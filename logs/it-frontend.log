@@ -1,0 +1,46 @@
+
+> slp-web@0.1.0 dev
+> next dev
+
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3001
+  - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 1243ms
+ ✓ Compiled /middleware in 104ms (72 modules)
+ ○ Compiling /login ...
+ ✓ Compiled /login in 2.3s (521 modules)
+ GET /login 200 in 2463ms
+ ✓ Compiled /_not-found in 317ms (515 modules)
+ GET /studio-lotus-logo.png 404 in 384ms
+ ✓ Compiled /api/auth/me in 97ms (291 modules)
+ GET /it/api/auth/me 401 in 234ms
+ GET /it/api/auth/me 401 in 10ms
+ ✓ Compiled /api/auth/google/start in 44ms (298 modules)
+ GET /it/api/auth/google/start 307 in 74ms
+ ✓ Compiled /api/auth/callback/google in 35ms (300 modules)
+ GET /it/api/auth/callback/google?state=1767177407342-c7f5d9e44a3338&code=4%2F0ATX87lN_hlcmfhiUUBvG8l8lTDw2jEyy8uX6_HsKDZ9Do7LF19vnBOM8P7QMiVtA5OR9Zw&scope=email+profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+openid&authuser=0&hd=studiolotus.in&prompt=none 307 in 431ms
+ ✓ Compiled / in 388ms (647 modules)
+ GET / 200 in 488ms
+ GET /it/api/auth/me 200 in 45ms
+ GET /it/api/auth/me 200 in 50ms
+ GET /studio-lotus-logo.png 404 in 59ms
+ GET / 200 in 42ms
+ GET /it/api/auth/me 200 in 43ms
+ GET /studio-lotus-logo.png 404 in 22ms
+ GET /it/api/auth/me 200 in 46ms
+ ✓ Compiled in 348ms (608 modules)
+ ✓ Compiled /api/auth/logout in 69ms (309 modules)
+ POST /it/api/auth/logout 200 in 112ms
+ GET /login 200 in 60ms
+ ✓ Compiled /api/auth/me in 36ms (318 modules)
+ GET /it/api/auth/me 401 in 89ms
+ GET /it/api/auth/me 401 in 6ms
+ ✓ Compiled /api/auth/google/start in 26ms (325 modules)
+ GET /it/api/auth/google/start 307 in 41ms
+ ✓ Compiled /api/auth/callback/google in 37ms (327 modules)
+ GET /it/api/auth/callback/google?state=1767177522930-ea96ef10d2a3c8&code=4%2F0ATX87lNFC9ZNG0jFA6Pm3XEpKu17V7vsVJGAUPvjPX84tFfz7SQRDe7-6hffSoVnoNTeXQ&scope=email+profile+openid+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile&authuser=0&hd=studiolotus.in&prompt=none 307 in 393ms
+ GET / 200 in 73ms
+ GET /it/api/auth/me 200 in 43ms
+ GET /it/api/auth/me 200 in 41ms

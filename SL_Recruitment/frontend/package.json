@@ -1,0 +1,31 @@
+{
+  "name": "sl-recruitment-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "prebuild": "node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\"",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "autoprefixer": "10.4.16",
+    "clsx": "2.1.0",
+    "framer-motion": "11.0.3",
+    "lucide-react": "0.351.0",
+    "next": "14.2.35",
+    "postcss": "8.4.35",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "tailwindcss": "3.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "25.0.2",
+    "@types/react": "18.2.79",
+    "@types/react-dom": "18.2.25",
+    "eslint": "8.57.0",
+    "eslint-config-next": "14.2.35",
+    "typescript": "5.4.3"
+  }
+}

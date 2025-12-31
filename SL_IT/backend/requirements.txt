@@ -1,0 +1,14 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+sqlalchemy>=2.0
+aiomysql>=0.2
+pymysql>=1.1
+pydantic>=2.5
+pydantic-settings>=2.2
+python-multipart>=0.0.9
+google-api-python-client>=2.125
+google-auth>=2.29
+google-auth-httplib2>=0.2
+pytest>=8.1
+pytest-asyncio>=0.23
+aiosqlite>=0.20

@@ -1,0 +1,16 @@
+
+> frontend@0.1.0 dev
+> next dev
+
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3003
+
+ ✓ Starting...
+ ✓ Ready in 1151ms
+ ○ Compiling /_not-found ...
+ ✓ Compiled /_not-found in 989ms (458 modules)
+ GET /.well-known/appspecific/com.chrome.devtools.json 404 in 1132ms
+ ✓ Compiled in 135ms (238 modules)
+ GET /.well-known/appspecific/com.chrome.devtools.json 404 in 35ms
+ GET /.well-known/appspecific/com.chrome.devtools.json 404 in 52ms
+ GET /.well-known/appspecific/com.chrome.devtools.json 404 in 25ms

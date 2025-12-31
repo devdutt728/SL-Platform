@@ -1,0 +1,26 @@
+import { NextResponse } from "next/server";
+import { backendUrl } from "@/lib/backend";
+
+export async function GET(_request: Request, context: { params: { opening_code: string } }) {
+  const res = await fetch(backendUrl(`/apply/${context.params.opening_code}`), { cache: "no-store" });
+  const data = await res.text();
+  return new NextResponse(data, {
+    status: res.status,
+    headers: { "content-type": res.headers.get("content-type") || "application/json" },
+  });
+}
+
+export async function POST(request: Request, context: { params: { opening_code: string } }) {
+  const res = await fetch(backendUrl(`/apply/${context.params.opening_code}`), {
+    method: "POST",
+    // forward as-is to support multipart
+    body: request.body,
+    headers: Object.fromEntries(request.headers),
+    duplex: "half",
+  } as any);
+  const data = await res.text();
+  return new NextResponse(data, {
+    status: res.status,
+    headers: { "content-type": res.headers.get("content-type") || "application/json" },
+  });
+}
