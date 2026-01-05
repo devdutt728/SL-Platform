@@ -1,13 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, JSON, LargeBinary, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.constants import (
+    IT_ASSET_STATUS_IN_STOCK,
+    IT_ASSET_STATUS_VALUES,
+    IT_ASSET_TYPE_VALUES,
     IT_ATTACHMENT_STORAGE_VALUES,
+    IT_BILLING_CYCLE_VALUES,
     IT_IMPACT_VALUES,
+    IT_LICENSE_ASSIGNMENT_ACTIVE,
+    IT_LICENSE_ASSIGNMENT_VALUES,
+    IT_LICENSE_TYPE_VALUES,
     IT_PRIORITY_VALUES,
     IT_STATUS_VALUES,
     IT_URGENCY_VALUES,
@@ -149,3 +156,129 @@ class ITTicketAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     ticket: Mapped[ITTicket] = relationship("ITTicket")
+
+
+class ITVendor(Base):
+    __tablename__ = "it_vendor"
+
+    vendor_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    website: Mapped[str | None] = mapped_column(String(255))
+    support_email: Mapped[str | None] = mapped_column(String(255))
+    support_phone: Mapped[str | None] = mapped_column(String(64))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ITAsset(Base):
+    __tablename__ = "it_asset"
+
+    asset_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    asset_tag: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    asset_type: Mapped[str] = mapped_column(Enum(*IT_ASSET_TYPE_VALUES, name="it_asset_type_enum"), nullable=False)
+    serial_number: Mapped[str | None] = mapped_column(String(128), unique=True)
+    manufacturer: Mapped[str | None] = mapped_column(String(128))
+    model: Mapped[str | None] = mapped_column(String(128))
+    operating_system: Mapped[str | None] = mapped_column(String(128))
+    purchase_date: Mapped[date | None] = mapped_column(Date)
+    warranty_end: Mapped[date | None] = mapped_column(Date)
+    assigned_person_id: Mapped[str | None] = mapped_column(String(64))
+    assigned_email: Mapped[str | None] = mapped_column(String(255))
+    assigned_name: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(
+        Enum(*IT_ASSET_STATUS_VALUES, name="it_asset_status_enum"),
+        nullable=False,
+        default=IT_ASSET_STATUS_IN_STOCK,
+    )
+    location: Mapped[str | None] = mapped_column(String(128))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ITLicense(Base):
+    __tablename__ = "it_license"
+
+    license_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    vendor_id: Mapped[int | None] = mapped_column(ForeignKey("it_vendor.vendor_id"))
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    sku: Mapped[str | None] = mapped_column(String(128))
+    license_type: Mapped[str] = mapped_column(Enum(*IT_LICENSE_TYPE_VALUES, name="it_license_type_enum"), nullable=False)
+    total_seats: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    contract_start: Mapped[date | None] = mapped_column(Date)
+    contract_end: Mapped[date | None] = mapped_column(Date)
+    renewal_date: Mapped[date | None] = mapped_column(Date)
+    cost_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    cost_currency: Mapped[str | None] = mapped_column(String(16))
+    billing_cycle: Mapped[str | None] = mapped_column(Enum(*IT_BILLING_CYCLE_VALUES, name="it_billing_cycle_enum"))
+    registered_email: Mapped[str | None] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    vendor: Mapped[ITVendor | None] = relationship("ITVendor")
+
+
+class ITLicenseAssignment(Base):
+    __tablename__ = "it_license_assignment"
+
+    assignment_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    license_id: Mapped[int] = mapped_column(ForeignKey("it_license.license_id"), nullable=False)
+    asset_id: Mapped[int | None] = mapped_column(ForeignKey("it_asset.asset_id"))
+    assigned_person_id: Mapped[str | None] = mapped_column(String(64))
+    assigned_email: Mapped[str | None] = mapped_column(String(255))
+    assigned_name: Mapped[str | None] = mapped_column(String(255))
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    unassigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(
+        Enum(*IT_LICENSE_ASSIGNMENT_VALUES, name="it_license_assignment_enum"),
+        nullable=False,
+        default=IT_LICENSE_ASSIGNMENT_ACTIVE,
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+    license: Mapped[ITLicense] = relationship("ITLicense")
+    asset: Mapped[ITAsset | None] = relationship("ITAsset")
+
+
+class ITLicenseAttachment(Base):
+    __tablename__ = "it_license_attachment"
+
+    attachment_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    license_id: Mapped[int] = mapped_column(ForeignKey("it_license.license_id"), nullable=False)
+    filename: Mapped[str] = mapped_column(String(256), nullable=False)
+    mime: Mapped[str] = mapped_column(String(128), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    storage_type: Mapped[str] = mapped_column(Enum(*IT_ATTACHMENT_STORAGE_VALUES, name="it_attachment_storage_enum"), nullable=False)
+    storage_ref: Mapped[str] = mapped_column(String(512), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+    license: Mapped[ITLicense] = relationship("ITLicense")
+
+
+class ITCredential(Base):
+    __tablename__ = "it_credential"
+
+    credential_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_cipher: Mapped[bytes] = mapped_column(LargeBinary(4096), nullable=False)
+    password_nonce: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ITLicenseCredential(Base):
+    __tablename__ = "it_license_credential"
+
+    license_id: Mapped[int] = mapped_column(ForeignKey("it_license.license_id"), primary_key=True)
+    credential_id: Mapped[int] = mapped_column(ForeignKey("it_credential.credential_id"), primary_key=True)
+
+    license: Mapped[ITLicense] = relationship("ITLicense")
+    credential: Mapped[ITCredential] = relationship("ITCredential")

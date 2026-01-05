@@ -275,7 +275,9 @@ export type CandidateOffer = {
   viewed_at?: string | null;
   accepted_at?: string | null;
   declined_at?: string | null;
+  docx_url?: string | null;
   pdf_url?: string | null;
+  offer_doc_payload?: string | null;
   notes_internal?: string | null;
   created_at: string;
   updated_at: string;
@@ -297,5 +299,6 @@ export type OfferPublic = {
   probation_months?: number | null;
   offer_valid_until?: string | null;
   offer_status: string;
+  docx_url?: string | null;
   pdf_url?: string | null;
 };

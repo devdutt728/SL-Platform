@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     sprint_overdue_days: int = 2
     offer_followup_days: int = 5
     stale_stage_days: int = 5
+    libreoffice_path: str = ""
 
     model_config = SettingsConfigDict(env_prefix="SL_", env_file=".env", extra="ignore")
 

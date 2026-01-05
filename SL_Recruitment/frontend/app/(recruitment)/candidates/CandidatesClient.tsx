@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import { CandidateListItem, OpeningListItem } from "@/lib/types";
 import { AlertTriangle, CheckCircle2, Filter, XCircle } from "lucide-react";
+import { withBasePath } from "@/lib/base-path";
 
 type Props = {
   initialCandidates: CandidateListItem[];
@@ -104,7 +105,7 @@ async function fetchCandidates(params: {
   openingId: string;
   statusView: "all" | "active" | "hired" | "rejected";
 }) {
-  const url = new URL("/api/rec/candidates", window.location.origin);
+  const url = new URL(withBasePath("/api/rec/candidates"), window.location.origin);
   for (const st of params.stage) url.searchParams.append("stage", st);
   if (params.openingId) url.searchParams.set("opening_id", params.openingId);
 
@@ -165,7 +166,7 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
     let cancelled = false;
     let inFlight = false;
     let pending = false;
-    const source = new EventSource("/api/rec/events/stream");
+    const source = new EventSource(withBasePath("/api/rec/events/stream"));
 
     async function refresh() {
       if (inFlight) {

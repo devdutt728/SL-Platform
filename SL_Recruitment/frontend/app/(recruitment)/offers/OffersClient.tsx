@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { CandidateOffer } from "@/lib/types";
+import { withBasePath } from "@/lib/base-path";
 
 const statusTone: Record<string, string> = {
   draft: "bg-slate-500/10 text-slate-600",
@@ -44,7 +45,7 @@ export function OffersClient() {
     setLoading(true);
     setError(null);
     try {
-      const url = new URL("/api/rec/offers", window.location.origin);
+      const url = new URL(withBasePath("/api/rec/offers"), window.location.origin);
       if (status !== "all") url.searchParams.append("status", status);
       const res = await fetch(url.toString(), { cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
@@ -65,7 +66,7 @@ export function OffersClient() {
     let cancelled = false;
     let inFlight = false;
     let pending = false;
-    const source = new EventSource("/api/rec/events/stream");
+    const source = new EventSource(withBasePath("/api/rec/events/stream"));
 
     async function refresh() {
       if (inFlight) {

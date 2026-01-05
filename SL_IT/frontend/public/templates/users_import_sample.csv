@@ -1,0 +1,3 @@
+person_id,person_code,personal_id,email,first_name,last_name,role_id,role_code,role_name,grade_id,department_id,manager_id,employment_type,join_date,exit_date,mobile_number,status,is_deleted,source_system,created_at,updated_at,full_name,display_name
+SL0343,SL0343,,devdutt.kumar@studiolotus.in,Devdutt,Kumar,2,,,3,10,SL0123,Permanent,2023-11-03,,9999999999,Working,0,hrms,,,Devdutt Kumar,Devdutt Kumar
+SL0456,SL0456,,jane.doe@studiolotus.in,Jane,Doe,6,,,2,11,,Contract,2024-01-15,,8888888888,Active,0,hrms,,,Jane Doe,Jane Doe

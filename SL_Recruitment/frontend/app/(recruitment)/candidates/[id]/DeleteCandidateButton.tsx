@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { withBasePath } from "@/lib/base-path";
 
 export function DeleteCandidateButton({ candidateId }: { candidateId: number }) {
   const router = useRouter();
@@ -13,7 +14,7 @@ export function DeleteCandidateButton({ candidateId }: { candidateId: number }) 
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/rec/candidates/${candidateId}`, { method: "DELETE" });
+      const res = await fetch(withBasePath(`/api/rec/candidates/${candidateId}`), { method: "DELETE" });
       if (!res.ok) {
         let msg = `Delete failed (${res.status})`;
         try {

@@ -65,7 +65,7 @@ class OpeningPublicListItemOut(BaseModel):
 
 
 def _candidate_code(candidate_id: int) -> str:
-    return f"SLR-{candidate_id:06d}"
+    return f"SLR-{candidate_id:03d}"
 
 
 def _client_ip(request: Request) -> str | None:
@@ -218,11 +218,15 @@ async def get_opening_apply_prefill(
     opening_code: str,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    opening_id = None
     opening = (
         await session.execute(select(RecOpening).where(RecOpening.opening_code == opening_code))
     ).scalars().first()
     if not opening or not bool(opening.is_active):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not available")
+    opening_id = opening.opening_id
+    if opening_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Opening is missing an ID")
     return OpeningApplyPrefillOut(
         opening_id=opening.opening_id,
         opening_code=opening_code,
@@ -260,6 +264,7 @@ async def apply_for_opening(
     portfolio_file: UploadFile | None = None,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    opening_id_value: int | None = None
     idempotency_key = (request.headers.get("idempotency-key") or request.headers.get("Idempotency-Key") or "").strip()
     if not idempotency_key:
         raise HTTPException(
@@ -272,6 +277,9 @@ async def apply_for_opening(
     ).scalars().first()
     if not opening or not bool(opening.is_active):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not available")
+    opening_id_value = opening.opening_id
+    if opening_id_value is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Opening is missing an ID")
 
     now = datetime.utcnow()
     email_normalized = str(email).strip().lower()
@@ -382,7 +390,7 @@ async def apply_for_opening(
         await session.execute(
             select(RecCandidate)
             .where(
-                RecCandidate.opening_id == opening.opening_id,
+                RecCandidate.opening_id == opening_id_value,
                 func.lower(RecCandidate.email) == email_normalized,
             )
             .order_by(RecCandidate.candidate_id.desc())
@@ -431,8 +439,9 @@ async def apply_for_opening(
         email=email_normalized,
         phone=phone,
         source_channel="website",
-        opening_id=opening.opening_id,
+        opening_id=opening_id_value,
         status="enquiry",
+        final_decision="pending",
         cv_url=None,
         caf_token=caf_token,
         caf_sent_at=now,
@@ -441,6 +450,7 @@ async def apply_for_opening(
         created_at=now,
         updated_at=now,
     )
+    candidate.final_decision = "pending"
     session.add(candidate)
     try:
         await session.flush()
@@ -450,7 +460,7 @@ async def apply_for_opening(
             await session.execute(
                 select(RecCandidate)
                 .where(
-                    RecCandidate.opening_id == opening.opening_id,
+                    RecCandidate.opening_id == opening_id_value,
                     func.lower(RecCandidate.email) == email_normalized,
                 )
                 .order_by(RecCandidate.candidate_id.desc())
@@ -524,7 +534,7 @@ async def apply_for_opening(
         related_entity_id=candidate.candidate_id,
         meta_json={
             "source_channel": "website",
-            "opening_id": opening.opening_id,
+            "opening_id": opening_id_value,
             "opening_code": opening_code,
             "linkedin": linkedin,
             "note": note,

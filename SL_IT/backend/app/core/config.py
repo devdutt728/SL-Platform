@@ -71,6 +71,7 @@ class Settings(BaseSettings):
 
     reopen_window_days: int = 7
     rate_limit_ticket_per_minute: int = 5
+    credential_encryption_key: str = ""
 
     model_config = SettingsConfigDict(env_prefix="SL_", env_file=(".env", ".env.local"), extra="ignore")
 

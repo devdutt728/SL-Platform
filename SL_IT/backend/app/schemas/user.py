@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import List, Optional
 
 from pydantic import BaseModel, EmailStr
@@ -38,3 +39,25 @@ class PlatformRoleOut(BaseModel):
 class PlatformUserUpdate(BaseModel):
     role_id: int | None = None
     status: str | None = None
+
+
+class PlatformUserCreate(BaseModel):
+    person_id: str | None = None
+    person_code: str | None = None
+    personal_id: str | None = None
+    email: EmailStr | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    role_id: int | None = None
+    grade_id: int | None = None
+    department_id: int | None = None
+    manager_id: str | None = None
+    employment_type: str | None = None
+    join_date: date | None = None
+    exit_date: date | None = None
+    mobile_number: str | None = None
+    status: str | None = None
+    is_deleted: int | None = None
+    full_name: str | None = None
+    display_name: str | None = None
+    source_system: str | None = None

@@ -2,6 +2,7 @@ import { internalUrl } from "@/lib/internal";
 import { OpeningApplyPrefill } from "@/lib/types";
 import { ApplyForm } from "./ui";
 import Image from "next/image";
+import { withBasePath } from "@/lib/base-path";
 import { CheckCircle2, ShieldCheck } from "lucide-react";
 
 async function fetchOpening(openingCode: string) {
@@ -21,7 +22,7 @@ export default async function ApplyPage({ params }: { params: { opening_code: st
             <div className="flex items-center gap-3">
               <div className="relative h-9 w-36">
                 <Image
-                  src="/Studio Lotus Logo (TM).png"
+                  src={withBasePath("/Studio Lotus Logo (TM).png")}
                   alt="Studio Lotus"
                   fill
                   sizes="144px"
@@ -56,7 +57,7 @@ export default async function ApplyPage({ params }: { params: { opening_code: st
           <div className="flex items-center gap-3">
             <div className="relative h-9 w-36">
               <Image
-                src="/Studio Lotus Logo (TM).png"
+                src={withBasePath("/Studio Lotus Logo (TM).png")}
                 alt="Studio Lotus"
                 fill
                 sizes="144px"

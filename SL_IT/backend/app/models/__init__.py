@@ -1,7 +1,12 @@
 from app.db.base import Base
 from app.models.it import (
+    ITAsset,
     ITAuditLog,
     ITCategory,
+    ITCredential,
+    ITLicense,
+    ITLicenseAssignment,
+    ITLicenseCredential,
     ITRoutingRule,
     ITSlaPolicy,
     ITSubcategory,
@@ -9,6 +14,7 @@ from app.models.it import (
     ITTicketAttachment,
     ITTicketComment,
     ITTicketSequence,
+    ITVendor,
 )
 from app.models.platform import DimPerson, DimRole
 
@@ -25,4 +31,10 @@ __all__ = [
     "ITTicket",
     "ITTicketComment",
     "ITTicketAttachment",
+    "ITVendor",
+    "ITAsset",
+    "ITLicense",
+    "ITLicenseAssignment",
+    "ITCredential",
+    "ITLicenseCredential",
 ]

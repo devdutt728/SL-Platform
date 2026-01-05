@@ -64,7 +64,7 @@ export function middleware(request: NextRequest) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
     const url = request.nextUrl.clone();
-    url.pathname = `${basePath}/login`;
+    url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 

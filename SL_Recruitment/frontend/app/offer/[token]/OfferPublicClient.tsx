@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { OfferPublic } from "@/lib/types";
+import { withBasePath } from "@/lib/base-path";
 
 type Props = {
   token: string;
@@ -34,7 +35,7 @@ export function OfferPublicClient({ token }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/offer/${encodeURIComponent(token)}`, { cache: "no-store" });
+      const res = await fetch(withBasePath(`/api/offer/${encodeURIComponent(token)}`), { cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as OfferPublic;
       setOffer(data);
@@ -50,7 +51,7 @@ export function OfferPublicClient({ token }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/offer/${encodeURIComponent(token)}/decision`, {
+      const res = await fetch(withBasePath(`/api/offer/${encodeURIComponent(token)}/decision`), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ decision: value }),

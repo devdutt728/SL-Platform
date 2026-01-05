@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-import { Home, LayoutDashboard, ListChecks, PlusCircle, ShieldCheck } from "lucide-react";
+import { Home, KeyRound, Laptop2, LayoutDashboard, ListChecks, PlusCircle, ShieldCheck } from "lucide-react";
 
 const navItems = [
   { href: "/queue", label: "Queue", icon: LayoutDashboard },
   { href: "/my", label: "My tickets", icon: ListChecks },
   { href: "/new", label: "Create ticket", icon: PlusCircle },
+  { href: "/admin/it/assets", label: "Assets", icon: Laptop2 },
+  { href: "/admin/it/licenses", label: "Licenses", icon: KeyRound },
   { href: "/admin/users", label: "Admin", icon: ShieldCheck },
   { href: "/", label: "Home", icon: Home },
 ];

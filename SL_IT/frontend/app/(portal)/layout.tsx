@@ -6,7 +6,6 @@ import { PortalShell } from "@/components/portal-shell";
 import { useUser } from "@/components/user-context";
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const { user, loading } = useUser();
 
   if (loading) {
@@ -27,7 +26,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
           </p>
           <Link
             className="inline-flex mt-6 px-6 py-3 rounded-full bg-ink text-white font-semibold"
-            href={`${basePath}/login`}
+            href="/login"
           >
             Continue to sign in
           </Link>

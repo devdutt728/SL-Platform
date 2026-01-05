@@ -3,8 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { OpeningDetail, OpeningListItem, PlatformPersonSuggestion } from "@/lib/types";
-
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+import { withBasePath } from "@/lib/base-path";
 
 
 type Props = {
@@ -52,7 +51,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${basePath}/api/auth/me`, { cache: "no-store" });
+        const res = await fetch(withBasePath("/api/auth/me"), { cache: "no-store" });
         if (!res.ok) return;
         const me = (await res.json()) as { roles?: string[]; platform_role_id?: number | null };
         if (cancelled) return;
@@ -69,7 +68,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
 
   const refreshOpenings = async () => {
     try {
-      const res = await fetch("/api/rec/openings", { cache: "no-store" });
+      const res = await fetch(withBasePath("/api/rec/openings"), { cache: "no-store" });
       if (!res.ok) return;
       const data = (await res.json()) as OpeningListItem[];
       setOpenings(data);
@@ -86,7 +85,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
     let cancelled = false;
     let inFlight = false;
     let pending = false;
-    const source = new EventSource("/api/rec/events/stream");
+    const source = new EventSource(withBasePath("/api/rec/events/stream"));
 
     async function refresh() {
       if (inFlight) {
@@ -124,7 +123,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
       (async () => {
         setRequestedByLoading(true);
         try {
-          const res = await fetch(`/api/platform/people?q=${encodeURIComponent(q)}&limit=10`, { cache: "no-store" });
+          const res = await fetch(withBasePath(`/api/platform/people?q=${encodeURIComponent(q)}&limit=10`), { cache: "no-store" });
           if (!res.ok) return;
           const data = (await res.json()) as PlatformPersonSuggestion[];
           if (!cancelled) setRequestedByOptions(data);
@@ -152,7 +151,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
     const handle = window.setTimeout(() => {
       (async () => {
         try {
-          const res = await fetch(`/api/rec/openings/by-code/${encodeURIComponent(c)}`, { cache: "no-store" });
+          const res = await fetch(withBasePath(`/api/rec/openings/by-code/${encodeURIComponent(c)}`), { cache: "no-store" });
           if (res.status === 404) {
             if (!cancelled) setUpdatingOpening(null);
             return;
@@ -223,7 +222,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
 
     const isUpdate = !!(updatingOpening && updatingOpening.opening_code === code.trim());
 
-    const res = await fetch(isUpdate ? `/api/rec/openings/${updatingOpening?.opening_id}` : "/api/rec/openings", {
+    const res = await fetch(withBasePath(isUpdate ? `/api/rec/openings/${updatingOpening?.opening_id}` : "/api/rec/openings"), {
       method: isUpdate ? "PATCH" : "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
@@ -264,7 +263,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
       return;
     }
     setError(null);
-    const res = await fetch(`/api/rec/openings/${openingId}`, {
+    const res = await fetch(withBasePath(`/api/rec/openings/${openingId}`), {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ is_active: isActive }),
@@ -284,7 +283,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
     }
     if (!window.confirm("Delete this opening? This cannot be undone.")) return;
     setError(null);
-    const res = await fetch(`/api/rec/openings/${openingId}`, { method: "DELETE" });
+    const res = await fetch(withBasePath(`/api/rec/openings/${openingId}`), { method: "DELETE" });
     if (!res.ok) {
       setError(await formatApiError(res));
       return;
@@ -293,7 +292,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
   }
 
   async function copyApplyLink(openingCode: string) {
-    const url = `${window.location.origin}/apply/${encodeURIComponent(openingCode)}`;
+    const url = `${window.location.origin}${withBasePath(`/apply/${encodeURIComponent(openingCode)}`)}`;
     try {
       await navigator.clipboard.writeText(url);
       setError("Copied apply link.");
@@ -307,7 +306,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
     if (!canEditOpenings) return;
     setError(null);
     try {
-      const res = await fetch(`/api/rec/openings/${openingId}`, { cache: "no-store" });
+      const res = await fetch(withBasePath(`/api/rec/openings/${openingId}`), { cache: "no-store" });
       if (!res.ok) {
         setError(await formatApiError(res));
         return;

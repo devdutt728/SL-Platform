@@ -1,7 +1,8 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, event
+from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.db.base import Base
 
@@ -24,7 +25,7 @@ class RecCandidate(Base):
     current_company: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
     status: Mapped[str] = mapped_column(String(50), default="new")
-    final_decision: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    final_decision: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
 
     cv_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     portfolio_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -48,3 +49,20 @@ class RecCandidate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    @validates("final_decision")
+    def _normalize_final_decision(self, key, value):
+        return value or "pending"
+
+
+@event.listens_for(RecCandidate, "before_insert")
+def _set_default_final_decision(mapper, connection, target):
+    if not target.final_decision:
+        target.final_decision = "pending"
+
+
+@event.listens_for(Session, "before_flush")
+def _ensure_candidate_final_decision(session, flush_context, instances):
+    for obj in session.new:
+        if isinstance(obj, RecCandidate) and not obj.final_decision:
+            obj.final_decision = "pending"

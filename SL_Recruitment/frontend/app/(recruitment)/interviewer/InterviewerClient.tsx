@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import { CalendarCheck2, ExternalLink, Loader2, UserRound } from "lucide-react";
 import { CandidateSprint, Interview } from "@/lib/types";
+import { withBasePath } from "@/lib/base-path";
 
 type Props = {
   initialUpcoming: Interview[];
@@ -76,7 +77,7 @@ function buildInternalNotes(form: FeedbackForm) {
 }
 
 async function fetchInterviews(params: Record<string, string>) {
-  const url = new URL("/api/rec/interviews", window.location.origin);
+  const url = new URL(withBasePath("/api/rec/interviews"), window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   const res = await fetch(url.toString(), { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
@@ -84,7 +85,7 @@ async function fetchInterviews(params: Record<string, string>) {
 }
 
 async function submitFeedback(interviewId: number, payload: Record<string, unknown>) {
-  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}`, {
+  const res = await fetch(withBasePath(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}`), {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -94,7 +95,7 @@ async function submitFeedback(interviewId: number, payload: Record<string, unkno
 }
 
 async function fetchSprints(params: Record<string, string>) {
-  const url = new URL("/api/rec/sprints", window.location.origin);
+  const url = new URL(withBasePath("/api/rec/sprints"), window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   const res = await fetch(url.toString(), { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
@@ -102,7 +103,7 @@ async function fetchSprints(params: Record<string, string>) {
 }
 
 async function submitSprintReview(sprintId: number, payload: Record<string, unknown>) {
-  const res = await fetch(`/api/rec/sprints/${encodeURIComponent(String(sprintId))}`, {
+  const res = await fetch(withBasePath(`/api/rec/sprints/${encodeURIComponent(String(sprintId))}`), {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -261,7 +262,7 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
     let cancelled = false;
     let inFlight = false;
     let pending = false;
-    const source = new EventSource("/api/rec/events/stream");
+    const source = new EventSource(withBasePath("/api/rec/events/stream"));
 
     async function refreshAll() {
       if (inFlight) {

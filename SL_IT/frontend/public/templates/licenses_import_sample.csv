@@ -1,0 +1,4 @@
+﻿name,vendor_name,sku,license_type,total_seats,billing_cycle,contract_start,contract_end,renewal_date,registered_email,cost_amount,cost_currency,notes
+Adobe Creative Cloud,Adobe,CC-AllApps,SUBSCRIPTION,25,ANNUAL,2024-04-01,2025-03-31,2025-03-31,licenses@studiolotus.in,150000,INR,All apps plan
+Autodesk AutoCAD,Autodesk,AUTOCAD-2024,SUBSCRIPTION,10,ANNUAL,2024-01-01,2024-12-31,2024-12-31,autocad@studiolotus.in,120000,INR,Named user licenses
+Microsoft 365,Microsoft,M365-Business-Std,SUBSCRIPTION,80,ANNUAL,2024-07-01,2025-06-30,2025-06-30,itops@studiolotus.in,420000,INR,Includes Outlook + Teams

@@ -148,7 +148,7 @@ def _map_platform_role_to_app_roles(role_id: int | None) -> list[Role]:
     # - role_id=5 => HR
     if role_id == 2:
         return [Role.HR_ADMIN]
-    if role_id == 5:
+    if role_id in (1, 4, 5):
         return [Role.HR_EXEC]
     return [Role.VIEWER]
 

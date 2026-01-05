@@ -18,13 +18,15 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const logoSrc = `${basePath}/studio-lotus-logo.png`;
 
   return (
     <aside className="glass-panel fixed bottom-4 left-4 top-4 z-20 w-56 overflow-hidden rounded-2xl p-4">
       <div className="px-2 pb-4">
         <div className="relative h-12 w-full">
           <Image
-            src="/Studio Lotus Logo (TM).png"
+            src={logoSrc}
             alt="Studio Lotus"
             fill
             sizes="220px"

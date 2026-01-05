@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CafPrefill } from "@/lib/types";
+import { withBasePath } from "@/lib/base-path";
 
 type CafFormProps = {
   token: string;
@@ -33,7 +34,7 @@ export function CafForm({ token, prefill }: CafFormProps) {
       screening_notes: stringOrNull(formData.get("screening_notes")),
     };
 
-    const res = await fetch(`/api/caf/${token}`, {
+    const res = await fetch(withBasePath(`/api/caf/${encodeURIComponent(token)}`), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),

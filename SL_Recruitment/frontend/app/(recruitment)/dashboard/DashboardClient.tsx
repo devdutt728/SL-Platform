@@ -6,6 +6,7 @@ import type { CandidateEvent, CandidateOffer, DashboardMetrics } from "@/lib/typ
 import { LayoutPanelLeft, UsersRound, Briefcase } from "lucide-react";
 import NeedsReviewCard from "./NeedsReviewCard";
 import RecentActivityCard from "./RecentActivityCard";
+import { withBasePath } from "@/lib/base-path";
 
 type Props = {
   initialMetrics: DashboardMetrics | null;
@@ -76,7 +77,7 @@ export default function DashboardClient({ initialMetrics, initialEvents, initial
     let cancelled = false;
     let inFlight = false;
     let pending = false;
-    const source = new EventSource("/api/rec/events/stream");
+    const source = new EventSource(withBasePath("/api/rec/events/stream"));
 
     async function refresh() {
       if (inFlight) {
@@ -86,9 +87,9 @@ export default function DashboardClient({ initialMetrics, initialEvents, initial
       inFlight = true;
       try {
         const [metricsRes, eventsRes, offersRes] = await Promise.all([
-          fetch("/api/rec/dashboard?stuck_days=5", { cache: "no-store" }),
-          fetch("/api/rec/events?limit=10", { cache: "no-store" }),
-          fetch("/api/rec/offers", { cache: "no-store" }),
+          fetch(withBasePath("/api/rec/dashboard?stuck_days=5"), { cache: "no-store" }),
+          fetch(withBasePath("/api/rec/events?limit=10"), { cache: "no-store" }),
+          fetch(withBasePath("/api/rec/offers"), { cache: "no-store" }),
         ]);
         if (!cancelled && metricsRes.ok) setMetrics((await metricsRes.json()) as DashboardMetrics);
         if (!cancelled && eventsRes.ok) setEvents((await eventsRes.json()) as CandidateEvent[]);

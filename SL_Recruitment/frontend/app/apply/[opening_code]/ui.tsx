@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Briefcase, CalendarClock, FileText, Sparkles } from "lucide-react";
+import { withBasePath } from "@/lib/base-path";
 
 export function ApplyForm({ openingCode }: { openingCode: string }) {
   const [submitting, setSubmitting] = useState(false);
@@ -37,7 +38,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
 
     let res: Response;
     try {
-      res = await fetch(`/api/apply/${openingCode}`, {
+      res = await fetch(withBasePath(`/api/apply/${encodeURIComponent(openingCode)}`), {
         method: "POST",
         body: formData,
         headers: { "Idempotency-Key": idempotencyKeyRef.current },

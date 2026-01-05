@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { setDefaultResultOrder } from "dns";
 import { cookies } from "next/headers";
 import { readGoogleOAuthSecrets } from "@/lib/google-oauth";
 import { backendUrl } from "@/lib/backend";
@@ -8,6 +9,7 @@ import { deleteOAuthState, getOAuthState, putFinalizeToken } from "@/lib/oauth-m
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
+  setDefaultResultOrder("ipv4first");
   const url = new URL(request.url);
   const origin = process.env.PUBLIC_APP_ORIGIN || getRequestOrigin(request.url);
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
@@ -43,11 +45,25 @@ export async function GET(request: Request) {
     body.set("redirect_uri", redirectUri);
     body.set("grant_type", "authorization_code");
 
-    const tokenRes = await fetch(tokenUri, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body,
-    });
+    let tokenRes: Response;
+    try {
+      tokenRes = await fetch(tokenUri, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body,
+      });
+    } catch (e: any) {
+      return NextResponse.json(
+        {
+          error: "token_exchange_fetch_failed",
+          message: e?.message || String(e),
+          cause: e?.cause?.message || null,
+          tokenUri,
+          redirectUri,
+        },
+        { status: 502 }
+      );
+    }
 
     const tokenText = await tokenRes.text();
     if (!tokenRes.ok) {
@@ -76,10 +92,23 @@ export async function GET(request: Request) {
     const idToken = tokenJson.id_token as string | undefined;
     if (!idToken) return NextResponse.json({ error: "missing_id_token", tokenJson }, { status: 401 });
 
-    const meRes = await fetch(backendUrl("/auth/me"), {
-      headers: { authorization: `Bearer ${idToken}` },
-      cache: "no-store",
-    });
+    let meRes: Response;
+    try {
+      meRes = await fetch(backendUrl("/auth/me"), {
+        headers: { authorization: `Bearer ${idToken}` },
+        cache: "no-store",
+      });
+    } catch (e: any) {
+      return NextResponse.json(
+        {
+          error: "backend_auth_fetch_failed",
+          message: e?.message || String(e),
+          cause: e?.cause?.message || null,
+          backendUrl: backendUrl("/auth/me"),
+        },
+        { status: 502 }
+      );
+    }
 
     const meText = await meRes.text();
     if (!meRes.ok) {

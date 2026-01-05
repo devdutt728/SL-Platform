@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { CandidateEvent } from "@/lib/types";
+import { withBasePath } from "@/lib/base-path";
 
 type Props = {
   initialLimit?: number;
@@ -34,7 +35,7 @@ export function ActivityClient({ initialLimit = 25 }: Props) {
   const [personFilter, setPersonFilter] = useState("");
 
   const loadPage = async (offset: number) => {
-    const res = await fetch(`/api/rec/events?limit=${initialLimit}&offset=${offset}`, { cache: "no-store" });
+    const res = await fetch(withBasePath(`/api/rec/events?limit=${initialLimit}&offset=${offset}`), { cache: "no-store" });
     if (!res.ok) {
       throw new Error(await res.text());
     }
@@ -102,7 +103,7 @@ export function ActivityClient({ initialLimit = 25 }: Props) {
     let cancelled = false;
     let inFlight = false;
     let pending = false;
-    const source = new EventSource("/api/rec/events/stream");
+    const source = new EventSource(withBasePath("/api/rec/events/stream"));
 
     async function refresh() {
       if (inFlight) {

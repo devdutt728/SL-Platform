@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { withBasePath } from "@/lib/base-path";
 
 type Props = {
   token: string;
@@ -27,7 +28,7 @@ export function SprintPublicClient({ token, defaultSubmissionUrl, initialStatus 
       const form = new FormData();
       if (submissionUrl.trim()) form.append("submission_url", submissionUrl.trim());
       if (file) form.append("submission_file", file);
-      const res = await fetch(`/api/sprint/${encodeURIComponent(token)}`, { method: "POST", body: form });
+      const res = await fetch(withBasePath(`/api/sprint/${encodeURIComponent(token)}`), { method: "POST", body: form });
       if (!res.ok) throw new Error(await res.text());
       setSuccess(true);
     } catch (e: any) {

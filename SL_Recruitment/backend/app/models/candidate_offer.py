@@ -39,7 +39,9 @@ class RecCandidateOffer(Base):
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     declined_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    docx_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     pdf_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    offer_doc_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes_internal: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

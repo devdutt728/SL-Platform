@@ -6,6 +6,7 @@ import { CandidateFull, CandidateOffer, CandidateStage, CandidateSprint, Intervi
 import { clsx } from "clsx";
 import { CheckCircle2, Copy, ExternalLink, FileText, Layers, Mail, Phone, XCircle } from "lucide-react";
 import { DeleteCandidateButton } from "./DeleteCandidateButton";
+import { withBasePath } from "@/lib/base-path";
 
 type Props = {
   candidateId: string;
@@ -72,6 +73,14 @@ function formatDate(raw?: string | null) {
   if (!d) return "";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleDateString("en-IN", { month: "short", day: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" });
+}
+
+function formatLetterDate(raw?: string | null) {
+  if (!raw) return "";
+  const d = parseAsUtc(raw);
+  if (!d) return "";
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric", timeZone: "Asia/Kolkata" });
 }
 
 function formatRelativeDue(raw?: string | null) {
@@ -162,13 +171,13 @@ function bestEffortFromMeta(meta: Record<string, unknown>, key: string) {
 }
 
 async function fetchFull(candidateId: string) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/full`, { cache: "no-store" });
+  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/full`), { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateFull;
 }
 
 async function fetchCafLink(candidateId: string) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/caf-link`, { cache: "no-store" });
+  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/caf-link`), { cache: "no-store" });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as { caf_token: string; caf_url: string };
@@ -190,31 +199,31 @@ const skipStageOptions = [
 ];
 
 async function fetchInterviews(candidateId: string) {
-  const res = await fetch(`/api/rec/interviews?candidate_id=${encodeURIComponent(candidateId)}`, { cache: "no-store" });
+  const res = await fetch(withBasePath(`/api/rec/interviews?candidate_id=${encodeURIComponent(candidateId)}`), { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as Interview[];
 }
 
 async function fetchCandidateSprints(candidateId: string) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/sprints`, { cache: "no-store" });
+  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/sprints`), { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateSprint[];
 }
 
 async function fetchSprintTemplates() {
-  const res = await fetch("/api/rec/sprint-templates", { cache: "no-store" });
+  const res = await fetch(withBasePath("/api/rec/sprint-templates"), { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as SprintTemplate[];
 }
 
 async function fetchCandidateOffers(candidateId: string) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/offers`, { cache: "no-store" });
+  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/offers`), { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateOffer[];
 }
 
 async function createOffer(candidateId: string, payload: Record<string, unknown>) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/offers`, {
+  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/offers`), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -224,7 +233,7 @@ async function createOffer(candidateId: string, payload: Record<string, unknown>
 }
 
 async function updateOffer(offerId: number, payload: Record<string, unknown>) {
-  const res = await fetch(`/api/rec/offers/${offerId}`, {
+  const res = await fetch(withBasePath(`/api/rec/offers/${offerId}`), {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -234,13 +243,13 @@ async function updateOffer(offerId: number, payload: Record<string, unknown>) {
 }
 
 async function approveOffer(offerId: number) {
-  const res = await fetch(`/api/rec/offers/${offerId}/approve`, { method: "POST" });
+  const res = await fetch(withBasePath(`/api/rec/offers/${offerId}/approve`), { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateOffer;
 }
 
 async function rejectOffer(offerId: number, reason?: string) {
-  const res = await fetch(`/api/rec/offers/${offerId}/reject`, {
+  const res = await fetch(withBasePath(`/api/rec/offers/${offerId}/reject`), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ decision: "reject", reason }),
@@ -250,19 +259,50 @@ async function rejectOffer(offerId: number, reason?: string) {
 }
 
 async function sendOffer(offerId: number) {
-  const res = await fetch(`/api/rec/offers/${offerId}/send`, { method: "POST" });
+  const res = await fetch(withBasePath(`/api/rec/offers/${offerId}/send`), { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateOffer;
 }
 
+async function decideOffer(offerId: number, decision: "accept" | "decline", reason?: string) {
+  const res = await fetch(withBasePath(`/api/rec/offers/${offerId}/decision`), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decision, reason }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as CandidateOffer;
+}
+
+async function generateOfferDocument(offerId: number, payload: Record<string, unknown>) {
+  const res = await fetch(withBasePath(`/api/rec/offers/${offerId}/document`), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let message = text;
+    try {
+      const parsed = JSON.parse(text) as { detail?: string };
+      if (parsed?.detail) message = parsed.detail;
+    } catch {
+      // keep raw text
+    }
+    if (!message) message = `Offer letter generation failed (${res.status}).`;
+    throw new Error(message);
+  }
+  return (text ? (JSON.parse(text) as CandidateOffer) : ({} as CandidateOffer));
+}
+
 async function convertCandidate(candidateId: string) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/convert`, { method: "POST" });
+  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/convert`), { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
   return await res.json();
 }
 
 async function assignSprint(candidateId: string, payload: Record<string, unknown>) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/sprints`, {
+  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/sprints`), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -272,7 +312,7 @@ async function assignSprint(candidateId: string, payload: Record<string, unknown
 }
 
 async function createInterview(candidateId: string, payload: Record<string, unknown>) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/interviews`, {
+  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/interviews`), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -282,13 +322,13 @@ async function createInterview(candidateId: string, payload: Record<string, unkn
 }
 
 async function fetchPeople(query: string) {
-  const res = await fetch(`/api/platform/people?q=${encodeURIComponent(query)}`, { cache: "no-store" });
+  const res = await fetch(withBasePath(`/api/platform/people?q=${encodeURIComponent(query)}`), { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as PlatformPersonSuggestion[];
 }
 
 async function transition(candidateId: string, payload: { to_stage: string; decision?: string; note?: string }) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/transition`, {
+  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/transition`), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -312,9 +352,30 @@ function Metric({ label, value }: { label: string; value: string }) {
 function formatMoney(raw?: number | null) {
   if (raw === null || raw === undefined) return "?";
   try {
-    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(raw);
+    return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(raw);
   } catch {
     return String(raw);
+  }
+}
+
+function formatMonthlyRupees(annual?: number | null) {
+  if (annual === null || annual === undefined) return "";
+  const monthly = Math.round(annual / 12);
+  try {
+    const formatted = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(monthly);
+    return `Rs. ${formatted}/-`;
+  } catch {
+    return `Rs. ${monthly}/-`;
+  }
+}
+
+function parseOfferDocPayload(raw?: string | null) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
   }
 }
 
@@ -344,6 +405,38 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [offerProbationMonths, setOfferProbationMonths] = useState("3");
   const [offerGradeId, setOfferGradeId] = useState("");
   const [offerNotes, setOfferNotes] = useState("");
+  const [offerDocOpen, setOfferDocOpen] = useState(false);
+  const [offerDocBusy, setOfferDocBusy] = useState(false);
+  const [offerDocDeleteBusy, setOfferDocDeleteBusy] = useState(false);
+  const [offerDocError, setOfferDocError] = useState<string | null>(null);
+  const [offerDocNotice, setOfferDocNotice] = useState<string | null>(null);
+  const [docSalutation, setDocSalutation] = useState("Mr");
+  const [docCandidateName, setDocCandidateName] = useState("");
+  const [docCandidateAddress, setDocCandidateAddress] = useState("");
+  const [docIssueDate, setDocIssueDate] = useState("");
+  const [docDesignation, setDocDesignation] = useState("");
+  const [docCurrentCtc, setDocCurrentCtc] = useState("");
+  const [docExpectedCtc, setDocExpectedCtc] = useState("");
+  const [docUnit, setDocUnit] = useState("");
+  const [docReportingTo, setDocReportingTo] = useState("");
+  const [reportToQuery, setReportToQuery] = useState("");
+  const [reportToResults, setReportToResults] = useState<PlatformPersonSuggestion[]>([]);
+  const [reportToBusy, setReportToBusy] = useState(false);
+  const [reportToPerson, setReportToPerson] = useState<PlatformPersonSuggestion | null>(null);
+  const [docJoiningDate, setDocJoiningDate] = useState("");
+  const [docOfficeAddress, setDocOfficeAddress] = useState("F 301, Ch. Prem Singh House, Lado Sarai, New Delhi 110030");
+  const [docGrossMonthly, setDocGrossMonthly] = useState("");
+  const [docIncludeJoiningBonus, setDocIncludeJoiningBonus] = useState(false);
+  const [docJoiningBonusMonthly, setDocJoiningBonusMonthly] = useState("");
+  const [docJoiningBonusInstallment, setDocJoiningBonusInstallment] = useState("");
+  const [docJoiningBonusEndMonthYear, setDocJoiningBonusEndMonthYear] = useState("");
+  const [docVariableStart, setDocVariableStart] = useState("");
+  const [docVariableEvalRange, setDocVariableEvalRange] = useState("");
+  const [docVariablePayoutRange, setDocVariablePayoutRange] = useState("");
+  const [docSignatoryName, setDocSignatoryName] = useState("Harsh Vardhan");
+  const [docSignatoryTitle, setDocSignatoryTitle] = useState("Principal");
+  const [docCandidateSignatureName, setDocCandidateSignatureName] = useState("");
+  const [docCandidateSignatureDate, setDocCandidateSignatureDate] = useState("");
   const [assignOpen, setAssignOpen] = useState(false);
   const [sprintTemplates, setSprintTemplates] = useState<SprintTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
@@ -378,6 +471,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   });
 
   const candidate = data.candidate;
+  const screening = data.screening;
+  const screeningCurrentCtc = screening?.current_ctc_annual != null ? `Rs. ${formatMoney(screening.current_ctc_annual)}` : "";
+  const screeningExpectedCtc = screening?.expected_ctc_annual != null ? `Rs. ${formatMoney(screening.expected_ctc_annual)}` : "";
   const candidateInitials = useMemo(() => {
     const parts = (candidate.name || "").trim().split(/\s+/).filter(Boolean);
     const first = parts[0]?.[0] || "";
@@ -385,6 +481,12 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     return (first + second).toUpperCase() || "C";
   }, [candidate.name]);
   const currentStageKey = normalizeStage(candidate.current_stage);
+
+  useEffect(() => {
+    if (offerDesignation.trim()) return;
+    const fallback = candidate.opening_title || candidate.current_stage || "";
+    if (fallback) setOfferDesignation(fallback);
+  }, [candidate.opening_title, candidate.current_stage, offerDesignation]);
 
   const cafState = useMemo(() => {
     const generated = !!candidate.caf_sent_at || !!cafLink?.caf_token;
@@ -508,7 +610,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     let cancelled = false;
     let inFlight = false;
     let pending = false;
-    const source = new EventSource("/api/rec/events/stream");
+    const source = new EventSource(withBasePath("/api/rec/events/stream"));
 
     async function refreshAllData() {
       if (inFlight) {
@@ -700,6 +802,164 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
+  async function handleDecisionOffer(offerId: number, decision: "accept" | "decline") {
+    if (decision === "decline" && !window.confirm("Mark this offer as declined? This will move the candidate to rejected.")) {
+      return;
+    }
+    setOffersBusy(true);
+    setOffersError(null);
+    try {
+      await decideOffer(offerId, decision);
+      await refreshOffers();
+    } catch (e: any) {
+      setOffersError(e?.message || "Offer decision failed.");
+    } finally {
+      setOffersBusy(false);
+    }
+  }
+
+  function openOfferDocument(offer: CandidateOffer) {
+    setOfferDocError(null);
+    setOfferDocNotice(null);
+    const payload = parseOfferDocPayload(offer.offer_doc_payload);
+    const payloadString = (key: string) => {
+      const value = payload?.[key];
+      return typeof value === "string" ? value : "";
+    };
+    const payloadBool = (key: string) => {
+      const value = payload?.[key];
+      return typeof value === "boolean" ? value : false;
+    };
+    const candidateName = payloadString("candidate_name") || candidate.name || offer.candidate_name || offer.candidate_code || "";
+    const designation = payloadString("designation") || offer.designation_title || candidate.opening_title || "";
+    const issueDate = payloadString("issue_date") || formatLetterDate(new Date().toISOString());
+    const unit = payloadString("unit");
+    const reportingTo = payloadString("reporting_to");
+    const candidateAddress = payloadString("candidate_address");
+    const joiningDate = payloadString("joining_date") || formatLetterDate(offer.joining_date);
+    const officeAddress = payloadString("office_address") || docOfficeAddress;
+    const grossMonthly = payloadString("gross_salary_monthly") || formatMonthlyRupees(offer.gross_ctc_annual);
+    const includeJoiningBonus = payloadBool("include_joining_bonus");
+    const currentCtc = payloadString("current_ctc_annual") || screeningCurrentCtc;
+    const expectedCtc = payloadString("expected_ctc_annual") || screeningExpectedCtc;
+
+    setDocSalutation(payloadString("salutation") || "Mr");
+    setDocCandidateName(candidateName);
+    setDocCandidateAddress(candidateAddress);
+    setDocIssueDate(issueDate);
+    setDocDesignation(designation);
+    setDocCurrentCtc(currentCtc);
+    setDocExpectedCtc(expectedCtc);
+    setDocUnit(unit);
+    setDocReportingTo(reportingTo);
+    setReportToQuery(reportingTo);
+    setReportToResults([]);
+    setReportToPerson(null);
+    setDocJoiningDate(joiningDate);
+    setDocOfficeAddress(officeAddress);
+    setDocGrossMonthly(grossMonthly);
+    setDocIncludeJoiningBonus(includeJoiningBonus);
+    setDocJoiningBonusMonthly(payloadString("joining_bonus_monthly"));
+    setDocJoiningBonusInstallment(payloadString("joining_bonus_installment"));
+    setDocJoiningBonusEndMonthYear(payloadString("joining_bonus_end_month_year"));
+    setDocVariableStart(payloadString("variable_start_month_year"));
+    setDocVariableEvalRange(payloadString("variable_eval_year_range"));
+    setDocVariablePayoutRange(payloadString("variable_payout_year_range"));
+    setDocSignatoryName(payloadString("signatory_name") || "Harsh Vardhan");
+    setDocSignatoryTitle(payloadString("signatory_title") || "Principal");
+    setDocCandidateSignatureName(payloadString("candidate_signature_name") || candidateName);
+    setDocCandidateSignatureDate(payloadString("candidate_signature_date"));
+    setOfferDocOpen(true);
+  }
+
+  async function handleGenerateOfferDocument(offerId: number) {
+    setOfferDocError(null);
+    setOfferDocNotice(null);
+    if (!docSalutation.trim()) {
+      setOfferDocError("Select a salutation.");
+      return;
+    }
+    if (!docCandidateName.trim()) {
+      setOfferDocError("Candidate name is required.");
+      return;
+    }
+    if (!docCandidateAddress.trim()) {
+      setOfferDocError("Candidate address is required.");
+      return;
+    }
+    if (!docUnit.trim() || !docReportingTo.trim()) {
+      setOfferDocError("Unit and reporting-to are required.");
+      return;
+    }
+    if (!docOfficeAddress.trim()) {
+      setOfferDocError("Office address is required.");
+      return;
+    }
+    if (!docGrossMonthly.trim()) {
+      setOfferDocError("Gross salary (monthly) is required.");
+      return;
+    }
+    if (docIncludeJoiningBonus) {
+      if (!docJoiningBonusMonthly.trim() || !docJoiningBonusInstallment.trim() || !docJoiningBonusEndMonthYear.trim()) {
+        setOfferDocError("Fill all joining bonus fields or disable the bonus section.");
+        return;
+      }
+    }
+
+    setOfferDocBusy(true);
+    try {
+        await generateOfferDocument(offerId, {
+          salutation: docSalutation.trim(),
+          candidate_name: docCandidateName.trim(),
+          candidate_address: docCandidateAddress.trim(),
+          issue_date: docIssueDate.trim(),
+          designation: docDesignation.trim(),
+          current_ctc_annual: docCurrentCtc.trim(),
+          expected_ctc_annual: docExpectedCtc.trim(),
+          unit: docUnit.trim(),
+          reporting_to: docReportingTo.trim(),
+          joining_date: docJoiningDate.trim(),
+        office_address: docOfficeAddress.trim(),
+        gross_salary_monthly: docGrossMonthly.trim(),
+        include_joining_bonus: docIncludeJoiningBonus,
+        joining_bonus_monthly: docJoiningBonusMonthly.trim(),
+        joining_bonus_installment: docJoiningBonusInstallment.trim(),
+        joining_bonus_end_month_year: docJoiningBonusEndMonthYear.trim(),
+        variable_start_month_year: docVariableStart.trim(),
+        variable_eval_year_range: docVariableEvalRange.trim(),
+        variable_payout_year_range: docVariablePayoutRange.trim(),
+        signatory_name: docSignatoryName.trim(),
+        signatory_title: docSignatoryTitle.trim(),
+        candidate_signature_name: docCandidateSignatureName.trim(),
+        candidate_signature_date: docCandidateSignatureDate.trim(),
+      });
+      setOfferDocNotice("Offer letter generated.");
+      await refreshOffers();
+    } catch (e: any) {
+      setOfferDocError(e?.message || "Offer letter generation failed.");
+    } finally {
+      setOfferDocBusy(false);
+    }
+  }
+
+  async function handleDeleteOfferDocument(offerId: number) {
+    if (!offerId) return;
+    if (!window.confirm("Delete the generated offer letter? This cannot be undone.")) return;
+    setOfferDocError(null);
+    setOfferDocNotice(null);
+    setOfferDocDeleteBusy(true);
+    try {
+      const res = await fetch(withBasePath(`/api/rec/offers/${offerId}/document`), { method: "DELETE" });
+      if (!res.ok) throw new Error(await res.text());
+      setOfferDocNotice("Offer letter deleted.");
+      await refreshOffers();
+    } catch (e: any) {
+      setOfferDocError(e?.message || "Offer letter delete failed.");
+    } finally {
+      setOfferDocDeleteBusy(false);
+    }
+  }
+
   async function handleConvertCandidate() {
     setOffersBusy(true);
     setOffersError(null);
@@ -779,7 +1039,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
     setSlotInviteBusy(true);
     try {
-      const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/interview-slots/propose`, {
+      const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/interview-slots/propose`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -838,6 +1098,36 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       window.clearTimeout(handle);
     };
   }, [personQuery, scheduleOpen]);
+
+  useEffect(() => {
+    if (!offerDocOpen) return;
+    const query = reportToQuery.trim();
+    let ignore = false;
+    if (query.length < 2) {
+      setReportToResults([]);
+      setReportToBusy(false);
+      return () => {
+        ignore = true;
+      };
+    }
+    const handle = window.setTimeout(() => {
+      setReportToBusy(true);
+      fetchPeople(query)
+        .then((rows) => {
+          if (!ignore) setReportToResults(rows);
+        })
+        .catch(() => {
+          if (!ignore) setReportToResults([]);
+        })
+        .finally(() => {
+          if (!ignore) setReportToBusy(false);
+        });
+    }, 250);
+    return () => {
+      ignore = true;
+      window.clearTimeout(handle);
+    };
+  }, [reportToQuery, offerDocOpen]);
 
   useEffect(() => {
     if (!scheduleOpen) return;
@@ -1063,7 +1353,6 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     return [];
   }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef]);
 
-  const screening = data.screening as Screening | null | undefined;
   const interviewUpcoming = useMemo(() => {
     if (!interviews) return [] as Interview[];
     const now = new Date();
@@ -1784,6 +2073,329 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
             </div>
           ) : null}
 
+          {offerDocOpen ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+              <div className="w-full max-w-3xl rounded-3xl border border-white/20 bg-white/95 p-5 shadow-xl">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-tight text-slate-500">Offer letter</p>
+                    <h3 className="text-lg font-semibold">Generate appointment letter</h3>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                    onClick={() => setOfferDocOpen(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+
+                {offerDocError ? (
+                  <div className="mt-3 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">
+                    {offerDocError}
+                  </div>
+                ) : null}
+                {offerDocNotice ? (
+                  <div className="mt-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
+                    {offerDocNotice}
+                  </div>
+                ) : null}
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Salutation
+                    <select
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docSalutation}
+                      onChange={(e) => setDocSalutation(e.target.value)}
+                    >
+                      <option value="Mr">Mr</option>
+                      <option value="Ms">Ms</option>
+                      <option value="Mrs">Mrs</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Candidate name
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docCandidateName}
+                      onChange={(e) => setDocCandidateName(e.target.value)}
+                      placeholder="Full name"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600 md:col-span-2">
+                    Candidate address
+                    <textarea
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      rows={2}
+                      value={docCandidateAddress}
+                      onChange={(e) => setDocCandidateAddress(e.target.value)}
+                      placeholder="Address / City"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Issue date
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docIssueDate}
+                      onChange={(e) => setDocIssueDate(e.target.value)}
+                      placeholder="December 11, 2025"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Designation
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docDesignation}
+                      onChange={(e) => setDocDesignation(e.target.value)}
+                      placeholder="Architect/ Designer"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Current CTC (annual)
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docCurrentCtc}
+                      onChange={(e) => setDocCurrentCtc(e.target.value)}
+                      placeholder="Rs. 6,00,000"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Expected CTC (annual)
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docExpectedCtc}
+                      onChange={(e) => setDocExpectedCtc(e.target.value)}
+                      placeholder="Rs. 9,00,000"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Unit
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docUnit}
+                      onChange={(e) => setDocUnit(e.target.value)}
+                      placeholder="Unit / Studio"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Reporting to
+                    <div className="relative">
+                      <input
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={reportToQuery}
+                        placeholder={reportToPerson ? reportToPerson.full_name : "Search active users"}
+                        onChange={(e) => {
+                          setReportToQuery(e.target.value);
+                          setReportToPerson(null);
+                          setDocReportingTo("");
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && reportToResults.length > 0) {
+                            e.preventDefault();
+                            const query = reportToQuery.trim().toLowerCase();
+                            const exact =
+                              reportToResults.find((person) => person.full_name.toLowerCase() === query) || reportToResults[0];
+                            if (exact) {
+                              setReportToPerson(exact);
+                              setDocReportingTo(exact.full_name);
+                              setReportToQuery(exact.full_name);
+                              setReportToResults([]);
+                            }
+                          }
+                        }}
+                      />
+                      {reportToQuery.trim().length >= 2 && reportToResults.length > 0 ? (
+                        <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-40 overflow-auto rounded-xl border border-slate-200 bg-white shadow-card">
+                          {reportToResults.map((person) => (
+                            <button
+                              key={person.person_id}
+                              type="button"
+                              className="flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setReportToPerson(person);
+                                setDocReportingTo(person.full_name);
+                                setReportToQuery(person.full_name);
+                                setReportToResults([]);
+                              }}
+                            >
+                              <span className="truncate">
+                                <span className="font-medium">{person.full_name}</span>{" "}
+                                <span className="text-slate-500">({person.email})</span>
+                              </span>
+                              <span className="shrink-0 text-xs text-slate-500">{person.role_name || person.role_code}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    {reportToQuery.trim().length >= 2 && reportToBusy ? <p className="text-[11px] text-slate-500">Searching active users...</p> : null}
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Joining date (letter format)
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docJoiningDate}
+                      onChange={(e) => setDocJoiningDate(e.target.value)}
+                      placeholder="January 15, 2026"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Gross salary monthly
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docGrossMonthly}
+                      onChange={(e) => setDocGrossMonthly(e.target.value)}
+                      placeholder="Rs. 1,00,000/-"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600 md:col-span-2">
+                    Office address
+                    <textarea
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      rows={2}
+                      value={docOfficeAddress}
+                      onChange={(e) => setDocOfficeAddress(e.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-white/60 p-3">
+                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                    <input type="checkbox" checked={docIncludeJoiningBonus} onChange={(e) => setDocIncludeJoiningBonus(e.target.checked)} />
+                    Include joining bonus section
+                  </label>
+                  {docIncludeJoiningBonus ? (
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1 text-xs text-slate-600">
+                        Joining bonus monthly
+                        <input
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                          value={docJoiningBonusMonthly}
+                          onChange={(e) => setDocJoiningBonusMonthly(e.target.value)}
+                          placeholder="Rs. 25,000/-"
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-slate-600">
+                        Monthly installment
+                        <input
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                          value={docJoiningBonusInstallment}
+                          onChange={(e) => setDocJoiningBonusInstallment(e.target.value)}
+                          placeholder="Rs. 25,000"
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-slate-600">
+                        Bonus end month/year
+                        <input
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                          value={docJoiningBonusEndMonthYear}
+                          onChange={(e) => setDocJoiningBonusEndMonthYear(e.target.value)}
+                          placeholder="March 2027"
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Variable start month/year
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docVariableStart}
+                      onChange={(e) => setDocVariableStart(e.target.value)}
+                      placeholder="April 2027"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Variable evaluation year range
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docVariableEvalRange}
+                      onChange={(e) => setDocVariableEvalRange(e.target.value)}
+                      placeholder="April 2026 - March 2027"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Variable payout year range
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docVariablePayoutRange}
+                      onChange={(e) => setDocVariablePayoutRange(e.target.value)}
+                      placeholder="2027-28"
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Signatory name
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docSignatoryName}
+                      onChange={(e) => setDocSignatoryName(e.target.value)}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Signatory title
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docSignatoryTitle}
+                      onChange={(e) => setDocSignatoryTitle(e.target.value)}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Candidate signature name
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docCandidateSignatureName}
+                      onChange={(e) => setDocCandidateSignatureName(e.target.value)}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Candidate signature date
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={docCandidateSignatureDate}
+                      onChange={(e) => setDocCandidateSignatureDate(e.target.value)}
+                      placeholder="(optional)"
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
+                    onClick={() => setOfferDocOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  {canDelete && latestOffer?.candidate_offer_id && (latestOffer.pdf_url || latestOffer.docx_url) ? (
+                    <button
+                      type="button"
+                      className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-xs font-semibold text-rose-600"
+                      onClick={() => void handleDeleteOfferDocument(latestOffer.candidate_offer_id)}
+                      disabled={offerDocBusy || offerDocDeleteBusy}
+                    >
+                      {offerDocDeleteBusy ? "Deleting..." : "Delete letter"}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
+                    onClick={() => void handleGenerateOfferDocument(latestOffer?.candidate_offer_id || 0)}
+                    disabled={offerDocBusy || offerDocDeleteBusy || !latestOffer}
+                  >
+                    {offerDocBusy ? "Generating..." : "Generate letter"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {assignOpen ? (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
               <div className="w-full max-w-xl rounded-3xl border border-white/20 bg-white/95 p-5 shadow-xl">
@@ -1981,11 +2593,25 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                       {latestOffer.pdf_url ? (
                         <a
                           className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
-                          href={latestOffer.pdf_url}
+                          href={
+                            latestOffer.pdf_url.toLowerCase().startsWith("http")
+                              ? latestOffer.pdf_url
+                              : withBasePath(`/api/rec/offers/${encodeURIComponent(String(latestOffer.candidate_offer_id))}/document/pdf`)
+                          }
                           target="_blank"
                           rel="noreferrer"
                         >
                           <ExternalLink className="h-3.5 w-3.5" /> Offer PDF
+                        </a>
+                      ) : null}
+                      {latestOffer.docx_url ? (
+                        <a
+                          className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
+                          href={withBasePath(`/api/rec/offers/${encodeURIComponent(String(latestOffer.candidate_offer_id))}/document`)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <FileText className="h-3.5 w-3.5" /> Offer DOCX
                         </a>
                       ) : null}
                     </div>
@@ -2030,6 +2656,26 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                           Send to candidate
                         </button>
                       ) : null}
+                      {canDelete && (latestOffer.offer_status === "sent" || latestOffer.offer_status === "viewed") ? (
+                        <>
+                          <button
+                            type="button"
+                            className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
+                            onClick={() => void handleDecisionOffer(latestOffer.candidate_offer_id, "accept")}
+                            disabled={offersBusy}
+                          >
+                            Mark accepted
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-full bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white"
+                            onClick={() => void handleDecisionOffer(latestOffer.candidate_offer_id, "decline")}
+                            disabled={offersBusy}
+                          >
+                            Mark declined
+                          </button>
+                        </>
+                      ) : null}
                       {latestOffer.offer_status === "accepted" ? (
                         <button
                           type="button"
@@ -2040,6 +2686,14 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                           Mark as joined
                         </button>
                       ) : null}
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
+                        onClick={() => openOfferDocument(latestOffer)}
+                        disabled={offersBusy}
+                      >
+                        {canDelete && (latestOffer.pdf_url || latestOffer.docx_url) ? "Edit letter" : "Generate letter"}
+                      </button>
                     </div>
                   </div>
                 ) : (

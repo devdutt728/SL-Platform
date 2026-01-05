@@ -58,7 +58,9 @@ class OfferOut(BaseModel):
     viewed_at: datetime | None = None
     accepted_at: datetime | None = None
     declined_at: datetime | None = None
+    docx_url: str | None = None
     pdf_url: str | None = None
+    offer_doc_payload: str | None = None
     notes_internal: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -84,9 +86,36 @@ class OfferPublicOut(BaseModel):
     probation_months: int | None = None
     offer_valid_until: date | None = None
     offer_status: str
+    docx_url: str | None = None
     pdf_url: str | None = None
 
 
 class OfferDecisionIn(BaseModel):
     decision: str
     reason: str | None = None
+
+
+class OfferDocumentGenerateIn(BaseModel):
+    salutation: str
+    candidate_name: str | None = None
+    candidate_address: str
+    issue_date: str | None = None
+    designation: str | None = None
+    current_ctc_annual: str | None = None
+    expected_ctc_annual: str | None = None
+    unit: str
+    reporting_to: str
+    joining_date: str | None = None
+    office_address: str
+    gross_salary_monthly: str | None = None
+    joining_bonus_monthly: str | None = None
+    joining_bonus_installment: str | None = None
+    joining_bonus_end_month_year: str | None = None
+    variable_start_month_year: str | None = None
+    variable_eval_year_range: str | None = None
+    variable_payout_year_range: str | None = None
+    include_joining_bonus: bool = False
+    signatory_name: str | None = None
+    signatory_title: str | None = None
+    candidate_signature_name: str | None = None
+    candidate_signature_date: str | None = None

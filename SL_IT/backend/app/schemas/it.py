@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
 from app.constants import (
+    IT_ASSET_STATUS_VALUES,
+    IT_ASSET_TYPE_VALUES,
+    IT_BILLING_CYCLE_VALUES,
     IT_IMPACT_VALUES,
+    IT_LICENSE_ASSIGNMENT_VALUES,
+    IT_LICENSE_TYPE_VALUES,
     IT_PRIORITY_VALUES,
     IT_STATUS_VALUES,
     IT_URGENCY_VALUES,
@@ -216,6 +221,275 @@ class TicketDetail(BaseModel):
     calendar_event_id: str | None
     calendar_event_html_link: str | None
     comments: list[TicketCommentOut] = []
+
+    class Config:
+        from_attributes = True
+
+
+class VendorBase(BaseModel):
+    name: str
+    website: str | None = None
+    support_email: str | None = None
+    support_phone: str | None = None
+    is_active: bool = True
+
+
+class VendorCreate(VendorBase):
+    pass
+
+
+class VendorUpdate(BaseModel):
+    name: str | None = None
+    website: str | None = None
+    support_email: str | None = None
+    support_phone: str | None = None
+    is_active: bool | None = None
+
+
+class VendorOut(VendorBase):
+    vendor_id: int
+
+    class Config:
+        from_attributes = True
+
+
+class AssetBase(BaseModel):
+    asset_tag: str = Field(min_length=2, max_length=64)
+    asset_type: str
+    serial_number: str | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    operating_system: str | None = None
+    purchase_date: date | None = None
+    warranty_end: date | None = None
+    assigned_person_id: str | None = None
+    assigned_email: str | None = None
+    assigned_name: str | None = None
+    status: str = "IN_STOCK"
+    location: str | None = None
+    notes: str | None = None
+
+    @field_validator("asset_type")
+    @classmethod
+    def validate_asset_type(cls, value: str) -> str:
+        if value not in IT_ASSET_TYPE_VALUES:
+            raise ValueError("invalid_asset_type")
+        return value
+
+    @field_validator("status")
+    @classmethod
+    def validate_asset_status(cls, value: str) -> str:
+        if value not in IT_ASSET_STATUS_VALUES:
+            raise ValueError("invalid_asset_status")
+        return value
+
+
+class AssetCreate(AssetBase):
+    pass
+
+
+class AssetUpdate(BaseModel):
+    asset_tag: str | None = None
+    asset_type: str | None = None
+    serial_number: str | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    operating_system: str | None = None
+    purchase_date: date | None = None
+    warranty_end: date | None = None
+    assigned_person_id: str | None = None
+    assigned_email: str | None = None
+    assigned_name: str | None = None
+    status: str | None = None
+    location: str | None = None
+    notes: str | None = None
+
+    @field_validator("asset_type")
+    @classmethod
+    def validate_asset_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if value not in IT_ASSET_TYPE_VALUES:
+            raise ValueError("invalid_asset_type")
+        return value
+
+    @field_validator("status")
+    @classmethod
+    def validate_asset_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if value not in IT_ASSET_STATUS_VALUES:
+            raise ValueError("invalid_asset_status")
+        return value
+
+
+class AssetOut(AssetBase):
+    asset_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LicenseBase(BaseModel):
+    vendor_id: int | None = None
+    name: str = Field(min_length=2, max_length=128)
+    sku: str | None = None
+    license_type: str
+    total_seats: int = Field(ge=1)
+    contract_start: date | None = None
+    contract_end: date | None = None
+    renewal_date: date | None = None
+    cost_amount: float | None = None
+    cost_currency: str | None = None
+    billing_cycle: str | None = None
+    registered_email: str | None = None
+    is_active: bool = True
+    notes: str | None = None
+
+    @field_validator("license_type")
+    @classmethod
+    def validate_license_type(cls, value: str) -> str:
+        if value not in IT_LICENSE_TYPE_VALUES:
+            raise ValueError("invalid_license_type")
+        return value
+
+    @field_validator("billing_cycle")
+    @classmethod
+    def validate_billing_cycle(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if value not in IT_BILLING_CYCLE_VALUES:
+            raise ValueError("invalid_billing_cycle")
+        return value
+
+
+class LicenseCreate(LicenseBase):
+    pass
+
+
+class LicenseUpdate(BaseModel):
+    vendor_id: int | None = None
+    name: str | None = None
+    sku: str | None = None
+    license_type: str | None = None
+    total_seats: int | None = None
+    contract_start: date | None = None
+    contract_end: date | None = None
+    renewal_date: date | None = None
+    cost_amount: float | None = None
+    cost_currency: str | None = None
+    billing_cycle: str | None = None
+    registered_email: str | None = None
+    is_active: bool | None = None
+    notes: str | None = None
+
+    @field_validator("license_type")
+    @classmethod
+    def validate_license_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if value not in IT_LICENSE_TYPE_VALUES:
+            raise ValueError("invalid_license_type")
+        return value
+
+    @field_validator("billing_cycle")
+    @classmethod
+    def validate_billing_cycle(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if value not in IT_BILLING_CYCLE_VALUES:
+            raise ValueError("invalid_billing_cycle")
+        return value
+
+
+class LicenseOut(LicenseBase):
+    license_id: int
+    assigned_seats: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LicenseAssignmentBase(BaseModel):
+    license_id: int
+    asset_id: int | None = None
+    assigned_person_id: str | None = None
+    assigned_email: str | None = None
+    assigned_name: str | None = None
+    assigned_at: datetime | None = None
+    unassigned_at: datetime | None = None
+    status: str = "ACTIVE"
+    notes: str | None = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_assignment_status(cls, value: str) -> str:
+        if value not in IT_LICENSE_ASSIGNMENT_VALUES:
+            raise ValueError("invalid_assignment_status")
+        return value
+
+
+class LicenseAssignmentCreate(LicenseAssignmentBase):
+    pass
+
+
+class LicenseAssignmentUpdate(BaseModel):
+    asset_id: int | None = None
+    assigned_person_id: str | None = None
+    assigned_email: str | None = None
+    assigned_name: str | None = None
+    assigned_at: datetime | None = None
+    unassigned_at: datetime | None = None
+    status: str | None = None
+    notes: str | None = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_assignment_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if value not in IT_LICENSE_ASSIGNMENT_VALUES:
+            raise ValueError("invalid_assignment_status")
+        return value
+
+
+class LicenseAssignmentOut(LicenseAssignmentBase):
+    assignment_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CredentialCreate(BaseModel):
+    label: str = Field(min_length=2, max_length=128)
+    username: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=1)
+    notes: str | None = None
+    is_active: bool = True
+
+
+class CredentialUpdate(BaseModel):
+    label: str | None = None
+    username: str | None = None
+    password: str | None = None
+    notes: str | None = None
+    is_active: bool | None = None
+
+
+class CredentialOut(BaseModel):
+    credential_id: int
+    label: str
+    username: str
+    notes: str | None = None
+    is_active: bool
+    last_rotated_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True

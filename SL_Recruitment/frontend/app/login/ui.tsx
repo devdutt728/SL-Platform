@@ -11,21 +11,44 @@ declare global {
 
 export function LoginPanel({ clientId }: { clientId: string }) {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const logoSrc = `${basePath}/studio-lotus-logo.png`;
+  const portalOrigin = process.env.NEXT_PUBLIC_PORTAL_ORIGIN || "";
+  const workbookHref = portalOrigin ? `${portalOrigin}/` : "/";
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <div className="section-card w-full max-w-md">
-      <p className="text-xs uppercase tracking-tight text-[var(--text-secondary)]">Studio Lotus</p>
-      <h1 className="mt-2 text-2xl font-semibold">Recruitment OS</h1>
-      <p className="mt-2 text-sm text-[var(--text-secondary)]">Sign in with your Studio Lotus Google account.</p>
+    <div className="section-card w-full max-w-md text-center">
+      <div className="mx-auto inline-flex flex-col items-center gap-2">
+        <div className="flex h-12 w-44 items-center justify-center rounded-full bg-white/90 shadow-[0_16px_40px_-28px_rgba(15,23,42,0.5)]">
+          <img src={logoSrc} alt="Studio Lotus" className="h-8 w-36 object-contain" />
+        </div>
+        <p className="text-xs font-semibold uppercase tracking-[0.32em] text-[var(--text-secondary)]">
+          Recruitment OS
+        </p>
+      </div>
+      <h1 className="mt-4 text-2xl font-semibold">Welcome back</h1>
+      <p className="mt-2 text-sm text-[var(--text-secondary)]">Sign in with your Google account.</p>
 
       <div className="mt-6 flex justify-center">
         <a
           href={`${basePath}/api/auth/google/start`}
-          className="inline-flex w-[320px] items-center justify-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-strong)] px-4 py-2 text-sm font-semibold shadow-card hover:bg-[var(--surface-strong)]/80"
+          className="inline-flex w-[320px] items-center justify-center gap-2 rounded-full border border-[var(--border)] bg-white/85 px-4 py-2 text-sm font-semibold shadow-card transition hover:bg-white"
         >
           <GoogleMark className="h-4 w-4" />
           Sign in with Google
+        </a>
+      </div>
+      <div className="mt-4 flex justify-center">
+        <a
+          href={workbookHref}
+          className="group relative inline-flex w-[320px] items-center justify-center rounded-full px-4 py-2 text-sm font-semibold text-slate-900 transition"
+        >
+          <span className="absolute inset-0 rounded-full bg-gradient-to-r from-cyan-200 via-sky-100 to-indigo-200 opacity-80 blur-sm transition group-hover:opacity-100" />
+          <span className="absolute inset-[1px] rounded-full bg-white/70 ring-1 ring-white/60" />
+          <span className="relative flex items-center gap-2">
+            Open Workbook
+            <span className="text-xs opacity-70">→</span>
+          </span>
         </a>
       </div>
 

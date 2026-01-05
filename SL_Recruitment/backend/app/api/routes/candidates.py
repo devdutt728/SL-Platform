@@ -36,7 +36,7 @@ router = APIRouter(prefix="/rec/candidates", tags=["candidates"])
 
 
 def _candidate_code(candidate_id: int) -> str:
-    return f"SLR-{candidate_id:06d}"
+    return f"SLR-{candidate_id:03d}"
 
 
 def _split_name(full_name: str) -> tuple[str, str | None]:
@@ -132,6 +132,7 @@ async def create_candidate(
         opening_id=payload.opening_id,
         source_channel=payload.source_channel,
         status="enquiry",
+        final_decision="pending",
         cv_url=payload.cv_url,
         caf_token=uuid4().hex,
         caf_sent_at=now,
@@ -140,6 +141,7 @@ async def create_candidate(
         created_at=now,
         updated_at=now,
     )
+    candidate.final_decision = candidate.final_decision or "pending"
     session.add(candidate)
     await session.flush()
 

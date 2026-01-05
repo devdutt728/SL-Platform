@@ -11,9 +11,7 @@ export default function AdminUsersPage() {
         </p>
       </section>
       <RoleGuard allowed={["admin"]}>
-        <section className="section-card">
-          <UserAdminTable />
-        </section>
+        <UserAdminTable />
       </RoleGuard>
     </div>
   );

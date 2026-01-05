@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CandidateListItem, SprintTemplate, SprintTemplateAttachment } from "@/lib/types";
-
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+import { withBasePath } from "@/lib/base-path";
 
 
 type Props = {
@@ -61,7 +60,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${basePath}/api/auth/me`, { cache: "no-store" });
+        const res = await fetch(withBasePath("/api/auth/me"), { cache: "no-store" });
         if (!res.ok) return;
         const me = (await res.json()) as { roles?: string[]; platform_role_id?: number | null };
         if (cancelled) return;
@@ -82,7 +81,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
     (async () => {
       setPreviewCandidatesLoading(true);
       try {
-        const url = new URL("/api/rec/candidates", window.location.origin);
+        const url = new URL(withBasePath("/api/rec/candidates"), window.location.origin);
         url.searchParams.set("stage", "sprint");
         url.searchParams.set("limit", "200");
         const res = await fetch(url.toString(), { cache: "no-store" });
@@ -132,7 +131,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
     }
     (async () => {
       try {
-        const res = await fetch(`/api/rec/sprint-templates/${encodeURIComponent(attachmentTemplateId)}/attachments`, { cache: "no-store" });
+        const res = await fetch(withBasePath(`/api/rec/sprint-templates/${encodeURIComponent(attachmentTemplateId)}/attachments`), { cache: "no-store" });
         if (!res.ok) return;
         const data = (await res.json()) as SprintTemplateAttachment[];
         if (!cancelled) setAttachments(data);
@@ -147,7 +146,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
 
   async function refreshTemplates() {
     try {
-      const res = await fetch("/api/rec/sprint-templates?include_inactive=1", { cache: "no-store" });
+      const res = await fetch(withBasePath("/api/rec/sprint-templates?include_inactive=1"), { cache: "no-store" });
       if (!res.ok) return;
       const data = (await res.json()) as SprintTemplate[];
       setTemplates(data);
@@ -160,7 +159,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
     let cancelled = false;
     let inFlight = false;
     let pending = false;
-    const source = new EventSource("/api/rec/events/stream");
+    const source = new EventSource(withBasePath("/api/rec/events/stream"));
 
     async function refreshAll() {
       if (inFlight) {
@@ -211,7 +210,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
     };
 
     const isUpdate = !!selectedTemplateId;
-    const res = await fetch(isUpdate ? `/api/rec/sprint-templates/${encodeURIComponent(selectedTemplateId)}` : "/api/rec/sprint-templates", {
+    const res = await fetch(withBasePath(isUpdate ? `/api/rec/sprint-templates/${encodeURIComponent(selectedTemplateId)}` : "/api/rec/sprint-templates"), {
       method: isUpdate ? "PATCH" : "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
@@ -256,7 +255,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
     try {
       const formData = new FormData();
       formData.append("upload", attachmentFile);
-      const res = await fetch(`/api/rec/sprint-templates/${encodeURIComponent(attachmentTemplateId)}/attachments`, {
+      const res = await fetch(withBasePath(`/api/rec/sprint-templates/${encodeURIComponent(attachmentTemplateId)}/attachments`), {
         method: "POST",
         body: formData,
       });
@@ -287,7 +286,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
     setUploadError(null);
     try {
       const res = await fetch(
-        `/api/rec/sprint-templates/${encodeURIComponent(attachmentTemplateId)}/attachments/${attachmentId}`,
+        withBasePath(`/api/rec/sprint-templates/${encodeURIComponent(attachmentTemplateId)}/attachments/${attachmentId}`),
         { method: "DELETE" }
       );
       if (!res.ok) {
