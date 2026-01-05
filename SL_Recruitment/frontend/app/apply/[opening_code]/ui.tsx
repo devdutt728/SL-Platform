@@ -17,17 +17,12 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
   async function onSubmit(formData: FormData) {
     const cv = formData.get("cv_file") as File | null;
     const portfolio = formData.get("portfolio_file") as File | null;
-    const portfolioReason = String(formData.get("portfolio_not_uploaded_reason") || "").trim();
     if (cv && cv.size > 2 * 1024 * 1024) {
       setError("CV file is too large. Max 2MB.");
       return;
     }
     if (portfolio && portfolio.size > 10 * 1024 * 1024) {
       setError("Portfolio file is too large. Max 10MB.");
-      return;
-    }
-    if (!portfolio && !portfolioReason) {
-      setError("Please provide a reason if you are not uploading a portfolio.");
       return;
     }
 
@@ -185,17 +180,18 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
             />
             </div>
 
-            {!portfolioName ? (
-              <label className="block space-y-1">
-                <span className="text-[12px] font-medium text-[var(--text-secondary)]">If you are not uploading a portfolio, please share a reason</span>
-                <textarea
-                  name="portfolio_not_uploaded_reason"
-                  required
-                  rows={2}
-                  className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[13px] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
-                  placeholder="e.g. NDA / work is confidential / still compiling / no portfolio available"
-                />
-              </label>
+              {!portfolioName ? (
+                <label className="block space-y-1">
+                  <span className="text-[12px] font-medium text-[var(--text-secondary)]">
+                    If you are not uploading a portfolio, you can share a reason (optional)
+                  </span>
+                  <textarea
+                    name="portfolio_not_uploaded_reason"
+                    rows={2}
+                    className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[13px] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                    placeholder="e.g. NDA / work is confidential / still compiling / no portfolio available"
+                  />
+                </label>
             ) : (
               <input type="hidden" name="portfolio_not_uploaded_reason" value="" />
             )}

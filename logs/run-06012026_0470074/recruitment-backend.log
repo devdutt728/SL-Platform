@@ -1,0 +1,5 @@
+INFO:     127.0.0.1:53253 - "GET /apply HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53253 - "GET /apply/TEST-5674 HTTP/1.1" 200 OK
+INFO:     ::1:0 - "POST /apply/TEST-5674 HTTP/1.1" 400 Bad Request
+INFO:     ::1:0 - "POST /apply/TEST-5674 HTTP/1.1" 400 Bad Request
+INFO:     ::1:0 - "POST /apply/TEST-5674 HTTP/1.1" 400 Bad Request

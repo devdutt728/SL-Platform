@@ -649,13 +649,7 @@ async def apply_for_opening(
     if portfolio_url:
         candidate.portfolio_not_uploaded_reason = None
     else:
-        reason = (portfolio_not_uploaded_reason or "").strip()
-        if not reason:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Please provide a reason if you are not uploading a portfolio.",
-            )
-        candidate.portfolio_not_uploaded_reason = reason
+        candidate.portfolio_not_uploaded_reason = (portfolio_not_uploaded_reason or "").strip() or None
 
     if cv_url:
         candidate.cv_url = cv_url if not portfolio_url else f"{cv_url};portfolio={portfolio_url}"

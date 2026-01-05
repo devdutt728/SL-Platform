@@ -1,0 +1,6 @@
+{"level":"info","ts":1767641210.8433273,"msg":"maxprocs: Leaving GOMAXPROCS=22: CPU quota undefined"}
+{"level":"info","ts":1767641210.8433273,"msg":"GOMEMLIMIT is updated","package":"github.com/KimMachineGun/automemlimit/memlimit","GOMEMLIMIT":30397840588,"previous":9223372036854775807}
+{"level":"info","ts":1767641210.8438842,"msg":"using config from file","file":"Caddyfile"}
+{"level":"info","ts":1767641210.8449109,"msg":"adapted config to JSON","adapter":"caddyfile"}
+{"level":"warn","ts":1767641210.8449109,"msg":"Caddyfile input is not formatted; run 'caddy fmt --overwrite' to fix inconsistencies","adapter":"caddyfile","file":"Caddyfile","line":2}
+{"level":"info","ts":1767641210.8573859,"msg":"serving initial configuration"}

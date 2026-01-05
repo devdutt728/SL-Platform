@@ -2,7 +2,6 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 for %%I in ("%~dp0.") do set "ROOT=%%~fI"
-set "LOGDIR=%ROOT%\logs"
 set "PORTS=3000 3001 3002 3003 8001 8002"
 set "QUIET="
 if /I "%~1"=="/quiet" set "QUIET=1"
@@ -11,18 +10,23 @@ if not defined QUIET (
   echo Stopping services...
 )
 
-set "ROOT_WQL=%ROOT:\=\\%"
+taskkill /FI "WINDOWTITLE eq SLP Live Logs" /T /F >nul 2>&1
+
 set "MAX_PASSES=3"
 set "PASS=1"
 
 :RETRY
+if not defined QUIET (
+  echo.
+  call :PrintPorts
+)
 call :KillPorts
-call :KillRoot
-timeout /t 1 /nobreak >nul
+call :KillNamed
+ping -n 2 127.0.0.1 >nul
 call :CheckPorts
 if defined PORTS_IN_USE (
   set /a PASS+=1
-  if %PASS% LEQ %MAX_PASSES% goto :RETRY
+  if !PASS! LEQ !MAX_PASSES! goto :RETRY
 )
 
 if not defined QUIET (
@@ -42,10 +46,8 @@ for %%P in (%PORTS%) do (
 )
 exit /b
 
-:KillRoot
-for /f "tokens=2 delims==" %%A in ('wmic process where "CommandLine like '%%%ROOT_WQL%%' and Name!='cmd.exe' and Name!='conhost.exe'" get ProcessId /value 2^>nul ^| findstr /I "ProcessId="') do (
-  call :KillPid %%A
-)
+:KillNamed
+taskkill /IM caddy.exe /T /F >nul 2>&1
 exit /b
 
 :KillPid

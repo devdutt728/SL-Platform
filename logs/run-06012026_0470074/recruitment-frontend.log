@@ -1,0 +1,34 @@
+
+> sl-recruitment-frontend@0.1.0 dev
+> next dev
+
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3002
+  - Environments: .env.local
+
+ ✓ Starting...
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+ ✓ Ready in 1823ms
+ ✓ Compiled /middleware in 244ms (72 modules)
+ ○ Compiling /login ...
+ ✓ Compiled /login in 1203ms (524 modules)
+ GET /login 200 in 1443ms
+ ✓ Compiled /icon.png in 235ms (308 modules)
+ GET /recruitment/icon.png?d3f4a896211c3c1a 200 in 326ms
+ GET /login 200 in 132ms
+ ○ Compiling / ...
+ ✓ Compiled / in 1703ms (576 modules)
+ ✓ Compiled in 213ms (263 modules)
+ ✓ Compiled /apply in 289ms (570 modules)
+ ✓ Compiled /apply/[opening_code] in 488ms (650 modules)
+ ✓ Compiled /api/apply/[opening_code] in 203ms (396 modules)
+ GET /recruitment/api/apply/TEST-5674 200 in 643ms
+ GET /apply/TEST-5674?_rsc=1rvlo 200 in 720ms
+ POST /recruitment/api/apply/TEST-5674 400 in 373ms
+ POST /recruitment/api/apply/TEST-5674 400 in 153ms
+ POST /recruitment/api/apply/TEST-5674 400 in 209ms
+[?25h

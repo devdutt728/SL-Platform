@@ -1,0 +1,8 @@
+INFO:     Will watch for changes in these directories: ['D:\\SL Platform\\SL_Recruitment\\backend']
+INFO:     Uvicorn running on http://127.0.0.1:8002 (Press CTRL+C to quit)
+INFO:     Started reloader process [1676] using WatchFiles
+INFO:     Started server process [16172]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:slr.request:request_completed
+WARNING:  WatchFiles detected changes in 'app\api\routes\public_apply.py'. Reloading...

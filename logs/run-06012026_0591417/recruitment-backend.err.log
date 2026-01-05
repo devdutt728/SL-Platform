@@ -1,0 +1,7 @@
+INFO:     Will watch for changes in these directories: ['D:\\SL Platform\\SL_Recruitment\\backend']
+INFO:     Uvicorn running on http://127.0.0.1:8002 (Press CTRL+C to quit)
+INFO:     Started reloader process [4640] using WatchFiles
+INFO:     Started server process [21916]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:slr.request:request_completed

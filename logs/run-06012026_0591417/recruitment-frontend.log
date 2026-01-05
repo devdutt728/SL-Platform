@@ -1,0 +1,13 @@
+
+> sl-recruitment-frontend@0.1.0 dev
+> next dev
+
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3002
+  - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 1728ms
+ ✓ Compiled /middleware in 257ms (72 modules)
+ ✓ Compiled /api/apply/[opening_code] in 192ms (57 modules)
+ POST /recruitment/api/apply/TEST-5674 201 in 3043ms
