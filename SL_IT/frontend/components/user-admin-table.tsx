@@ -282,15 +282,15 @@ export function UserAdminTable() {
           </div>
         </div>
 
-        <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,180px))]">
+        <div className="mt-5 flex flex-wrap items-center gap-3">
           <input
-            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            className="h-9 w-full min-w-[220px] flex-1 rounded-full border border-black/10 bg-white/70 px-4 text-sm"
             placeholder="Search name, email, role..."
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
           <select
-            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            className="h-9 min-w-[150px] rounded-full border border-black/10 bg-white/70 px-4 text-sm"
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
           >
@@ -301,7 +301,7 @@ export function UserAdminTable() {
             ))}
           </select>
           <select
-            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            className="h-9 min-w-[150px] rounded-full border border-black/10 bg-white/70 px-4 text-sm"
             value={roleFilter}
             onChange={(event) => setRoleFilter(event.target.value)}
           >
@@ -312,37 +312,35 @@ export function UserAdminTable() {
               </option>
             ))}
           </select>
-          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
-            <label className="flex items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3 py-2">
-              <input
-                type="checkbox"
-                checked={activeOnly}
-                onChange={(event) => {
-                  setActiveOnly(event.target.checked);
-                  if (event.target.checked) setRelievedOnly(false);
-                }}
-              />
-              Active only
-            </label>
-            <label className="flex items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3 py-2">
-              <input
-                type="checkbox"
-                checked={relievedOnly}
-                onChange={(event) => {
-                  setRelievedOnly(event.target.checked);
-                  if (event.target.checked) setActiveOnly(false);
-                }}
-              />
-              Show relieved only
-            </label>
-          </div>
+          <label className="flex h-9 items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              checked={activeOnly}
+              onChange={(event) => {
+                setActiveOnly(event.target.checked);
+                if (event.target.checked) setRelievedOnly(false);
+              }}
+            />
+            Active only
+          </label>
+          <label className="flex h-9 items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              checked={relievedOnly}
+              onChange={(event) => {
+                setRelievedOnly(event.target.checked);
+                if (event.target.checked) setActiveOnly(false);
+              }}
+            />
+            Show relieved only
+          </label>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={exportDirectory}
-            className="rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm font-semibold"
+            className="h-9 rounded-full border border-black/10 bg-white/70 px-4 text-sm font-semibold"
           >
             Export full directory
           </button>
