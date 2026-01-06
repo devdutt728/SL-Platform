@@ -10,6 +10,9 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata = {
   title: "SL Recruitment",
   description: "Hiring OS",
+  icons: {
+    icon: "/Studio Lotus Logo (TM).png",
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
