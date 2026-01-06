@@ -20,7 +20,6 @@ from app.models.screening import RecCandidateScreening
 from app.services.drive import create_candidate_folder, upload_application_doc
 from app.services.email import send_email
 from app.services.events import log_event
-from app.services.local_docs import save_application_doc
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
 from app.schemas.screening import ScreeningUpsertIn
@@ -552,7 +551,7 @@ async def apply_for_opening(
         meta_extra={"caf_token": caf_token},
     )
 
-    # Best-effort Drive folder creation
+    # Drive folder creation (required)
     drive_folder_id: str | None = None
     drive_folder_url: str | None = None
     try:
@@ -580,6 +579,11 @@ async def apply_for_opening(
             related_entity_id=candidate.candidate_id,
             meta_json={"error": str(exc)},
         )
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to create candidate folder in Drive. Please retry later.",
+        )
 
     def _clean_name(name: str | None) -> str:
         if not name:
@@ -594,64 +598,54 @@ async def apply_for_opening(
                 detail=f"{kind.upper()} file too large. Max allowed is {max_bytes // (1024 * 1024)}MB.",
             )
 
-        if drive_folder_id:
-            filename = f"{candidate.candidate_code}-{kind}-{_clean_name(upload.filename)}"
-            try:
-                _, file_url = await anyio.to_thread.run_sync(
-                    lambda: upload_application_doc(
-                        drive_folder_id,
-                        filename=filename,
-                        content_type=upload.content_type or "application/octet-stream",
-                        data=data,
-                    )
-                )
-                await log_event(
-                    session,
-                    candidate_id=candidate.candidate_id,
-                    action_type=f"{kind}_uploaded",
-                    performed_by_person_id_platform=None,
-                    related_entity_type="candidate",
-                    related_entity_id=candidate.candidate_id,
-                    meta_json={
-                        "file_url": file_url,
-                        "drive_folder_id": drive_folder_id,
-                        "drive_folder_url": drive_folder_url,
-                    },
-                )
-                return file_url
-            except Exception as exc:  # noqa: BLE001
-                await log_event(
-                    session,
-                    candidate_id=candidate.candidate_id,
-                    action_type=f"{kind}_upload_failed",
-                    performed_by_person_id_platform=None,
-                    related_entity_type="candidate",
-                    related_entity_id=candidate.candidate_id,
-                    meta_json={
-                        "error": str(exc),
-                        "drive_folder_id": drive_folder_id,
-                        "drive_folder_url": drive_folder_url,
-                    },
-                )
+        if not drive_folder_id:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Drive folder missing; please retry later.",
+            )
 
-        stored_path = save_application_doc(
-            candidate.candidate_id,
-            kind=kind,
-            filename=upload.filename,
-            content_type=upload.content_type,
-            data=data,
-        )
-        local_url = f"/api/rec/candidates/{candidate.candidate_id}/documents/{kind}"
-        await log_event(
-            session,
-            candidate_id=candidate.candidate_id,
-            action_type=f"{kind}_stored_local",
-            performed_by_person_id_platform=None,
-            related_entity_type="candidate",
-            related_entity_id=candidate.candidate_id,
-            meta_json={"local_url": local_url, "path": str(stored_path)},
-        )
-        return local_url
+        filename = f"{candidate.candidate_code}-{kind}-{_clean_name(upload.filename)}"
+        try:
+            _, file_url = await anyio.to_thread.run_sync(
+                lambda: upload_application_doc(
+                    drive_folder_id,
+                    filename=filename,
+                    content_type=upload.content_type or "application/octet-stream",
+                    data=data,
+                )
+            )
+            await log_event(
+                session,
+                candidate_id=candidate.candidate_id,
+                action_type=f"{kind}_uploaded",
+                performed_by_person_id_platform=None,
+                related_entity_type="candidate",
+                related_entity_id=candidate.candidate_id,
+                meta_json={
+                    "file_url": file_url,
+                    "drive_folder_id": drive_folder_id,
+                    "drive_folder_url": drive_folder_url,
+                },
+            )
+            return file_url
+        except Exception as exc:  # noqa: BLE001
+            await log_event(
+                session,
+                candidate_id=candidate.candidate_id,
+                action_type=f"{kind}_upload_failed",
+                performed_by_person_id_platform=None,
+                related_entity_type="candidate",
+                related_entity_id=candidate.candidate_id,
+                meta_json={
+                    "error": str(exc),
+                    "drive_folder_id": drive_folder_id,
+                    "drive_folder_url": drive_folder_url,
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Unable to upload {kind} to Drive. Please retry later.",
+            )
 
     cv_url: str | None = None
     portfolio_url: str | None = None

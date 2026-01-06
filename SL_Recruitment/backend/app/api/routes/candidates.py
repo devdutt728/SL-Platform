@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 import json
 from pydantic import BaseModel
 from sqlalchemy import func, select, delete, text
@@ -26,13 +26,12 @@ from app.schemas.candidate_full import CandidateFullOut
 from app.schemas.screening import ScreeningOut, ScreeningUpsertIn
 from app.schemas.stage import CandidateStageOut, StageTransitionRequest
 from app.schemas.user import UserContext
-from app.services.drive import create_candidate_folder, delete_drive_item, delete_all_candidate_folders
+from app.services.drive import create_candidate_folder, delete_candidate_folder, delete_all_candidate_folders
 from app.services.email import send_email
 from app.services.events import log_event
 from app.services.offers import convert_candidate_to_employee, create_offer
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
-from app.services.local_docs import find_application_doc
 
 router = APIRouter(prefix="/rec/candidates", tags=["candidates"])
 
@@ -78,8 +77,12 @@ async def _delete_candidate_with_dependents(session: AsyncSession, candidate: Re
         except Exception:
             # Ignore if table missing or FK differs
             continue
-    if delete_drive and candidate.drive_folder_id:
-        await anyio.to_thread.run_sync(delete_drive_item, candidate.drive_folder_id)
+    if delete_drive:
+        await anyio.to_thread.run_sync(
+            delete_candidate_folder,
+            candidate_code=candidate.candidate_code,
+            folder_id=candidate.drive_folder_id,
+        )
     await session.delete(candidate)
 
 
@@ -398,12 +401,15 @@ async def download_candidate_application_document(
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
 
-    found = find_application_doc(candidate_id, kind=normalized)
-    if not found:
+    url = candidate.cv_url if normalized == "cv" else candidate.portfolio_url
+    if not url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-
-    path, filename, content_type = found
-    return FileResponse(path, media_type=content_type, filename=filename)
+    if url.startswith("/"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Document stored locally; Drive storage is required.",
+        )
+    return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/{candidate_id}/full", response_model=CandidateFullOut)

@@ -54,12 +54,12 @@ export default async function CandidateCafPage({ params }: { params: { id: strin
             <p className="text-xs uppercase tracking-tight text-slate-500">CAF (read-only)</p>
             <h1 className="mt-1 truncate text-2xl font-semibold">{candidate.name}</h1>
             <p className="mt-1 text-sm text-slate-600">
-              {candidate.candidate_code} · {candidate.opening_title || "Not linked"}
+              {candidate.candidate_code} - {candidate.opening_title || "Not linked"}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={`/candidates/${encodeURIComponent(params.id)}`}
+              href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/candidates/${encodeURIComponent(params.id)}`}
               className="rounded-full border border-slate-200 bg-white/70 px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-white"
             >
               Back
@@ -88,50 +88,50 @@ export default async function CandidateCafPage({ params }: { params: { id: strin
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {labelValue("Email", candidate.email || "—")}
-          {labelValue("Phone", candidate.phone || "—")}
+          {labelValue("Email", candidate.email || "-")}
+          {labelValue("Phone", candidate.phone || "-")}
           {labelValue("CAF status", candidate.caf_submitted_at ? "Submitted" : candidate.caf_sent_at ? "Sent" : "Not sent")}
-          {labelValue("Submitted at", candidate.caf_submitted_at ? new Date(candidate.caf_submitted_at).toLocaleString() : "—")}
+          {labelValue("Submitted at", candidate.caf_submitted_at ? new Date(candidate.caf_submitted_at).toLocaleString() : "-")}
         </div>
 
         {!screening ? (
           <div className="mt-4 rounded-2xl border border-white/60 bg-white/30 p-4">
             <p className="text-sm font-semibold">No CAF submission yet</p>
-            <p className="mt-1 text-sm text-slate-600">Use “Copy CAF link” to send the candidate their CAF link.</p>
+            <p className="mt-1 text-sm text-slate-600">Use "Copy CAF link" to send the candidate their CAF link.</p>
           </div>
         ) : (
           <div className="mt-4 rounded-2xl border border-white/60 bg-white/30 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-semibold">Submitted responses</p>
               <span className="rounded-full bg-white/60 px-3 py-1 text-xs font-semibold text-slate-800">
-                {screening.screening_result || "—"}
+                {screening.screening_result || "-"}
               </span>
             </div>
 
             <div className="mt-3 grid gap-3 md:grid-cols-3">
-              {labelValue("Current city", screening.current_city ? String(screening.current_city) : "—")}
-              {labelValue("Employer", screening.current_employer ? String(screening.current_employer) : "—")}
-              {labelValue("Total exp (yrs)", screening.total_experience_years != null ? String(screening.total_experience_years) : "—")}
-              {labelValue("Relevant exp (yrs)", screening.relevant_experience_years != null ? String(screening.relevant_experience_years) : "—")}
-              {labelValue("Notice (days)", screening.notice_period_days != null ? String(screening.notice_period_days) : "—")}
-              {labelValue("Expected CTC", screening.expected_ctc_annual != null ? String(screening.expected_ctc_annual) : "—")}
-              {labelValue("Relocate", screening.willing_to_relocate == null ? "—" : screening.willing_to_relocate ? "Yes" : "No")}
-              {labelValue("Joining date", screening.expected_joining_date ? String(screening.expected_joining_date) : "—")}
-              {labelValue("Job change", screening.reason_for_job_change ? String(screening.reason_for_job_change) : "—")}
+              {labelValue("Current city", screening.current_city ? String(screening.current_city) : "-")}
+              {labelValue("Employer", screening.current_employer ? String(screening.current_employer) : "-")}
+              {labelValue("Total exp (yrs)", screening.total_experience_years != null ? String(screening.total_experience_years) : "-")}
+              {labelValue("Relevant exp (yrs)", screening.relevant_experience_years != null ? String(screening.relevant_experience_years) : "-")}
+              {labelValue("Notice (days)", screening.notice_period_days != null ? String(screening.notice_period_days) : "-")}
+              {labelValue("Expected CTC", screening.expected_ctc_annual != null ? String(screening.expected_ctc_annual) : "-")}
+              {labelValue("Relocate", screening.willing_to_relocate == null ? "-" : screening.willing_to_relocate ? "Yes" : "No")}
+              {labelValue("Joining date", screening.expected_joining_date ? String(screening.expected_joining_date) : "-")}
+              {labelValue("Job change", screening.reason_for_job_change ? String(screening.reason_for_job_change) : "-")}
             </div>
 
             <div className="mt-3 grid gap-3">
               <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-wide text-slate-500">Relocation notes</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{screening.relocation_notes || "—"}</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{screening.relocation_notes || "-"}</p>
               </div>
               <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-wide text-slate-500">Questions</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{screening.questions_from_candidate || "—"}</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{screening.questions_from_candidate || "-"}</p>
               </div>
               <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-wide text-slate-500">Screening notes</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{screening.screening_notes || "—"}</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{screening.screening_notes || "-"}</p>
               </div>
             </div>
           </div>

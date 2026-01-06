@@ -916,6 +916,188 @@ async def deactivate_routing_rule(
     return {"rule_id": rule.rule_id}
 
 
+@router.post("/admin/policies/import", response_model=dict)
+async def import_policy_csv(
+    request: Request,
+    upload: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    if upload.content_type and "csv" not in upload.content_type.lower():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_file_type")
+    raw = await upload.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
+
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    rows: list[dict] = []
+    row_limit = 5000
+    for row in reader:
+        rows.append(row)
+        if len(rows) >= row_limit:
+            break
+
+    def _norm(value: str | None) -> str:
+        return (value or "").strip().lower()
+
+    def _parse_bool(value: str | None, default: bool = True) -> bool:
+        if value is None or value == "":
+            return default
+        return _norm(value) in {"1", "true", "yes", "y"}
+
+    def _parse_int(value: str | None, default: int) -> int:
+        try:
+            return int(str(value).strip())
+        except Exception:
+            return default
+
+    def _parse_category_id(row: dict, by_name: dict[str, int]) -> int | None:
+        raw_id = str(row.get("category_id") or "").strip()
+        if raw_id.isdigit():
+            return int(raw_id)
+        name = _norm(row.get("category_name"))
+        return by_name.get(name)
+
+    def _parse_subcategory_id(row: dict, by_key: dict[tuple[int, str], int], by_name: dict[str, int]) -> int | None:
+        raw_id = str(row.get("subcategory_id") or "").strip()
+        if raw_id.isdigit():
+            return int(raw_id)
+        name = _norm(row.get("subcategory_name"))
+        if not name:
+            return None
+        category_id = _parse_category_id(row, category_name_to_id)
+        if category_id:
+            return by_key.get((category_id, name))
+        return by_name.get(name)
+
+    existing_categories = (await session.execute(select(ITCategory))).scalars().all()
+    category_name_to_id = {_norm(cat.name): cat.category_id for cat in existing_categories}
+
+    existing_subcategories = (await session.execute(select(ITSubcategory))).scalars().all()
+    subcategory_key_to_id: dict[tuple[int, str], int] = {}
+    subcategory_name_to_id: dict[str, int] = {}
+    for sub in existing_subcategories:
+        name = _norm(sub.name)
+        subcategory_key_to_id[(sub.category_id, name)] = sub.subcategory_id
+        if name not in subcategory_name_to_id:
+            subcategory_name_to_id[name] = sub.subcategory_id
+
+    existing_sla = (await session.execute(select(ITSlaPolicy))).scalars().all()
+    sla_names = {_norm(policy.name) for policy in existing_sla}
+
+    existing_rules = (await session.execute(select(ITRoutingRule))).scalars().all()
+    routing_keys = {
+        (rule.category_id, rule.subcategory_id, rule.default_assignee_person_id) for rule in existing_rules
+    }
+
+    created = {"categories": 0, "subcategories": 0, "sla": 0, "routing": 0}
+    skipped = 0
+
+    for row in rows:
+        if _norm(row.get("record_type")) != "category":
+            continue
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        key = _norm(name)
+        if key in category_name_to_id:
+            skipped += 1
+            continue
+        category = ITCategory(name=name, is_active=_parse_bool(row.get("is_active"), True))
+        session.add(category)
+        await session.flush()
+        category_name_to_id[key] = category.category_id
+        created["categories"] += 1
+
+    for row in rows:
+        if _norm(row.get("record_type")) != "subcategory":
+            continue
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        category_id = _parse_category_id(row, category_name_to_id)
+        if not category_id:
+            skipped += 1
+            continue
+        key = (category_id, _norm(name))
+        if key in subcategory_key_to_id:
+            skipped += 1
+            continue
+        subcategory = ITSubcategory(
+            category_id=category_id,
+            name=name,
+            is_active=_parse_bool(row.get("is_active"), True),
+        )
+        session.add(subcategory)
+        await session.flush()
+        subcategory_key_to_id[key] = subcategory.subcategory_id
+        if _norm(name) not in subcategory_name_to_id:
+            subcategory_name_to_id[_norm(name)] = subcategory.subcategory_id
+        created["subcategories"] += 1
+
+    for row in rows:
+        if _norm(row.get("record_type")) != "sla":
+            continue
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        key = _norm(name)
+        if key in sla_names:
+            skipped += 1
+            continue
+        policy = ITSlaPolicy(
+            name=name,
+            category_id=_parse_category_id(row, category_name_to_id),
+            priority=(row.get("priority") or "").strip() or None,
+            first_response_minutes=_parse_int(row.get("first_response_minutes"), 60),
+            resolution_minutes=_parse_int(row.get("resolution_minutes"), 480),
+            is_active=_parse_bool(row.get("is_active"), True),
+        )
+        session.add(policy)
+        await session.flush()
+        sla_names.add(key)
+        created["sla"] += 1
+
+    for row in rows:
+        if _norm(row.get("record_type")) != "routing":
+            continue
+        category_id = _parse_category_id(row, category_name_to_id)
+        subcategory_id = _parse_subcategory_id(row, subcategory_key_to_id, subcategory_name_to_id)
+        assignee = (row.get("default_assignee_person_id") or "").strip() or None
+        key = (category_id, subcategory_id, assignee)
+        if key in routing_keys:
+            skipped += 1
+            continue
+        rule = ITRoutingRule(
+            category_id=category_id,
+            subcategory_id=subcategory_id,
+            default_assignee_person_id=assignee,
+            is_active=_parse_bool(row.get("is_active"), True),
+        )
+        session.add(rule)
+        await session.flush()
+        routing_keys.add(key)
+        created["routing"] += 1
+
+    await write_audit_log(
+        session,
+        actor=user,
+        action="IT_POLICY_IMPORT",
+        entity_type="it_policy",
+        entity_id="bulk",
+        before=None,
+        after={"created": created, "skipped": skipped, "filename": upload.filename},
+        context=get_request_context(request),
+    )
+    await session.commit()
+
+    return {"created": created, "skipped": skipped}
+
+
 @router.get("/admin/assets", response_model=list[AssetOut])
 async def list_assets(
     session: AsyncSession = Depends(get_session),

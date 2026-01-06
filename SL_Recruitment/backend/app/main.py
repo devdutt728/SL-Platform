@@ -10,6 +10,7 @@ from app.middleware.logging import RequestLoggingMiddleware
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 logging.getLogger("apscheduler.scheduler").setLevel(logging.WARNING)
+logger = logging.getLogger("slr.startup")
 
 app = FastAPI(
     title=settings.app_name,
@@ -31,6 +32,13 @@ app.include_router(api_router)
 
 @app.on_event("startup")
 async def _startup_jobs() -> None:
+    logger.info(
+        "Drive config: root_id=%s ongoing_id=%s appointed_id=%s not_appointed_id=%s",
+        settings.drive_root_folder_id,
+        settings.drive_ongoing_folder_id,
+        settings.drive_appointed_folder_id,
+        settings.drive_not_appointed_folder_id,
+    )
     app.state.scheduler = start_scheduler()
 
 
