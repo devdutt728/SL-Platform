@@ -1,0 +1,269 @@
+
+> slp-web@0.1.0 dev
+> next dev
+
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3001
+  - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 1278ms
+ ✓ Compiled /middleware in 117ms (72 modules)
+ ○ Compiling /login ...
+ ✓ Compiled /login in 681ms (456 modules)
+ GET /login 200 in 830ms
+ ✓ Compiled /api/auth/me in 118ms (264 modules)
+ GET /it/api/auth/me 401 in 206ms
+ GET /it/api/auth/me 401 in 12ms
+ ✓ Compiled /api/auth/google/start in 73ms (271 modules)
+ GET /it/api/auth/google/start 307 in 93ms
+ ✓ Compiled /api/auth/callback/google in 39ms (273 modules)
+ GET /it/api/auth/callback/google?state=1767687293550-2bf40fc2b13e28&code=4%2F0ATX87lOoBea_rg4g_aEefUP4Bnk_MLpO_7FiRkRp9CI2jLnHb1IN69wZtxh3211PLBNpfg&scope=email+profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+openid&authuser=0&hd=studiolotus.in&prompt=none 307 in 394ms
+ ○ Compiling / ...
+ ✓ Compiled / in 939ms (618 modules)
+ GET / 200 in 1110ms
+ ✓ Compiled in 175ms (291 modules)
+ GET /it/api/auth/me 200 in 53ms
+ GET /it/api/auth/me 200 in 48ms
+ ✓ Compiled /my in 251ms (613 modules)
+ ✓ Compiled /api/it/[...path] in 82ms (335 modules)
+ GET /it/api/it/tickets 200 in 424ms
+ GET /it/api/it/tickets 200 in 58ms
+ GET /it/api/it/tickets 200 in 50ms
+ GET /it/api/it/tickets 200 in 50ms
+ ✓ Compiled /new in 315ms (648 modules)
+ GET /it/api/it/categories 200 in 60ms
+ GET /it/api/it/categories 200 in 42ms
+ GET /it/api/it/categories 200 in 39ms
+ GET /it/api/it/categories 200 in 44ms
+ ✓ Compiled /admin/it in 133ms (658 modules)
+ GET /it/api/it/admin/routing 200 in 147ms
+ GET /it/api/it/admin/categories 200 in 149ms
+ GET /it/api/it/admin/sla 200 in 150ms
+ GET /it/api/it/admin/subcategories 200 in 150ms
+ GET /it/api/it/admin/subcategories 200 in 150ms
+ GET /it/api/it/admin/categories 200 in 152ms
+ GET /it/api/it/admin/sla 200 in 153ms
+ GET /it/api/it/admin/routing 200 in 155ms
+ GET /it/api/it/admin/routing 200 in 112ms
+ GET /it/api/it/admin/subcategories 200 in 115ms
+ GET /it/api/it/admin/sla 200 in 115ms
+ GET /it/api/it/admin/categories 200 in 115ms
+ GET /it/api/it/admin/subcategories 200 in 114ms
+ GET /it/api/it/admin/categories 200 in 113ms
+ GET /it/api/it/admin/sla 200 in 115ms
+ GET /it/api/it/admin/routing 200 in 115ms
+ ○ Compiling /admin/users ...
+ ✓ Compiled /admin/users in 504ms (779 modules)
+ ✓ Compiled /api/admin/[...path] in 125ms (424 modules)
+ GET /it/api/admin/roles 200 in 383ms
+ GET /it/api/admin/users 200 in 488ms
+ GET /it/api/admin/roles 200 in 132ms
+ GET /it/api/admin/users 200 in 94ms
+ GET /it/api/admin/roles 200 in 64ms
+ GET /it/api/admin/roles 200 in 72ms
+ GET /it/api/admin/users 200 in 96ms
+ GET /it/api/admin/users 200 in 69ms
+ GET /it/api/it/admin/categories 200 in 125ms
+ GET /it/api/it/admin/sla 200 in 130ms
+ GET /it/api/it/admin/subcategories 200 in 131ms
+ GET /it/api/it/admin/routing 200 in 132ms
+ GET /it/api/it/admin/subcategories 200 in 112ms
+ GET /it/api/it/admin/routing 200 in 117ms
+ GET /it/api/it/admin/categories 200 in 121ms
+ GET /it/api/it/admin/sla 200 in 118ms
+ GET /it/api/it/admin/categories 200 in 123ms
+ GET /it/api/it/admin/subcategories 200 in 132ms
+ GET /it/api/it/admin/routing 200 in 127ms
+ GET /it/api/it/admin/sla 200 in 128ms
+ GET /it/api/it/admin/subcategories 200 in 121ms
+ GET /it/api/it/admin/categories 200 in 123ms
+ GET /it/api/it/admin/routing 200 in 122ms
+ GET /it/api/it/admin/sla 200 in 122ms
+ GET /it/api/admin/roles 200 in 81ms
+ GET /it/api/admin/users 200 in 124ms
+ GET /it/api/admin/roles 200 in 78ms
+ GET /it/api/admin/users 200 in 89ms
+ GET /it/api/admin/roles 200 in 104ms
+ GET /it/api/admin/users 200 in 156ms
+ GET /it/api/admin/roles 200 in 102ms
+ GET /it/api/admin/users 200 in 89ms
+ ✓ Compiled in 393ms (720 modules)
+ ✓ Compiled in 192ms (720 modules)
+ ✓ Compiled in 165ms (720 modules)
+ GET /admin/users 200 in 56ms
+ ✓ Compiled /api/auth/me in 96ms (385 modules)
+ GET /it/api/auth/me 200 in 189ms
+ GET /it/api/auth/me 200 in 73ms
+ ✓ Compiled /api/admin/[...path] in 154ms (387 modules)
+ GET /it/api/admin/roles 200 in 256ms
+ GET /it/api/admin/users 200 in 308ms
+ GET /it/api/admin/roles 200 in 81ms
+ GET /it/api/admin/users 200 in 115ms
+ GET /it/api/admin/roles 200 in 90ms
+ GET /it/api/admin/roles 200 in 62ms
+ GET /it/api/admin/users 200 in 98ms
+ GET /it/api/admin/users 200 in 70ms
+ ✓ Compiled /api/it/[...path] in 102ms (389 modules)
+ GET /it/api/it/admin/sla 200 in 255ms
+ GET /it/api/it/admin/subcategories 200 in 256ms
+ GET /it/api/it/admin/routing 200 in 258ms
+ GET /it/api/it/admin/categories 200 in 259ms
+ GET /it/api/it/admin/subcategories 200 in 125ms
+ GET /it/api/it/admin/sla 200 in 127ms
+ GET /it/api/it/admin/routing 200 in 124ms
+ GET /it/api/it/admin/categories 200 in 125ms
+ GET /it/api/it/admin/subcategories 200 in 116ms
+ GET /it/api/it/admin/categories 200 in 117ms
+ GET /it/api/it/admin/sla 200 in 118ms
+ GET /it/api/it/admin/routing 200 in 122ms
+ GET /it/api/it/admin/subcategories 200 in 110ms
+ GET /it/api/it/admin/categories 200 in 112ms
+ GET /it/api/it/admin/routing 200 in 110ms
+ GET /it/api/it/admin/sla 200 in 113ms
+ GET /it/api/admin/roles 200 in 65ms
+ GET /it/api/admin/users 200 in 108ms
+ GET /it/api/admin/roles 200 in 74ms
+ GET /it/api/admin/users 200 in 83ms
+ GET /it/api/admin/roles 200 in 84ms
+ GET /it/api/admin/users 200 in 96ms
+ GET /it/api/admin/roles 200 in 94ms
+ GET /it/api/admin/users 200 in 87ms
+ GET /it/api/it/admin/categories 200 in 140ms
+ GET /it/api/it/admin/subcategories 200 in 140ms
+ GET /it/api/it/admin/sla 200 in 141ms
+ GET /it/api/it/admin/routing 200 in 145ms
+ GET /it/api/it/admin/subcategories 200 in 135ms
+ GET /it/api/it/admin/categories 200 in 138ms
+ GET /it/api/it/admin/routing 200 in 135ms
+ GET /it/api/it/admin/sla 200 in 143ms
+ GET /it/api/it/admin/subcategories 200 in 149ms
+ GET /it/api/it/admin/sla 200 in 139ms
+ GET /it/api/it/admin/routing 200 in 149ms
+ GET /it/api/it/admin/categories 200 in 151ms
+ GET /it/api/it/admin/subcategories 200 in 142ms
+ GET /it/api/it/admin/sla 200 in 147ms
+ GET /it/api/it/admin/routing 200 in 149ms
+ GET /it/api/it/admin/categories 200 in 149ms
+ ✓ Compiled /admin/it/assets in 221ms (754 modules)
+ GET /it/api/it/admin/assets 200 in 57ms
+ GET /it/api/it/admin/assets 200 in 62ms
+ GET /it/api/it/admin/assets 200 in 43ms
+ GET /it/api/it/admin/assets 200 in 47ms
+ GET /it/api/admin/roles 200 in 78ms
+ GET /it/api/admin/users 200 in 119ms
+ GET /it/api/admin/roles 200 in 82ms
+ GET /it/api/admin/users 200 in 102ms
+ GET /it/api/admin/roles 200 in 141ms
+ GET /it/api/admin/users 200 in 147ms
+ GET /it/api/admin/roles 200 in 70ms
+ GET /it/api/admin/users 200 in 79ms
+ GET /admin/users 200 in 68ms
+ GET /it/api/auth/me 200 in 85ms
+ GET /it/api/auth/me 200 in 102ms
+ GET /it/api/admin/roles 200 in 95ms
+ GET /it/api/admin/users 200 in 146ms
+ GET /it/api/admin/roles 200 in 94ms
+ GET /it/api/admin/users 200 in 136ms
+ GET /it/api/admin/roles 200 in 146ms
+ GET /it/api/admin/users 200 in 145ms
+ GET /it/api/admin/roles 200 in 128ms
+ GET /it/api/admin/users 200 in 77ms
+ GET /admin/users 200 in 72ms
+ GET /it/api/auth/me 200 in 48ms
+ GET /it/api/auth/me 200 in 87ms
+ GET /it/api/admin/roles 200 in 83ms
+ GET /it/api/admin/users 200 in 148ms
+ GET /it/api/admin/roles 200 in 103ms
+ GET /it/api/admin/users 200 in 92ms
+ GET /it/api/admin/roles 200 in 93ms
+ GET /it/api/admin/users 200 in 90ms
+ GET /it/api/admin/roles 200 in 105ms
+ GET /it/api/admin/users 200 in 89ms
+ GET /admin/users 200 in 68ms
+ GET /it/api/auth/me 200 in 97ms
+ GET /it/api/auth/me 200 in 88ms
+ GET /it/api/admin/roles 200 in 87ms
+ GET /it/api/admin/users 200 in 137ms
+ GET /it/api/admin/roles 200 in 92ms
+ GET /it/api/admin/users 200 in 106ms
+ GET /it/api/admin/roles 200 in 93ms
+ GET /it/api/admin/users 200 in 103ms
+ GET /it/api/admin/roles 200 in 79ms
+ GET /it/api/admin/users 200 in 90ms
+ ✓ Compiled in 431ms (761 modules)
+ GET /it/api/admin/roles 200 in 111ms
+ GET /it/api/admin/users 200 in 153ms
+ GET /it/api/admin/roles 200 in 74ms
+ GET /it/api/admin/users 200 in 83ms
+ GET /it/api/admin/roles 200 in 87ms
+ GET /it/api/admin/users 200 in 102ms
+ GET /it/api/admin/roles 200 in 68ms
+ GET /it/api/admin/roles 200 in 71ms
+ GET /it/api/admin/users 200 in 121ms
+ GET /it/api/admin/roles 200 in 84ms
+ GET /it/api/admin/users 200 in 92ms
+ GET /it/api/admin/roles 200 in 87ms
+ GET /it/api/admin/users 200 in 91ms
+ GET /it/api/admin/roles 200 in 82ms
+ GET /it/api/admin/users 200 in 63ms
+ GET /it/api/admin/users 200 in 81ms
+ GET /it/api/admin/users 200 in 69ms
+ GET /it/api/admin/users 200 in 90ms
+ ✓ Compiled in 119ms (374 modules)
+ ✓ Compiled in 111ms (374 modules)
+ ✓ Compiled in 252ms (722 modules)
+ ✓ Compiled /api/admin/[...path] in 43ms (385 modules)
+ GET /it/api/admin/roles 200 in 199ms
+ GET /it/api/admin/users 200 in 249ms
+ GET /it/api/admin/roles 200 in 77ms
+ GET /it/api/admin/users 200 in 86ms
+ GET /it/api/admin/roles 200 in 88ms
+ GET /it/api/admin/users 200 in 126ms
+ GET /it/api/admin/roles 200 in 95ms
+ GET /it/api/admin/users 200 in 75ms
+ GET /it/api/admin/users 200 in 77ms
+ GET /it/api/admin/users 200 in 76ms
+ ✓ Compiled /api/it/[...path] in 48ms (387 modules)
+ GET /it/api/it/admin/subcategories 200 in 201ms
+ GET /it/api/it/admin/sla 200 in 202ms
+ GET /it/api/it/admin/routing 200 in 203ms
+ GET /it/api/it/admin/categories 200 in 205ms
+ GET /it/api/it/admin/subcategories 200 in 102ms
+ GET /it/api/it/admin/sla 200 in 103ms
+ GET /it/api/it/admin/categories 200 in 104ms
+ GET /it/api/it/admin/routing 200 in 104ms
+ GET /it/api/it/admin/sla 200 in 116ms
+ GET /it/api/it/admin/routing 200 in 118ms
+ GET /it/api/it/admin/subcategories 200 in 121ms
+ GET /it/api/it/admin/categories 200 in 123ms
+ GET /it/api/it/admin/sla 200 in 113ms
+ GET /it/api/it/admin/categories 200 in 111ms
+ GET /it/api/it/admin/subcategories 200 in 112ms
+ GET /it/api/it/admin/routing 200 in 116ms
+ ✓ Compiled /admin/it/assets in 119ms (392 modules)
+ GET /it/api/it/admin/assets 200 in 60ms
+ GET /it/api/it/admin/assets 200 in 47ms
+ GET /it/api/it/admin/assets 200 in 112ms
+ GET /it/api/it/admin/assets 200 in 55ms
+ ✓ Compiled /admin/it/licenses in 481ms (759 modules)
+ GET /it/api/it/admin/licenses 200 in 148ms
+ GET /it/api/it/admin/vendors 200 in 149ms
+ GET /it/api/it/admin/licenses 200 in 71ms
+ GET /it/api/it/admin/vendors 200 in 73ms
+ GET /it/api/it/admin/licenses 200 in 65ms
+ GET /it/api/it/admin/vendors 200 in 68ms
+ GET /it/api/it/admin/licenses 200 in 60ms
+ GET /it/api/it/admin/vendors 200 in 60ms
+ GET /it/api/admin/roles 200 in 73ms
+ GET /it/api/admin/users 200 in 122ms
+ GET /it/api/admin/roles 200 in 90ms
+ GET /it/api/admin/users 200 in 95ms
+ GET /it/api/admin/roles 200 in 85ms
+ GET /it/api/admin/users 200 in 107ms
+ GET /it/api/admin/roles 200 in 74ms
+ GET /it/api/admin/users 200 in 94ms
+ GET /it/api/admin/users 200 in 165ms
+ GET /it/api/admin/users 200 in 81ms
+ ✓ Compiled in 267ms (773 modules)
+ ✓ Compiled in 329ms (773 modules)

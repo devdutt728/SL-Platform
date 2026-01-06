@@ -11,6 +11,10 @@ def require_admin():
     return require_roles([Role.ADMIN, Role.SUPERADMIN])
 
 
+def require_superadmin():
+    return require_roles([Role.SUPERADMIN])
+
+
 def require_it_agent():
     return require_roles([Role.IT_AGENT, Role.IT_LEAD, Role.ADMIN, Role.SUPERADMIN])
 

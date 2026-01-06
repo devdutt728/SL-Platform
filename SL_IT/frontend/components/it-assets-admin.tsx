@@ -7,6 +7,7 @@ import type { Asset } from "@/lib/types";
 
 const ASSET_TYPES = ["LAPTOP", "DESKTOP", "MONITOR", "PHONE", "TABLET", "OTHER"] as const;
 const ASSET_STATUSES = ["IN_STOCK", "ASSIGNED", "RETIRED", "LOST"] as const;
+const MAX_CSV_BYTES = 5 * 1024 * 1024;
 
 function downloadText(filename: string, content: string) {
   const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
@@ -16,6 +17,18 @@ function downloadText(filename: string, content: string) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function validateCsvFile(file: File) {
+  const name = file.name.toLowerCase();
+  const type = file.type.toLowerCase();
+  if (!name.endsWith(".csv") && !type.includes("csv")) {
+    return "Only CSV files are allowed.";
+  }
+  if (file.size > MAX_CSV_BYTES) {
+    return "CSV file is too large. Please upload a file under 5MB.";
+  }
+  return null;
 }
 
 function toIsoOrNull(dateValue: string) {
@@ -50,6 +63,7 @@ export function ItAssetsAdmin() {
 
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const csvInputRef = useRef<HTMLInputElement | null>(null);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
 
   const filteredAssets = useMemo(() => {
     if (statusFilter === "ALL") return assets;
@@ -133,6 +147,11 @@ export function ItAssetsAdmin() {
   };
 
   const uploadCsv = async (file: File) => {
+    const validation = validateCsvFile(file);
+    if (validation) {
+      setError(validation);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -150,6 +169,7 @@ export function ItAssetsAdmin() {
     } finally {
       setBusy(false);
       if (csvInputRef.current) csvInputRef.current.value = "";
+      setCsvFile(null);
     }
   };
 
@@ -187,11 +207,20 @@ export function ItAssetsAdmin() {
                 className="hidden"
                 disabled={busy}
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void uploadCsv(file);
+                  const file = e.target.files?.[0] || null;
+                  setError(null);
+                  setCsvFile(file);
                 }}
               />
             </label>
+            <button
+              type="button"
+              className="rounded-full border border-black/10 bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={busy || !csvFile}
+              onClick={() => csvFile && void uploadCsv(csvFile)}
+            >
+              Upload CSV
+            </button>
           </div>
         </div>
 

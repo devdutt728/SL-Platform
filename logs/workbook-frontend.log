@@ -1,0 +1,16 @@
+
+> frontend@0.1.0 dev
+> next dev
+
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3003
+
+ ✓ Starting...
+ ✓ Ready in 1214ms
+ ○ Compiling / ...
+ ✓ Compiled / in 1081ms (459 modules)
+ GET / 200 in 1297ms
+ ✓ Compiled in 141ms (237 modules)
+ ✓ Compiled /_not-found in 217ms (448 modules)
+ GET /Studio%20Lotus%20Logo%20(TM).png 404 in 332ms
+ GET / 200 in 47ms

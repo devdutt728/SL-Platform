@@ -1,10 +1,47 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { apiFetch } from "@/lib/api";
+import { API_BASE, apiFetch } from "@/lib/api";
 import type { PlatformRole, PlatformUser } from "@/lib/types";
+
+const MAX_CSV_BYTES = 5 * 1024 * 1024;
+
+function downloadText(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function isActiveStatus(status?: string | null) {
+  if (!status) return true;
+  const normalized = status.trim().toLowerCase();
+  return normalized === "working" || normalized === "active";
+}
+
+function isRelievedStatus(status?: string | null, isDeleted?: number | null) {
+  if (isDeleted) return true;
+  if (!status) return false;
+  const normalized = status.trim().toLowerCase();
+  return normalized === "relieved" || normalized === "inactive";
+}
+
+function validateCsvFile(file: File) {
+  const name = file.name.toLowerCase();
+  const type = file.type.toLowerCase();
+  if (!name.endsWith(".csv") && !type.includes("csv")) {
+    return "Only CSV files are allowed.";
+  }
+  if (file.size > MAX_CSV_BYTES) {
+    return "CSV file is too large. Please upload a file under 5MB.";
+  }
+  return null;
+}
 
 export function UserAdminTable() {
   const [users, setUsers] = useState<PlatformUser[]>([]);
@@ -16,9 +53,35 @@ export function UserAdminTable() {
     status?: string;
   } | null>(null);
 
-  const loadUsers = () => {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [roleFilter, setRoleFilter] = useState("ALL");
+  const [activeOnly, setActiveOnly] = useState(false);
+  const [relievedOnly, setRelievedOnly] = useState(false);
+
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createMessage, setCreateMessage] = useState<string | null>(null);
+  const [newUser, setNewUser] = useState({
+    person_id: "",
+    person_code: "",
+    email: "",
+    first_name: "",
+    last_name: "",
+    role_id: "",
+    status: "Working",
+  });
+
+  const loadUsers = (query?: string) => {
     setLoading(true);
-    apiFetch<PlatformUser[]>("/admin/users")
+    const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
+    apiFetch<PlatformUser[]>(`/admin/users${suffix}`)
       .then(setUsers)
       .catch(() => setUsers([]))
       .finally(() => setLoading(false));
@@ -35,6 +98,13 @@ export function UserAdminTable() {
     loadRoles();
   }, []);
 
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      loadUsers(search.trim() || undefined);
+    }, 350);
+    return () => clearTimeout(handle);
+  }, [search]);
+
   const requestChange = (userId: string, updates: { roleId?: number; status?: string }) => {
     setConfirm({ userId, ...updates });
   };
@@ -46,77 +116,420 @@ export function UserAdminTable() {
       body: JSON.stringify({ role_id: confirm.roleId, status: confirm.status }),
     });
     setConfirm(null);
-    loadUsers();
+    loadUsers(search.trim() || undefined);
   };
 
-  if (loading) {
-    return <div className="text-steel">Loading users...</div>;
-  }
+  const statusOptions = useMemo(() => {
+    const options = new Set<string>();
+    users.forEach((user) => {
+      if (user.status) options.add(user.status);
+    });
+    return ["ALL", ...Array.from(options).sort()];
+  }, [users]);
+
+  const roleOptions = useMemo(() => {
+    const options = [...roles];
+    users.forEach((user) => {
+      if (user.role_id && !options.some((role) => role.role_id === user.role_id)) {
+        options.push({
+          role_id: user.role_id,
+          role_code: user.role_code || undefined,
+          role_name: user.role_name || undefined,
+        });
+      }
+    });
+    return options;
+  }, [roles, users]);
+
+  const filteredUsers = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return users.filter((user) => {
+      if (term) {
+        const haystack = `${user.full_name || ""} ${user.email || ""} ${user.role_name || ""} ${user.role_code || ""}`.toLowerCase();
+        if (!haystack.includes(term)) return false;
+      }
+      if (statusFilter !== "ALL" && (user.status || "") !== statusFilter) return false;
+      if (roleFilter !== "ALL" && String(user.role_id || "") !== roleFilter) return false;
+      if (activeOnly && !isActiveStatus(user.status)) return false;
+      if (relievedOnly && !isRelievedStatus(user.status, user.is_deleted)) return false;
+      if (activeOnly && relievedOnly) return false;
+      return true;
+    });
+  }, [users, search, statusFilter, roleFilter, activeOnly, relievedOnly]);
+
+  const activeCount = useMemo(() => users.filter((user) => isActiveStatus(user.status)).length, [users]);
+  const relievedCount = useMemo(
+    () => users.filter((user) => isRelievedStatus(user.status, user.is_deleted)).length,
+    [users]
+  );
+
+  const exportDirectory = () => {
+    const rows = filteredUsers.map((user) => [
+      user.person_id,
+      user.full_name || "",
+      user.email || "",
+      user.role_name || user.role_code || "",
+      user.status || "",
+    ]);
+    const content = [
+      "person_id,full_name,email,role,status",
+      ...rows.map((row) => row.map((cell) => `"${String(cell).replace(/\"/g, "\"\"")}"`).join(",")),
+    ].join("\n");
+    downloadText("user-directory.csv", content);
+  };
+
+  const downloadSampleCsv = () => {
+    downloadText(
+      "user-directory-sample.csv",
+      [
+        "person_id,person_code,email,first_name,last_name,role_id,status",
+        "EMP-001,SL-EMP-001,alex@studiolotus.in,Alex,Ray,2,Working",
+      ].join("\n")
+    );
+  };
+
+  const importUsers = async () => {
+    if (!importFile) return;
+    const validation = validateCsvFile(importFile);
+    if (validation) {
+      setImportError(validation);
+      return;
+    }
+    setImportBusy(true);
+    setImportError(null);
+    setImportMessage(null);
+    try {
+      const formData = new FormData();
+      formData.append("upload", importFile);
+      const res = await fetch(`${API_BASE}/admin/users/import`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const result = await res.json();
+      setImportMessage(`Imported ${result.created || 0} users. Skipped ${result.skipped || 0}.`);
+      setImportFile(null);
+      if (importInputRef.current) importInputRef.current.value = "";
+      loadUsers(search.trim() || undefined);
+    } catch (e: any) {
+      setImportError(e?.message || "CSV import failed");
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const createUser = async () => {
+    const payload = {
+      person_id: newUser.person_id.trim(),
+      person_code: newUser.person_code.trim(),
+      email: newUser.email.trim() || null,
+      first_name: newUser.first_name.trim(),
+      last_name: newUser.last_name.trim() || null,
+      role_id: newUser.role_id ? Number(newUser.role_id) : null,
+      status: newUser.status.trim() || null,
+    };
+    if (!payload.person_id || !payload.person_code || !payload.first_name || !payload.role_id) {
+      setCreateError("Person ID, person code, first name, and role are required.");
+      return;
+    }
+    setCreateBusy(true);
+    setCreateError(null);
+    setCreateMessage(null);
+    try {
+      await apiFetch("/admin/users", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setCreateMessage("User created successfully.");
+      setNewUser({
+        person_id: "",
+        person_code: "",
+        email: "",
+        first_name: "",
+        last_name: "",
+        role_id: "",
+        status: "Working",
+      });
+      loadUsers(search.trim() || undefined);
+    } catch (e: any) {
+      setCreateError(e?.message || "Failed to create user");
+    } finally {
+      setCreateBusy(false);
+    }
+  };
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-6 text-xs uppercase text-steel px-4">
-        <div className="col-span-2">User</div>
-        <div>Role</div>
-        <div>Status</div>
-        <div className="col-span-2">Actions</div>
-      </div>
-      {users.map((user) => {
-        const statusOptions = Array.from(
-          new Set(["Working", "Active", "Inactive", user.status || ""])
-        ).filter(Boolean);
-        const roleOptions = [...roles];
-        if (user.role_id && !roleOptions.some((role) => role.role_id === user.role_id)) {
-          roleOptions.push({
-            role_id: user.role_id,
-            role_code: user.role_code || undefined,
-            role_name: user.role_name || undefined,
-          });
-        }
-        return (
-        <div
-          key={user.person_id}
-          className="grid grid-cols-6 items-center gap-2 rounded-2xl border border-black/5 bg-white/80 px-4 py-3"
-        >
-          <div className="col-span-2">
-            <div className="font-semibold">{user.full_name || user.email}</div>
-            <div className="text-xs text-steel">{user.email}</div>
-          </div>
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <section className="section-card">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <select
-              className="rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
-              value={user.role_id ?? ""}
-              onChange={(event) => requestChange(user.person_id, { roleId: Number(event.target.value) })}
-            >
-              <option value="" disabled>
-                Select role
-              </option>
-              {roleOptions.map((role) => (
-                <option key={role.role_id} value={role.role_id}>
-                  {role.role_name || role.role_code || `Role ${role.role_id}`}
-                </option>
-              ))}
-            </select>
+            <p className="text-[0.6rem] font-semibold uppercase tracking-[0.4em] text-steel">
+              User control center
+            </p>
+            <h2 className="mt-2 text-lg font-semibold">Directory filters, bulk actions & users</h2>
           </div>
-          <div>
-            <select
-              className="rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
-              value={user.status || "Working"}
-              onChange={(event) => requestChange(user.person_id, { status: event.target.value })}
-            >
-              {statusOptions.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="col-span-2 text-xs text-steel">
-            Role changes and deactivations are audit logged.
+          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
+            <span className="rounded-full border border-white/70 bg-white/70 px-3 py-1">
+              Total {users.length}
+            </span>
+            <span className="rounded-full border border-emerald-200 bg-emerald-100/70 px-3 py-1 text-emerald-700">
+              Active {activeCount}
+            </span>
+            <span className="rounded-full border border-slate-200 bg-white/70 px-3 py-1">
+              Relieved {relievedCount}
+            </span>
           </div>
         </div>
-        );
-      })}
+
+        <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,180px))]">
+          <input
+            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            placeholder="Search name, email, role..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <select
+            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+          >
+            {statusOptions.map((status) => (
+              <option key={status} value={status}>
+                {status === "ALL" ? "All statuses" : status}
+              </option>
+            ))}
+          </select>
+          <select
+            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            value={roleFilter}
+            onChange={(event) => setRoleFilter(event.target.value)}
+          >
+            <option value="ALL">All roles</option>
+            {roleOptions.map((role) => (
+              <option key={role.role_id} value={String(role.role_id)}>
+                {role.role_name || role.role_code || `Role ${role.role_id}`}
+              </option>
+            ))}
+          </select>
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+            <label className="flex items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3 py-2">
+              <input
+                type="checkbox"
+                checked={activeOnly}
+                onChange={(event) => {
+                  setActiveOnly(event.target.checked);
+                  if (event.target.checked) setRelievedOnly(false);
+                }}
+              />
+              Active only
+            </label>
+            <label className="flex items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3 py-2">
+              <input
+                type="checkbox"
+                checked={relievedOnly}
+                onChange={(event) => {
+                  setRelievedOnly(event.target.checked);
+                  if (event.target.checked) setActiveOnly(false);
+                }}
+              />
+              Show relieved only
+            </label>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={exportDirectory}
+            className="rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm font-semibold"
+          >
+            Export full directory
+          </button>
+        </div>
+
+        <div className="mt-6 grid grid-cols-6 px-4 text-xs uppercase text-steel">
+          <div className="col-span-2">User</div>
+          <div>Role</div>
+          <div>Status</div>
+          <div className="col-span-2">Actions</div>
+        </div>
+
+        {loading ? (
+          <div className="mt-4 text-sm text-steel">Loading users...</div>
+        ) : null}
+
+        {!loading && filteredUsers.map((user) => {
+          const statusList = Array.from(new Set(["Working", "Active", "Inactive", "Relieved", user.status || ""])).filter(Boolean);
+          const availableRoles = [...roleOptions];
+          if (user.role_id && !availableRoles.some((role) => role.role_id === user.role_id)) {
+            availableRoles.push({
+              role_id: user.role_id,
+              role_code: user.role_code || undefined,
+              role_name: user.role_name || undefined,
+            });
+          }
+          return (
+            <div
+              key={user.person_id}
+              className="grid grid-cols-6 items-center gap-2 rounded-2xl border border-black/5 bg-white/80 px-4 py-3"
+            >
+              <div className="col-span-2">
+                <div className="font-semibold">{user.full_name || user.email}</div>
+                <div className="text-xs text-steel">{user.email || "—"}</div>
+              </div>
+              <div>
+                <select
+                  className="rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
+                  value={user.role_id ?? ""}
+                  onChange={(event) => requestChange(user.person_id, { roleId: Number(event.target.value) })}
+                >
+                  <option value="" disabled>
+                    Select role
+                  </option>
+                  {availableRoles.map((role) => (
+                    <option key={role.role_id} value={role.role_id}>
+                      {role.role_name || role.role_code || `Role ${role.role_id}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <select
+                  className="rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
+                  value={user.status || "Working"}
+                  onChange={(event) => requestChange(user.person_id, { status: event.target.value })}
+                >
+                  {statusList.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-span-2 text-xs text-steel">
+                Role changes and deactivations are audit logged.
+              </div>
+            </div>
+          );
+        })}
+
+        {!loading && !filteredUsers.length && (
+          <div className="mt-4 text-sm text-steel">No users match the current filters.</div>
+        )}
+      </section>
+
+      <section className="section-card space-y-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-steel">Add user</p>
+          <h3 className="mt-2 text-lg font-semibold">Create access profile</h3>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="rounded-full border border-black/10 bg-white/70 px-4 py-2 text-xs font-semibold"
+            onClick={downloadSampleCsv}
+          >
+            Download sample CSV
+          </button>
+          <label className="cursor-pointer rounded-full border border-black/10 bg-white/70 px-4 py-2 text-xs font-semibold">
+            Choose CSV
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0] || null;
+                setImportError(null);
+                setImportMessage(null);
+                setImportFile(file);
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={importBusy || !importFile}
+            onClick={() => void importUsers()}
+            className="rounded-full border border-black/10 bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            Import CSV
+          </button>
+        </div>
+
+        {importError ? <div className="text-xs text-rose-600">{importError}</div> : null}
+        {importMessage ? <div className="text-xs text-emerald-600">{importMessage}</div> : null}
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <input
+            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            placeholder="Person ID"
+            value={newUser.person_id}
+            onChange={(event) => setNewUser((prev) => ({ ...prev, person_id: event.target.value }))}
+          />
+          <input
+            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            placeholder="Person code"
+            value={newUser.person_code}
+            onChange={(event) => setNewUser((prev) => ({ ...prev, person_code: event.target.value }))}
+          />
+          <input
+            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm md:col-span-2"
+            placeholder="Work email"
+            value={newUser.email}
+            onChange={(event) => setNewUser((prev) => ({ ...prev, email: event.target.value }))}
+          />
+          <input
+            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            placeholder="First name"
+            value={newUser.first_name}
+            onChange={(event) => setNewUser((prev) => ({ ...prev, first_name: event.target.value }))}
+          />
+          <input
+            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            placeholder="Last name"
+            value={newUser.last_name}
+            onChange={(event) => setNewUser((prev) => ({ ...prev, last_name: event.target.value }))}
+          />
+          <select
+            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            value={newUser.role_id}
+            onChange={(event) => setNewUser((prev) => ({ ...prev, role_id: event.target.value }))}
+          >
+            <option value="">Select role</option>
+            {roleOptions.map((role) => (
+              <option key={role.role_id} value={role.role_id}>
+                {role.role_name || role.role_code || `Role ${role.role_id}`}
+              </option>
+            ))}
+          </select>
+          <select
+            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            value={newUser.status}
+            onChange={(event) => setNewUser((prev) => ({ ...prev, status: event.target.value }))}
+          >
+            {["Working", "Active", "Inactive", "Relieved"].map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {createError ? <div className="text-xs text-rose-600">{createError}</div> : null}
+        {createMessage ? <div className="text-xs text-emerald-600">{createMessage}</div> : null}
+
+        <button
+          type="button"
+          disabled={createBusy}
+          onClick={() => void createUser()}
+          className="w-full rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          Add user
+        </button>
+      </section>
+
       {confirm && (
         <ConfirmDialog
           open={!!confirm}

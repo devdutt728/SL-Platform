@@ -7,6 +7,7 @@ import type { License, LicenseAssignment, Vendor } from "@/lib/types";
 
 const LICENSE_TYPES = ["SUBSCRIPTION", "PERPETUAL"] as const;
 const BILLING_CYCLES = ["MONTHLY", "QUARTERLY", "ANNUAL", "ONE_TIME"] as const;
+const MAX_CSV_BYTES = 5 * 1024 * 1024;
 
 function downloadText(filename: string, content: string) {
   const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
@@ -16,6 +17,18 @@ function downloadText(filename: string, content: string) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function validateCsvFile(file: File) {
+  const name = file.name.toLowerCase();
+  const type = file.type.toLowerCase();
+  if (!name.endsWith(".csv") && !type.includes("csv")) {
+    return "Only CSV files are allowed.";
+  }
+  if (file.size > MAX_CSV_BYTES) {
+    return "CSV file is too large. Please upload a file under 5MB.";
+  }
+  return null;
 }
 
 function toIsoOrNull(dateValue: string) {
@@ -33,6 +46,7 @@ export function ItLicensesAdmin() {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [csvError, setCsvError] = useState<string | null>(null);
 
   const [vendorName, setVendorName] = useState("");
   const [licenseForm, setLicenseForm] = useState({
@@ -60,6 +74,8 @@ export function ItLicensesAdmin() {
 
   const licenseInputRef = useRef<HTMLInputElement | null>(null);
   const assignmentCsvRef = useRef<HTMLInputElement | null>(null);
+  const [licenseCsvFile, setLicenseCsvFile] = useState<File | null>(null);
+  const [assignmentCsvFile, setAssignmentCsvFile] = useState<File | null>(null);
 
   const selectedLicense = useMemo(() => {
     if (!selectedLicenseId) return null;
@@ -202,8 +218,14 @@ export function ItLicensesAdmin() {
   };
 
   const uploadLicenseCsv = async (file: File) => {
+    const validation = validateCsvFile(file);
+    if (validation) {
+      setCsvError(validation);
+      return;
+    }
     setBusy(true);
     setError(null);
+    setCsvError(null);
     try {
       const formData = new FormData();
       formData.append("upload", file);
@@ -215,6 +237,7 @@ export function ItLicensesAdmin() {
     } finally {
       setBusy(false);
       if (licenseInputRef.current) licenseInputRef.current.value = "";
+      setLicenseCsvFile(null);
     }
   };
 
@@ -226,8 +249,14 @@ export function ItLicensesAdmin() {
   };
 
   const uploadAssignmentCsv = async (file: File) => {
+    const validation = validateCsvFile(file);
+    if (validation) {
+      setCsvError(validation);
+      return;
+    }
     setBusy(true);
     setError(null);
+    setCsvError(null);
     try {
       const formData = new FormData();
       formData.append("upload", file);
@@ -240,6 +269,7 @@ export function ItLicensesAdmin() {
     } finally {
       setBusy(false);
       if (assignmentCsvRef.current) assignmentCsvRef.current.value = "";
+      setAssignmentCsvFile(null);
     }
   };
 
@@ -252,6 +282,9 @@ export function ItLicensesAdmin() {
 
       {error ? (
         <section className="section-card border border-rose-500/20 bg-rose-500/10 text-rose-700">{error}</section>
+      ) : null}
+      {csvError ? (
+        <section className="section-card border border-rose-500/20 bg-rose-500/10 text-rose-700">{csvError}</section>
       ) : null}
 
       <section className="section-card">
@@ -290,11 +323,20 @@ export function ItLicensesAdmin() {
                 className="hidden"
                 disabled={busy}
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void uploadLicenseCsv(file);
+                  const file = e.target.files?.[0] || null;
+                  setCsvError(null);
+                  setLicenseCsvFile(file);
                 }}
               />
             </label>
+            <button
+              type="button"
+              className="rounded-full border border-black/10 bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={busy || !licenseCsvFile}
+              onClick={() => licenseCsvFile && void uploadLicenseCsv(licenseCsvFile)}
+            >
+              Upload CSV
+            </button>
           </div>
         </div>
 
@@ -376,11 +418,20 @@ export function ItLicensesAdmin() {
                 className="hidden"
                 disabled={busy}
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void uploadAssignmentCsv(file);
+                  const file = e.target.files?.[0] || null;
+                  setCsvError(null);
+                  setAssignmentCsvFile(file);
                 }}
               />
             </label>
+            <button
+              type="button"
+              className="rounded-full border border-black/10 bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={busy || !assignmentCsvFile}
+              onClick={() => assignmentCsvFile && void uploadAssignmentCsv(assignmentCsvFile)}
+            >
+              Upload CSV
+            </button>
           </div>
         </div>
 

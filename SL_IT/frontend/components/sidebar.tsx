@@ -3,17 +3,22 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-import { Home, KeyRound, Laptop, LayoutDashboard, ListChecks, PlusCircle, ShieldCheck } from "lucide-react";
+import { Home, KeyRound, Laptop, LayoutDashboard, ListChecks, PlusCircle, Settings, ShieldCheck } from "lucide-react";
 
-const navItems = [
-  { href: "/queue", label: "Queue", icon: LayoutDashboard },
-  { href: "/my", label: "My tickets", icon: ListChecks },
-  { href: "/new", label: "Create ticket", icon: PlusCircle },
-  { href: "/admin/it/assets", label: "Assets", icon: Laptop },
-  { href: "/admin/it/licenses", label: "Licenses", icon: KeyRound },
-  { href: "/admin/users", label: "Admin", icon: ShieldCheck },
-  { href: "/", label: "Home", icon: Home },
-];
+const navItems = {
+  core: [
+    { href: "/queue", label: "Queue", icon: LayoutDashboard },
+    { href: "/my", label: "My tickets", icon: ListChecks },
+    { href: "/new", label: "Create ticket", icon: PlusCircle },
+  ],
+  admin: [
+    { href: "/admin/users", label: "User management", icon: ShieldCheck },
+    { href: "/admin/it", label: "IT policies", icon: Settings },
+    { href: "/admin/it/assets", label: "Assets", icon: Laptop },
+    { href: "/admin/it/licenses", label: "Licenses", icon: KeyRound },
+  ],
+  home: [{ href: "/", label: "Home", icon: Home }],
+};
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -32,26 +37,75 @@ export function Sidebar() {
           />
         </div>
       </div>
-      <nav className="space-y-1">
-        {navItems.map((item) => {
-          const active = item.href === "/" ? normalizedPath === "/" : normalizedPath.startsWith(item.href);
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={clsx(
-                "flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-700 transition",
-                active
-                  ? "bg-white/60 text-slate-900 shadow-md ring-1 ring-white/70"
-                  : "hover:bg-white/40 hover:text-slate-900"
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
+      <nav className="space-y-4">
+        <div className="space-y-1">
+          {navItems.core.map((item) => {
+            const active = item.href === "/" ? normalizedPath === "/" : normalizedPath.startsWith(item.href);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={clsx(
+                  "flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-700 transition",
+                  active
+                    ? "bg-white/60 text-slate-900 shadow-md ring-1 ring-white/70"
+                    : "hover:bg-white/40 hover:text-slate-900"
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+        <div>
+          <p className="px-3 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-slate-400">
+            Admin
+          </p>
+          <div className="mt-2 space-y-1">
+            {navItems.admin.map((item) => {
+              const active = item.href === "/" ? normalizedPath === "/" : normalizedPath.startsWith(item.href);
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={clsx(
+                    "flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-700 transition",
+                    active
+                      ? "bg-white/60 text-slate-900 shadow-md ring-1 ring-white/70"
+                      : "hover:bg-white/40 hover:text-slate-900"
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+        <div className="space-y-1">
+          {navItems.home.map((item) => {
+            const active = item.href === "/" ? normalizedPath === "/" : normalizedPath.startsWith(item.href);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={clsx(
+                  "flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-700 transition",
+                  active
+                    ? "bg-white/60 text-slate-900 shadow-md ring-1 ring-white/70"
+                    : "hover:bg-white/40 hover:text-slate-900"
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
       </nav>
     </aside>
   );

@@ -1,0 +1,235 @@
+INFO:     Will watch for changes in these directories: ['D:\\SL Platform\\SL_IT\\backend']
+INFO:     Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+INFO:     Started reloader process [25400] using WatchFiles
+INFO:     Started server process [19580]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'app\schemas\user.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [19580]
+WARNING:  WatchFiles detected changes in 'app\rbac.py', 'app\routers\admin.py'. Reloading...
+INFO:     Started server process [4064]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [4064]
+Exception ignored while calling deallocator <function Connection.__del__ at 0x00000192F0DD81A0>:
+Traceback (most recent call last):
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\site-packages\aiomysql\connection.py", line 1131, in __del__
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\site-packages\aiomysql\connection.py", line 339, in close
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\selector_events.py", line 1216, in close
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\selector_events.py", line 869, in close
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\base_events.py", line 827, in call_soon
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\base_events.py", line 550, in _check_closed
+RuntimeError: Event loop is closed
+WARNING:  WatchFiles detected changes in 'app\routers\admin.py'. Reloading...
+INFO:     Started server process [17624]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    Traceback (most recent call last):
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\runners.py", line 204, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\runners.py", line 132, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\site-packages\starlette\routing.py", line 701, in lifespan
+    await receive()
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\site-packages\uvicorn\lifespan\on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\queues.py", line 186, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+Exception ignored while calling deallocator <function Connection.__del__ at 0x0000016C19F081A0>:
+Traceback (most recent call last):
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\site-packages\aiomysql\connection.py", line 1131, in __del__
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\site-packages\aiomysql\connection.py", line 339, in close
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\selector_events.py", line 1216, in close
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\selector_events.py", line 869, in close
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\base_events.py", line 827, in call_soon
+  File "C:\Users\Dev\AppData\Local\Programs\Python\Python314\Lib\asyncio\base_events.py", line 550, in _check_closed
+RuntimeError: Event loop is closed
+INFO:     Started server process [30036]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+O:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed
+INFO:slp.request:request_completed

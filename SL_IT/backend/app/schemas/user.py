@@ -38,3 +38,13 @@ class PlatformRoleOut(BaseModel):
 class PlatformUserUpdate(BaseModel):
     role_id: int | None = None
     status: str | None = None
+
+
+class PlatformUserCreate(BaseModel):
+    person_id: str
+    person_code: str
+    email: EmailStr | None = None
+    first_name: str
+    last_name: str | None = None
+    role_id: int | None = None
+    status: str | None = None
