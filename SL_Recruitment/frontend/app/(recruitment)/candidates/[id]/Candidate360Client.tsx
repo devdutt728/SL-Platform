@@ -1462,6 +1462,30 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                   </Chip>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
+                  {candidate.cv_url ? (
+                    <Link
+                      href={candidate.cv_url}
+                      target="_blank"
+                      className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-white"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open CV
+                    </Link>
+                  ) : null}
+                  {candidate.portfolio_url ? (
+                    <Link
+                      href={candidate.portfolio_url}
+                      target="_blank"
+                      className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-white"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open Portfolio
+                    </Link>
+                  ) : candidate.portfolio_not_uploaded_reason ? (
+                    <span className="inline-flex items-center rounded-xl border border-white/60 bg-white/30 px-4 py-2 text-sm text-slate-700">
+                      Portfolio not uploaded: {candidate.portfolio_not_uploaded_reason}
+                    </span>
+                  ) : null}
                   {candidate.drive_folder_url ? (
                     <Link
                       href={candidate.drive_folder_url}

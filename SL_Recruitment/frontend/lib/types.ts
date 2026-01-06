@@ -26,6 +26,8 @@ export type CandidateDetail = {
   final_decision?: string | null;
   hired_person_id_platform?: number | null;
   cv_url?: string | null;
+  portfolio_url?: string | null;
+  portfolio_not_uploaded_reason?: string | null;
   drive_folder_url?: string | null;
   caf_sent_at?: string | null;
   caf_submitted_at?: string | null;

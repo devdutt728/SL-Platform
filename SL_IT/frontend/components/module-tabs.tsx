@@ -7,12 +7,12 @@ import { cn } from "@/lib/utils";
 
 const tabs = [
   { label: "IT Helpdesk", href: "/queue" },
-  { label: "Admin", href: "/admin/users" },
+  { label: "Admin", href: "/admin/it" },
 ];
 
 export function ModuleTabs() {
   const pathname = usePathname();
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/it";
   const normalizedPath = basePath && pathname.startsWith(basePath) ? pathname.slice(basePath.length) || "/" : pathname;
   return (
     <div className="flex gap-3 overflow-x-auto">

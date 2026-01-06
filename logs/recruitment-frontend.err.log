@@ -1,0 +1,4 @@
+Recruitment apply failed {
+  status: 400,
+  body: '{"detail":"Please provide a reason if you are not uploading a portfolio."}'
+}

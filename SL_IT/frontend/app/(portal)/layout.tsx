@@ -6,7 +6,7 @@ import { PortalShell } from "@/components/portal-shell";
 import { useUser } from "@/components/user-context";
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/it";
   const { user, loading } = useUser();
 
   if (loading) {

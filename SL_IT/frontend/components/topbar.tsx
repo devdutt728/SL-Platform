@@ -14,7 +14,7 @@ function firstName(source: string) {
 
 export function Topbar() {
   const { user, loading } = useUser();
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/it";
   const roleLabel = user?.platform_role_name || user?.platform_role_code || user?.roles?.[0] || "Member";
 
   const handleSignOut = async () => {

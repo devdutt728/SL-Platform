@@ -11,12 +11,19 @@ declare global {
 
 export function LoginPanel({ clientId }: { clientId: string }) {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
   const [error, setError] = useState<string | null>(null);
 
   return (
     <div className="section-card w-full max-w-md">
-      <p className="text-xs uppercase tracking-tight text-[var(--text-secondary)]">Studio Lotus</p>
-      <h1 className="mt-2 text-2xl font-semibold">Recruitment OS</h1>
+      <div className="mx-auto mb-4 h-12 w-48">
+        <img
+          src={logoSrc}
+          alt="Studio Lotus"
+          className="h-full w-full object-contain"
+        />
+      </div>
+      <h1 className="text-2xl font-semibold">Recruitment OS</h1>
       <p className="mt-2 text-sm text-[var(--text-secondary)]">Sign in with your Studio Lotus Google account.</p>
 
       <div className="mt-6 flex justify-center">

@@ -1,5 +1,5 @@
 export default function LoginPage() {
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/it";
   const logoSrc = `${basePath}/studio-lotus-logo.png`;
   return (
     <main className="page-shell flex min-h-screen items-center justify-center py-12">

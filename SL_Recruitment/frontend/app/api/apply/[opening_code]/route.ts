@@ -19,6 +19,12 @@ export async function POST(request: Request, context: { params: { opening_code: 
     duplex: "half",
   } as any);
   const data = await res.text();
+  if (!res.ok) {
+    console.error("Recruitment apply failed", {
+      status: res.status,
+      body: data,
+    });
+  }
   return new NextResponse(data, {
     status: res.status,
     headers: { "content-type": res.headers.get("content-type") || "application/json" },

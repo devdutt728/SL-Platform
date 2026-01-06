@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import csv
+import io
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
@@ -12,13 +14,35 @@ from app.core.config import settings
 from app.core.roles import Role
 from app.db.platform_session import get_platform_session
 from app.db.session import get_session
-from app.models.it import ITCategory, ITRoutingRule, ITSlaPolicy, ITSubcategory, ITTicket, ITTicketComment
+from app.models.it import (
+    ITAsset,
+    ITCategory,
+    ITLicense,
+    ITLicenseAssignment,
+    ITLicenseAttachment,
+    ITLicenseCredential,
+    ITCredential,
+    ITVendor,
+    ITRoutingRule,
+    ITSlaPolicy,
+    ITSubcategory,
+    ITTicket,
+    ITTicketComment,
+)
 from app.request_context import get_request_context
 from app.rbac import require_employee, require_it_agent, require_it_lead
 from app.schemas.it import (
+    AssetCreate,
+    AssetOut,
+    AssetUpdate,
     CategoryCreate,
     CategoryOut,
     CategoryUpdate,
+    LicenseAssignmentCreate,
+    LicenseAssignmentOut,
+    LicenseCreate,
+    LicenseOut,
+    LicenseUpdate,
     SlaPolicyCreate,
     SlaPolicyOut,
     SlaPolicyUpdate,
@@ -33,6 +57,8 @@ from app.schemas.it import (
     TicketListItem,
     TicketTransition,
     TicketUpdate,
+    VendorCreate,
+    VendorOut,
 )
 from app.schemas.user import UserContext
 from app.services.audit_service import write_audit_log
@@ -888,3 +914,427 @@ async def deactivate_routing_rule(
     await session.commit()
 
     return {"rule_id": rule.rule_id}
+
+
+@router.get("/admin/assets", response_model=list[AssetOut])
+async def list_assets(
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    result = await session.execute(select(ITAsset).order_by(ITAsset.updated_at.desc(), ITAsset.asset_id.desc()))
+    return result.scalars().all()
+
+
+@router.post("/admin/assets", response_model=AssetOut, status_code=status.HTTP_201_CREATED)
+async def create_asset(
+    payload: AssetCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    now = datetime.utcnow()
+    asset = ITAsset(**payload.model_dump(), created_at=now, updated_at=now)
+    session.add(asset)
+    await session.flush()
+
+    await write_audit_log(
+        session,
+        actor=user,
+        action="IT_ASSET_CREATE",
+        entity_type="it_asset",
+        entity_id=str(asset.asset_id),
+        before=None,
+        after=payload.model_dump(),
+        context=get_request_context(request),
+    )
+    await session.commit()
+    return AssetOut.model_validate(asset)
+
+
+@router.patch("/admin/assets/{asset_id}", response_model=AssetOut)
+async def update_asset(
+    asset_id: int,
+    payload: AssetUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    asset = (await session.execute(select(ITAsset).where(ITAsset.asset_id == asset_id))).scalars().one_or_none()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset_not_found")
+
+    before = {
+        "asset_tag": asset.asset_tag,
+        "asset_type": asset.asset_type,
+        "status": asset.status,
+        "assigned_email": asset.assigned_email,
+        "assigned_name": asset.assigned_name,
+    }
+
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(asset, key, value)
+    asset.updated_at = datetime.utcnow()
+    session.add(asset)
+
+    await write_audit_log(
+        session,
+        actor=user,
+        action="IT_ASSET_UPDATE",
+        entity_type="it_asset",
+        entity_id=str(asset.asset_id),
+        before=before,
+        after=data,
+        context=get_request_context(request),
+    )
+    await session.commit()
+    return AssetOut.model_validate(asset)
+
+
+@router.post("/admin/assets/import", response_model=dict)
+async def import_assets_csv(
+    request: Request,
+    upload: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    def _parse_date(raw: str | None) -> datetime | None:
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.strip())
+        except Exception:
+            return None
+
+    raw = await upload.read()
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    created = 0
+    for row in reader:
+        asset_tag = (row.get("asset_tag") or "").strip()
+        if not asset_tag:
+            continue
+        asset = ITAsset(
+            asset_tag=asset_tag,
+            asset_type=(row.get("asset_type") or "OTHER").strip(),
+            status=(row.get("status") or "IN_STOCK").strip(),
+            serial_number=(row.get("serial_number") or "").strip() or None,
+            manufacturer=(row.get("manufacturer") or "").strip() or None,
+            model=(row.get("model") or "").strip() or None,
+            operating_system=(row.get("operating_system") or "").strip() or None,
+            purchase_date=_parse_date(row.get("purchase_date")),
+            warranty_end=_parse_date(row.get("warranty_end")),
+            location=(row.get("location") or "").strip() or None,
+            assigned_person_id=(row.get("assigned_person_id") or "").strip() or None,
+            assigned_email=(row.get("assigned_email") or "").strip() or None,
+            assigned_name=(row.get("assigned_name") or "").strip() or None,
+            notes=(row.get("notes") or "").strip() or None,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        session.add(asset)
+        created += 1
+
+    await write_audit_log(
+        session,
+        actor=user,
+        action="IT_ASSET_IMPORT",
+        entity_type="it_asset",
+        entity_id="bulk",
+        before=None,
+        after={"created": created, "filename": upload.filename},
+        context=get_request_context(request),
+    )
+    await session.commit()
+    return {"created": created}
+
+
+@router.get("/admin/vendors", response_model=list[VendorOut])
+async def list_vendors(
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    result = await session.execute(select(ITVendor).order_by(ITVendor.name.asc()))
+    return result.scalars().all()
+
+
+@router.post("/admin/vendors", response_model=VendorOut, status_code=status.HTTP_201_CREATED)
+async def create_vendor(
+    payload: VendorCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    vendor = ITVendor(
+        name=payload.name.strip(),
+        website=(payload.website or "").strip() or None,
+        support_email=(payload.support_email or "").strip() or None,
+        support_phone=(payload.support_phone or "").strip() or None,
+        is_active=bool(payload.is_active),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    session.add(vendor)
+    await session.flush()
+
+    await write_audit_log(
+        session,
+        actor=user,
+        action="IT_VENDOR_CREATE",
+        entity_type="it_vendor",
+        entity_id=str(vendor.vendor_id),
+        before=None,
+        after=payload.model_dump(),
+        context=get_request_context(request),
+    )
+    await session.commit()
+    return VendorOut.model_validate(vendor)
+
+
+@router.get("/admin/licenses", response_model=list[LicenseOut])
+async def list_licenses(
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    result = await session.execute(select(ITLicense).order_by(ITLicense.updated_at.desc(), ITLicense.license_id.desc()))
+    return result.scalars().all()
+
+
+@router.post("/admin/licenses", response_model=LicenseOut, status_code=status.HTTP_201_CREATED)
+async def create_license(
+    payload: LicenseCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    now = datetime.utcnow()
+    license_obj = ITLicense(**payload.model_dump(), created_at=now, updated_at=now)
+    session.add(license_obj)
+    await session.flush()
+
+    await write_audit_log(
+        session,
+        actor=user,
+        action="IT_LICENSE_CREATE",
+        entity_type="it_license",
+        entity_id=str(license_obj.license_id),
+        before=None,
+        after=payload.model_dump(),
+        context=get_request_context(request),
+    )
+    await session.commit()
+    return LicenseOut.model_validate(license_obj)
+
+
+@router.patch("/admin/licenses/{license_id}", response_model=LicenseOut)
+async def update_license(
+    license_id: int,
+    payload: LicenseUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    license_obj = (await session.execute(select(ITLicense).where(ITLicense.license_id == license_id))).scalars().one_or_none()
+    if not license_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="license_not_found")
+
+    before = {"name": license_obj.name, "total_seats": license_obj.total_seats, "is_active": license_obj.is_active}
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(license_obj, key, value)
+    license_obj.updated_at = datetime.utcnow()
+    session.add(license_obj)
+
+    await write_audit_log(
+        session,
+        actor=user,
+        action="IT_LICENSE_UPDATE",
+        entity_type="it_license",
+        entity_id=str(license_obj.license_id),
+        before=before,
+        after=data,
+        context=get_request_context(request),
+    )
+    await session.commit()
+    return LicenseOut.model_validate(license_obj)
+
+
+@router.get("/admin/license-assignments", response_model=list[LicenseAssignmentOut])
+async def list_license_assignments(
+    license_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    result = await session.execute(
+        select(ITLicenseAssignment)
+        .where(ITLicenseAssignment.license_id == license_id)
+        .order_by(ITLicenseAssignment.assigned_at.desc(), ITLicenseAssignment.assignment_id.desc())
+    )
+    return result.scalars().all()
+
+
+@router.post("/admin/license-assignments", response_model=LicenseAssignmentOut, status_code=status.HTTP_201_CREATED)
+async def create_license_assignment(
+    payload: LicenseAssignmentCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    license_obj = (await session.execute(select(ITLicense).where(ITLicense.license_id == payload.license_id))).scalars().one_or_none()
+    if not license_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="license_not_found")
+
+    assignment = ITLicenseAssignment(
+        license_id=payload.license_id,
+        asset_id=payload.asset_id,
+        assignee_person_id=payload.assignee_person_id,
+        assignee_email=(payload.assignee_email or "").strip() or None,
+        assignee_name=(payload.assignee_name or "").strip() or None,
+        status=(payload.status or "ASSIGNED").strip(),
+        notes=(payload.notes or "").strip() or None,
+        assigned_at=datetime.utcnow(),
+        created_at=datetime.utcnow(),
+    )
+    session.add(assignment)
+    await session.flush()
+
+    await write_audit_log(
+        session,
+        actor=user,
+        action="IT_LICENSE_ASSIGN",
+        entity_type="it_license_assignment",
+        entity_id=str(assignment.assignment_id),
+        before=None,
+        after=payload.model_dump(),
+        context=get_request_context(request),
+    )
+    await session.commit()
+    return LicenseAssignmentOut.model_validate(assignment)
+
+
+@router.post("/admin/license-assignments/import", response_model=dict)
+async def import_license_assignments_csv(
+    request: Request,
+    upload: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    def _parse_date(raw: str | None) -> datetime | None:
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.strip())
+        except Exception:
+            return None
+
+    raw = await upload.read()
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    created = 0
+    for row in reader:
+        raw_license_id = (row.get("license_id") or "").strip()
+        if not raw_license_id:
+            continue
+        try:
+            license_id = int(raw_license_id)
+        except Exception:
+            continue
+        exists = (await session.execute(select(ITLicense).where(ITLicense.license_id == license_id))).scalars().one_or_none()
+        if not exists:
+            continue
+
+        assignment = ITLicenseAssignment(
+            license_id=license_id,
+            asset_id=int(raw_asset_id) if (raw_asset_id := (row.get("asset_id") or "").strip()) else None,
+            assignee_person_id=(row.get("assignee_person_id") or "").strip() or None,
+            assignee_email=(row.get("assignee_email") or "").strip() or None,
+            assignee_name=(row.get("assignee_name") or "").strip() or None,
+            status=(row.get("status") or "ASSIGNED").strip(),
+            notes=(row.get("notes") or "").strip() or None,
+            assigned_at=datetime.utcnow(),
+            unassigned_at=_parse_date(row.get("unassigned_at")),
+            created_at=_parse_date(row.get("created_at")) or datetime.utcnow(),
+        )
+        session.add(assignment)
+        created += 1
+
+    await write_audit_log(
+        session,
+        actor=user,
+        action="IT_LICENSE_ASSIGN_IMPORT",
+        entity_type="it_license_assignment",
+        entity_id="bulk",
+        before=None,
+        after={"created": created, "filename": upload.filename},
+        context=get_request_context(request),
+    )
+    await session.commit()
+    return {"created": created}
+
+
+@router.post("/admin/licenses/import", response_model=dict)
+async def import_licenses_csv(
+    request: Request,
+    upload: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    def _parse_date(raw: str | None) -> datetime | None:
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.strip())
+        except Exception:
+            return None
+
+    raw = await upload.read()
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    created = 0
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        vendor_name = (row.get("vendor") or "").strip() or None
+        vendor_id = None
+        if vendor_name:
+            existing = (await session.execute(select(ITVendor).where(ITVendor.name == vendor_name))).scalars().one_or_none()
+            if not existing:
+                existing = ITVendor(name=vendor_name, is_active=True, created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+                session.add(existing)
+                await session.flush()
+            vendor_id = existing.vendor_id
+
+        license_obj = ITLicense(
+            vendor_id=vendor_id,
+            name=name,
+            sku=(row.get("sku") or "").strip() or None,
+            license_type=(row.get("license_type") or "SUBSCRIPTION").strip(),
+            billing_cycle=(row.get("billing_cycle") or "ANNUAL").strip(),
+            total_seats=int((row.get("total_seats") or row.get("seats_total") or "1").strip() or 1),
+            contract_start=_parse_date(row.get("contract_start")),
+            contract_end=_parse_date(row.get("contract_end")),
+            renewal_date=_parse_date(row.get("renewal_date")),
+            registered_email=(row.get("registered_email") or "").strip() or None,
+            cost_currency=(row.get("cost_currency") or row.get("currency") or "INR").strip() or "INR",
+            cost_amount=int((row.get("cost_amount") or "0").strip() or 0) or None,
+            notes=(row.get("notes") or "").strip() or None,
+            is_active=True,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        session.add(license_obj)
+        created += 1
+
+    await write_audit_log(
+        session,
+        actor=user,
+        action="IT_LICENSE_IMPORT",
+        entity_type="it_license",
+        entity_id="bulk",
+        before=None,
+        after={"created": created, "filename": upload.filename},
+        context=get_request_context(request),
+    )
+    await session.commit()
+    return {"created": created}

@@ -9,6 +9,10 @@ from app.constants import (
     IT_PRIORITY_VALUES,
     IT_STATUS_VALUES,
     IT_URGENCY_VALUES,
+    IT_ASSET_STATUS_VALUES,
+    IT_ASSET_TYPE_VALUES,
+    IT_LICENSE_TYPE_VALUES,
+    IT_BILLING_CYCLE_VALUES,
 )
 
 
@@ -216,6 +220,176 @@ class TicketDetail(BaseModel):
     calendar_event_id: str | None
     calendar_event_html_link: str | None
     comments: list[TicketCommentOut] = []
+
+    class Config:
+        from_attributes = True
+
+
+class AssetBase(BaseModel):
+    asset_tag: str
+    asset_type: str
+    status: str
+    serial_number: str | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    operating_system: str | None = None
+    purchase_date: datetime | None = None
+    warranty_end: datetime | None = None
+    location: str | None = None
+    assigned_person_id: str | None = None
+    assigned_email: str | None = None
+    assigned_name: str | None = None
+    notes: str | None = None
+
+    @field_validator("asset_type")
+    @classmethod
+    def validate_asset_type(cls, value: str) -> str:
+        if value not in IT_ASSET_TYPE_VALUES:
+            raise ValueError("invalid_asset_type")
+        return value
+
+    @field_validator("status")
+    @classmethod
+    def validate_asset_status(cls, value: str) -> str:
+        if value not in IT_ASSET_STATUS_VALUES:
+            raise ValueError("invalid_asset_status")
+        return value
+
+
+class AssetCreate(AssetBase):
+    pass
+
+
+class AssetUpdate(BaseModel):
+    asset_type: str | None = None
+    status: str | None = None
+    serial_number: str | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    operating_system: str | None = None
+    purchase_date: datetime | None = None
+    warranty_end: datetime | None = None
+    location: str | None = None
+    assigned_person_id: str | None = None
+    assigned_email: str | None = None
+    assigned_name: str | None = None
+    notes: str | None = None
+
+
+class AssetOut(AssetBase):
+    asset_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class VendorCreate(BaseModel):
+    name: str
+    website: str | None = None
+    support_email: str | None = None
+    support_phone: str | None = None
+    is_active: bool = True
+
+
+class VendorOut(BaseModel):
+    vendor_id: int
+    name: str
+    website: str | None = None
+    support_email: str | None = None
+    support_phone: str | None = None
+    is_active: bool | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class LicenseBase(BaseModel):
+    name: str
+    vendor_id: int | None = None
+    sku: str | None = None
+    license_type: str
+    billing_cycle: str
+    total_seats: int = 1
+    contract_start: datetime | None = None
+    contract_end: datetime | None = None
+    renewal_date: datetime | None = None
+    registered_email: str | None = None
+    cost_currency: str = "INR"
+    cost_amount: int | None = None
+    notes: str | None = None
+    is_active: bool = True
+
+    @field_validator("license_type")
+    @classmethod
+    def validate_license_type(cls, value: str) -> str:
+        if value not in IT_LICENSE_TYPE_VALUES:
+            raise ValueError("invalid_license_type")
+        return value
+
+    @field_validator("billing_cycle")
+    @classmethod
+    def validate_billing_cycle(cls, value: str) -> str:
+        if value not in IT_BILLING_CYCLE_VALUES:
+            raise ValueError("invalid_billing_cycle")
+        return value
+
+
+class LicenseCreate(LicenseBase):
+    pass
+
+
+class LicenseUpdate(BaseModel):
+    name: str | None = None
+    vendor_id: int | None = None
+    sku: str | None = None
+    license_type: str | None = None
+    billing_cycle: str | None = None
+    total_seats: int | None = None
+    contract_start: datetime | None = None
+    contract_end: datetime | None = None
+    renewal_date: datetime | None = None
+    registered_email: str | None = None
+    cost_currency: str | None = None
+    cost_amount: int | None = None
+    notes: str | None = None
+    is_active: bool | None = None
+
+
+class LicenseOut(LicenseBase):
+    license_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LicenseAssignmentCreate(BaseModel):
+    license_id: int
+    asset_id: int | None = None
+    assignee_person_id: str | None = None
+    assignee_email: str | None = None
+    assignee_name: str | None = None
+    status: str | None = None
+    notes: str | None = None
+
+
+class LicenseAssignmentOut(BaseModel):
+    assignment_id: int
+    license_id: int
+    asset_id: int | None
+    assignee_person_id: str | None
+    assignee_email: str | None
+    assignee_name: str | None
+    assigned_at: datetime
+    unassigned_at: datetime | None
+    status: str | None
+    notes: str | None
+    created_at: datetime
 
     class Config:
         from_attributes = True

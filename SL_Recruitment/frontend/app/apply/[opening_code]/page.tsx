@@ -11,6 +11,8 @@ async function fetchOpening(openingCode: string) {
 }
 
 export default async function ApplyPage({ params }: { params: { opening_code: string } }) {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
+  const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
   const opening = await fetchOpening(params.opening_code);
 
   if (!opening) {
@@ -21,12 +23,13 @@ export default async function ApplyPage({ params }: { params: { opening_code: st
             <div className="flex items-center gap-3">
               <div className="relative h-9 w-36">
                 <Image
-                  src="/Studio Lotus Logo (TM).png"
+                  src={logoSrc}
                   alt="Studio Lotus"
                   fill
                   sizes="144px"
                   className="object-contain object-left"
                   priority
+                  unoptimized
                 />
               </div>
               <div className="hidden sm:block">
@@ -56,12 +59,13 @@ export default async function ApplyPage({ params }: { params: { opening_code: st
           <div className="flex items-center gap-3">
             <div className="relative h-9 w-36">
               <Image
-                src="/Studio Lotus Logo (TM).png"
+                src={logoSrc}
                 alt="Studio Lotus"
                 fill
                 sizes="144px"
                 className="object-contain object-left"
                 priority
+                unoptimized
               />
             </div>
             <div className="hidden sm:block">

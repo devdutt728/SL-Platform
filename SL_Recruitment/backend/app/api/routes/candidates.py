@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 import json
 from pydantic import BaseModel
 from sqlalchemy import func, select, delete, text
@@ -31,6 +32,7 @@ from app.services.events import log_event
 from app.services.offers import convert_candidate_to_employee, create_offer
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
+from app.services.local_docs import find_application_doc
 
 router = APIRouter(prefix="/rec/candidates", tags=["candidates"])
 
@@ -250,6 +252,8 @@ async def create_candidate(
         final_decision=candidate.final_decision,
         hired_person_id_platform=candidate.hired_person_id_platform,
         cv_url=candidate.cv_url,
+        portfolio_url=candidate.portfolio_url,
+        portfolio_not_uploaded_reason=candidate.portfolio_not_uploaded_reason,
         drive_folder_url=candidate.drive_folder_url,
         caf_sent_at=candidate.caf_sent_at,
         caf_submitted_at=candidate.caf_submitted_at,
@@ -366,6 +370,8 @@ async def get_candidate(
         final_decision=candidate.final_decision,
         hired_person_id_platform=candidate.hired_person_id_platform,
         cv_url=candidate.cv_url,
+        portfolio_url=candidate.portfolio_url,
+        portfolio_not_uploaded_reason=candidate.portfolio_not_uploaded_reason,
         drive_folder_url=candidate.drive_folder_url,
         caf_sent_at=candidate.caf_sent_at,
         caf_submitted_at=candidate.caf_submitted_at,
@@ -375,6 +381,29 @@ async def get_candidate(
         created_at=candidate.created_at,
         updated_at=candidate.updated_at,
     )
+
+
+@router.get("/{candidate_id}/documents/{kind}")
+async def download_candidate_application_document(
+    candidate_id: int,
+    kind: str,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+):
+    normalized = (kind or "").strip().lower()
+    if normalized not in {"cv", "portfolio"}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+
+    found = find_application_doc(candidate_id, kind=normalized)
+    if not found:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    path, filename, content_type = found
+    return FileResponse(path, media_type=content_type, filename=filename)
 
 
 @router.get("/{candidate_id}/full", response_model=CandidateFullOut)

@@ -6,7 +6,7 @@ export function internalUrl(path: string) {
   const proto = incomingHeaders.get("x-forwarded-proto") || "http";
   const configuredOrigin = process.env.PUBLIC_APP_ORIGIN || "";
   const origin = configuredOrigin ? configuredOrigin.replace(/\/$/, "") : `${proto}://${host}`;
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/it";
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${origin}${basePath}${normalizedPath}`;
 }

@@ -100,14 +100,15 @@ def _bucket_folder_id(service, bucket: DriveBucket) -> str:
 
 def create_candidate_folder(candidate_code: str, full_name: str) -> tuple[str, str]:
     """
-    Creates /SL_Recruitment/Ongoing/{candidate_code} – {full_name} with subfolders:
+    Creates /SL_Recruitment/Ongoing/{candidate_code} - {full_name} with subfolders:
     - Application
     - Joining
     """
     service = _drive_client()
     ongoing_id = _bucket_folder_id(service, "Ongoing")
 
-    candidate_folder_name = f"{candidate_code} – {full_name}"
+    safe_name = (full_name or "Candidate").replace("/", "_").replace("\\", "_").strip()
+    candidate_folder_name = f"{candidate_code} - {safe_name}"
     candidate_folder_id = _ensure_folder(service, name=candidate_folder_name, parent_id=ongoing_id)
 
     _ensure_folder(service, name="Application", parent_id=candidate_folder_id)

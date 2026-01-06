@@ -6,11 +6,55 @@
   - Local:        http://localhost:3003
 
  ✓ Starting...
- ✓ Ready in 1151ms
- ○ Compiling /_not-found ...
- ✓ Compiled /_not-found in 989ms (458 modules)
- GET /.well-known/appspecific/com.chrome.devtools.json 404 in 1132ms
- ✓ Compiled in 135ms (238 modules)
- GET /.well-known/appspecific/com.chrome.devtools.json 404 in 35ms
- GET /.well-known/appspecific/com.chrome.devtools.json 404 in 52ms
- GET /.well-known/appspecific/com.chrome.devtools.json 404 in 25ms
+ ✓ Ready in 1907ms
+ ○ Compiling /favicon.ico ...
+ ✓ Compiled /favicon.ico in 509ms (57 modules)
+ GET /favicon.ico 200 in 633ms
+ ○ Compiling / ...
+ ✓ Compiled / in 3s (528 modules)
+ GET / 200 in 3319ms
+ ✓ Compiled in 267ms (237 modules)
+ GET / 200 in 43ms
+ GET / 200 in 54ms
+ GET /favicon.ico 200 in 36ms
+ GET / 200 in 45ms
+ GET / 200 in 60ms
+ GET /favicon.ico 200 in 16ms
+ GET / 200 in 55ms
+ GET /favicon.ico 200 in 10ms
+ GET / 200 in 63ms
+ GET /favicon.ico 200 in 12ms
+ GET / 200 in 39ms
+ GET /favicon.ico 200 in 10ms
+ GET / 200 in 43ms
+ GET /favicon.ico 200 in 9ms
+ GET / 200 in 49ms
+ GET /favicon.ico 200 in 10ms
+ ✓ Compiled in 200ms (519 modules)
+ GET / 200 in 81ms
+ GET / 200 in 51ms
+ GET / 200 in 54ms
+ GET / 200 in 47ms
+ ✓ Compiled in 150ms (236 modules)
+ ✓ Compiled /_not-found in 181ms (444 modules)
+ GET / 404 in 91ms
+ ✓ Compiled in 117ms (238 modules)
+ GET / 404 in 40ms
+ ✓ Compiled in 69ms (444 modules)
+ ✓ Compiled in 153ms (458 modules)
+ ✓ Compiled / in 278ms (476 modules)
+ GET / 200 in 103ms
+ ✓ Compiled /favicon.ico in 316ms (282 modules)
+ GET /favicon.ico 200 in 406ms
+ ✓ Compiled /_not-found in 267ms (522 modules)
+ POST /api/apply/SRAR-7B6B 404 in 390ms
+ ✓ Compiled in 223ms (490 modules)
+ GET / 200 in 160ms
+ GET / 200 in 41ms
+ ✓ Compiled /favicon.ico in 134ms (282 modules)
+ GET /favicon.ico 200 in 201ms
+ GET / 200 in 119ms
+ GET /favicon.ico 200 in 15ms
+ GET /favicon.ico 200 in 15ms
+ GET /favicon.ico 200 in 9ms
+[?25h

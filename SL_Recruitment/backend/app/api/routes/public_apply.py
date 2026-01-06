@@ -4,7 +4,7 @@ import json
 from uuid import uuid4
 
 import anyio
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select
@@ -20,6 +20,7 @@ from app.models.screening import RecCandidateScreening
 from app.services.drive import create_candidate_folder, upload_application_doc
 from app.services.email import send_email
 from app.services.events import log_event
+from app.services.local_docs import save_application_doc
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
 from app.schemas.screening import ScreeningUpsertIn
@@ -256,8 +257,8 @@ async def apply_for_opening(
     gender_identity: str | None = Form(default=None),
     gender_self_describe: str | None = Form(default=None),
     portfolio_not_uploaded_reason: str | None = Form(default=None),
-    cv_file: UploadFile | None = None,
-    portfolio_file: UploadFile | None = None,
+    cv_file: UploadFile | None = File(default=None),
+    portfolio_file: UploadFile | None = File(default=None),
     session: AsyncSession = Depends(deps.get_db_session),
 ):
     idempotency_key = (request.headers.get("idempotency-key") or request.headers.get("Idempotency-Key") or "").strip()
@@ -586,48 +587,71 @@ async def apply_for_opening(
         return name.replace("/", "_").replace("\\", "_")
 
     async def _upload(kind: str, upload: UploadFile, max_bytes: int) -> str | None:
-        if not drive_folder_id:
-            return None
         data = await upload.read()
         if len(data) > max_bytes:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"{kind.upper()} file too large. Max allowed is {max_bytes // (1024 * 1024)}MB.",
             )
-        filename = f"{candidate.candidate_code}-{kind}-{_clean_name(upload.filename)}"
-        try:
-            _, file_url = await anyio.to_thread.run_sync(
-                lambda: upload_application_doc(
-                    drive_folder_id,
-                    filename=filename,
-                    content_type=upload.content_type or "application/octet-stream",
-                    data=data,
+
+        if drive_folder_id:
+            filename = f"{candidate.candidate_code}-{kind}-{_clean_name(upload.filename)}"
+            try:
+                _, file_url = await anyio.to_thread.run_sync(
+                    lambda: upload_application_doc(
+                        drive_folder_id,
+                        filename=filename,
+                        content_type=upload.content_type or "application/octet-stream",
+                        data=data,
+                    )
                 )
-            )
-            await log_event(
-                session,
-                candidate_id=candidate.candidate_id,
-                action_type=f"{kind}_uploaded",
-                performed_by_person_id_platform=None,
-                related_entity_type="candidate",
-                related_entity_id=candidate.candidate_id,
-                meta_json={"file_url": file_url, "drive_folder_id": drive_folder_id, "drive_folder_url": drive_folder_url},
-            )
-            return file_url
-        except Exception as exc:  # noqa: BLE001
-            await log_event(
-                session,
-                candidate_id=candidate.candidate_id,
-                action_type=f"{kind}_upload_failed",
-                performed_by_person_id_platform=None,
-                related_entity_type="candidate",
-                related_entity_id=candidate.candidate_id,
-                meta_json={"error": str(exc)},
-            )
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Drive upload failed for {kind}: {exc}",
-            )
+                await log_event(
+                    session,
+                    candidate_id=candidate.candidate_id,
+                    action_type=f"{kind}_uploaded",
+                    performed_by_person_id_platform=None,
+                    related_entity_type="candidate",
+                    related_entity_id=candidate.candidate_id,
+                    meta_json={
+                        "file_url": file_url,
+                        "drive_folder_id": drive_folder_id,
+                        "drive_folder_url": drive_folder_url,
+                    },
+                )
+                return file_url
+            except Exception as exc:  # noqa: BLE001
+                await log_event(
+                    session,
+                    candidate_id=candidate.candidate_id,
+                    action_type=f"{kind}_upload_failed",
+                    performed_by_person_id_platform=None,
+                    related_entity_type="candidate",
+                    related_entity_id=candidate.candidate_id,
+                    meta_json={
+                        "error": str(exc),
+                        "drive_folder_id": drive_folder_id,
+                        "drive_folder_url": drive_folder_url,
+                    },
+                )
+
+        stored_path = save_application_doc(
+            candidate.candidate_id,
+            kind=kind,
+            filename=upload.filename,
+            content_type=upload.content_type,
+            data=data,
+        )
+        local_url = f"/api/rec/candidates/{candidate.candidate_id}/documents/{kind}"
+        await log_event(
+            session,
+            candidate_id=candidate.candidate_id,
+            action_type=f"{kind}_stored_local",
+            performed_by_person_id_platform=None,
+            related_entity_type="candidate",
+            related_entity_id=candidate.candidate_id,
+            meta_json={"local_url": local_url, "path": str(stored_path)},
+        )
+        return local_url
 
     cv_url: str | None = None
     portfolio_url: str | None = None
@@ -636,28 +660,15 @@ async def apply_for_opening(
     if portfolio_file:
         portfolio_url = await _upload("portfolio", portfolio_file, max_bytes=10 * 1024 * 1024)
 
+    if cv_url:
+        candidate.cv_url = cv_url
     if portfolio_url:
+        candidate.portfolio_url = portfolio_url
         candidate.portfolio_not_uploaded_reason = None
     else:
-        reason = (portfolio_not_uploaded_reason or "").strip()
-        if not reason:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Please provide a reason if you are not uploading a portfolio.",
-            )
-        candidate.portfolio_not_uploaded_reason = reason
+        candidate.portfolio_not_uploaded_reason = (portfolio_not_uploaded_reason or "").strip() or None
 
-    if cv_url:
-        candidate.cv_url = cv_url if not portfolio_url else f"{cv_url};portfolio={portfolio_url}"
-        candidate.portfolio_url = portfolio_url
-        application_docs_status = "complete"
-    elif portfolio_url:
-        candidate.cv_url = f"portfolio={portfolio_url}"
-        candidate.portfolio_url = portfolio_url
-        application_docs_status = "complete"
-    else:
-        application_docs_status = "none"
-    candidate.application_docs_status = application_docs_status
+    candidate.application_docs_status = "complete" if (cv_url or portfolio_url) else "none"
     candidate.linkedin_url = linkedin or None
 
     # Auto-submit CAF data from the same form

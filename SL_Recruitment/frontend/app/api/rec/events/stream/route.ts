@@ -1,5 +1,8 @@
 ﻿export const runtime = "nodejs";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function createEventStream() {
   const encoder = new TextEncoder();
   let interval: NodeJS.Timeout | undefined;
