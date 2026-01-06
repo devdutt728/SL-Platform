@@ -18,16 +18,22 @@ export default function HomePage() {
         <div className="mt-6 flex items-center justify-center gap-3">
           <Link
             href="/login"
-            className="rounded-full bg-gradient-to-r from-cyan-500 via-blue-500 to-violet-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg"
+            className="workbook-launch inline-flex items-center justify-center px-5 py-2.5 text-sm font-semibold"
           >
             Sign in
           </Link>
           <Link
             href="/apply"
-            className="rounded-full border border-white/60 bg-white/40 px-5 py-2.5 text-sm font-semibold text-slate-800 backdrop-blur"
+            className="workbook-launch inline-flex items-center justify-center px-5 py-2.5 text-sm font-semibold"
           >
             Apply to a role
           </Link>
+          <a
+            href="/"
+            className="workbook-launch inline-flex items-center justify-center px-5 py-2.5 text-sm font-semibold"
+          >
+            Open Workbook
+          </a>
         </div>
       </div>
     </main>

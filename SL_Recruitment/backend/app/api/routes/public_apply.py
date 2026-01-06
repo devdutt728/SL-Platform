@@ -66,7 +66,7 @@ class OpeningPublicListItemOut(BaseModel):
 
 
 def _candidate_code(candidate_id: int) -> str:
-    return f"SLR-{candidate_id:06d}"
+    return f"SLR-{candidate_id:04d}"
 
 
 def _client_ip(request: Request) -> str | None:

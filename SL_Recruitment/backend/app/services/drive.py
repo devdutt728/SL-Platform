@@ -16,6 +16,13 @@ from app.core.paths import resolve_repo_path
 DriveBucket = Literal["Ongoing", "Appointed", "Not Appointed"]
 
 
+def _shared_drive_id() -> str | None:
+    root_id = settings.drive_root_folder_id or os.environ.get("ROOT_FOLDER_ID", "")
+    if root_id.startswith("0A"):
+        return root_id
+    return None
+
+
 def _drive_client():
     scopes = ["https://www.googleapis.com/auth/drive"]
 
@@ -36,7 +43,7 @@ def _file_url(file_id: str) -> str:
     return f"https://drive.google.com/file/d/{file_id}/view"
 
 
-def _find_folder_id(service, *, name: str, parent_id: str) -> str | None:
+def _find_folder_id(service, *, name: str, parent_id: str, drive_id: str | None = None) -> str | None:
     escaped = name.replace("'", "\\'")
     query = (
         "mimeType='application/vnd.google-apps.folder' "
@@ -44,16 +51,22 @@ def _find_folder_id(service, *, name: str, parent_id: str) -> str | None:
         f"and '{parent_id}' in parents "
         "and trashed=false"
     )
+    drive_id = drive_id or _shared_drive_id()
+    list_kwargs = {
+        "q": query,
+        "fields": "files(id,name)",
+        "pageSize": 1,
+        "supportsAllDrives": True,
+        "includeItemsFromAllDrives": True,
+    }
+    if drive_id:
+        list_kwargs["driveId"] = drive_id
+        list_kwargs["corpora"] = "drive"
+    else:
+        list_kwargs["corpora"] = "allDrives"
     resp = (
         service.files()
-        .list(
-            q=query,
-            fields="files(id,name)",
-            pageSize=1,
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-            corpora="allDrives",
-        )
+        .list(**list_kwargs)
         .execute()
     )
     files = resp.get("files", [])
@@ -62,8 +75,8 @@ def _find_folder_id(service, *, name: str, parent_id: str) -> str | None:
     return files[0]["id"]
 
 
-def _ensure_folder(service, *, name: str, parent_id: str) -> str:
-    existing = _find_folder_id(service, name=name, parent_id=parent_id)
+def _ensure_folder(service, *, name: str, parent_id: str, drive_id: str | None = None) -> str:
+    existing = _find_folder_id(service, name=name, parent_id=parent_id, drive_id=drive_id)
     if existing:
         return existing
     file_metadata = {
@@ -80,21 +93,22 @@ def _bucket_folder_id(service, bucket: DriveBucket) -> str:
     if not root_id:
         raise ValueError("Missing ROOT_FOLDER_ID (or SL_DRIVE_ROOT_FOLDER_ID)")
 
+    drive_id = _shared_drive_id()
     if bucket == "Ongoing":
         ongoing_id = settings.drive_ongoing_folder_id or os.environ.get("ONGOING_FOLDER_ID", "")
         if ongoing_id:
             return ongoing_id
-        return _ensure_folder(service, name="Ongoing", parent_id=root_id)
+        return _ensure_folder(service, name="Ongoing", parent_id=root_id, drive_id=drive_id)
     if bucket == "Appointed":
         appointed_id = settings.drive_appointed_folder_id or os.environ.get("APPOINTED_FOLDER_ID", "")
         if appointed_id:
             return appointed_id
-        return _ensure_folder(service, name="Appointed", parent_id=root_id)
+        return _ensure_folder(service, name="Appointed", parent_id=root_id, drive_id=drive_id)
     if bucket == "Not Appointed":
         not_appointed_id = settings.drive_not_appointed_folder_id or os.environ.get("NOT_APPOINTED_FOLDER_ID", "")
         if not_appointed_id:
             return not_appointed_id
-        return _ensure_folder(service, name="Not Appointed", parent_id=root_id)
+        return _ensure_folder(service, name="Not Appointed", parent_id=root_id, drive_id=drive_id)
     raise ValueError(f"Unknown bucket: {bucket}")
 
 
@@ -109,10 +123,11 @@ def create_candidate_folder(candidate_code: str, full_name: str) -> tuple[str, s
 
     safe_name = (full_name or "Candidate").replace("/", "_").replace("\\", "_").strip()
     candidate_folder_name = f"{candidate_code} - {safe_name}"
-    candidate_folder_id = _ensure_folder(service, name=candidate_folder_name, parent_id=ongoing_id)
+    drive_id = _shared_drive_id()
+    candidate_folder_id = _ensure_folder(service, name=candidate_folder_name, parent_id=ongoing_id, drive_id=drive_id)
 
-    _ensure_folder(service, name="Application", parent_id=candidate_folder_id)
-    _ensure_folder(service, name="Joining", parent_id=candidate_folder_id)
+    _ensure_folder(service, name="Application", parent_id=candidate_folder_id, drive_id=drive_id)
+    _ensure_folder(service, name="Joining", parent_id=candidate_folder_id, drive_id=drive_id)
 
     return candidate_folder_id, _folder_url(candidate_folder_id)
 
@@ -164,11 +179,21 @@ def delete_all_candidate_folders(bucket: DriveBucket = "Ongoing") -> int:
     page_token = None
     query = f"'{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
     while True:
-        resp = (
-            service.files()
-            .list(q=query, fields="files(id), nextPageToken", pageSize=100, pageToken=page_token)
-            .execute()
-        )
+        drive_id = _shared_drive_id()
+        list_kwargs = {
+            "q": query,
+            "fields": "files(id), nextPageToken",
+            "pageSize": 100,
+            "pageToken": page_token,
+            "supportsAllDrives": True,
+            "includeItemsFromAllDrives": True,
+        }
+        if drive_id:
+            list_kwargs["driveId"] = drive_id
+            list_kwargs["corpora"] = "drive"
+        else:
+            list_kwargs["corpora"] = "allDrives"
+        resp = service.files().list(**list_kwargs).execute()
         files = resp.get("files", [])
         for f in files:
             try:

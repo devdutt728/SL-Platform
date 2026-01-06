@@ -7,152 +7,173 @@
   - Environments: .env.local
 
  ✓ Starting...
- ✓ Ready in 1617ms
- ○ Compiling /middleware ...
- ✓ Compiled /middleware in 532ms (72 modules)
- ○ Compiling /login ...
- ✓ Compiled /login in 3.7s (520 modules)
- GET /login 200 in 4034ms
- ✓ Compiled /api/auth/google/start in 268ms (286 modules)
- GET /recruitment/api/auth/google/start 307 in 370ms
- GET /login 200 in 91ms
- GET /login 200 in 86ms
- ✓ Compiled in 284ms (511 modules)
- GET /login 200 in 147ms
- GET /login 200 in 47ms
- ✓ Compiled /api/auth/google/start in 131ms (286 modules)
- GET /recruitment/api/auth/google/start 307 in 222ms
- ✓ Compiled /api/auth/callback/google in 122ms (289 modules)
- GET /recruitment/api/auth/callback/google?state=1767672938569-7e3c85d06e53b8&code=4%2F0ATX87lOTsSeZmZygxeCm97VEb52up_daJgLYR20CfQV6P7X3wx4a-v0TBMa-OP80-geKFw&scope=email+profile+openid+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile&authuser=0&hd=studiolotus.in&prompt=none 307 in 877ms
- ○ Compiling /dashboard ...
- ✓ Compiled /dashboard in 877ms (637 modules)
- ✓ Compiled /api/rec/offers in 126ms (342 modules)
- ✓ Compiled (348 modules)
- GET /recruitment/api/auth/me 200 in 553ms
- GET /recruitment/api/rec/events?limit=10 200 in 556ms
- GET /recruitment/api/rec/offers 200 in 560ms
- GET /recruitment/api/rec/dashboard?stuck_days=5 200 in 582ms
- GET /dashboard 200 in 1637ms
- GET /recruitment/api/auth/me 200 in 77ms
- ✓ Compiled /api/rec/events/stream in 142ms (350 modules)
- GET /recruitment/api/auth/me 200 in 675ms
- GET /recruitment/api/rec/events?limit=10 200 in 678ms
- GET /recruitment/api/rec/events?limit=10 200 in 683ms
- ✓ Compiled / in 235ms (640 modules)
- GET / 200 in 367ms
- ✓ Compiled /_not-found in 237ms (643 modules)
- GET /recruitment/apply 404 in 66ms
- GET / 200 in 56ms
- GET /login 200 in 55ms
- GET /login 200 in 79ms
- GET /recruitment/apply 404 in 46ms
- GET / 200 in 43ms
- GET /recruitment/apply 404 in 21ms
- GET / 200 in 43ms
- ✓ Compiled in 369ms (613 modules)
- ✓ Compiled /api/auth/me in 152ms (342 modules)
- ✓ Compiled (348 modules)
- GET /recruitment/api/auth/me 200 in 674ms
- GET /recruitment/api/rec/events?limit=10 200 in 681ms
- GET /recruitment/api/rec/offers 200 in 685ms
- GET /recruitment/api/rec/dashboard?stuck_days=5 200 in 715ms
- GET /dashboard?_rsc=1fu25 200 in 836ms
- ✓ Compiled /apply in 351ms (642 modules)
- ○ Compiling /apply/[opening_code] ...
- ✓ Compiled /apply/[opening_code] in 814ms (699 modules)
- ✓ Compiled /api/apply/[opening_code] in 214ms (393 modules)
- GET /recruitment/api/apply/SRAR-7B6B 200 in 640ms
- GET /apply/SRAR-7B6B?_rsc=8cay3 200 in 707ms
- ✓ Compiled in 371ms (715 modules)
- GET /recruitment/api/apply/SRAR-7B6B 200 in 302ms
- GET /recruitment/api/auth/me 200 in 313ms
- GET /apply/SRAR-7B6B?_rsc=byorv 200 in 444ms
- GET /recruitment/api/rec/events?limit=10 200 in 325ms
- GET /recruitment/api/rec/offers 200 in 327ms
- GET /recruitment/api/rec/dashboard?stuck_days=5 200 in 340ms
- GET /dashboard?_rsc=1fu25 200 in 480ms
- GET /login 200 in 104ms
- GET /login 200 in 51ms
- ✓ Compiled /api/auth/google/start in 207ms (379 modules)
- GET /recruitment/api/auth/google/start 307 in 258ms
- ✓ Compiled /api/auth/callback/google in 178ms (382 modules)
- GET /recruitment/api/auth/callback/google?state=1767673673368-c93597bc9a2628&code=4%2F0ATX87lP4MNarA80f05MdUrmEqqZjHcfhwjtMD_Sh2-ZgLUepQT8TXUm_xZypmJ4yUaAZRQ&scope=email+profile+openid+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile&authuser=0&hd=studiolotus.in&prompt=none 307 in 625ms
- ✓ Compiled /api/rec/dashboard in 130ms (385 modules)
- ✓ Compiled (391 modules)
- GET /recruitment/api/auth/me 200 in 559ms
- GET /recruitment/api/rec/offers 200 in 569ms
- GET /recruitment/api/rec/events?limit=10 200 in 586ms
- GET /recruitment/api/rec/dashboard?stuck_days=5 200 in 577ms
- GET /dashboard 200 in 746ms
- GET /recruitment/api/auth/me 200 in 278ms
- GET /recruitment/api/auth/me 200 in 280ms
- GET /recruitment/api/rec/events?limit=10 200 in 287ms
- GET /recruitment/api/rec/events?limit=10 200 in 290ms
- ✓ Compiled /api/rec/events/stream in 136ms (393 modules)
- ○ Compiling /candidates ...
- ✓ Compiled /candidates in 667ms (716 modules)
- ✓ Compiled /api/rec/candidates in 179ms (405 modules)
- ✓ Compiled (407 modules)
- GET /recruitment/api/rec/candidates 200 in 547ms
- GET /recruitment/api/rec/openings 200 in 551ms
- GET /candidates?_rsc=1osyv 200 in 597ms
- GET /recruitment/api/rec/events/stream 200 in 2563ms
- GET /recruitment/api/rec/events/stream 200 in 2571ms
- GET /recruitment/api/rec/candidates?status=new&status=enquiry&status=in_process&status=offer 200 in 153ms
- GET /recruitment/api/rec/candidates?status=new&status=enquiry&status=in_process&status=offer 200 in 154ms
- ✓ Compiled in 265ms (734 modules)
- GET /recruitment/api/auth/me 200 in 550ms
- GET /recruitment/api/auth/me 200 in 542ms
- GET /recruitment/api/rec/candidates 200 in 557ms
- GET /recruitment/api/rec/events?limit=10 200 in 554ms
- GET /recruitment/api/rec/dashboard?stuck_days=5 200 in 561ms
- GET /recruitment/api/rec/openings 200 in 2564ms
- GET /candidates?_rsc=1sfcp 200 in 2610ms
- GET /recruitment/api/rec/offers 200 in 2568ms
- GET /dashboard?_rsc=1fu25 200 in 2627ms
- GET /recruitment/api/rec/events?limit=10 200 in 84ms
- ✓ Compiled /api/auth/logout in 208ms (404 modules)
- POST /recruitment/api/auth/logout 200 in 261ms
- GET /login 200 in 128ms
- GET /recruitment/api/rec/events/stream 200 in 802609ms
- GET /recruitment/api/rec/events/stream 200 in 802613ms
- ✓ Compiled /apply in 171ms (407 modules)
- ✓ Compiled /api/apply/[opening_code] in 201ms (409 modules)
- GET /recruitment/api/apply/SRAR-7B6B 200 in 267ms
- GET /apply/SRAR-7B6B?_rsc=8cay3 200 in 317ms
- POST /recruitment/api/apply/SRAR-7B6B 400 in 302ms
- ✓ Compiled in 317ms (686 modules)
- ✓ Compiled /api/apply/[opening_code] in 215ms (675 modules)
- ✓ Compiled (704 modules)
- GET /recruitment/api/apply/SRAR-7B6B 200 in 268ms
- GET /apply/SRAR-7B6B?_rsc=byorv 200 in 371ms
- GET /recruitment/login 404 in 56ms
- GET /recruitment/api/rec/events/stream 200 in 513266ms
- GET /recruitment/api/rec/events/stream 200 in 513268ms
- ✓ Compiled in 298ms (686 modules)
- ✓ Compiled /_not-found in 107ms (675 modules)
- ✓ Compiled /api/apply/[opening_code] in 179ms (704 modules)
- GET /recruitment/login 404 in 260ms
- GET /recruitment/api/apply/SRAR-7B6B 200 in 286ms
- GET /apply/SRAR-7B6B?_rsc=byorv 200 in 523ms
- POST /recruitment/api/apply/SRAR-7B6B 400 in 210ms
- POST /recruitment/api/apply/SRAR-7B6B 400 in 258ms
- GET /recruitment/api/apply/SRAR-7B6B 200 in 38ms
- GET /apply/SRAR-7B6B 200 in 141ms
- GET /recruitment/api/apply/SRAR-7B6B 200 in 43ms
- GET /apply/SRAR-7B6B 200 in 133ms
- POST /recruitment/api/apply/SRAR-7B6B 400 in 258ms
- ✓ Compiled in 406ms (686 modules)
- ✓ Compiled /api/apply/[opening_code] in 180ms (675 modules)
- ✓ Compiled (704 modules)
- GET /recruitment/api/apply/SRAR-7B6B 200 in 203ms
- GET /apply/SRAR-7B6B?_rsc=byorv 200 in 332ms
- GET /recruitment/login 404 in 55ms
- ✓ Compiled in 193ms (718 modules)
- GET /recruitment/login 404 in 47ms
- GET /recruitment/api/apply/SRAR-7B6B 200 in 68ms
- GET /apply/SRAR-7B6B?_rsc=byorv 200 in 130ms
- POST /recruitment/api/apply/SRAR-7B6B 400 in 219ms
- GET /recruitment/api/apply/SRAR-7B6B 200 in 34ms
- GET /apply/SRAR-7B6B 200 in 137ms
-[?25h
+ ✓ Ready in 1170ms
+ ✓ Compiled /middleware in 123ms (72 modules)
+ ○ Compiling / ...
+ ✓ Compiled / in 730ms (487 modules)
+ GET / 200 in 883ms
+ ✓ Compiled in 1153ms (257 modules)
+ GET / 200 in 70ms
+ ✓ Compiled /login in 421ms (503 modules)
+ ✓ Compiled /apply in 126ms (511 modules)
+ ✓ Compiled /apply/[opening_code] in 204ms (588 modules)
+ ✓ Compiled /api/apply/[opening_code] in 106ms (340 modules)
+ GET /recruitment/api/apply/SRAR-7B6B 200 in 342ms
+ GET /apply/SRAR-7B6B?_rsc=8cay3 200 in 369ms
+ ✓ Compiled in 248ms (630 modules)
+ GET /recruitment/api/apply/SRAR-7B6B 200 in 14ms
+ GET /apply/SRAR-7B6B?_rsc=byorv 200 in 51ms
+ POST /recruitment/api/apply/SRAR-7B6B 201 in 1163ms
+ ✓ Compiled /api/rec/events in 105ms (336 modules)
+ GET /recruitment/api/rec/events?limit=10 200 in 200ms
+ ✓ Compiled /candidates in 307ms (677 modules)
+ ✓ Compiled /api/rec/openings in 105ms (377 modules)
+ ✓ Compiled (379 modules)
+ GET /recruitment/api/rec/openings 200 in 321ms
+ GET /recruitment/api/rec/candidates 200 in 335ms
+ GET /candidates?_rsc=1osyv 200 in 362ms
+ ✓ Compiled /api/rec/events/stream in 72ms (381 modules)
+ GET /recruitment/api/rec/candidates?status=new&status=enquiry&status=in_process&status=offer 200 in 60ms
+ GET /recruitment/api/rec/candidates?status=new&status=enquiry&status=in_process&status=offer 200 in 68ms
+ GET /recruitment/api/rec/events?limit=10 200 in 39ms
+ ✓ Compiled /candidates/[id] in 190ms (702 modules)
+ ✓ Compiled /api/rec/candidates/[id]/full in 56ms (394 modules)
+ ✓ Compiled (396 modules)
+ GET /recruitment/api/auth/me 200 in 224ms
+ GET /recruitment/api/rec/candidates/36/full 200 in 421ms
+ GET /candidates/36?_rsc=eodsd 200 in 438ms
+ GET /recruitment/api/rec/events/stream 200 in 1984ms
+ GET /recruitment/api/rec/events/stream 200 in 1987ms
+ ✓ Compiled /api/rec/candidates/[id]/sprints in 64ms (398 modules)
+ ✓ Compiled (402 modules)
+ GET /recruitment/api/rec/interviews?candidate_id=36 200 in 274ms
+ GET /recruitment/api/rec/interviews?candidate_id=36 200 in 275ms
+ GET /recruitment/api/rec/interviews?candidate_id=36 200 in 42ms
+ GET /recruitment/api/rec/candidates/36/offers 200 in 596ms
+ GET /recruitment/api/rec/candidates/36/offers 200 in 597ms
+ GET /recruitment/api/rec/candidates/36/sprints 200 in 665ms
+ GET /recruitment/api/rec/candidates/36/offers 200 in 348ms
+ GET /recruitment/api/rec/candidates/36/sprints 200 in 396ms
+ GET /recruitment/api/rec/candidates/36/sprints 200 in 678ms
+ GET /recruitment/api/rec/interviews?candidate_id=36 200 in 78ms
+ GET /recruitment/api/rec/candidates/36/sprints 200 in 114ms
+ GET /recruitment/api/rec/candidates/36/offers 200 in 49ms
+ ✓ Compiled /api/rec/candidates/[id] in 116ms (404 modules)
+ DELETE /recruitment/api/rec/candidates/36 500 in 370ms
+ GET /recruitment/api/auth/me 200 in 80ms
+ GET /recruitment/api/rec/candidates 200 in 90ms
+ GET /recruitment/api/rec/openings 200 in 101ms
+ GET /candidates?_rsc=1sfcp 200 in 127ms
+ GET /recruitment/api/rec/events/stream 200 in 3887ms
+ GET /recruitment/api/rec/events/stream 200 in 3888ms
+ GET /recruitment/api/rec/candidates?status=new&status=enquiry&status=in_process&status=offer 200 in 68ms
+ GET /recruitment/api/rec/candidates?status=new&status=enquiry&status=in_process&status=offer 200 in 69ms
+ GET /recruitment/api/rec/events?limit=10 200 in 47ms
+ GET /recruitment/api/rec/events?limit=10 200 in 55ms
+ GET /recruitment/api/rec/events?limit=10 200 in 55ms
+ GET /recruitment/api/rec/events?limit=10 200 in 45ms
+ GET /recruitment/api/rec/events?limit=10 200 in 49ms
+ GET /recruitment/api/rec/events?limit=10 200 in 62ms
+ GET /recruitment/api/rec/events?limit=10 200 in 51ms
+ GET /recruitment/api/rec/events?limit=10 200 in 65ms
+ GET /recruitment/api/rec/events?limit=10 200 in 50ms
+ GET /recruitment/api/rec/events?limit=10 200 in 46ms
+ GET /recruitment/api/rec/events?limit=10 200 in 99ms
+ GET /recruitment/api/auth/me 200 in 150ms
+ GET /recruitment/api/rec/candidates 200 in 170ms
+ GET /recruitment/api/rec/openings 200 in 264ms
+ GET /recruitment/api/rec/events/stream 200 in 1570002ms
+ GET /recruitment/api/rec/events/stream 200 in 1570004ms
+ GET /candidates 200 in 362ms
+ GET /recruitment/api/auth/me 200 in 146ms
+ GET /recruitment/api/auth/me 200 in 154ms
+ GET /recruitment/api/rec/events?limit=10 200 in 199ms
+ GET /recruitment/api/rec/events?limit=10 200 in 199ms
+ GET /recruitment/api/rec/candidates?status=new&status=enquiry&status=in_process&status=offer 200 in 102ms
+ GET /recruitment/api/rec/candidates?status=new&status=enquiry&status=in_process&status=offer 200 in 104ms
+ GET /recruitment/api/rec/events?limit=10 200 in 48ms
+ GET /recruitment/api/rec/events?limit=10 200 in 59ms
+ GET /recruitment/api/rec/events?limit=10 200 in 115ms
+ GET /recruitment/api/rec/events?limit=10 200 in 53ms
+ GET /recruitment/api/rec/events?limit=10 200 in 62ms
+ GET /recruitment/api/rec/events?limit=10 200 in 49ms
+ GET /recruitment/api/rec/events?limit=10 200 in 47ms
+ GET /recruitment/api/rec/events?limit=10 200 in 63ms
+ GET /recruitment/api/rec/events?limit=10 200 in 44ms
+ GET /recruitment/api/rec/events?limit=10 200 in 43ms
+ GET /recruitment/api/rec/events?limit=10 200 in 58ms
+ GET /recruitment/api/rec/events?limit=10 200 in 48ms
+ GET /recruitment/api/rec/events?limit=10 200 in 48ms
+ GET /recruitment/api/rec/events?limit=10 200 in 52ms
+ GET /recruitment/api/rec/events?limit=10 200 in 48ms
+ GET /recruitment/api/rec/events?limit=10 200 in 42ms
+ GET /recruitment/api/rec/events?limit=10 200 in 155ms
+ GET /recruitment/api/rec/events?limit=10 200 in 53ms
+ GET /login 200 in 43ms
+ ✓ Compiled /api/auth/google/start in 175ms (375 modules)
+ GET /recruitment/api/auth/google/start 307 in 227ms
+ ✓ Compiled /api/auth/callback/google in 59ms (378 modules)
+ GET /recruitment/api/auth/callback/google?state=1767680135038-a7da2ac67aab8&code=4%2F0ATX87lPdfvidMNA5ziS5-eEd8W234fPKUrzWIPnrPYCAif0xkvhqYpswDvDAMWmEZ5WNhQ&scope=email+profile+openid+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile&authuser=0&hd=studiolotus.in&prompt=none 307 in 423ms
+ ✓ Compiled /dashboard in 338ms (727 modules)
+ ✓ Compiled in 165ms (335 modules)
+ ✓ Compiled /api/rec/candidates in 101ms (395 modules)
+ ✓ Compiled (405 modules)
+ GET /recruitment/api/auth/me 200 in 692ms
+ GET /recruitment/api/rec/events?limit=10 200 in 700ms
+ GET /recruitment/api/rec/offers 200 in 710ms
+ GET /recruitment/api/auth/me 200 in 671ms
+ GET /recruitment/api/auth/me 200 in 376ms
+ GET /recruitment/api/rec/candidates 200 in 677ms
+ GET /recruitment/api/rec/openings 200 in 677ms
+ GET /recruitment/api/rec/candidates 200 in 382ms
+ GET /candidates?_rsc=1sfcp 200 in 809ms
+ GET /recruitment/api/rec/openings 200 in 390ms
+ GET /recruitment/api/rec/dashboard?stuck_days=5 200 in 740ms
+ GET /candidates?_rsc=1sfcp 200 in 704ms
+ ○ Compiling /_error ...
+ ✓ Compiled /_error in 1173ms (966 modules)
+ GET /dashboard 500 in 2709ms
+ GET /recruitment/api/auth/me 200 in 264ms
+ GET /recruitment/api/rec/candidates 200 in 270ms
+ GET /recruitment/api/rec/candidates 200 in 215ms
+ GET /recruitment/api/auth/me 200 in 222ms
+ GET /recruitment/api/auth/me 200 in 183ms
+ GET /recruitment/api/rec/openings 200 in 283ms
+ GET /recruitment/api/rec/candidates 200 in 188ms
+ GET /recruitment/api/rec/openings 200 in 230ms
+ GET /candidates?_rsc=1sfcp 200 in 855ms
+ GET /candidates?_rsc=1sfcp 200 in 271ms
+ GET /recruitment/api/rec/openings 200 in 208ms
+ GET /candidates?_rsc=1sfcp 200 in 240ms
+ GET /recruitment/api/rec/events?limit=10 200 in 46ms
+ ✓ Compiled in 352ms (936 modules)
+ ✓ Compiled /api/rec/candidates in 78ms (417 modules)
+ ✓ Compiled (421 modules)
+ GET /recruitment/api/auth/me 200 in 335ms
+ GET /recruitment/api/rec/candidates 200 in 340ms
+ GET /recruitment/api/rec/openings 200 in 357ms
+ GET /candidates?_rsc=1sfcp 200 in 393ms
+ ✓ Compiled in 300ms (942 modules)
+ GET /recruitment/api/auth/me 200 in 98ms
+ GET /recruitment/api/rec/candidates 200 in 105ms
+ GET /recruitment/api/rec/openings 200 in 125ms
+ GET /candidates?_rsc=1sfcp 200 in 177ms
+ ✓ Compiled in 557ms (940 modules)
+ GET /recruitment/api/auth/me 200 in 94ms
+ GET /recruitment/api/rec/candidates 200 in 101ms
+ GET /recruitment/api/rec/openings 200 in 120ms
+ GET /candidates?_rsc=1sfcp 200 in 157ms
+ GET /login 200 in 75ms
+ ✓ Compiled in 341ms (906 modules)
+ ✓ Compiled /api/rec/openings in 109ms (415 modules)
+ ✓ Compiled (419 modules)
+ GET /recruitment/api/auth/me 200 in 379ms
+ GET /recruitment/api/rec/candidates 200 in 384ms
+ GET /recruitment/api/rec/openings 200 in 412ms
+ GET /candidates?_rsc=1sfcp 200 in 502ms
+ GET /login 200 in 87ms
+ ✓ Compiled in 233ms (940 modules)
+ GET /recruitment/api/auth/me 200 in 124ms
+ GET /recruitment/api/rec/candidates 200 in 128ms
+ GET /recruitment/api/rec/openings 200 in 143ms
+ GET /candidates?_rsc=1sfcp 200 in 198ms

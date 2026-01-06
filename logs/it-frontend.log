@@ -7,100 +7,35 @@
   - Environments: .env.local
 
  ✓ Starting...
- ✓ Ready in 1574ms
- ✓ Compiled /middleware in 427ms (72 modules)
+ ✓ Ready in 1246ms
+ ✓ Compiled /middleware in 137ms (72 modules)
  ○ Compiling /login ...
- ✓ Compiled /login in 3.5s (479 modules)
- GET /login 200 in 3803ms
- ○ Compiling /api/auth/me ...
- ✓ Compiled /api/auth/me in 3.4s (264 modules)
- GET /it/api/auth/me 200 in 3533ms
- GET /it/api/auth/me 200 in 73ms
- GET /login 200 in 101ms
- GET /it/api/auth/me 200 in 85ms
- GET /it/api/auth/me 200 in 54ms
- GET /login 200 in 55ms
- GET /it/api/auth/me 200 in 69ms
- GET /it/api/auth/me 200 in 71ms
- ✓ Compiled /api/auth/google/start in 187ms (271 modules)
- GET /it/api/auth/google/start 307 in 265ms
- ✓ Compiled /api/auth/callback/google in 114ms (273 modules)
- GET /it/api/auth/callback/google?state=1767672844004-c29a115b45c048&code=4%2F0ATX87lOdiE_fQkhjeiw1gw5zgB6IEqBggt_nzGFZEljg-EARWgth0lrJNf3gV-u9LAlV6Q&scope=email+profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+openid&authuser=0&hd=studiolotus.in&prompt=none 307 in 529ms
- ○ Compiling / ...
- ✓ Compiled / in 818ms (618 modules)
- GET / 200 in 970ms
- GET /it/api/auth/me 200 in 73ms
- GET /it/api/auth/me 200 in 55ms
- ✓ Compiled /admin/it/assets in 471ms (614 modules)
- ✓ Compiled /api/it/[...path] in 137ms (336 modules)
- GET /it/api/it/admin/assets 404 in 577ms
- GET /it/api/it/admin/assets 404 in 26ms
- GET /it/api/it/admin/assets 404 in 13ms
- GET /it/api/it/admin/assets 404 in 15ms
- ✓ Compiled /admin/it/licenses in 422ms (623 modules)
- GET /it/api/it/admin/licenses 404 in 40ms
- GET /it/api/it/admin/vendors 404 in 43ms
- GET /it/api/it/admin/licenses 404 in 22ms
- GET /it/api/it/admin/vendors 404 in 25ms
- GET /it/api/it/admin/licenses 404 in 21ms
- GET /it/api/it/admin/vendors 404 in 20ms
- GET /it/api/it/admin/licenses 404 in 16ms
- GET /it/api/it/admin/vendors 404 in 24ms
- ○ Compiling /admin/users ...
- ✓ Compiled /admin/users in 1220ms (744 modules)
- ✓ Compiled /api/admin/[...path] in 179ms (405 modules)
- GET /it/api/admin/roles 200 in 792ms
- GET /it/api/admin/users 200 in 931ms
- GET /it/api/admin/roles 200 in 120ms
- GET /it/api/admin/roles 200 in 198ms
- GET /it/api/admin/users 200 in 210ms
- GET /it/api/admin/roles 200 in 145ms
- GET /it/api/admin/users 200 in 216ms
- GET /it/api/admin/users 200 in 131ms
- ✓ Compiled /admin/it in 378ms (753 modules)
- GET /it/api/it/admin/routing 200 in 316ms
- GET /it/api/it/admin/sla 200 in 318ms
- GET /it/api/it/admin/subcategories 200 in 293ms
- GET /it/api/it/admin/categories 200 in 296ms
- GET /it/api/it/admin/routing 200 in 300ms
- GET /it/api/it/admin/categories 200 in 303ms
- GET /it/api/it/admin/subcategories 200 in 305ms
- GET /it/api/it/admin/sla 200 in 309ms
- GET /it/api/it/admin/categories 200 in 290ms
- GET /it/api/it/admin/subcategories 200 in 292ms
- GET /it/api/it/admin/routing 200 in 295ms
- GET /it/api/it/admin/sla 200 in 293ms
- GET /it/api/it/admin/sla 200 in 273ms
- GET /it/api/it/admin/routing 200 in 284ms
- GET /it/api/it/admin/categories 200 in 286ms
- GET /it/api/it/admin/subcategories 200 in 288ms
- ○ Compiling /queue ...
- ✓ Compiled /queue in 673ms (781 modules)
- GET /it/api/it/tickets 200 in 79ms
- GET /it/api/it/tickets 200 in 55ms
- GET /it/api/it/tickets 200 in 55ms
- GET /it/api/it/tickets 200 in 69ms
- GET /it/api/it/admin/categories 200 in 288ms
- GET /it/api/it/admin/subcategories 200 in 289ms
- GET /it/api/it/admin/sla 200 in 291ms
- GET /it/api/it/admin/routing 200 in 294ms
- GET /it/api/it/admin/routing 200 in 244ms
- GET /it/api/it/admin/categories 200 in 251ms
- GET /it/api/it/admin/sla 200 in 252ms
- GET /it/api/it/admin/subcategories 200 in 254ms
- GET /it/api/it/admin/categories 200 in 290ms
- GET /it/api/it/admin/routing 200 in 293ms
- GET /it/api/it/admin/sla 200 in 294ms
- GET /it/api/it/admin/subcategories 200 in 294ms
- GET /it/api/it/admin/categories 200 in 272ms
- GET /it/api/it/admin/sla 200 in 273ms
- GET /it/api/it/admin/subcategories 200 in 274ms
- GET /it/api/it/admin/routing 200 in 281ms
- ✓ Compiled /api/auth/logout in 312ms (404 modules)
- POST /it/api/auth/logout 200 in 409ms
- ✓ Compiled /login in 175ms (407 modules)
- GET /login 200 in 315ms
- ✓ Compiled /api/auth/me in 152ms (409 modules)
- GET /it/api/auth/me 401 in 217ms
- GET /it/api/auth/me 401 in 25ms
-[?25h
+ ✓ Compiled /login in 2.2s (479 modules)
+ GET /login 200 in 2302ms
+ ✓ Compiled /api/auth/me in 160ms (264 modules)
+ GET /it/api/auth/me 401 in 228ms
+ GET /it/api/auth/me 401 in 9ms
+ ✓ Compiled /api/auth/google/start in 89ms (271 modules)
+ GET /it/api/auth/google/start 307 in 122ms
+ ✓ Compiled /api/auth/callback/google in 27ms (273 modules)
+ GET /it/api/auth/callback/google?state=1767680154132-6ffc5ebe1804b&code=4%2F0ATX87lPJZXmsGg0r2j1mcE5pmPB8Z09FP0w00lDdj_mPwU01ZHDikr8Z-n-nJra5FckTnQ&scope=email+profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile+openid&authuser=0&hd=studiolotus.in&prompt=none 307 in 398ms
+ ✓ Compiled / in 422ms (618 modules)
+ GET / 200 in 534ms
+ GET /it/api/auth/me 200 in 56ms
+ GET /it/api/auth/me 200 in 42ms
+ ✓ Compiled /api/auth/logout in 27ms (329 modules)
+ POST /it/api/auth/logout 200 in 43ms
+ GET /login 200 in 42ms
+ GET /it/api/auth/me 401 in 5ms
+ GET /it/api/auth/me 401 in 3ms
+ GET /login 200 in 46ms
+ GET /it/api/auth/me 401 in 11ms
+ GET /it/api/auth/me 401 in 4ms
+ ✓ Compiled in 246ms (518 modules)
+ ✓ Compiled in 279ms (518 modules)
+ ✓ Compiled in 237ms (518 modules)
+ ✓ Compiled in 133ms (518 modules)
+ GET /login 200 in 62ms
+ ✓ Compiled /api/auth/me in 150ms (264 modules)
+ GET /it/api/auth/me 401 in 196ms
+ GET /it/api/auth/me 401 in 4ms

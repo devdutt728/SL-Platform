@@ -11,18 +11,25 @@ export default function LoginPage() {
             className="h-full w-full object-contain"
           />
         </div>
-        <p className="text-xs uppercase tracking-tight text-[var(--text-secondary)]">Studio Lotus</p>
         <h1 className="mt-2 text-2xl font-semibold">IT Helpdesk</h1>
         <p className="mt-2 text-sm text-[var(--text-secondary)]">Sign in with your Studio Lotus Google account.</p>
 
         <div className="mt-6 flex justify-center">
           <a
             href={`${basePath}/api/auth/google/start`}
-            className="inline-flex w-[320px] items-center justify-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-strong)] px-4 py-2 text-sm font-semibold shadow-card hover:bg-[var(--surface-strong)]/80"
+            className="workbook-launch inline-flex w-[320px] items-center justify-center gap-2 px-4 py-2 text-sm font-semibold"
           >
             <GoogleMark className="h-4 w-4" />
             Sign in with Google
           </a>
+        </div>
+        <div className="mt-3 flex justify-center">
+        <a
+          href="/"
+          className="workbook-launch inline-flex w-[320px] items-center justify-center px-4 py-2 text-sm font-semibold"
+        >
+          Open Workbook
+        </a>
         </div>
       </div>
     </main>

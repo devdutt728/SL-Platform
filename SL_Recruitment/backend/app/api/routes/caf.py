@@ -42,7 +42,7 @@ async def get_caf_prefill(
 
     return CafPrefillOut(
         candidate_id=candidate.candidate_id,
-        candidate_code=candidate.candidate_code or f"SLR-{candidate.candidate_id:06d}",
+        candidate_code=candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}",
         name=candidate.full_name,
         email=candidate.email,
         phone=candidate.phone,

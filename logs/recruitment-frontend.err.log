@@ -1,4 +1,86 @@
-Recruitment apply failed {
-  status: 400,
-  body: '{"detail":"Please provide a reason if you are not uploading a portfolio."}'
+ ⨯ TypeError: Response constructor: Invalid response status code 204
+    at webidl.errors.exception (node:internal/deps/undici/undici:4282:14)
+    at initializeResponse (node:internal/deps/undici/undici:10234:31)
+    at new Response (node:internal/deps/undici/undici:9974:9)
+    at new NextResponse (webpack-internal:///(rsc)/./node_modules/next/dist/server/web/spec-extension/response.js:40:9)
+    at DELETE (webpack-internal:///(rsc)/./app/api/rec/candidates/[id]/route.ts:35:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-route.runtime.dev.js:6:57228
+    at async eT.execute (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-route.runtime.dev.js:6:46851)
+    at async eT.handle (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-route.runtime.dev.js:6:58760)
+    at async doRender (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\base-server.js:1366:42)
+    at async cacheEntry.responseCache.get.routeKind (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\base-server.js:1576:40)
+    at async DevServer.renderToResponseWithComponentsImpl (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\base-server.js:1496:28)
+    at async DevServer.renderPageComponent (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\base-server.js:1924:24)
+    at async DevServer.renderToResponseImpl (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\base-server.js:1962:32)
+    at async DevServer.pipeImpl (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\base-server.js:922:25)
+    at async NextNodeServer.handleCatchallRenderRequest (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\next-server.js:272:17)
+    at async DevServer.handleRequestImpl (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\base-server.js:818:17)
+    at async D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\dev\next-dev-server.js:339:20
+    at async Span.traceAsyncFn (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\trace\trace.js:154:20)
+    at async DevServer.handleRequest (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\dev\next-dev-server.js:336:24)
+    at async invokeRender (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\lib\router-server.js:179:21)
+    at async handleRequest (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\lib\router-server.js:359:24)
+    at async requestHandlerImpl (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\lib\router-server.js:383:13)
+    at async Server.requestListener (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\server\lib\start-server.js:141:13)
+Warning: Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://reactjs.org/link/invalid-hook-call for tips about how to debug and fix this problem.
+ ⨯ TypeError: Cannot read properties of null (reading 'useContext')
+    at Sidebar (./components/sidebar.tsx:60:82)
+digest: "2711846496"
+Warning: Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://reactjs.org/link/invalid-hook-call for tips about how to debug and fix this problem.
+TypeError: Cannot read properties of null (reading 'useContext')
+    at t.useContext (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:162364)
+    at usePathname (webpack-internal:///(ssr)/./node_modules/next/dist/client/components/navigation.js:121:34)
+    at ErrorBoundary (webpack-internal:///(ssr)/./node_modules/next/dist/client/components/error-boundary.js:159:50)
+    at au (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:10446)
+    at D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:15122
+    at aw (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:16908)
+    at a_ (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:49776)
+    at ab (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:11808)
+    at D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:16871
+    at aw (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:16908)
+    at aw (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:46505)
+    at a_ (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:49776)
+    at ab (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:11808)
+    at D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:16871
+    at aw (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:16908)
+    at a_ (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:49776)
+    at D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:58612
+    at D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:59270
+    at aN (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:59278)
+    at Timeout._onTimeout (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:6939)
+    at listOnTimeout (node:internal/timers:605:17)
+    at process.processTimers (node:internal/timers:541:7)
+ ⨯ TypeError: Cannot read properties of null (reading 'useContext')
+    at t.useContext (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:162364)
+    at usePathname (webpack-internal:///(ssr)/./node_modules/next/dist/client/components/navigation.js:121:34)
+    at ErrorBoundary (webpack-internal:///(ssr)/./node_modules/next/dist/client/components/error-boundary.js:159:50)
+    at au (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:10446)
+    at D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:15122
+    at aw (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:16908)
+    at a_ (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:49776)
+    at ab (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:11808)
+    at D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:16871
+    at aw (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:16908)
+    at aw (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:46505)
+    at a_ (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:49776)
+    at ab (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:11808)
+    at D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:16871
+    at aw (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:16908)
+    at a_ (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:49776)
+    at D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:58612
+    at D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:59270
+    at aN (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:59278)
+    at Timeout._onTimeout (D:\SL Platform\SL_Recruitment\frontend\node_modules\next\dist\compiled\next-server\app-page.runtime.dev.js:35:6939)
+    at listOnTimeout (node:internal/timers:605:17)
+    at process.processTimers (node:internal/timers:541:7) {
+  page: '/dashboard'
 }

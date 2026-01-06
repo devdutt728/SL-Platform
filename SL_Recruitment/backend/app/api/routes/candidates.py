@@ -38,7 +38,7 @@ router = APIRouter(prefix="/rec/candidates", tags=["candidates"])
 
 
 def _candidate_code(candidate_id: int) -> str:
-    return f"SLR-{candidate_id:06d}"
+    return f"SLR-{candidate_id:04d}"
 
 
 def _split_name(full_name: str) -> tuple[str, str | None]:

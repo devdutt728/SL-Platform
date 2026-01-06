@@ -4,16 +4,18 @@ const apps = [
     title: "IT Helpdesk",
     description: "Tickets, assets, SLAs, and support operations.",
     href: "/it/login",
-    accent: "from-cyan-500/20 to-blue-500/10",
+    accent: "from-cyan-500/30 to-blue-500/10",
     tags: ["Live Sync", "Encrypted access", "Audit-ready"],
+    icon: <CircuitIcon />,
   },
   {
     label: "TALENT ENGINE",
     title: "Recruitment",
     description: "Candidates, pipelines, interviews, and offers.",
     href: "/recruitment/login",
-    accent: "from-rose-500/20 to-orange-500/10",
+    accent: "from-rose-500/30 to-orange-500/10",
     tags: ["Live Sync", "Encrypted access", "Audit-ready"],
+    icon: <OrbitIcon />,
   },
 ];
 
@@ -50,8 +52,8 @@ export default function Home() {
           <a key={app.title} href={app.href} className="section-card workbook-card group">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br ${app.accent}`}>
-                  <span className="text-xs font-semibold text-slate-900">{app.title.slice(0, 2).toUpperCase()}</span>
+                <div className={`workbook-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br ${app.accent}`}>
+                  {app.icon}
                 </div>
                 <div>
                   <p className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-steel">{app.label}</p>
@@ -79,5 +81,50 @@ export default function Home() {
         <span>Need access? Contact your admin to enable your role in the sl_platform directory.</span>
       </div>
     </div>
+  );
+}
+
+function CircuitIcon() {
+  return (
+    <svg
+      className="h-5 w-5 text-slate-900"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M6 6h5m7 0h-2M6 12h12M6 18h2m6 0h4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <circle cx="16" cy="6" r="2" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="8" cy="12" r="2" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="12" cy="18" r="2" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function OrbitIcon() {
+  return (
+    <svg
+      className="h-5 w-5 text-slate-900"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M12 4c3.3 0 6 3.6 6 8s-2.7 8-6 8-6-3.6-6-8 2.7-8 6-8Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <path
+        d="M5 8c2.2-1.8 5.7-2.4 9.4-1.3 3.7 1.1 6.1 3.6 6.1 6.3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <circle cx="17.5" cy="13.5" r="1.5" fill="currentColor" />
+    </svg>
   );
 }
