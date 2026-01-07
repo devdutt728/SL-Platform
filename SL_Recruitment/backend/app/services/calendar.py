@@ -186,8 +186,6 @@ def list_visible_calendar_ids(*, subject_email: str | None = None) -> list[str]:
         for item in resp.get("items", []) or []:
             if item.get("deleted"):
                 continue
-            if not item.get("selected") and not item.get("primary"):
-                continue
             access = (item.get("accessRole") or "").lower()
             if access in {"none", "freebusy"}:
                 continue
@@ -198,6 +196,32 @@ def list_visible_calendar_ids(*, subject_email: str | None = None) -> list[str]:
         if not page_token:
             break
     return calendar_ids
+
+
+def list_calendar_list_details(*, subject_email: str | None = None) -> list[dict[str, Any]]:
+    if not settings.enable_calendar:
+        return []
+    service = _calendar_client(subject_email=subject_email)
+    out: list[dict[str, Any]] = []
+    page_token = None
+    while True:
+        resp = service.calendarList().list(pageToken=page_token).execute()
+        for item in resp.get("items", []) or []:
+            if item.get("deleted"):
+                continue
+            out.append(
+                {
+                    "id": item.get("id"),
+                    "summary": item.get("summary"),
+                    "primary": bool(item.get("primary")),
+                    "selected": bool(item.get("selected")),
+                    "accessRole": item.get("accessRole"),
+                }
+            )
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return out
 
 
 def list_calendar_events(
