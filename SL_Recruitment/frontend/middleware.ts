@@ -49,7 +49,8 @@ export function middleware(request: NextRequest) {
     normalizedPath.startsWith("/api/auth") ||
     normalizedPath.startsWith("/api/apply") ||
     normalizedPath.startsWith("/api/caf") ||
-    normalizedPath.startsWith("/api/sprint")
+    normalizedPath.startsWith("/api/sprint") ||
+    normalizedPath.startsWith("/api/offer")
   ) {
     return NextResponse.next();
   }

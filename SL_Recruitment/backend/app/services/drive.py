@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.paths import resolve_repo_path
 
 DriveBucket = Literal["Ongoing", "Appointed", "Not Appointed"]
+MANUAL_FOLDER_NAME = "SLR-MANUAL - Manual Folder"
 logger = logging.getLogger("slr.drive")
 
 
@@ -154,6 +155,8 @@ def _bucket_folder_id(service, bucket: DriveBucket) -> str:
         raise ValueError("Missing ROOT_FOLDER_ID (or SL_DRIVE_ROOT_FOLDER_ID)")
 
     # If the root_id already points at the bucket folder, avoid creating a nested folder.
+    drive_id = _shared_drive_id()
+    bucket_root_id: str | None = None
     try:
         meta = service.files().get(
             fileId=root_id,
@@ -163,24 +166,32 @@ def _bucket_folder_id(service, bucket: DriveBucket) -> str:
         if meta.get("mimeType") == "application/vnd.google-apps.folder":
             root_name = (meta.get("name") or "").strip()
             if root_name.lower() == bucket.lower():
-                return root_id
+                bucket_root_id = root_id
     except Exception:
         # Best-effort; fall back to normal behavior.
         pass
 
-    drive_id = _shared_drive_id()
     if bucket == "Ongoing":
+        if bucket_root_id:
+            _ensure_manual_folder(service, ongoing_id=bucket_root_id, drive_id=drive_id)
+            return bucket_root_id
         ongoing_id = (
             settings.drive_ongoing_folder_id
             or os.environ.get("ONGOING_FOLDER_ID", "")
             or _drive_config_value("ongoing_folder_id")
         )
         if ongoing_id:
+            _ensure_manual_folder(service, ongoing_id=ongoing_id, drive_id=drive_id)
             return ongoing_id
         existing = _find_folder_id(service, name="Ongoing", parent_id=root_id, drive_id=drive_id)
         if existing:
+            _ensure_manual_folder(service, ongoing_id=existing, drive_id=drive_id)
             return existing
-        return _ensure_folder(service, name="Ongoing", parent_id=root_id, drive_id=drive_id)
+        created = _ensure_folder(service, name="Ongoing", parent_id=root_id, drive_id=drive_id)
+        _ensure_manual_folder(service, ongoing_id=created, drive_id=drive_id)
+        return created
+    if bucket_root_id:
+        return bucket_root_id
     if bucket == "Appointed":
         appointed_id = (
             settings.drive_appointed_folder_id
@@ -206,6 +217,18 @@ def _bucket_folder_id(service, bucket: DriveBucket) -> str:
             return existing
         return _ensure_folder(service, name="Not Appointed", parent_id=root_id, drive_id=drive_id)
     raise ValueError(f"Unknown bucket: {bucket}")
+
+
+def _ensure_manual_folder(service, *, ongoing_id: str, drive_id: str | None) -> None:
+    try:
+        _ensure_folder(service, name=MANUAL_FOLDER_NAME, parent_id=ongoing_id, drive_id=drive_id)
+    except Exception as exc:
+        logger.exception(
+            "Drive manual folder ensure failed: ongoing_id=%s drive_id=%s error=%s",
+            ongoing_id,
+            drive_id or _shared_drive_id(),
+            _format_drive_error(exc),
+        )
 
 
 def create_candidate_folder(candidate_code: str, full_name: str) -> tuple[str, str]:
@@ -299,7 +322,7 @@ def delete_all_candidate_folders(bucket: DriveBucket = "Ongoing") -> int:
         drive_id = _shared_drive_id()
         list_kwargs = {
             "q": query,
-            "fields": "files(id), nextPageToken",
+            "fields": "files(id,name), nextPageToken",
             "pageSize": 100,
             "pageToken": page_token,
             "supportsAllDrives": True,
@@ -313,6 +336,8 @@ def delete_all_candidate_folders(bucket: DriveBucket = "Ongoing") -> int:
         resp = service.files().list(**list_kwargs).execute()
         files = resp.get("files", [])
         for f in files:
+            if (f.get("name") or "").strip() == MANUAL_FOLDER_NAME:
+                continue
             if _delete_drive_item_with_service(service, f["id"]):
                 deleted += 1
         page_token = resp.get("nextPageToken")
@@ -413,6 +438,20 @@ def upload_sprint_doc(candidate_folder_id: str, *, filename: str, content_type: 
     sprint_id = _ensure_child_folder(service, parent_id=candidate_folder_id, name="Sprint")
     media = MediaIoBaseUpload(io.BytesIO(data), mimetype=content_type or "application/octet-stream", resumable=False)
     file_metadata = {"name": filename, "parents": [sprint_id]}
+    created = (
+        service.files()
+        .create(body=file_metadata, media_body=media, fields="id", supportsAllDrives=True)
+        .execute()
+    )
+    file_id = created["id"]
+    return file_id, _file_url(file_id)
+
+
+def upload_offer_doc(candidate_folder_id: str, *, filename: str, content_type: str, data: bytes) -> tuple[str, str]:
+    service = _drive_client()
+    offer_id = _ensure_child_folder(service, parent_id=candidate_folder_id, name="Offer")
+    media = MediaIoBaseUpload(io.BytesIO(data), mimetype=content_type or "application/octet-stream", resumable=False)
+    file_metadata = {"name": filename, "parents": [offer_id]}
     created = (
         service.files()
         .create(body=file_metadata, media_body=media, fields="id", supportsAllDrives=True)

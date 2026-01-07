@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from urllib.parse import urlparse, parse_qs
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,16 +21,43 @@ from app.services.offers import (
     create_offer,
     record_candidate_response,
     reject_offer,
+    _resolve_candidate_address,
+    _resolve_reporting_to,
+    _ensure_offer_pdf,
+    _offer_public_link,
+    _offer_public_pdf_link,
+    offer_pdf_signed_url,
+    verify_offer_pdf_signature,
+    render_offer_letter,
     send_offer,
     submit_for_approval,
     update_offer_details,
 )
 from app.services.events import log_event
-from app.services.drive import move_candidate_folder
-from app.services.email import send_email
+from app.services.drive import move_candidate_folder, download_drive_file
+from app.services.email import render_template, send_email
 
 router = APIRouter(prefix="/rec/offers", tags=["offers"])
 public_router = APIRouter(prefix="/offer", tags=["offers-public"])
+
+
+def _extract_drive_file_id(raw_url: str | None) -> str | None:
+    if not raw_url:
+        return None
+    try:
+        parsed = urlparse(raw_url)
+        if parsed.query:
+            query = parse_qs(parsed.query)
+            if "id" in query and query["id"]:
+                return query["id"][0]
+        parts = parsed.path.split("/")
+        if "d" in parts:
+            idx = parts.index("d")
+            if idx + 1 < len(parts):
+                return parts[idx + 1]
+    except Exception:
+        return None
+    return None
 
 
 @router.get("", response_model=list[OfferOut])
@@ -61,6 +90,7 @@ async def list_offers(
                 candidate_name=row[1],
                 candidate_code=row[2],
                 opening_title=row[3],
+                pdf_download_url=offer_pdf_signed_url(offer.public_token),
             )
         )
     return out
@@ -94,6 +124,7 @@ async def get_offer(
         candidate_name=row[1],
         candidate_code=row[2],
         opening_title=row[3],
+        pdf_download_url=offer_pdf_signed_url(offer.public_token),
     )
 
 
@@ -173,8 +204,10 @@ async def send_offer_route(
             context={
                 "candidate_name": candidate.full_name,
                 "opening_title": opening.title if opening else "",
-                "offer_link": f"/offer/{offer.public_token}",
+                "offer_link": _offer_public_link(offer.public_token),
                 "joining_date": offer.joining_date,
+                "offer_file_url": offer_pdf_signed_url(offer.public_token),
+                "sender_name": "Studio Lotus Team",
             },
             email_type="offer_sent",
             related_entity_type="offer",
@@ -184,6 +217,70 @@ async def send_offer_route(
     await session.commit()
     await session.refresh(offer)
     return OfferOut.model_validate(offer)
+
+
+@router.get("/{offer_id}/preview")
+async def preview_offer_letter(
+    offer_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+):
+    offer = await session.get(RecCandidateOffer, offer_id)
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    candidate = await session.get(RecCandidate, offer.candidate_id)
+    opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
+    sender_name = "Studio Lotus Team"
+    reporting_to = await _resolve_reporting_to(opening)
+    candidate_address = await _resolve_candidate_address(session, candidate, opening)
+    unit_name = opening.title if opening and opening.title else "Studio Lotus"
+    html = render_offer_letter(
+        offer=offer,
+        candidate=candidate,
+        opening=opening,
+        sender_name=sender_name,
+        candidate_address=candidate_address,
+        reporting_to=reporting_to,
+        unit_name=unit_name,
+    )
+    return Response(content=html, media_type="text/html")
+
+
+@router.get("/{offer_id}/email-preview")
+async def preview_offer_email(
+    offer_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+):
+    offer = await session.get(RecCandidateOffer, offer_id)
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    candidate = await session.get(RecCandidate, offer.candidate_id)
+    opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
+    offer_link = _offer_public_link(offer.public_token)
+    offer_pdf_link = offer_pdf_signed_url(offer.public_token)
+    await _ensure_offer_pdf(
+        session=session,
+        offer=offer,
+        candidate=candidate,
+        opening=opening,
+        sender_name="Studio Lotus Team",
+        candidate_address=await _resolve_candidate_address(session, candidate, opening),
+        reporting_to=await _resolve_reporting_to(opening),
+        unit_name=opening.title if opening and opening.title else "Studio Lotus",
+    )
+    html = render_template(
+        "offer_sent",
+        {
+            "candidate_name": candidate.full_name if candidate else "",
+            "opening_title": opening.title if opening else "",
+            "offer_link": offer_link,
+            "joining_date": offer.joining_date or "",
+            "offer_file_url": offer_pdf_link,
+            "sender_name": "Studio Lotus Team",
+        },
+    )
+    return Response(content=html, media_type="text/html")
 
 
 @router.get("/candidates/{candidate_id}", response_model=list[OfferOut])
@@ -199,7 +296,10 @@ async def list_candidate_offers(
             .order_by(RecCandidateOffer.created_at.desc(), RecCandidateOffer.candidate_offer_id.desc())
         )
     ).scalars().all()
-    return [OfferOut.model_validate(row) for row in rows]
+    return [
+        OfferOut(**OfferOut.model_validate(row).model_dump(), pdf_download_url=offer_pdf_signed_url(row.public_token))
+        for row in rows
+    ]
 
 
 @router.post("/candidates/{candidate_id}", response_model=OfferOut, status_code=status.HTTP_201_CREATED)
@@ -252,7 +352,47 @@ async def get_public_offer(
         offer_valid_until=offer.offer_valid_until,
         offer_status=offer.offer_status,
         pdf_url=offer.pdf_url,
+        pdf_download_url=offer_pdf_signed_url(offer.public_token),
     )
+
+
+@public_router.get("/{token}/pdf")
+async def get_public_offer_pdf(
+    token: str,
+    request: Request,
+    session: AsyncSession = Depends(deps.get_db_session),
+):
+    exp = request.query_params.get("exp")
+    sig = request.query_params.get("sig")
+    if not verify_offer_pdf_signature(token, exp, sig):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired link")
+    download_flag = request.query_params.get("download", "1")
+    offer = (
+        await session.execute(select(RecCandidateOffer).where(RecCandidateOffer.public_token == token))
+    ).scalars().first()
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    candidate = await session.get(RecCandidate, offer.candidate_id)
+    opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
+    await _ensure_offer_pdf(
+        session=session,
+        offer=offer,
+        candidate=candidate,
+        opening=opening,
+        sender_name="Studio Lotus Team",
+        candidate_address=await _resolve_candidate_address(session, candidate, opening),
+        reporting_to=await _resolve_reporting_to(opening),
+        unit_name=opening.title if opening and opening.title else "Studio Lotus",
+    )
+    if not offer.pdf_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer file not available")
+    file_id = _extract_drive_file_id(offer.pdf_url)
+    if not file_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer file not available")
+    data, content_type, filename = download_drive_file(file_id)
+    disposition = "attachment" if download_flag == "1" else "inline"
+    headers = {"Content-Disposition": f'{disposition}; filename="{filename}"'}
+    return Response(content=data, media_type=content_type, headers=headers)
 
 
 @public_router.post("/{token}/decision", response_model=OfferPublicOut)
@@ -325,4 +465,5 @@ async def decide_public_offer(
         offer_valid_until=offer.offer_valid_until,
         offer_status=offer.offer_status,
         pdf_url=offer.pdf_url,
+        pdf_download_url=offer_pdf_signed_url(offer.public_token),
     )

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { OfferPublic } from "@/lib/types";
+import { parseDateUtc } from "@/lib/datetime";
 
 type Props = {
   token: string;
@@ -18,12 +19,14 @@ function formatMoney(value?: number | null) {
 
 function formatDate(raw?: string | null) {
   if (!raw) return "-";
-  const d = new Date(raw);
+  const d = parseDateUtc(raw);
+  if (!d) return "-";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleDateString("en-IN", { month: "short", day: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" });
 }
 
 export function OfferPublicClient({ token }: Props) {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const [offer, setOffer] = useState<OfferPublic | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -102,9 +105,9 @@ export function OfferPublicClient({ token }: Props) {
             <span>Fixed: {formatMoney(offer.fixed_ctc_annual)}</span>
             <span>Variable: {formatMoney(offer.variable_ctc_annual)}</span>
           </div>
-          {offer.pdf_url ? (
+          {offer.pdf_download_url ? (
             <a
-              href={offer.pdf_url}
+              href={offer.pdf_download_url}
               target="_blank"
               rel="noreferrer"
               className="text-sm font-semibold text-slate-800 underline decoration-dotted underline-offset-2"

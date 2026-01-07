@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { CandidateOffer } from "@/lib/types";
+import { parseDateUtc } from "@/lib/datetime";
 
 const statusTone: Record<string, string> = {
   draft: "bg-slate-500/10 text-slate-600",
@@ -29,7 +30,8 @@ const statusOptions = [
 
 function formatDate(raw?: string | null) {
   if (!raw) return "-";
-  const d = new Date(raw);
+  const d = parseDateUtc(raw);
+  if (!d) return "-";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleDateString("en-IN", { month: "short", day: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" });
 }

@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { CandidateFull } from "@/lib/types";
 import { internalUrl } from "@/lib/internal";
+import { parseDateUtc } from "@/lib/datetime";
 
 type Me = {
   platform_role_id?: number | null;
@@ -91,7 +92,12 @@ export default async function CandidateCafPage({ params }: { params: { id: strin
           {labelValue("Email", candidate.email || "-")}
           {labelValue("Phone", candidate.phone || "-")}
           {labelValue("CAF status", candidate.caf_submitted_at ? "Submitted" : candidate.caf_sent_at ? "Sent" : "Not sent")}
-          {labelValue("Submitted at", candidate.caf_submitted_at ? new Date(candidate.caf_submitted_at).toLocaleString() : "-")}
+          {labelValue(
+            "Submitted at",
+            candidate.caf_submitted_at
+              ? (parseDateUtc(candidate.caf_submitted_at)?.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) ?? "-")
+              : "-"
+          )}
         </div>
 
         {!screening ? (

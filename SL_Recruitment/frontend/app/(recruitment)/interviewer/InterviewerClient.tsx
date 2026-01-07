@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import { CalendarCheck2, ExternalLink, Loader2, UserRound } from "lucide-react";
 import { CandidateSprint, Interview } from "@/lib/types";
+import { parseDateUtc } from "@/lib/datetime";
 
 type Props = {
   initialUpcoming: Interview[];
@@ -33,7 +34,8 @@ const ratingOptions = ["", "1", "2", "3", "4", "5"];
 
 function formatDateTime(raw?: string | null) {
   if (!raw) return "";
-  const d = new Date(raw);
+  const d = parseDateUtc(raw);
+  if (!d) return "";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleString("en-IN", {
     month: "short",

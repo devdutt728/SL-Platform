@@ -1,0 +1,304 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Appointment Letter</title>
+    <style>
+      body {{ font-family: "Times New Roman", Times, serif; color: #111827; line-height: 1.6; font-size: 14px; }}
+      .container {{ max-width: 760px; margin: 0 auto; padding: 40px; }}
+      .header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }}
+      .logo {{ height: 44px; }}
+      .date {{ font-size: 12px; color: #374151; }}
+      .to-block {{ margin-top: 18px; }}
+      .subject {{ margin: 18px 0 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }}
+      .section-title {{ margin-top: 16px; font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: 0.03em; }}
+      .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }}
+      .card {{ border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 10px; }}
+      .label {{ font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em; }}
+      .value {{ font-size: 14px; font-weight: 600; }}
+      table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+      th, td {{ border: 1px solid #d1d5db; padding: 6px 8px; font-size: 13px; vertical-align: top; }}
+      th {{ background: #f3f4f6; text-align: left; }}
+      .note {{ font-size: 12px; color: #4b5563; margin-top: 8px; }}
+      .signature {{ margin-top: 26px; }}
+      .muted {{ color: #6b7280; font-size: 12px; }}
+      .spacer {{ height: 8px; }}
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <img class="logo" src="{logo_data_uri}" alt="Studio Lotus" />
+        <div class="date">{letter_date}</div>
+      </div>
+
+      <div class="to-block">
+        <p>To,</p>
+        <p>{candidate_name}</p>
+        <p>{candidate_address}</p>
+      </div>
+
+      <div class="subject">Subject: Appointment Letter</div>
+
+      <p>
+        With reference to your application and subsequent interview held at our offices, we are pleased to offer you an
+        employment at Studio Lotus in the following position:
+      </p>
+
+      <div class="grid">
+        <div class="card">
+          <div class="label">Designation</div>
+          <div class="value">{designation_title}</div>
+        </div>
+        <div class="card">
+          <div class="label">Unit</div>
+          <div class="value">{unit_name}</div>
+        </div>
+        <div class="card">
+          <div class="label">Reporting to</div>
+          <div class="value">{reporting_to}</div>
+        </div>
+        <div class="card">
+          <div class="label">Joining date</div>
+          <div class="value">{joining_date}</div>
+        </div>
+      </div>
+
+      <p>
+        The terms and conditions of your employment are provided in the annexure attached. You shall be joining Studio
+        Lotus on {joining_date} at our office at {joining_address}. Your annual emoluments are as follows:
+      </p>
+
+      <table>
+        <tr>
+          <th>Gross Salary Monthly</th>
+          <th>Joining Bonus Monthly**</th>
+        </tr>
+        <tr>
+          <td>{gross_salary_monthly}</td>
+          <td>{joining_bonus_monthly}</td>
+        </tr>
+      </table>
+
+      <p class="note">
+        Note - Your emoluments as detailed above will be subject to deduction of Income Tax and other statutory deductions
+        wherever applicable. All figures are on an annual basis.
+      </p>
+
+      <p>
+        <strong>Joining Bonus -</strong> You are eligible for a joining bonus which shall be paid out to you in equal monthly
+        instalments of {joining_bonus_monthly} each up until {joining_bonus_until}.
+      </p>
+
+      <p>
+        <strong>CTC Revision/ Variable P.A. -</strong> From {ctc_revision_from} onward, you will be eligible for a Revision of CTC
+        along with a Performance Linked Variable. The Variable shall be based on your individual and the firm's performance in
+        the Financial Year {ctc_revision_window}. The dispensation of said Variable will be given in two equal stages in the
+        subsequent Financial Year {ctc_revision_payout}, at the sole discretion of the management. If at any point in time
+        during the year, this appointment with the Firm is notified to be terminated by either party, you shall not be
+        eligible for any Variable, previous or otherwise.
+      </p>
+
+      <div class="section-title">Deductions</div>
+      <p>
+        Income Tax will be deducted at source from your taxable income. It will be computed as per Income Tax Rules, after
+        considering declarations/ documents furnished by you as per the rules of the Firm in force from time to time. Basic
+        salary and Monthly Allowances shall be subject to proportionate deduction on account of absence without pay.
+      </p>
+
+      <div class="section-title">Terms & Conditions (Annexure to letter of appointment)</div>
+      <div class="section-title">General</div>
+      <p>
+        In case of unforeseen circumstances Studio Lotus holds the rights to rescind this offer at any stage. In such a scenario,
+        Studio Lotus is not obligated to provide you with employment or compensation of any kind.
+      </p>
+      <p>
+        Subject to the probation, the term of employment shall be until terminated by either of the parties as per the termination
+        clause or the voluntary resignation of an employee.
+      </p>
+      <p>
+        By signing this appointment letter, you agree to commit to an employment period of a minimum of {minimum_commitment_years}
+        years with Studio Lotus, including the period of probation and subject to the successful completion of probation. In the
+        event this is not honored you shall not be eligible for any privileges, bonus or experience letter.
+      </p>
+
+      <div class="section-title">Probation</div>
+      <p>
+        The first {probation_months} months of your employment will be treated as a probation period post which upon satisfactory
+        performance your employment will be confirmed.
+      </p>
+      <p>
+        In case of termination of employment by either party during the probation period, the joining bonus for the accrued term
+        will be deducted in the full and final settlement.
+      </p>
+      <p>During the probation period either party may terminate the employment by giving {probation_notice_days} days' notice.</p>
+      <p>
+        Only upon confirmation shall you be eligible for all employee benefits such as bonus, paid leaves etc., the details of which
+        are mentioned in the employee handbook.
+      </p>
+
+      <div class="section-title">Revision of Salary</div>
+      <p>Management reserves the right to increase or decrease the salaries, at its sole discretion from time to time.</p>
+
+      <div class="section-title">Termination of Employment</div>
+      <p>For termination of the Employment agreement, a notice period will be mandatory for the different levels as follows:</p>
+      <table>
+        <tr>
+          <th>Band / Level</th>
+          <th>Duration of Notice Period</th>
+        </tr>
+        <tr>
+          <td>Senior Associate / Associate Architect / Project Architect</td>
+          <td>2 months</td>
+        </tr>
+        <tr>
+          <td>Sr. Architect / Architect / Trainee</td>
+          <td>1 month</td>
+        </tr>
+      </table>
+      <p>
+        Your last day of attendance as per above guideline, will also be the full and final settlement date. You are expected to
+        exhibit the same level of performance standards as laid down by the Firm for your role during notice period failing which
+        the firm may terminate your service with immediate effect. The Firm may also immediately terminate your services without any
+        compensation or notice thereof, if you are found with dissatisfactory/ below expected performance after 2 notices (written or
+        verbal) or through one cycle of poor appraisal, or if found in immaterial/ material breach of your responsibilities which breach
+        either (i) is incapable of remedy; or (ii) if capable of remedy, has not been remedied by you for at least 5 days after receipt
+        of notice from the Firm.
+      </p>
+      <p>
+        In the event of your continuous absence from work for a period of 7 working days or more, without formal request or permission
+        from management for the same, you shall be deemed to have left and relinquished your services. In such a case a notice from the
+        Firm will be given to the employee and the Firm shall not be liable to pay any compensation for the notice or absenteeism period
+        to the employee.
+      </p>
+
+      <div class="section-title">Annual Review</div>
+      <p>
+        Subsequent to your confirmation, you will be eligible for increment/ salary revisions, based solely on your satisfactory performance.
+        This would be in accordance with the Firm policy in force in the employee handbook.
+      </p>
+
+      <div class="section-title">Confidentiality</div>
+      <p>
+        You shall not at any time during your employment and thereafter without the prior written consent of the Firm, disclose, divulge,
+        email out or make public any of the secrets regarding accounts, costs data or any other accounts figures, transactions, processes,
+        records, formulae, designs, sketches, drawings, documentation, details, specifications, technical and patent information and know-how,
+        Hardware or Software, as well as methods of procedures of production or dealings of the Firm, which may have become known to you during
+        the course of your duties herein, whether you are in the Firm's employment or not.
+      </p>
+      <p>
+        In the event of your making any discovery of the above information, you shall immediately disclose the same to the Firm. The proprietary
+        rights in such improvement invention or discovery shall vest with the Firm. You shall be bound to join with the Firm to apply for Letters
+        of Patent for the said inventions, improvements or discovery and you shall at the cost of the Firm, do everything necessary to vest the
+        same in the Firm.
+      </p>
+      <p>
+        You acknowledge that in the course of your employment you shall have access to proprietary information, trade secrets and other Confidential
+        Information which is a valuable asset of the Firm and its disclosure or unauthorised use will cause the Firm substantial harm and damage.
+      </p>
+      <p>
+        You shall not at any time during your employment and thereafter for a period of 2 years without the prior written consent of the Firm, consult
+        or offer architectural/design related services to any of the Firm's existing or past clients.
+      </p>
+      <p>
+        While you are in the services of the Firm, you will adhere to the IT Security Systems as prescribed by the Firm. Any instances or attempts of
+        violation of the aforesaid IT Security Systems on your part shall result in strict disciplinary action.
+      </p>
+      <p>
+        You undertake not to disclose except as instructed in writing by the Firm or required by a legally constituted authority for the purpose of laws
+        regarding disclosure, or for the purpose of filing with any Government authority the said Confidential Information.
+      </p>
+      <p>
+        You shall not at any time during your employment and thereafter without the prior written consent of the Firm, for a period of 2 years hire/partner
+        with or allure to hire/partner with any existing employee of Studio Lotus.
+      </p>
+      <p>
+        You accept that the restrictions are reasonable and necessary to protect the Firm's bona fide interest. You acknowledge that irreparable harm, loss
+        and injury to the Firm and the Firm shall be entitled to institute proceedings for temporary restraining order and permanent injunction by any Court of
+        competent jurisdiction to prevent breach of this clause. This remedy is available to the Firm in addition to any other remedy available at law or in equity.
+      </p>
+      <p>
+        You hereby agree and undertake to indemnify and keep indemnified the Firm against all losses that the Firm may suffer as a consequence of the breach
+        by you of the said clauses. Thus, if the Firm is required to make good any loss due to any suit or action for recovery or any claims, penalties, etc.,
+        alleged against the Firm by a third party in accordance with any agreement entered into by the Firm with such third party, directly or indirectly related
+        to the breach committed by you, you undertake to make good to the Firm upon receipt of first information by the Firm in this regard, all such losses,
+        claims, penalties, etc.
+      </p>
+
+      <div class="section-title">Miscellaneous</div>
+      <p>
+        You will be required to work for the Firm or for an Associate or Subsidiary of the Firm on secondment or transfer either full time or part-time in any
+        part of India or overseas as directed by the Management.
+      </p>
+      <p>
+        You will be governed by the Policies & Rules laid down by the Firm from time to time. You will be required to abide by the administrative instructions
+        and rules and regulations stipulated in the employee handbook as in force for the effective and smooth working of the Firm. Actual working hours, timings,
+        working condition, leaves details and other employment policies like IT Policy, travel, transfers, reimbursements, deputation and or sexual harassment, etc
+        will be informed to you through the employee handbook upon your joining the Firm, all updates and new policies in the handbook will be intimated to you
+        from time to time.
+      </p>
+      <p>
+        You shall devote your whole time and full attention exclusively to your employment with the Firm and shall discharge your duties to the best of your abilities.
+        You further undertake that, during the term of your employment, you shall not engage yourself, directly or indirectly, with or without remuneration in any
+        other employment, service or calling of any nature without written permission from the Firm.
+      </p>
+      <p>
+        Any invention, improvement or design conceived by you while in our employment which is within the existing or contemplated scope of the business of the Firm,
+        shall become the Firm's exclusive property for all purposes. For this purpose, the expression 'Firm' includes associated or subsidiary firms also.
+      </p>
+      <p>
+        If felt necessary, the Firm may get you medically examined, and your appointment is subject to your being declared medically fit by a Doctor appointed by the Firm.
+      </p>
+      <p>
+        All architects/designers will be governed by the regulations framed under Council of Architecture. They will be entitled to practice the profession of architecture
+        and use the title of Architect, for which it will be mandatory to hold a Certificate of Registration with up-to-date renewals.
+      </p>
+      <p>
+        Your appointment is subject to the veracity of the documents/ information provided by you and to the satisfactory verification and reference checks. If at any stage
+        you are found to have provided incorrect documents/ information or it is known that you have indulged in illegal or unprofessional activities in the past then your
+        appointment is liable to be cancelled without notice or salary in lieu of notice.
+      </p>
+      <p>
+        You cannot during your employment in the Firm or before be a part of any anti-social/national outfits or of any outfit which is declared as banned by the Government
+        of any country in the world. A breach of this term would entail initiation of appropriate lawful action as deemed by the Firm.
+      </p>
+      <p>
+        The normal age of your retirement shall be on your completion of 58 years. Your date of birth shall be as recorded in your valid birth certificate or school leaving
+        certificate.
+      </p>
+
+      <div class="section-title">Notices</div>
+      <p>
+        Notices may be given by you to the Company at its registered office address. Notices may be given by the Company to you at the address intimated by you in the
+        official records. Any deficiency in the receipt of the notice served upon shall be deemed to confirm that notice has adequately been served upon and receipt thereof
+        has been acknowledged.
+      </p>
+
+      <div class="section-title">Governing Law/Jurisdiction</div>
+      <p>Your employment with the Company is subject to Indian laws. All disputes shall be subject to the jurisdiction of Union Territory Delhi only.</p>
+      <p>In case of any dispute, the decision of the management will be final and obligatory.</p>
+      <p>
+        This appointment letter is being issued to you on the basis of the information and particulars furnished by you in your application (including bio-data), at the time
+        of your interview and subsequent discussions. If it transpires that you have made a false statement (or have not disclosed a material fact) resulting in your being
+        offered this appointment, the Management may take such action as it deems fit in its sole discretion, including termination of your employment.
+      </p>
+
+      <div class="section-title">Policies</div>
+      <p>All policies shall be mentioned in the employee handbook for your reference.</p>
+      <p>The above-mentioned terms of your offer letter will not be considered to be changed/ deemed to be changed unless they are communicated to you in writing by an authorized signatory.</p>
+
+      <p>Please return a scanned copy of this letter duly signed by you, as an acknowledgement of receipt and acceptance of the terms and conditions.</p>
+
+      <div class="signature">
+        <p>On behalf of Studio Lotus</p>
+        <p>{signatory_name}</p>
+        <p>{signatory_title}</p>
+        <div class="spacer"></div>
+        <p>I have read and understood and accept the terms and conditions mentioned above and hereby append my signatures as token of acceptance.</p>
+        <p>{candidate_name}</p>
+        <p>Date: ____________</p>
+      </div>
+      <p class="muted">{footer_note}</p>
+    </div>
+  </body>
+</html>

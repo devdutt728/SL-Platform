@@ -278,6 +278,7 @@ export type CandidateOffer = {
   accepted_at?: string | null;
   declined_at?: string | null;
   pdf_url?: string | null;
+  pdf_download_url?: string | null;
   notes_internal?: string | null;
   created_at: string;
   updated_at: string;
@@ -300,4 +301,5 @@ export type OfferPublic = {
   offer_valid_until?: string | null;
   offer_status: string;
   pdf_url?: string | null;
+  pdf_download_url?: string | null;
 };

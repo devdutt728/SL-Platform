@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { CandidateEvent } from "@/lib/types";
+import { parseDateUtc } from "@/lib/datetime";
 
 type Props = {
   initialLimit?: number;
@@ -9,7 +10,8 @@ type Props = {
 
 function formatDateTime(raw?: string | null) {
   if (!raw) return "";
-  const d = new Date(raw);
+  const d = parseDateUtc(raw);
+  if (!d) return "";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleString("en-IN", {
     month: "short",

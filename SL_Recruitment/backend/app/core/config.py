@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     gmail_sender_name: str = "SL Recruitment"
     calendar_id: str = "primary"
     calendar_timezone: str = "Asia/Kolkata"
+    public_app_origin: str = ""
+    public_app_base_path: str = "/recruitment"
+    public_link_ttl_hours: int = 168
     caf_reminder_days: int = 3
     feedback_reminder_hours: int = 24
     feedback_escalation_hours: int = 48

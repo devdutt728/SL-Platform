@@ -59,6 +59,7 @@ class OfferOut(BaseModel):
     accepted_at: datetime | None = None
     declined_at: datetime | None = None
     pdf_url: str | None = None
+    pdf_download_url: str | None = None
     notes_internal: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -85,6 +86,7 @@ class OfferPublicOut(BaseModel):
     offer_valid_until: date | None = None
     offer_status: str
     pdf_url: str | None = None
+    pdf_download_url: str | None = None
 
 
 class OfferDecisionIn(BaseModel):

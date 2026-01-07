@@ -30,7 +30,13 @@ def _sprint_link(token: str) -> str:
 
 
 def _offer_link(token: str) -> str:
-    return f"/offer/{token}"
+    base = (settings.public_app_origin or "").rstrip("/")
+    base_path = (settings.public_app_base_path or "").strip()
+    if base_path and not base_path.startswith("/"):
+        base_path = f"/{base_path}"
+    base_path = base_path.rstrip("/")
+    path = f"{base_path}/offer/{token}" if base_path else f"/offer/{token}"
+    return f"{base}{path}" if base else path
 
 
 async def _event_exists(

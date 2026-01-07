@@ -6,6 +6,7 @@ import { CandidateFull, CandidateOffer, CandidateStage, CandidateSprint, Intervi
 import { clsx } from "clsx";
 import { CheckCircle2, Copy, ExternalLink, FileText, Layers, Mail, Phone, XCircle } from "lucide-react";
 import { DeleteCandidateButton } from "./DeleteCandidateButton";
+import { parseDateUtc } from "@/lib/datetime";
 
 type Props = {
   candidateId: string;
@@ -46,15 +47,9 @@ function stageLabel(raw?: string | null) {
   return stageOrder.find((s) => s.key === key)?.label || key.split("_").join(" ");
 }
 
-function parseAsUtc(raw: string) {
-  if (!raw) return null;
-  const hasZone = /[zZ]$|[+\-]\d{2}:\d{2}$/.test(raw);
-  return new Date(hasZone ? raw : `${raw}Z`);
-}
-
 function formatDateTime(raw?: string | null) {
   if (!raw) return "";
-  const d = parseAsUtc(raw);
+  const d = parseDateUtc(raw);
   if (!d) return "";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleString("en-IN", {
@@ -68,7 +63,7 @@ function formatDateTime(raw?: string | null) {
 
 function formatDate(raw?: string | null) {
   if (!raw) return "";
-  const d = parseAsUtc(raw);
+  const d = parseDateUtc(raw);
   if (!d) return "";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleDateString("en-IN", { month: "short", day: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" });
@@ -76,7 +71,7 @@ function formatDate(raw?: string | null) {
 
 function formatRelativeDue(raw?: string | null) {
   if (!raw) return "No due date";
-  const due = parseAsUtc(raw);
+  const due = parseDateUtc(raw);
   if (!due || Number.isNaN(due.getTime())) return raw;
   const diffMs = due.getTime() - Date.now();
   const diffDays = Math.ceil(Math.abs(diffMs) / (1000 * 60 * 60 * 24));
@@ -312,13 +307,35 @@ function Metric({ label, value }: { label: string; value: string }) {
 function formatMoney(raw?: number | null) {
   if (raw === null || raw === undefined) return "?";
   try {
-    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(raw);
+    return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(raw);
   } catch {
     return String(raw);
   }
 }
 
+const offerTemplateOptions = [
+  { code: "STD_OFFER", label: "Standard offer" },
+  { code: "ARCH_L2_STD", label: "Architect L2 standard" },
+  { code: "ID_JUNIOR_STD", label: "Interior junior standard" },
+];
+
+function suggestOfferTemplate(openingTitle?: string | null) {
+  const title = (openingTitle || "").toLowerCase();
+  if (!title) return "STD_OFFER";
+  if (title.includes("architect")) return "ARCH_L2_STD";
+  if (title.includes("interior") || title.includes("id ")) return "ID_JUNIOR_STD";
+  return "STD_OFFER";
+}
+
+function parseMoneyString(raw: string) {
+  const cleaned = raw.replace(/,/g, "").trim();
+  if (!cleaned) return null;
+  const value = Number(cleaned);
+  return Number.isFinite(value) ? value : null;
+}
+
 export function Candidate360Client({ candidateId, initial, canDelete, canSchedule, canSkip }: Props) {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const [data, setData] = useState<CandidateFull>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -344,6 +361,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [offerProbationMonths, setOfferProbationMonths] = useState("3");
   const [offerGradeId, setOfferGradeId] = useState("");
   const [offerNotes, setOfferNotes] = useState("");
+  const [offerPreviewOpen, setOfferPreviewOpen] = useState(false);
+  const [offerPreviewHtml, setOfferPreviewHtml] = useState("");
+  const [offerPreviewTitle, setOfferPreviewTitle] = useState("");
+  const [offerPreviewBusy, setOfferPreviewBusy] = useState(false);
+  const [offerPreviewError, setOfferPreviewError] = useState<string | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
   const [sprintTemplates, setSprintTemplates] = useState<SprintTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
@@ -385,6 +407,16 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     return (first + second).toUpperCase() || "C";
   }, [candidate.name]);
   const currentStageKey = normalizeStage(candidate.current_stage);
+
+  useEffect(() => {
+    if (candidate.opening_title && !offerDesignation) {
+      setOfferDesignation(candidate.opening_title);
+    }
+    if (offerTemplateCode === "STD_OFFER") {
+      const suggestion = suggestOfferTemplate(candidate.opening_title);
+      setOfferTemplateCode(suggestion);
+    }
+  }, [candidate.opening_title]);
 
   const cafState = useMemo(() => {
     const generated = !!candidate.caf_sent_at || !!cafLink?.caf_token;
@@ -645,6 +677,24 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       setOffersError(e?.message || "Offer creation failed.");
     } finally {
       setOffersBusy(false);
+    }
+  }
+
+  async function handleOfferPreview(offerId: number, kind: "letter" | "email") {
+    setOfferPreviewBusy(true);
+    setOfferPreviewError(null);
+    try {
+      const endpoint = kind === "email" ? "email-preview" : "preview";
+      const res = await fetch(`/api/rec/offers/${offerId}/${endpoint}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(await res.text());
+      const html = await res.text();
+      setOfferPreviewHtml(html);
+      setOfferPreviewTitle(kind === "email" ? "Offer email preview" : "Offer letter preview");
+      setOfferPreviewOpen(true);
+    } catch (e: any) {
+      setOfferPreviewError(e?.message || "Preview failed.");
+    } finally {
+      setOfferPreviewBusy(false);
     }
   }
 
@@ -1067,17 +1117,19 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const interviewUpcoming = useMemo(() => {
     if (!interviews) return [] as Interview[];
     const now = new Date();
+    const getTs = (value?: string | null) => parseDateUtc(value)?.getTime() ?? 0;
     return [...interviews]
-      .filter((item) => new Date(item.scheduled_start_at).getTime() >= now.getTime())
-      .sort((a, b) => new Date(a.scheduled_start_at).getTime() - new Date(b.scheduled_start_at).getTime());
+      .filter((item) => getTs(item.scheduled_start_at) >= now.getTime())
+      .sort((a, b) => getTs(a.scheduled_start_at) - getTs(b.scheduled_start_at));
   }, [interviews]);
 
   const interviewPast = useMemo(() => {
     if (!interviews) return [] as Interview[];
     const now = new Date();
+    const getTs = (value?: string | null) => parseDateUtc(value)?.getTime() ?? 0;
     return [...interviews]
-      .filter((item) => new Date(item.scheduled_start_at).getTime() < now.getTime())
-      .sort((a, b) => new Date(b.scheduled_start_at).getTime() - new Date(a.scheduled_start_at).getTime());
+      .filter((item) => getTs(item.scheduled_start_at) < now.getTime())
+      .sort((a, b) => getTs(b.scheduled_start_at) - getTs(a.scheduled_start_at));
   }, [interviews]);
   const latestOffer = candidateOffers && candidateOffers.length > 0 ? candidateOffers[0] : null;
 
@@ -1980,6 +2032,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     {offersError}
                   </div>
                 ) : null}
+                {offerPreviewError ? (
+                  <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">
+                    {offerPreviewError}
+                  </div>
+                ) : null}
                 {offersBusy && !candidateOffers ? (
                   <div className="rounded-2xl border border-white/60 bg-white/30 p-4 text-sm text-slate-600">Loading offers...</div>
                 ) : latestOffer ? (
@@ -2002,10 +2059,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                       {latestOffer.fixed_ctc_annual != null ? <Chip className={chipTone("blue")}>Fixed {formatMoney(latestOffer.fixed_ctc_annual)}</Chip> : null}
                       {latestOffer.variable_ctc_annual != null ? <Chip className={chipTone("amber")}>Variable {formatMoney(latestOffer.variable_ctc_annual)}</Chip> : null}
                       {latestOffer.currency ? <Chip className={chipTone("neutral")}>{latestOffer.currency}</Chip> : null}
-                      {latestOffer.pdf_url ? (
+                      {latestOffer.pdf_download_url ? (
                         <a
                           className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
-                          href={latestOffer.pdf_url}
+                          href={latestOffer.pdf_download_url}
                           target="_blank"
                           rel="noreferrer"
                         >
@@ -2014,6 +2071,22 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                       ) : null}
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800"
+                        onClick={() => void handleOfferPreview(latestOffer.candidate_offer_id, "letter")}
+                        disabled={offerPreviewBusy}
+                      >
+                        Preview letter
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800"
+                        onClick={() => void handleOfferPreview(latestOffer.candidate_offer_id, "email")}
+                        disabled={offerPreviewBusy}
+                      >
+                        Preview email
+                      </button>
                       {latestOffer.offer_status === "draft" ? (
                         <button
                           type="button"
@@ -2077,9 +2150,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                           value={offerTemplateCode}
                           onChange={(e) => setOfferTemplateCode(e.target.value)}
                         >
-                          <option value="STD_OFFER">STD_OFFER</option>
-                          <option value="ARCH_L2_STD">ARCH_L2_STD</option>
-                          <option value="ID_JUNIOR_STD">ID_JUNIOR_STD</option>
+                          {offerTemplateOptions.map((opt) => (
+                            <option key={opt.code} value={opt.code}>
+                              {opt.code} - {opt.label}
+                            </option>
+                          ))}
                         </select>
                       </label>
                       <label className="space-y-1 text-xs text-slate-600">
@@ -2180,6 +2255,27 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           </div>
         </section>
       </div>
+      {offerPreviewOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-white/30 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-white/80 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-800">{offerPreviewTitle}</p>
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
+                onClick={() => setOfferPreviewOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <iframe
+              title={offerPreviewTitle}
+              className="h-[70vh] w-full bg-white"
+              srcDoc={offerPreviewHtml}
+            />
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
