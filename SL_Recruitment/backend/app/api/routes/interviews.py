@@ -602,12 +602,12 @@ async def propose_interview_slots(
     ]
     slot_rows = "\n".join(
         "<tr>"
-        f'<td style="padding:10px 0; color:#0f172a; font-weight:600;">{item["label"]}</td>'
-        f'<td style="padding:10px 0; text-align:right;">'
+        f'<td style="padding:12px 0; color:#0f172a; font-weight:600; font-size:15px;">{item["label"]}</td>'
+        f'<td style="padding:12px 0; text-align:right;">'
         f'<a href="{item["link"]}" '
-        'style="display:inline-block; padding:8px 16px; border-radius:999px; '
-        'background:linear-gradient(120deg,#2563eb,#0ea5e9); color:#ffffff; text-decoration:none; '
-        'font-weight:600;">Select</a>'
+        'style="display:inline-block; padding:10px 18px; border-radius:999px; '
+        'background:linear-gradient(120deg,#0ea5e9,#22c55e); color:#ffffff; text-decoration:none; '
+        'font-weight:700; font-size:13px; letter-spacing:0.02em;">Select slot</a>'
         "</td>"
         "</tr>"
         for item in slot_links
@@ -719,6 +719,71 @@ async def preview_interview_email(
     return Response(content=html, media_type="text/html")
 
 
+@router.get("/interview-slots/email-preview")
+async def preview_interview_slot_email(
+    candidate_id: int = Query(ge=1),
+    round_type: str = Query(min_length=1, max_length=50),
+    interviewer_email: str = Query(min_length=3, max_length=255),
+    start_date: str | None = Query(default=None),
+    session: AsyncSession = Depends(deps.get_db_session),
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER])),
+):
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    opening = None
+    if candidate.opening_id is not None:
+        opening = (await session.execute(select(RecOpening).where(RecOpening.opening_id == candidate.opening_id))).scalars().first()
+
+    parsed_start = None
+    if start_date:
+        try:
+            parsed_start = datetime.fromisoformat(start_date).date()
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start_date format")
+
+    tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
+    start_day = parsed_start or datetime.now(tz).date()
+    free_slots = filter_free_slots(interviewer_email=interviewer_email, start_day=start_day, tz=tz)
+
+    slot_links = [
+        {"label": _format_slot_label(slot.start_at.astimezone(timezone.utc).replace(tzinfo=None), tz), "link": "#"}
+        for slot in free_slots
+    ]
+    if slot_links:
+        slot_rows = "\n".join(
+            "<tr>"
+            f'<td style="padding:12px 0; color:#0f172a; font-weight:600; font-size:15px;">{item["label"]}</td>'
+            f'<td style="padding:12px 0; text-align:right;">'
+            f'<a href="{item["link"]}" '
+            'style="display:inline-block; padding:10px 18px; border-radius:999px; '
+            'background:linear-gradient(120deg,#0ea5e9,#22c55e); color:#ffffff; text-decoration:none; '
+            'font-weight:700; font-size:13px; letter-spacing:0.02em;">Select slot</a>'
+            "</td>"
+            "</tr>"
+            for item in slot_links
+        )
+    else:
+        slot_rows = (
+            "<tr>"
+            "<td style=\"padding:14px 0; color:#64748b; font-size:14px;\">"
+            "No available slots in the selected window."
+            "</td>"
+            "</tr>"
+        )
+
+    html = render_template(
+        "interview_slot_options",
+        {
+            "candidate_name": candidate.full_name,
+            "round_type": round_type,
+            "opening_title": opening.title if opening else "",
+            "slots_table": slot_rows,
+        },
+    )
+    return Response(content=html, media_type="text/html")
+
+
 @router.get("/interview-slots/debug")
 async def debug_interview_slot_lookup(
     interviewer_email: str = Query(min_length=3, max_length=255),
@@ -735,9 +800,7 @@ async def debug_interview_slot_lookup(
     day_start = datetime.combine(parsed_start, time(0, 0), tzinfo=tz)
     day_end = datetime.combine(parsed_start, time(23, 59), tzinfo=tz)
 
-    calendar_ids = list_visible_calendar_ids(subject_email=interviewer_email)
-    if not calendar_ids:
-        calendar_ids = [settings.calendar_id or "primary"]
+    calendar_ids = [interviewer_email]
 
     busy_map = query_freebusy(
         calendar_ids=calendar_ids,
@@ -775,6 +838,11 @@ async def debug_interview_slot_lookup(
                 }
             )
 
+    try:
+        calendar_list = list_calendar_list_details(subject_email=interviewer_email)
+    except Exception:
+        calendar_list = []
+
     return {
         "settings": {
             "enable_calendar": settings.enable_calendar,
@@ -783,7 +851,7 @@ async def debug_interview_slot_lookup(
             "google_application_credentials": settings.google_application_credentials,
         },
         "service_account": service_account_info(),
-        "calendar_list": list_calendar_list_details(subject_email=interviewer_email),
+        "calendar_list": calendar_list,
         "calendar_ids": calendar_ids,
         "busy_ranges": busy_flat,
         "events": events,

@@ -913,18 +913,45 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
 
   async function handleScheduleEmailPreview() {
     setScheduleEmailPreviewError(null);
-    const fallbackSlot = slotPreviewSlots[0] || null;
-    const startIso = selectedSlot
-      ? `${selectedSlot.slot_start_at}Z`
-      : fallbackSlot
-        ? `${fallbackSlot.slot_start_at}Z`
-        : `${scheduleStartAt}:00+05:30`;
-    if (!selectedSlot && !fallbackSlot && !scheduleStartAt) {
-      setScheduleEmailPreviewError("Pick a slot or start time to preview the email.");
-      return;
-    }
+    const roundUpper = scheduleRound.toUpperCase();
+    const isSlotInvite = roundUpper === "L1" || roundUpper === "L2";
     setScheduleEmailPreviewBusy(true);
     try {
+      if (isSlotInvite) {
+        if (!scheduleInterviewer?.email) {
+          setScheduleEmailPreviewError("Select an interviewer to preview the slot email.");
+          return;
+        }
+        const startDate =
+          slotPreviewDate ||
+          (scheduleStartAt ? scheduleStartAt.split("T")[0] : "");
+        if (!startDate) {
+          setScheduleEmailPreviewError("Select a first day to preview the slot email.");
+          return;
+        }
+        const url = new URL(`${basePath}/api/rec/interview-slots/email-preview`, window.location.origin);
+        url.searchParams.set("candidate_id", candidateId);
+        url.searchParams.set("round_type", scheduleRound);
+        url.searchParams.set("interviewer_email", scheduleInterviewer.email);
+        url.searchParams.set("start_date", startDate);
+        const res = await fetch(url.toString(), { cache: "no-store" });
+        if (!res.ok) throw new Error(await res.text());
+        const html = await res.text();
+        setScheduleEmailPreviewHtml(html);
+        setScheduleEmailPreviewOpen(true);
+        return;
+      }
+
+      const fallbackSlot = slotPreviewSlots[0] || null;
+      const startIso = selectedSlot
+        ? `${selectedSlot.slot_start_at}Z`
+        : fallbackSlot
+          ? `${fallbackSlot.slot_start_at}Z`
+          : `${scheduleStartAt}:00+05:30`;
+      if (!selectedSlot && !fallbackSlot && !scheduleStartAt) {
+        setScheduleEmailPreviewError("Pick a slot or start time to preview the email.");
+        return;
+      }
       const url = new URL(`${basePath}/api/rec/interviews/email-preview`, window.location.origin);
       url.searchParams.set("candidate_id", candidateId);
       url.searchParams.set("round_type", scheduleRound);
