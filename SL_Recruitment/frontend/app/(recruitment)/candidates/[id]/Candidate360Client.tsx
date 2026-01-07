@@ -250,6 +250,11 @@ async function sendOffer(offerId: number) {
   return (await res.json()) as CandidateOffer;
 }
 
+async function deleteOffer(offerId: number) {
+  const res = await fetch(`/api/rec/offers/${encodeURIComponent(String(offerId))}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await res.text());
+}
+
 async function convertCandidate(candidateId: string) {
   const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/convert`, { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
@@ -319,6 +324,22 @@ const offerTemplateOptions = [
   { code: "ID_JUNIOR_STD", label: "Interior junior standard" },
 ];
 
+const letterOverrideFields = [
+  { key: "candidate_address", label: "Candidate address" },
+  { key: "unit_name", label: "Unit name" },
+  { key: "reporting_to", label: "Reporting to" },
+  { key: "joining_address", label: "Joining address" },
+  { key: "joining_bonus_monthly", label: "Joining bonus monthly (Rs.)" },
+  { key: "joining_bonus_until", label: "Joining bonus until" },
+  { key: "ctc_revision_from", label: "CTC revision from" },
+  { key: "ctc_revision_window", label: "CTC revision window" },
+  { key: "ctc_revision_payout", label: "CTC revision payout" },
+  { key: "minimum_commitment_years", label: "Minimum commitment (years)" },
+  { key: "probation_notice_days", label: "Probation notice (days)" },
+  { key: "signatory_name", label: "Signatory name" },
+  { key: "signatory_title", label: "Signatory title" },
+];
+
 function suggestOfferTemplate(openingTitle?: string | null) {
   const title = (openingTitle || "").toLowerCase();
   if (!title) return "STD_OFFER";
@@ -332,6 +353,15 @@ function parseMoneyString(raw: string) {
   if (!cleaned) return null;
   const value = Number(cleaned);
   return Number.isFinite(value) ? value : null;
+}
+
+function cleanLetterOverrides(raw: Record<string, string>) {
+  const cleaned: Record<string, string> = {};
+  Object.entries(raw).forEach(([key, value]) => {
+    const trimmed = value.trim();
+    if (trimmed) cleaned[key] = trimmed;
+  });
+  return cleaned;
 }
 
 export function Candidate360Client({ candidateId, initial, canDelete, canSchedule, canSkip }: Props) {
@@ -361,6 +391,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [offerProbationMonths, setOfferProbationMonths] = useState("3");
   const [offerGradeId, setOfferGradeId] = useState("");
   const [offerNotes, setOfferNotes] = useState("");
+  const [offerLetterOverrides, setOfferLetterOverrides] = useState<Record<string, string>>({});
+  const [draftLetterOverrides, setDraftLetterOverrides] = useState<Record<string, string>>({});
+  const [draftOverridesOpen, setDraftOverridesOpen] = useState(false);
   const [offerPreviewOpen, setOfferPreviewOpen] = useState(false);
   const [offerPreviewHtml, setOfferPreviewHtml] = useState("");
   const [offerPreviewTitle, setOfferPreviewTitle] = useState("");
@@ -660,6 +693,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
     setOffersBusy(true);
     try {
+      const overrides = cleanLetterOverrides(offerLetterOverrides);
       await createOffer(candidateId, {
         offer_template_code: offerTemplateCode.trim(),
         designation_title: offerDesignation.trim() || candidate.opening_title || candidate.current_stage,
@@ -671,6 +705,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         probation_months: offerProbationMonths ? Number(offerProbationMonths) : null,
         grade_id_platform: offerGradeId ? Number(offerGradeId) : null,
         notes_internal: offerNotes.trim() || null,
+        letter_overrides: Object.keys(overrides).length ? overrides : {},
       });
       await refreshOffers();
     } catch (e: any) {
@@ -745,6 +780,34 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       await refreshOffers();
     } catch (e: any) {
       setOffersError(e?.message || "Offer send failed.");
+    } finally {
+      setOffersBusy(false);
+    }
+  }
+
+  async function handleSaveDraftOverrides(offerId: number) {
+    setOffersBusy(true);
+    setOffersError(null);
+    try {
+      const overrides = cleanLetterOverrides(draftLetterOverrides);
+      await updateOffer(offerId, { letter_overrides: overrides });
+      await refreshOffers();
+    } catch (e: any) {
+      setOffersError(e?.message || "Offer update failed.");
+    } finally {
+      setOffersBusy(false);
+    }
+  }
+
+  async function handleDeleteOffer(offerId: number) {
+    if (!confirm("Delete this draft offer? This cannot be undone.")) return;
+    setOffersBusy(true);
+    setOffersError(null);
+    try {
+      await deleteOffer(offerId);
+      await refreshOffers();
+    } catch (e: any) {
+      setOffersError(e?.message || "Offer deletion failed.");
     } finally {
       setOffersBusy(false);
     }
@@ -1132,6 +1195,15 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       .sort((a, b) => getTs(b.scheduled_start_at) - getTs(a.scheduled_start_at));
   }, [interviews]);
   const latestOffer = candidateOffers && candidateOffers.length > 0 ? candidateOffers[0] : null;
+
+  useEffect(() => {
+    if (!latestOffer) {
+      setDraftLetterOverrides({});
+      setDraftOverridesOpen(false);
+      return;
+    }
+    setDraftLetterOverrides(latestOffer.letter_overrides || {});
+  }, [latestOffer?.candidate_offer_id]);
 
   return (
     <main className="content-pad space-y-4">
@@ -2089,14 +2161,26 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                         Preview email
                       </button>
                       {latestOffer.offer_status === "draft" ? (
-                        <button
-                          type="button"
-                          className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
-                          onClick={() => void handleSubmitOffer(latestOffer.candidate_offer_id)}
-                          disabled={offersBusy}
-                        >
-                          Submit for approval
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
+                            onClick={() => void handleSubmitOffer(latestOffer.candidate_offer_id)}
+                            disabled={offersBusy}
+                          >
+                            Submit for approval
+                          </button>
+                          {canDelete ? (
+                            <button
+                              type="button"
+                              className="rounded-full bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white"
+                              onClick={() => void handleDeleteOffer(latestOffer.candidate_offer_id)}
+                              disabled={offersBusy}
+                            >
+                              Delete draft
+                            </button>
+                          ) : null}
+                        </>
                       ) : null}
                       {latestOffer.offer_status === "pending_approval" ? (
                         <>
@@ -2139,6 +2223,52 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                         </button>
                       ) : null}
                     </div>
+                    {latestOffer.offer_status === "draft" ? (
+                      <div className="mt-4 rounded-2xl border border-slate-200 bg-white/70 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Appointment letter variables</p>
+                          <button
+                            type="button"
+                            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                            onClick={() => setDraftOverridesOpen((prev) => !prev)}
+                          >
+                            {draftOverridesOpen ? "Hide" : "Edit"}
+                          </button>
+                        </div>
+                        {draftOverridesOpen ? (
+                          <>
+                            <div className="mt-3 grid gap-2 md:grid-cols-2">
+                              {letterOverrideFields.map((field) => (
+                                <label key={field.key} className="space-y-1 text-xs text-slate-600">
+                                  {field.label}
+                                  <input
+                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                                    value={draftLetterOverrides[field.key] || ""}
+                                    onChange={(e) =>
+                                      setDraftLetterOverrides((prev) => ({
+                                        ...prev,
+                                        [field.key]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="-"
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                            <div className="mt-3 flex justify-end">
+                              <button
+                                type="button"
+                                className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
+                                onClick={() => void handleSaveDraftOverrides(latestOffer.candidate_offer_id)}
+                                disabled={offersBusy}
+                              >
+                                Save letter fields
+                              </button>
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-white/60 bg-white/30 p-4">
@@ -2238,6 +2368,27 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                           placeholder="Offer notes for HR"
                         />
                       </label>
+                      <div className="rounded-2xl border border-slate-200 bg-white/70 p-3 md:col-span-2">
+                        <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Appointment letter variables</p>
+                        <div className="mt-2 grid gap-2 md:grid-cols-2">
+                          {letterOverrideFields.map((field) => (
+                            <label key={field.key} className="space-y-1 text-xs text-slate-600">
+                              {field.label}
+                              <input
+                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                                value={offerLetterOverrides[field.key] || ""}
+                                onChange={(e) =>
+                                  setOfferLetterOverrides((prev) => ({
+                                    ...prev,
+                                    [field.key]: e.target.value,
+                                  }))
+                                }
+                                placeholder="-"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                     <div className="mt-3 flex justify-end">
                       <button

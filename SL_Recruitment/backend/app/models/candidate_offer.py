@@ -41,6 +41,7 @@ class RecCandidateOffer(Base):
 
     pdf_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes_internal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    offer_letter_overrides: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -29,3 +29,18 @@ export async function PATCH(request: Request, { params }: Params) {
     headers: { "content-type": res.headers.get("content-type") || "application/json" },
   });
 }
+
+export async function DELETE(_request: Request, { params }: Params) {
+  const res = await fetch(backendUrl(`/rec/offers/${encodeURIComponent(params.id)}`), {
+    method: "DELETE",
+    headers: { ...authHeaderFromCookie() },
+  });
+  if (res.status === 204) {
+    return new NextResponse(null, { status: 204 });
+  }
+  const data = await res.text();
+  return new NextResponse(data, {
+    status: res.status,
+    headers: { "content-type": res.headers.get("content-type") || "application/json" },
+  });
+}

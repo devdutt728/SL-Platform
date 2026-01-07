@@ -16,6 +16,7 @@ class OfferCreateIn(BaseModel):
     probation_months: int | None = None
     offer_valid_until: date | None = None
     notes_internal: str | None = None
+    letter_overrides: dict[str, str] | None = None
 
 
 class OfferUpdateIn(BaseModel):
@@ -30,6 +31,7 @@ class OfferUpdateIn(BaseModel):
     probation_months: int | None = None
     offer_valid_until: date | None = None
     notes_internal: str | None = None
+    letter_overrides: dict[str, str] | None = None
     submit_for_approval: bool | None = None
 
 
@@ -61,6 +63,7 @@ class OfferOut(BaseModel):
     pdf_url: str | None = None
     pdf_download_url: str | None = None
     notes_internal: str | None = None
+    letter_overrides: dict[str, str] | None = None
     created_at: datetime
     updated_at: datetime
 

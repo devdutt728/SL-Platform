@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from urllib.parse import urlparse, parse_qs
 from sqlalchemy import select
@@ -61,6 +62,43 @@ def _extract_drive_file_id(raw_url: str | None) -> str | None:
     return None
 
 
+def _decode_letter_overrides(raw: str | None) -> dict[str, str] | None:
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    cleaned: dict[str, str] = {}
+    for key, value in data.items():
+        if not isinstance(key, str):
+            continue
+        if value is None:
+            continue
+        cleaned[key] = str(value)
+    return cleaned or None
+
+
+def _safe_person_id(raw: str | None) -> int | None:
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except Exception:
+        return None
+
+
+def _offer_base_payload(offer: RecCandidateOffer) -> dict:
+    data = OfferOut.model_validate(offer).model_dump()
+    data.pop("candidate_name", None)
+    data.pop("candidate_code", None)
+    data.pop("opening_title", None)
+    data.pop("letter_overrides", None)
+    return data
+
+
 @router.get("", response_model=list[OfferOut])
 async def list_offers(
     status_filter: list[str] | None = Query(default=None, alias="status"),
@@ -87,11 +125,12 @@ async def list_offers(
         offer = row[0]
         out.append(
             OfferOut(
-                **OfferOut.model_validate(offer).model_dump(),
+                **_offer_base_payload(offer),
                 candidate_name=row[1],
                 candidate_code=row[2],
                 opening_title=row[3],
                 pdf_download_url=offer_pdf_signed_url(offer.public_token),
+                letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
             )
         )
     return out
@@ -121,11 +160,12 @@ async def get_offer(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
     offer = row[0]
     return OfferOut(
-        **OfferOut.model_validate(offer).model_dump(),
+        **_offer_base_payload(offer),
         candidate_name=row[1],
         candidate_code=row[2],
         opening_title=row[3],
         pdf_download_url=offer_pdf_signed_url(offer.public_token),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
     )
 
 
@@ -147,7 +187,35 @@ async def update_offer(
         await submit_for_approval(session, offer=offer, user=user)
     await session.commit()
     await session.refresh(offer)
-    return OfferOut.model_validate(offer)
+    return OfferOut(
+        **_offer_base_payload(offer),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
+
+
+@router.delete("/{offer_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_offer(
+    offer_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    offer = await session.get(RecCandidateOffer, offer_id)
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    if offer.offer_status != "draft":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only draft offers can be deleted")
+    await log_event(
+        session,
+        candidate_id=offer.candidate_id,
+        action_type="offer_draft_deleted",
+        performed_by_person_id_platform=_safe_person_id(user.person_id_platform),
+        related_entity_type="offer",
+        related_entity_id=offer.candidate_offer_id,
+        meta_json={"offer_id": offer.candidate_offer_id},
+    )
+    await session.delete(offer)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{offer_id}/approve", response_model=OfferOut)
@@ -162,7 +230,10 @@ async def approve_offer_route(
     await approve_offer(session, offer=offer, user=user)
     await session.commit()
     await session.refresh(offer)
-    return OfferOut.model_validate(offer)
+    return OfferOut(
+        **_offer_base_payload(offer),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
 
 
 @router.post("/{offer_id}/reject", response_model=OfferOut)
@@ -179,7 +250,10 @@ async def reject_offer_route(
     await reject_offer(session, offer=offer, user=user, reason=reason)
     await session.commit()
     await session.refresh(offer)
-    return OfferOut.model_validate(offer)
+    return OfferOut(
+        **_offer_base_payload(offer),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
 
 
 @router.post("/{offer_id}/send", response_model=OfferOut)
@@ -217,7 +291,10 @@ async def send_offer_route(
         )
     await session.commit()
     await session.refresh(offer)
-    return OfferOut.model_validate(offer)
+    return OfferOut(
+        **_offer_base_payload(offer),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
 
 
 @router.get("/{offer_id}/preview")
@@ -298,7 +375,11 @@ async def list_candidate_offers(
         )
     ).scalars().all()
     return [
-        OfferOut(**OfferOut.model_validate(row).model_dump(), pdf_download_url=offer_pdf_signed_url(row.public_token))
+        OfferOut(
+            **_offer_base_payload(row),
+            pdf_download_url=offer_pdf_signed_url(row.public_token),
+            letter_overrides=_decode_letter_overrides(row.offer_letter_overrides),
+        )
         for row in rows
     ]
 
@@ -317,9 +398,25 @@ async def create_candidate_offer(
     if candidate.opening_id:
         opening = await session.get(RecOpening, candidate.opening_id)
     offer = await create_offer(session, candidate=candidate, opening=opening, payload=payload.model_dump(exclude_none=True), user=user)
+    try:
+        await _ensure_offer_pdf(
+            session=session,
+            offer=offer,
+            candidate=candidate,
+            opening=opening,
+            sender_name=user.full_name or "Studio Lotus Team",
+            candidate_address=await _resolve_candidate_address(session, candidate, opening),
+            reporting_to=await _resolve_reporting_to(opening),
+            unit_name=opening.title if opening and opening.title else "Studio Lotus",
+        )
+    except Exception:
+        pass
     await session.commit()
     await session.refresh(offer)
-    return OfferOut.model_validate(offer)
+    return OfferOut(
+        **_offer_base_payload(offer),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
 
 
 @public_router.get("/{token}", response_model=OfferPublicOut)
@@ -365,9 +462,11 @@ async def get_public_offer_pdf(
 ):
     exp = request.query_params.get("exp")
     sig = request.query_params.get("sig")
-    valid = verify_offer_pdf_signature(token, exp, sig)
-    if settings.environment == "production" and not valid:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired link")
+    has_internal_cookie = bool(request.cookies.get("slr_token"))
+    if settings.environment == "production" or not has_internal_cookie:
+        valid = verify_offer_pdf_signature(token, exp, sig)
+        if not valid:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired link")
     download_flag = request.query_params.get("download", "1")
     offer = (
         await session.execute(select(RecCandidateOffer).where(RecCandidateOffer.public_token == token))

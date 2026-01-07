@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import json
 import base64
 import hashlib
 import hmac
@@ -43,7 +44,9 @@ def _format_money(value) -> str:
         return str(value)
 
 def _logo_data_uri() -> str:
-    path = resolve_repo_path("frontend/public/Studio Lotus Logo (TM).png")
+    preferred = resolve_repo_path("backend/app/templates/offer_letter_logo.png")
+    fallback = resolve_repo_path("frontend/public/Studio Lotus Logo (TM).png")
+    path = preferred if preferred.exists() else fallback
     if not path.exists():
         return ""
     data = path.read_bytes()
@@ -77,21 +80,22 @@ def _offer_public_pdf_link(token: str) -> str:
     path = f"{prefix}/api/offer/{token}/pdf" if prefix else f"/api/offer/{token}/pdf"
     return f"{base}{path}" if base else path
 
-def _offer_pdf_signature(token: str, expires_at: datetime) -> str:
-    payload = f"{token}:{int(expires_at.timestamp())}"
+def _offer_pdf_signature(token: str, expires_at: int) -> str:
+    signing_key = (settings.public_link_signing_key or settings.secret_key).strip()
+    payload = f"{token}:{int(expires_at)}"
     digest = hmac.new(
-        settings.secret_key.encode("utf-8"),
+        signing_key.encode("utf-8"),
         payload.encode("utf-8"),
         hashlib.sha256,
     ).digest()
     return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
 def offer_pdf_signed_url(token: str, *, download: bool = True) -> str:
-    expires_at = datetime.utcnow() + timedelta(hours=settings.public_link_ttl_hours)
+    expires_at = int((datetime.now(timezone.utc) + timedelta(hours=settings.public_link_ttl_hours)).timestamp())
     sig = _offer_pdf_signature(token, expires_at)
     base = _offer_public_pdf_link(token)
     download_flag = "1" if download else "0"
-    return f"{base}?exp={int(expires_at.timestamp())}&sig={sig}&download={download_flag}"
+    return f"{base}?exp={expires_at}&sig={sig}&download={download_flag}"
 
 def verify_offer_pdf_signature(token: str, exp: str | None, sig: str | None) -> bool:
     if not exp or not sig:
@@ -100,10 +104,29 @@ def verify_offer_pdf_signature(token: str, exp: str | None, sig: str | None) -> 
         exp_int = int(exp)
     except ValueError:
         return False
-    if datetime.utcnow().timestamp() > exp_int:
+    if datetime.now(timezone.utc).timestamp() > exp_int:
         return False
-    expected = _offer_pdf_signature(token, datetime.utcfromtimestamp(exp_int))
+    expected = _offer_pdf_signature(token, exp_int)
     return hmac.compare_digest(expected, sig)
+
+
+def _parse_letter_overrides(raw: str | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    cleaned: dict[str, str] = {}
+    for key, value in data.items():
+        if not isinstance(key, str):
+            continue
+        if value is None:
+            continue
+        cleaned[key] = str(value)
+    return cleaned
 
 async def _resolve_reporting_to(opening: RecOpening | None) -> str:
     if not opening or not opening.reporting_person_id_platform:
@@ -224,7 +247,7 @@ def render_offer_letter(
         "fixed_ctc": _format_money(offer.fixed_ctc_annual),
         "variable_ctc": _format_money(offer.variable_ctc_annual),
         "currency": offer.currency or "INR",
-        "probation_months": f"{offer.probation_months} months" if offer.probation_months is not None else "-",
+        "probation_months": f"{offer.probation_months} months" if offer.probation_months is not None else "6 months",
         "valid_until": _format_date(offer.offer_valid_until),
         "gross_salary_monthly": _format_money(gross_monthly),
         "joining_bonus_monthly": joining_bonus_monthly,
@@ -242,6 +265,10 @@ def render_offer_letter(
         "sender_name": sender_name,
         "offer_public_link": _offer_public_link(offer.public_token),
     }
+    overrides = _parse_letter_overrides(offer.offer_letter_overrides)
+    for key, value in overrides.items():
+        if key in context and value.strip():
+            context[key] = value.strip()
     return raw.format_map({k: ("" if v is None else v) for k, v in context.items()})
 
 def _platform_person_id(user: UserContext) -> int | None:
@@ -303,6 +330,14 @@ async def _transition_stage(session: AsyncSession, *, candidate_id: int, to_stag
 
 async def create_offer(session: AsyncSession, *, candidate: RecCandidate, opening: RecOpening | None, payload: dict[str, Any], user: UserContext) -> RecCandidateOffer:
     now = datetime.utcnow()
+    letter_overrides = payload.get("letter_overrides")
+    if isinstance(letter_overrides, dict):
+        try:
+            letter_overrides = json.dumps(letter_overrides)
+        except Exception:
+            letter_overrides = None
+    else:
+        letter_overrides = None
     offer = RecCandidateOffer(
         candidate_id=candidate.candidate_id,
         opening_id=candidate.opening_id,
@@ -322,6 +357,7 @@ async def create_offer(session: AsyncSession, *, candidate: RecCandidate, openin
         generated_by_person_id_platform=_platform_person_id(user),
         generated_at=now,
         notes_internal=payload.get("notes_internal"),
+        offer_letter_overrides=letter_overrides,
         created_at=now,
         updated_at=now,
     )
@@ -343,6 +379,15 @@ async def update_offer_details(session: AsyncSession, *, offer: RecCandidateOffe
     if offer.offer_status != "draft":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only draft offers can be edited.")
     for key, value in payload.items():
+        if key == "letter_overrides":
+            if isinstance(value, dict):
+                try:
+                    offer.offer_letter_overrides = json.dumps(value)
+                except Exception:
+                    offer.offer_letter_overrides = None
+            elif value is None:
+                offer.offer_letter_overrides = None
+            continue
         if hasattr(offer, key) and value is not None:
             setattr(offer, key, value)
     offer.updated_at = datetime.utcnow()

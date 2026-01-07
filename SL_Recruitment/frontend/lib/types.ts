@@ -280,6 +280,7 @@ export type CandidateOffer = {
   pdf_url?: string | null;
   pdf_download_url?: string | null;
   notes_internal?: string | null;
+  letter_overrides?: Record<string, string> | null;
   created_at: string;
   updated_at: string;
   candidate_name?: string | null;
