@@ -9,7 +9,7 @@ from secrets import token_urlsafe
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
-from app.services.calendar import list_calendar_events, list_visible_calendar_ids, query_freebusy
+from app.services.calendar import query_freebusy
 
 BUSINESS_START = time(10, 0)
 BUSINESS_END = time(18, 30)
@@ -60,18 +60,22 @@ def generate_candidate_slots(*, tz: ZoneInfo, start_day: date | None = None, inc
     return slots
 
 
-def _busy_ranges_utc(*, interviewer_email: str, window_start: datetime, window_end: datetime) -> list[tuple[datetime, datetime]]:
-    calendar_ids = list_visible_calendar_ids(subject_email=interviewer_email)
-    if not calendar_ids:
-        calendar_ids = [settings.calendar_id or "primary"]
+def _busy_ranges_utc(
+    *,
+    interviewer_email: str,
+    window_start: datetime,
+    window_end: datetime,
+    calendar_ids: list[str] | None = None,
+) -> list[tuple[datetime, datetime]]:
+    ids = calendar_ids or [settings.calendar_id or "primary"]
     busy_map = query_freebusy(
-        calendar_ids=calendar_ids,
+        calendar_ids=ids,
         start_at=window_start,
         end_at=window_end,
         subject_email=interviewer_email,
     )
     busy_ranges: list[dict[str, str]] = []
-    for cid in calendar_ids:
+    for cid in ids:
         busy_ranges.extend(busy_map.get(cid, []))
     busy_utc: list[tuple[datetime, datetime]] = []
     for item in busy_ranges:
@@ -82,28 +86,6 @@ def _busy_ranges_utc(*, interviewer_email: str, window_start: datetime, window_e
         start_dt = _parse_iso(start_raw).astimezone(timezone.utc)
         end_dt = _parse_iso(end_raw).astimezone(timezone.utc)
         busy_utc.append((start_dt, end_dt))
-    for cid in calendar_ids:
-        events = list_calendar_events(
-            calendar_id=cid,
-            start_at=window_start,
-            end_at=window_end,
-            subject_email=interviewer_email,
-        )
-        for event in events:
-            if (event.get("status") or "").lower() == "cancelled":
-                continue
-            start_info = event.get("start") or {}
-            end_info = event.get("end") or {}
-            start_raw = start_info.get("dateTime")
-            end_raw = end_info.get("dateTime")
-            if not start_raw or not end_raw:
-                continue
-            try:
-                start_dt = _parse_iso(start_raw).astimezone(timezone.utc)
-                end_dt = _parse_iso(end_raw).astimezone(timezone.utc)
-            except ValueError:
-                continue
-            busy_utc.append((start_dt, end_dt))
     return busy_utc
 
 
@@ -119,6 +101,7 @@ def _day_slots(day: date, *, tz: ZoneInfo) -> list[SlotCandidate]:
 
 def filter_free_slots(*, interviewer_email: str, start_day: date, tz: ZoneInfo) -> list[SlotCandidate]:
     free_slots: list[SlotCandidate] = []
+    calendar_ids = [settings.calendar_id or "primary"]
     days_found = 0
     scanned = 0
     for day in _iter_business_days(start_day, include_start=True):
@@ -134,6 +117,7 @@ def filter_free_slots(*, interviewer_email: str, start_day: date, tz: ZoneInfo) 
             interviewer_email=interviewer_email,
             window_start=day_slots[0].start_at,
             window_end=day_slots[-1].end_at,
+            calendar_ids=calendar_ids,
         )
         available: list[SlotCandidate] = []
         for slot in day_slots:

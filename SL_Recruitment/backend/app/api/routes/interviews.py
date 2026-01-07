@@ -25,7 +25,7 @@ from app.schemas.interview_slots import InterviewSlotOut, InterviewSlotPreviewOu
 from app.schemas.stage import StageTransitionRequest
 from app.schemas.user import UserContext
 from app.services.calendar import create_calendar_event, delete_calendar_event, query_freebusy, update_calendar_event
-from app.services.calendar import list_calendar_events, list_calendar_list_details, list_visible_calendar_ids
+from app.services.calendar import list_calendar_events, list_calendar_list_details, list_visible_calendar_ids, service_account_info
 from app.services.email import render_template, send_email
 from app.services.events import log_event
 from app.services.interview_slots import (
@@ -776,6 +776,13 @@ async def debug_interview_slot_lookup(
             )
 
     return {
+        "settings": {
+            "enable_calendar": settings.enable_calendar,
+            "calendar_id": settings.calendar_id,
+            "calendar_timezone": settings.calendar_timezone,
+            "google_application_credentials": settings.google_application_credentials,
+        },
+        "service_account": service_account_info(),
         "calendar_list": list_calendar_list_details(subject_email=interviewer_email),
         "calendar_ids": calendar_ids,
         "busy_ranges": busy_flat,
