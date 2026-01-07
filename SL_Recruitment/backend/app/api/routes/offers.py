@@ -31,12 +31,13 @@ from app.services.offers import (
     offer_pdf_signed_url,
     verify_offer_pdf_signature,
     render_offer_letter,
+    _render_offer_pdf_bytes,
     send_offer,
     submit_for_approval,
     update_offer_details,
 )
 from app.services.events import log_event
-from app.services.drive import move_candidate_folder, download_drive_file
+from app.services.drive import move_candidate_folder, upload_offer_doc
 from app.services.email import render_template, send_email
 
 router = APIRouter(prefix="/rec/offers", tags=["offers"])
@@ -346,6 +347,7 @@ async def preview_offer_email(
         candidate_address=await _resolve_candidate_address(session, candidate, opening),
         reporting_to=await _resolve_reporting_to(opening),
         unit_name=opening.title if opening and opening.title else "Studio Lotus",
+        force=True,
     )
     html = render_template(
         "offer_sent",
@@ -475,25 +477,33 @@ async def get_public_offer_pdf(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
     candidate = await session.get(RecCandidate, offer.candidate_id)
     opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
-    await _ensure_offer_pdf(
-        session=session,
+    sender_name = "Studio Lotus Team"
+    reporting_to = await _resolve_reporting_to(opening)
+    candidate_address = await _resolve_candidate_address(session, candidate, opening)
+    unit_name = opening.title if opening and opening.title else "Studio Lotus"
+    html = render_offer_letter(
         offer=offer,
         candidate=candidate,
         opening=opening,
-        sender_name="Studio Lotus Team",
-        candidate_address=await _resolve_candidate_address(session, candidate, opening),
-        reporting_to=await _resolve_reporting_to(opening),
-        unit_name=opening.title if opening and opening.title else "Studio Lotus",
+        sender_name=sender_name,
+        candidate_address=candidate_address,
+        reporting_to=reporting_to,
+        unit_name=unit_name,
     )
-    if not offer.pdf_url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer file not available")
-    file_id = _extract_drive_file_id(offer.pdf_url)
-    if not file_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer file not available")
-    data, content_type, filename = download_drive_file(file_id)
+    pdf_bytes = _render_offer_pdf_bytes(html)
+    filename = f"{candidate.candidate_code if candidate else token}-offer-letter.pdf"
+    if candidate and candidate.drive_folder_id:
+        _, file_url = upload_offer_doc(
+            candidate.drive_folder_id,
+            filename=filename,
+            content_type="application/pdf",
+            data=pdf_bytes,
+        )
+        offer.pdf_url = file_url
+        await session.flush()
     disposition = "attachment" if download_flag == "1" else "inline"
     headers = {"Content-Disposition": f'{disposition}; filename="{filename}"'}
-    return Response(content=data, media_type=content_type, headers=headers)
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
 @public_router.post("/{token}/decision", response_model=OfferPublicOut)

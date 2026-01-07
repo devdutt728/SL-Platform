@@ -7,7 +7,7 @@
       @page {{
         size: A4;
         margin: 2.2cm 2cm 2.6cm 2cm;
-        @top-center {{ content: element(letter-header); }}
+        @top-right {{ content: element(letter-header); }}
         @bottom-center {{ content: element(letter-footer); }}
       }}
       * {{ box-sizing: border-box; }}
@@ -17,8 +17,12 @@
         line-height: 1.45;
         color: #000;
       }}
-      .header {{ position: running(letter-header); height: 0.8cm; }}
-      .header img {{ height: 0.65cm; }}
+      .header {{
+        position: running(letter-header);
+        height: 1.1cm;
+        text-align: right;
+      }}
+      .header img {{ height: 0.5cm; }}
       .footer {{
         position: running(letter-footer);
         font-size: 8pt;
@@ -28,7 +32,7 @@
       }}
       .title {{ font-weight: 700; margin: 0 0 6px 0; }}
       .meta-row {{ width: 100%; margin-bottom: 12px; }}
-      .meta-row td {{ vertical-align: top; }}
+      .meta-row td {{ vertical-align: top; padding: 0; }}
       .right {{ text-align: right; }}
       .section {{ margin-bottom: 10px; }}
       .label {{ font-weight: 700; }}
@@ -48,16 +52,27 @@
       .notice-table td {{ border: 1px solid #000; padding: 6px 8px; vertical-align: top; }}
       .signature {{ margin-top: 20px; }}
       .indent {{ margin-left: 24px; }}
+      @media screen {{
+        body {{ background: #f3f4f6; }}
+        .page {{
+          background: #fff;
+          margin: 20px auto;
+          max-width: 210mm;
+          padding: 2.2cm 2cm 2.6cm 2cm;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }}
+      }}
     </style>
   </head>
   <body>
-    <div class="header">
-      <img src="{logo_data_uri}" alt="Studio Lotus" />
-    </div>
+    <div class="page">
+      <div class="header">
+        <img src="{logo_data_uri}" alt="Studio Lotus" />
+      </div>
 
-    <div class="footer">
-      STUDIO LOTUS F 301 2ND FLOOR CH PREM SINGH HOUSE LADO SARAI NEW DELHI 110030 INDIA TELE FAX +91 011 40527979 40570808 EMAIL lotus@studiolotus.in www.studiolotus.in A DIVISION OF TAC DESIGN PVT LTD | U74994DL2004PTC128426
-    </div>
+      <div class="footer">
+        STUDIO LOTUS F 301 2ND FLOOR CH PREM SINGH HOUSE LADO SARAI NEW DELHI 110030 INDIA TELE FAX +91 011 40527979 40570808 EMAIL lotus@studiolotus.in www.studiolotus.in A DIVISION OF TAC DESIGN PVT LTD | U74994DL2004PTC128426
+      </div>
 
     <table class="meta-row">
       <tr>
@@ -276,11 +291,12 @@
       <div>{signatory_title}</div>
     </div>
 
-    <div class="signature">
-      <div class="subhead">I have read and understood and accept the terms and conditions mentioned above and hereby append my signatures as token of acceptance.</div>
-      <div>______________________________</div>
-      <div>{candidate_name}</div>
-      <div>Date: _____________________</div>
+      <div class="signature">
+        <div class="subhead">I have read and understood and accept the terms and conditions mentioned above and hereby append my signatures as token of acceptance.</div>
+        <div>______________________________</div>
+        <div>{candidate_name}</div>
+        <div>Date: _____________________</div>
+      </div>
     </div>
   </body>
 </html>

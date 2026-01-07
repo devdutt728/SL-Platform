@@ -128,6 +128,18 @@ def _parse_letter_overrides(raw: str | None) -> dict[str, str]:
         cleaned[key] = str(value)
     return cleaned
 
+def _render_offer_pdf_bytes(html: str) -> bytes:
+    try:
+        from weasyprint import HTML
+    except Exception as exc:
+        raise RuntimeError(
+            "WeasyPrint is required to generate offer PDFs. Install weasyprint and its system dependencies."
+        ) from exc
+    try:
+        return HTML(string=html).write_pdf()
+    except Exception as exc:
+        raise RuntimeError("Failed to render offer letter PDF.") from exc
+
 async def _resolve_reporting_to(opening: RecOpening | None) -> str:
     if not opening or not opening.reporting_person_id_platform:
         return ""
@@ -174,9 +186,12 @@ async def _ensure_offer_pdf(
     candidate_address: str,
     reporting_to: str,
     unit_name: str,
+    force: bool = False,
 ) -> str | None:
     if not candidate or not candidate.drive_folder_id:
         return None
+    if not force and offer.pdf_url and offer.pdf_url.lower().endswith(".pdf"):
+        return offer.pdf_url
     html = render_offer_letter(
         offer=offer,
         candidate=candidate,
@@ -186,31 +201,17 @@ async def _ensure_offer_pdf(
         reporting_to=reporting_to,
         unit_name=unit_name,
     )
-    try:
-        from weasyprint import HTML
-
-        pdf_bytes = HTML(string=html).write_pdf()
-        filename = f"{candidate.candidate_code}-offer-letter.pdf"
-        _, file_url = upload_offer_doc(
-            candidate.drive_folder_id,
-            filename=filename,
-            content_type="application/pdf",
-            data=pdf_bytes,
-        )
-        offer.pdf_url = file_url
-        await session.flush()
-        return file_url
-    except Exception:
-        filename = f"{candidate.candidate_code}-offer-letter.html"
-        _, file_url = upload_offer_doc(
-            candidate.drive_folder_id,
-            filename=filename,
-            content_type="text/html",
-            data=html.encode("utf-8"),
-        )
-        offer.pdf_url = file_url
-        await session.flush()
-        return file_url
+    pdf_bytes = _render_offer_pdf_bytes(html)
+    filename = f"{candidate.candidate_code}-offer-letter.pdf"
+    _, file_url = upload_offer_doc(
+        candidate.drive_folder_id,
+        filename=filename,
+        content_type="application/pdf",
+        data=pdf_bytes,
+    )
+    offer.pdf_url = file_url
+    await session.flush()
+    return file_url
 
 def render_offer_letter(
     *,
