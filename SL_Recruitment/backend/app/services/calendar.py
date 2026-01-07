@@ -173,3 +173,64 @@ def query_freebusy(
     for cid in calendar_ids:
         out[cid] = list(calendars.get(cid, {}).get("busy") or [])
     return out
+
+
+def list_visible_calendar_ids(*, subject_email: str | None = None) -> list[str]:
+    if not settings.enable_calendar:
+        return []
+    service = _calendar_client(subject_email=subject_email)
+    calendar_ids: list[str] = []
+    page_token = None
+    while True:
+        resp = service.calendarList().list(pageToken=page_token).execute()
+        for item in resp.get("items", []) or []:
+            if item.get("deleted"):
+                continue
+            if not item.get("selected") and not item.get("primary"):
+                continue
+            access = (item.get("accessRole") or "").lower()
+            if access in {"none", "freebusy"}:
+                continue
+            cid = (item.get("id") or "").strip()
+            if cid:
+                calendar_ids.append(cid)
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return calendar_ids
+
+
+def list_calendar_events(
+    *,
+    calendar_id: str | None = None,
+    start_at: datetime,
+    end_at: datetime,
+    subject_email: str | None = None,
+) -> list[dict[str, Any]]:
+    if not settings.enable_calendar:
+        return []
+
+    service = _calendar_client(subject_email=subject_email)
+    time_min = start_at.astimezone(timezone.utc).isoformat()
+    time_max = end_at.astimezone(timezone.utc).isoformat()
+    events: list[dict[str, Any]] = []
+    page_token = None
+    while True:
+        resp = (
+            service.events()
+            .list(
+                calendarId=calendar_id or settings.calendar_id or "primary",
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,
+                orderBy="startTime",
+                showDeleted=False,
+                pageToken=page_token,
+            )
+            .execute()
+        )
+        events.extend(resp.get("items", []) or [])
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return events

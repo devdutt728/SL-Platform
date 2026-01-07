@@ -16,6 +16,12 @@ type Props = {
   canSkip: boolean;
 };
 
+type SlotPreview = {
+  slot_start_at: string;
+  slot_end_at: string;
+  label: string;
+};
+
 const stageOrder = [
   { key: "enquiry", label: "Enquiry" },
   { key: "hr_screening", label: "HR screening" },
@@ -281,10 +287,21 @@ async function createInterview(candidateId: string, payload: Record<string, unkn
   return (await res.json()) as Interview;
 }
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 async function fetchPeople(query: string) {
-  const res = await fetch(`/api/platform/people?q=${encodeURIComponent(query)}`, { cache: "no-store" });
+  const res = await fetch(`${basePath}/api/platform/people?q=${encodeURIComponent(query)}&limit=10`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as PlatformPersonSuggestion[];
+}
+
+async function fetchSlotPreview(interviewerId: string, startDate: string) {
+  const url = new URL(`${basePath}/api/rec/interview-slots/preview`, window.location.origin);
+  url.searchParams.set("interviewer_email", interviewerId);
+  if (startDate) url.searchParams.set("start_date", startDate);
+  const res = await fetch(url.toString(), { cache: "no-store" });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as SlotPreview[];
 }
 
 async function transition(candidateId: string, payload: { to_stage: string; decision?: string; note?: string }) {
@@ -365,7 +382,6 @@ function cleanLetterOverrides(raw: Record<string, string>) {
 }
 
 export function Candidate360Client({ candidateId, initial, canDelete, canSchedule, canSkip }: Props) {
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const [data, setData] = useState<CandidateFull>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -375,6 +391,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [interviewsError, setInterviewsError] = useState<string | null>(null);
   const [interviewsNotice, setInterviewsNotice] = useState<string | null>(null);
   const [expandedInterviewId, setExpandedInterviewId] = useState<number | null>(null);
+  const [scheduleEmailPreviewOpen, setScheduleEmailPreviewOpen] = useState(false);
+  const [scheduleEmailPreviewHtml, setScheduleEmailPreviewHtml] = useState("");
+  const [scheduleEmailPreviewBusy, setScheduleEmailPreviewBusy] = useState(false);
+  const [scheduleEmailPreviewError, setScheduleEmailPreviewError] = useState<string | null>(null);
   const [candidateSprints, setCandidateSprints] = useState<CandidateSprint[] | null>(null);
   const [sprintsBusy, setSprintsBusy] = useState(false);
   const [sprintsError, setSprintsError] = useState<string | null>(null);
@@ -415,6 +435,13 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [personQuery, setPersonQuery] = useState("");
   const [personResults, setPersonResults] = useState<PlatformPersonSuggestion[]>([]);
   const [personBusy, setPersonBusy] = useState(false);
+  const [personOpen, setPersonOpen] = useState(false);
+  const [personHighlight, setPersonHighlight] = useState(0);
+  const [slotPreviewDate, setSlotPreviewDate] = useState("");
+  const [slotPreviewSlots, setSlotPreviewSlots] = useState<SlotPreview[]>([]);
+  const [slotPreviewBusy, setSlotPreviewBusy] = useState(false);
+  const [slotPreviewError, setSlotPreviewError] = useState<string | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<SlotPreview | null>(null);
   const schedulePanelRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const screeningRef = useRef<HTMLDivElement | null>(null);
@@ -835,6 +862,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     setScheduleInterviewer(null);
     setPersonQuery("");
     setPersonResults([]);
+    setSlotPreviewDate("");
+    setSlotPreviewSlots([]);
+    setSlotPreviewError(null);
+    setSelectedSlot(null);
+    setScheduleEmailPreviewError(null);
     setScheduleOpen(true);
     setInterviewsError(null);
     setInterviewsNotice(null);
@@ -847,12 +879,12 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       setInterviewsError("Select an interviewer.");
       return;
     }
-    if (!scheduleStartAt || !scheduleEndAt) {
-      setInterviewsError("Provide both start and end time.");
+    const startIso = selectedSlot ? `${selectedSlot.slot_start_at}Z` : `${scheduleStartAt}:00+05:30`;
+    const endIso = selectedSlot ? `${selectedSlot.slot_end_at}Z` : `${scheduleEndAt}:00+05:30`;
+    if (!selectedSlot && (!scheduleStartAt || !scheduleEndAt)) {
+      setInterviewsError("Provide a slot or both start and end time.");
       return;
     }
-    const startIso = `${scheduleStartAt}:00+05:30`;
-    const endIso = `${scheduleEndAt}:00+05:30`;
     const start = new Date(startIso);
     const end = new Date(endIso);
     if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end <= start) {
@@ -870,6 +902,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         meeting_link: scheduleMeetLink || undefined,
       });
       setScheduleOpen(false);
+      setSelectedSlot(null);
       await refreshInterviews();
     } catch (e: any) {
       setInterviewsError(e?.message || "Could not schedule interview.");
@@ -878,11 +911,46 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
+  async function handleScheduleEmailPreview() {
+    setScheduleEmailPreviewError(null);
+    const fallbackSlot = slotPreviewSlots[0] || null;
+    const startIso = selectedSlot
+      ? `${selectedSlot.slot_start_at}Z`
+      : fallbackSlot
+        ? `${fallbackSlot.slot_start_at}Z`
+        : `${scheduleStartAt}:00+05:30`;
+    if (!selectedSlot && !fallbackSlot && !scheduleStartAt) {
+      setScheduleEmailPreviewError("Pick a slot or start time to preview the email.");
+      return;
+    }
+    setScheduleEmailPreviewBusy(true);
+    try {
+      const url = new URL(`${basePath}/api/rec/interviews/email-preview`, window.location.origin);
+      url.searchParams.set("candidate_id", candidateId);
+      url.searchParams.set("round_type", scheduleRound);
+      url.searchParams.set("scheduled_start_at", startIso);
+      if (scheduleMeetLink) url.searchParams.set("meeting_link", scheduleMeetLink);
+      const res = await fetch(url.toString(), { cache: "no-store" });
+      if (!res.ok) throw new Error(await res.text());
+      const html = await res.text();
+      setScheduleEmailPreviewHtml(html);
+      setScheduleEmailPreviewOpen(true);
+    } catch (e: any) {
+      setScheduleEmailPreviewError(e?.message || "Email preview failed.");
+    } finally {
+      setScheduleEmailPreviewBusy(false);
+    }
+  }
+
   async function handleSendSlotInvite() {
     setInterviewsError(null);
     setInterviewsNotice(null);
     if (!scheduleInterviewer) {
       setInterviewsError("Select an interviewer.");
+      return;
+    }
+    if (!scheduleInterviewer.email) {
+      setInterviewsError("Interviewer email is required for slot invites.");
       return;
     }
     const roundUpper = scheduleRound.toUpperCase();
@@ -897,7 +965,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           round_type: roundUpper,
+          interviewer_email: scheduleInterviewer.email,
           interviewer_person_id_platform: scheduleInterviewer.person_id,
+          start_date: slotPreviewDate || undefined,
         }),
       });
       if (!res.ok) {
@@ -934,10 +1004,18 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     const query = personQuery.trim();
     let ignore = false;
     const handle = window.setTimeout(() => {
+      if (query.length < 2) {
+        setPersonResults([]);
+        setPersonBusy(false);
+        return;
+      }
       setPersonBusy(true);
       fetchPeople(query)
         .then((rows) => {
-          if (!ignore) setPersonResults(rows);
+          if (!ignore) {
+            setPersonResults(rows);
+            setPersonHighlight(0);
+          }
         })
         .catch(() => {
           if (!ignore) setPersonResults([]);
@@ -954,9 +1032,54 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
 
   useEffect(() => {
     if (!scheduleOpen) return;
+    const roundUpper = scheduleRound.toUpperCase();
+    if (roundUpper !== "L1" && roundUpper !== "L2") return;
+    if (!scheduleInterviewer || !slotPreviewDate) {
+      setSlotPreviewSlots([]);
+      setSelectedSlot(null);
+      return;
+    }
+    let ignore = false;
+    const handle = window.setTimeout(() => {
+      setSlotPreviewBusy(true);
+      setSlotPreviewError(null);
+      if (!scheduleInterviewer.email) {
+        setSlotPreviewError("Interviewer email is required for slot lookup.");
+        setSlotPreviewBusy(false);
+        return;
+      }
+      fetchSlotPreview(scheduleInterviewer.email, slotPreviewDate)
+        .then((slots) => {
+          if (!ignore) {
+            setSlotPreviewSlots(slots);
+            if (slots.length === 0) setSelectedSlot(null);
+          }
+        })
+        .catch((e: any) => {
+          if (!ignore) {
+            setSlotPreviewSlots([]);
+            setSlotPreviewError(e?.message || "Could not fetch slots.");
+          }
+        })
+        .finally(() => {
+          if (!ignore) setSlotPreviewBusy(false);
+        });
+    }, 250);
+    return () => {
+      ignore = true;
+      window.clearTimeout(handle);
+    };
+  }, [scheduleInterviewer, scheduleOpen, scheduleRound, slotPreviewDate]);
+
+  useEffect(() => {
+    if (!scheduleOpen) return;
     const node = schedulePanelRef.current;
     if (node) node.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [scheduleOpen]);
+
+  useEffect(() => {
+    setSelectedSlot(null);
+  }, [scheduleRound]);
 
   const stageButtons = useMemo(() => {
     const current = currentStageKey;
@@ -1814,73 +1937,169 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                   </select>
                 </label>
 
-                <label className="space-y-1 text-xs text-slate-600">
-                  Interviewer
-                  <div className="relative">
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={personQuery}
-                      placeholder={scheduleInterviewer ? scheduleInterviewer.full_name : "Search by name or email"}
-                      onChange={(e) => setPersonQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && personResults.length > 0) {
-                          e.preventDefault();
-                          const [first] = personResults;
-                          if (first) {
-                            setScheduleInterviewer(first);
-                            setPersonQuery(first.full_name);
-                            setPersonResults([]);
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Interviewer
+                    <div className="relative">
+                      <input
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={personQuery}
+                        placeholder={scheduleInterviewer ? scheduleInterviewer.full_name : "Search by name or email"}
+                        onChange={(e) => {
+                          setPersonQuery(e.target.value);
+                          setPersonOpen(true);
+                        }}
+                        onFocus={() => setPersonOpen(true)}
+                        onBlur={() => {
+                          window.setTimeout(() => setPersonOpen(false), 120);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "ArrowDown" && personResults.length > 0) {
+                            e.preventDefault();
+                            setPersonHighlight((prev) => Math.min(prev + 1, personResults.length - 1));
                           }
-                        }
-                      }}
-                    />
-                    {personResults.length > 0 ? (
-                      <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-40 overflow-auto rounded-xl border border-slate-200 bg-white shadow-card">
-                        {personResults.map((person) => (
-                          <button
-                            key={person.person_id}
-                            type="button"
-                            className="flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50"
-                            onClick={() => {
-                              setScheduleInterviewer(person);
-                              setPersonQuery(person.full_name);
-                              setPersonResults([]);
-                            }}
-                          >
-                            <span className="truncate">
-                              <span className="font-medium">{person.full_name}</span>{" "}
-                              <span className="text-slate-500">({person.email})</span>
-                            </span>
-                            <span className="shrink-0 text-xs text-slate-500">{person.role_name || person.role_code}</span>
-                          </button>
-                        ))}
+                          if (e.key === "ArrowUp" && personResults.length > 0) {
+                            e.preventDefault();
+                            setPersonHighlight((prev) => Math.max(prev - 1, 0));
+                          }
+                          if (e.key === "Enter" && personResults.length > 0) {
+                            e.preventDefault();
+                            const pick = personResults[personHighlight] || personResults[0];
+                            setScheduleInterviewer(pick);
+                            setPersonQuery(pick.full_name);
+                            setPersonResults([]);
+                            setPersonOpen(false);
+                          }
+                        }}
+                      />
+                      {personOpen ? (
+                        <div className="absolute left-0 right-0 top-full z-10 mt-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
+                          {personQuery.trim().length < 2 ? (
+                            <p className="px-3 py-2 text-xs text-slate-500">Type at least 2 characters to search.</p>
+                          ) : personBusy ? (
+                            <p className="px-3 py-2 text-xs text-slate-500">Searching...</p>
+                          ) : personResults.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-slate-500">No matches found.</p>
+                          ) : (
+                            <div className="max-h-48 overflow-auto">
+                              {personResults.map((person, index) => {
+                                const active = index === personHighlight;
+                                return (
+                            <button
+                              key={person.person_id}
+                              type="button"
+                              className={`flex w-full items-start justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm ${
+                                active ? "bg-slate-900 text-white" : "text-slate-800 hover:bg-slate-50"
+                              }`}
+                              onClick={() => {
+                                setScheduleInterviewer(person);
+                                setPersonQuery(person.full_name);
+                                setPersonResults([]);
+                                setPersonOpen(false);
+                              }}
+                            >
+                              <span className="truncate">
+                                <span className="font-medium">{person.full_name}</span>{" "}
+                                <span className={active ? "text-slate-200" : "text-slate-500"}>({person.email})</span>
+                              </span>
+                              <span className={active ? "shrink-0 text-xs text-slate-200" : "shrink-0 text-xs text-slate-500"}>
+                                {person.role_name || person.role_code}
+                              </span>
+                            </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  </label>
+
+                  {["L1", "L2"].includes(scheduleRound.toUpperCase()) ? (
+                    <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Slot planner</p>
+                      <p className="text-[11px] text-slate-500">6 slots • 30 mins • 3 business days</p>
                       </div>
-                    ) : null}
+                      <div className="mt-3 grid gap-3 md:grid-cols-[220px_1fr]">
+                        <label className="space-y-1 text-xs text-slate-600">
+                          First day
+                          <input
+                            type="date"
+                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                            value={slotPreviewDate}
+                            onChange={(e) => {
+                              setSlotPreviewDate(e.target.value);
+                              setSelectedSlot(null);
+                            }}
+                          />
+                        </label>
+                        <div className="rounded-xl border border-slate-200/70 bg-white/80 p-3">
+                          {slotPreviewBusy ? (
+                            <p className="text-xs text-slate-500">Fetching slots...</p>
+                          ) : slotPreviewError ? (
+                            <p className="text-xs text-rose-600">{slotPreviewError}</p>
+                          ) : slotPreviewSlots.length === 0 ? (
+                            <p className="text-xs text-slate-500">
+                              {!scheduleInterviewer
+                                ? "Select an interviewer to view available slots."
+                                : !slotPreviewDate
+                                  ? "Select a first day to view available slots."
+                                  : "No available slots in the selected window."}
+                            </p>
+                          ) : (
+                            <div className="grid gap-2 md:grid-cols-2">
+                              {slotPreviewSlots.map((slot) => {
+                                const active = selectedSlot?.slot_start_at === slot.slot_start_at;
+                                return (
+                                  <button
+                                    key={slot.slot_start_at}
+                                    type="button"
+                                    className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left text-xs font-semibold ${
+                                      active
+                                        ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-700"
+                                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                    }`}
+                                    onClick={() => {
+                                      setSelectedSlot(slot);
+                                      setScheduleStartAt("");
+                                      setScheduleEndAt("");
+                                    }}
+                                  >
+                                    <span>{slot.label}</span>
+                                    <span>{active ? "Selected" : "Use"}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <p className="text-[11px] text-slate-500">Manual scheduling (optional)</p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="space-y-1 text-xs text-slate-600">
+                      Start time
+                      <input
+                        type="datetime-local"
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={scheduleStartAt}
+                        onChange={(e) => setScheduleStartAt(e.target.value)}
+                        disabled={!!selectedSlot}
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs text-slate-600">
+                      End time
+                      <input
+                        type="datetime-local"
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={scheduleEndAt}
+                        onChange={(e) => setScheduleEndAt(e.target.value)}
+                        disabled={!!selectedSlot}
+                      />
+                    </label>
                   </div>
-                </label>
-
-                {personBusy ? <p className="text-xs text-slate-500">Searching...</p> : null}
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Start time
-                    <input
-                      type="datetime-local"
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={scheduleStartAt}
-                      onChange={(e) => setScheduleStartAt(e.target.value)}
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    End time
-                    <input
-                      type="datetime-local"
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={scheduleEndAt}
-                      onChange={(e) => setScheduleEndAt(e.target.value)}
-                    />
-                  </label>
-                </div>
                 <p className="text-[11px] text-slate-500">All times are stored as IST.</p>
 
                 <label className="space-y-1 text-xs text-slate-600">
@@ -1904,6 +2123,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                 </label>
               </div>
 
+              {scheduleEmailPreviewError ? (
+                <div className="mt-3 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-700">
+                  {scheduleEmailPreviewError}
+                </div>
+              ) : null}
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
@@ -1912,19 +2136,27 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                 >
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  className="rounded-xl border border-slate-900/20 bg-white px-4 py-2 text-xs font-semibold text-slate-900"
-                  onClick={() => void handleSendSlotInvite()}
-                  disabled={slotInviteBusy || interviewsBusy}
-                >
-                  {slotInviteBusy ? "Sending..." : "Send slot options"}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
-                  onClick={() => void handleScheduleSubmit()}
-                  disabled={interviewsBusy}
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-900/20 bg-white px-4 py-2 text-xs font-semibold text-slate-900"
+                    onClick={() => void handleSendSlotInvite()}
+                    disabled={slotInviteBusy || interviewsBusy}
+                  >
+                    {slotInviteBusy ? "Sending..." : "Send slot options"}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-900/20 bg-white px-4 py-2 text-xs font-semibold text-slate-900"
+                    onClick={() => void handleScheduleEmailPreview()}
+                    disabled={scheduleEmailPreviewBusy}
+                  >
+                    {scheduleEmailPreviewBusy ? "Loading..." : "Preview email"}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
+                    onClick={() => void handleScheduleSubmit()}
+                    disabled={interviewsBusy}
                 >
                   {interviewsBusy ? "Saving..." : "Schedule interview"}
                 </button>
@@ -2407,6 +2639,27 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           </div>
         </section>
       </div>
+      {scheduleEmailPreviewOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-white/30 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-white/80 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-800">Interview email preview</p>
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
+                onClick={() => setScheduleEmailPreviewOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <iframe
+              title="Interview email preview"
+              className="h-[70vh] w-full bg-white"
+              srcDoc={scheduleEmailPreviewHtml}
+            />
+          </div>
+        </div>
+      ) : null}
       {offerPreviewOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
           <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-white/30 bg-white shadow-2xl">

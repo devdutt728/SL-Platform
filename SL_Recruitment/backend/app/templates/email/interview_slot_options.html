@@ -1,13 +1,24 @@
 <!doctype html>
 <html>
   <body>
-    <p>Hi {candidate_name},</p>
-    <p>Please select a slot for your {round_type} interview {opening_title}.</p>
-    <p>Interviewer: {interviewer_email}</p>
-    <table cellpadding="0" cellspacing="0" border="0">
-      {slots_table}
-    </table>
-    <p>If a slot gets taken before you confirm, you will be asked to choose another slot.</p>
-    <p>Regards,<br />SL Recruitment</p>
+    <div style="font-family:'Segoe UI', Arial, sans-serif; color:#0f172a; background:#f8fafc; padding:24px;">
+      <div style="max-width:680px; margin:0 auto; background:#ffffff; border:1px solid #e2e8f0; border-radius:18px; overflow:hidden;">
+        <div style="padding:22px 24px; background:linear-gradient(120deg,#1e293b,#0f172a); color:#ffffff;">
+          <p style="margin:0; font-size:12px; letter-spacing:0.2em; text-transform:uppercase;">Interview Scheduling</p>
+          <h2 style="margin:8px 0 0; font-size:22px; font-weight:600;">Pick your preferred slot</h2>
+        </div>
+        <div style="padding:22px 24px;">
+          <p style="margin:0 0 12px; font-size:16px;">Hi {candidate_name},</p>
+          <p style="margin:0 0 16px; color:#334155;">Select one of the available slots for your {round_type} interview {opening_title}. These are the next 3 business days, 2 slots per day.</p>
+          <table cellpadding="0" cellspacing="0" border="0" style="width:100%; border-collapse:collapse;">
+            {slots_table}
+          </table>
+          <div style="margin:16px 0 0; padding:12px 14px; border-radius:12px; background:#f1f5f9; color:#475569; font-size:13px;">
+            If a slot gets taken before you confirm, you will be asked to choose another slot.
+          </div>
+          <p style="margin:18px 0 0; font-size:14px;">Regards,<br />SL Recruitment</p>
+        </div>
+      </div>
+    </div>
   </body>
 </html>

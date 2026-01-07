@@ -12,7 +12,7 @@ class RecCandidateInterviewSlot(Base):
     candidate_interview_slot_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     candidate_id: Mapped[int] = mapped_column(Integer, index=True)
     round_type: Mapped[str] = mapped_column(String(50))
-    interviewer_person_id_platform: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    interviewer_person_id_platform: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     interviewer_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     slot_start_at: Mapped[datetime] = mapped_column(DateTime)

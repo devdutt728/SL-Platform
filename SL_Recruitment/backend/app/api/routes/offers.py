@@ -37,7 +37,7 @@ from app.services.offers import (
     update_offer_details,
 )
 from app.services.events import log_event
-from app.services.drive import move_candidate_folder, upload_offer_doc
+from app.services.drive import delete_drive_item, move_candidate_folder, upload_offer_doc
 from app.services.email import render_template, send_email
 
 router = APIRouter(prefix="/rec/offers", tags=["offers"])
@@ -205,6 +205,9 @@ async def delete_offer(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
     if offer.offer_status != "draft":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only draft offers can be deleted")
+    file_id = _extract_drive_file_id(offer.pdf_url)
+    if file_id:
+        delete_drive_item(file_id)
     await log_event(
         session,
         candidate_id=offer.candidate_id,
@@ -338,17 +341,6 @@ async def preview_offer_email(
     opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
     offer_link = _offer_public_link(offer.public_token)
     offer_pdf_link = offer_pdf_signed_url(offer.public_token)
-    await _ensure_offer_pdf(
-        session=session,
-        offer=offer,
-        candidate=candidate,
-        opening=opening,
-        sender_name="Studio Lotus Team",
-        candidate_address=await _resolve_candidate_address(session, candidate, opening),
-        reporting_to=await _resolve_reporting_to(opening),
-        unit_name=opening.title if opening and opening.title else "Studio Lotus",
-        force=True,
-    )
     html = render_template(
         "offer_sent",
         {
