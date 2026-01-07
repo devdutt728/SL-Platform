@@ -37,7 +37,7 @@ export function OfferPublicClient({ token }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/offer/${encodeURIComponent(token)}`, { cache: "no-store" });
+      const res = await fetch(`${basePath}/api/offer/${encodeURIComponent(token)}`, { cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as OfferPublic;
       setOffer(data);
@@ -53,7 +53,7 @@ export function OfferPublicClient({ token }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/offer/${encodeURIComponent(token)}/decision`, {
+      const res = await fetch(`${basePath}/api/offer/${encodeURIComponent(token)}/decision`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ decision: value }),
@@ -111,8 +111,9 @@ export function OfferPublicClient({ token }: Props) {
               target="_blank"
               rel="noreferrer"
               className="text-sm font-semibold text-slate-800 underline decoration-dotted underline-offset-2"
+              download
             >
-              View offer PDF
+              Download offer PDF
             </a>
           ) : null}
           {decision ? (

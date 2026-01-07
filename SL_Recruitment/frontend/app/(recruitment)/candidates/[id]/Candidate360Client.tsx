@@ -2065,8 +2065,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                           href={latestOffer.pdf_download_url}
                           target="_blank"
                           rel="noreferrer"
+                          download
                         >
-                          <ExternalLink className="h-3.5 w-3.5" /> Offer PDF
+                          <ExternalLink className="h-3.5 w-3.5" /> Download offer PDF
                         </a>
                       ) : null}
                     </div>
