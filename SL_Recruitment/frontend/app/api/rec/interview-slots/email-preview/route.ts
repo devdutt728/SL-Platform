@@ -33,10 +33,10 @@ function buildSlotRows(slots: SlotPreview[]) {
       const label = slot.label || "Slot";
       return (
         "<tr>" +
-        `<td style="padding:12px 0; color:#0f172a; font-weight:600; font-size:15px;">${label}</td>` +
+        `<td style="padding:12px 0; color:#1e293b; font-weight:600; font-size:15px;">${label}</td>` +
         '<td style="padding:12px 0; text-align:right;">' +
         '<a href="#" style="display:inline-block; padding:10px 18px; border-radius:999px; ' +
-        "background:linear-gradient(120deg,#0ea5e9,#22c55e); color:#ffffff; text-decoration:none; " +
+        "background:#2563eb; color:#ffffff; text-decoration:none; " +
         'font-weight:700; font-size:13px; letter-spacing:0.02em;">Select slot</a>' +
         "</td>" +
         "</tr>"

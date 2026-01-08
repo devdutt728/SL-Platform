@@ -14,6 +14,7 @@ type Props = {
   canDelete: boolean;
   canSchedule: boolean;
   canSkip: boolean;
+  canCancelInterview: boolean;
 };
 
 type SlotPreview = {
@@ -134,6 +135,7 @@ function decisionTone(decision?: string | null) {
   if (d === "advance") return chipTone("green");
   if (d === "reject") return chipTone("red");
   if (d === "keep_warm") return chipTone("amber");
+  if (d === "cancelled") return chipTone("red");
   return chipTone("neutral");
 }
 
@@ -194,6 +196,11 @@ async function fetchInterviews(candidateId: string) {
   const res = await fetch(`/api/rec/interviews?candidate_id=${encodeURIComponent(candidateId)}`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as Interview[];
+}
+
+async function cancelInterview(interviewId: number) {
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/cancel`, { method: "POST" });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 async function fetchCandidateSprints(candidateId: string) {
@@ -381,7 +388,7 @@ function cleanLetterOverrides(raw: Record<string, string>) {
   return cleaned;
 }
 
-export function Candidate360Client({ candidateId, initial, canDelete, canSchedule, canSkip }: Props) {
+export function Candidate360Client({ candidateId, initial, canDelete, canSchedule, canSkip, canCancelInterview }: Props) {
   const [data, setData] = useState<CandidateFull>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -411,6 +418,18 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [offerProbationMonths, setOfferProbationMonths] = useState("3");
   const [offerGradeId, setOfferGradeId] = useState("");
   const [offerNotes, setOfferNotes] = useState("");
+  function isCancelled(item: Interview) {
+    if ((item.decision || "").toLowerCase() === "cancelled") return true;
+    const note = (item.notes_internal || "").toLowerCase();
+    return note.includes("cancelled by superadmin");
+  }
+
+  const scheduleAllowed = useMemo(() => {
+    if (!canSchedule) return false;
+    if (canSkip) return true;
+    if (!interviews) return false;
+    return interviews.length === 0;
+  }, [canSchedule, canSkip, interviews]);
   const [offerLetterOverrides, setOfferLetterOverrides] = useState<Record<string, string>>({});
   const [draftLetterOverrides, setDraftLetterOverrides] = useState<Record<string, string>>({});
   const [draftOverridesOpen, setDraftOverridesOpen] = useState(false);
@@ -1341,7 +1360,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     const now = new Date();
     const getTs = (value?: string | null) => parseDateUtc(value)?.getTime() ?? 0;
     return [...interviews]
-      .filter((item) => getTs(item.scheduled_start_at) < now.getTime())
+      .filter((item) => isCancelled(item) || getTs(item.scheduled_start_at) < now.getTime())
       .sort((a, b) => getTs(b.scheduled_start_at) - getTs(a.scheduled_start_at));
   }, [interviews]);
   const latestOffer = candidateOffers && candidateOffers.length > 0 ? candidateOffers[0] : null;
@@ -1796,7 +1815,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
             {collapsedSections.interviews ? null : (
               <>
                 <p className="mt-2 text-sm text-slate-600">Scheduling, feedback, and outcomes in one view.</p>
-                {canSchedule ? (
+                {scheduleAllowed ? (
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
                       type="button"
@@ -1830,6 +1849,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     >
                       Schedule L1 interview
                     </button>
+                  </div>
+                ) : null}
+                {!canSkip && canSchedule && interviews && interviews.length > 0 ? (
+                  <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-2 text-xs text-amber-700">
+                    Only Superadmin can schedule another interview after the first one.
                   </div>
                 ) : null}
                 {interviewsError ? (
@@ -1873,7 +1897,37 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                   Meeting link
                                 </a>
                               ) : null}
+                              {isCancelled(item) ? <Chip className={chipTone("red")}>Cancelled</Chip> : null}
                             </div>
+                            {canCancelInterview && !isCancelled(item) ? (
+                              <div className="mt-3">
+                                <button
+                                  type="button"
+                                  className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                                  onClick={() => {
+                                    if (!window.confirm("Cancel this interview? This will remove it from the interviewer calendar.")) return;
+                                    void (async () => {
+                                      setBusy(true);
+                                      setInterviewsError(null);
+                                      setInterviewsNotice(null);
+                                      try {
+                                        await cancelInterview(item.candidate_interview_id);
+                                        const next = await fetchInterviews(candidateId);
+                                        setInterviews(next);
+                                        setInterviewsNotice("Interview cancelled.");
+                                      } catch (e: any) {
+                                        setInterviewsError(e?.message || "Could not cancel interview.");
+                                      } finally {
+                                        setBusy(false);
+                                      }
+                                    })();
+                                  }}
+                                  disabled={busy}
+                                >
+                                  Cancel interview
+                                </button>
+                              </div>
+                            ) : null}
                           </div>
                         ))
                       )}
@@ -1895,7 +1949,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                 <p className="text-sm font-semibold">{item.round_type}</p>
                                 <p className="text-xs text-slate-600">{formatDateTime(item.scheduled_start_at)}</p>
                               </div>
-                              <Chip className={decisionTone(item.decision)}>{item.decision || "No decision"}</Chip>
+                              <Chip className={decisionTone(item.decision)}>
+                                {item.decision === "cancelled" ? "Cancelled" : item.decision || "No decision"}
+                              </Chip>
                             </div>
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                               {item.rating_overall ? <Chip className={chipTone("neutral")}>Overall {item.rating_overall}/5</Chip> : null}

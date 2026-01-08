@@ -52,13 +52,11 @@ body {
 
 body {
   color-scheme: light;
-  background-color: #f8fafc;
+  background-color: #f5f7fb;
   background-image:
-    radial-gradient(circle at 12% 18%, rgba(59, 130, 246, 0.22), transparent 45%),
-    radial-gradient(circle at 82% 16%, rgba(236, 72, 153, 0.16), transparent 42%),
-    radial-gradient(circle at 72% 72%, rgba(34, 211, 238, 0.18), transparent 46%),
-    radial-gradient(circle at 24% 82%, rgba(168, 85, 247, 0.14), transparent 46%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(248, 250, 252, 0.95));
+    radial-gradient(circle at 18% 8%, rgba(37, 99, 235, 0.08), transparent 44%),
+    radial-gradient(circle at 82% 12%, rgba(14, 116, 144, 0.06), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(245, 247, 251, 0.95));
   background-attachment: fixed;
 }
 
@@ -69,13 +67,13 @@ a {
 
 .glass,
 .glass-panel {
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(226, 232, 240, 0.8);
   box-shadow:
-    0 24px 60px -40px rgba(15, 23, 42, 0.28),
-    0 10px 30px -22px rgba(15, 23, 42, 0.24);
+    0 20px 40px -32px rgba(15, 23, 42, 0.18),
+    0 8px 20px -18px rgba(15, 23, 42, 0.16);
   border-radius: var(--panel-radius);
   transition: background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
   will-change: transform;
@@ -84,16 +82,14 @@ a {
 .section-card {
   border-radius: var(--panel-radius);
   padding: var(--panel-padding);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.45)),
-    radial-gradient(circle at 12% 12%, rgba(59, 130, 246, 0.14), transparent 40%),
-    radial-gradient(circle at 88% 10%, rgba(168, 85, 247, 0.12), transparent 40%);
-  border: 1px solid rgba(255, 255, 255, 0.55);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 252, 0.9));
+  border: 1px solid rgba(226, 232, 240, 0.9);
   box-shadow:
-    0 24px 60px -40px rgba(15, 23, 42, 0.28),
-    0 10px 30px -22px rgba(15, 23, 42, 0.22);
+    0 18px 36px -28px rgba(15, 23, 42, 0.18),
+    0 6px 16px -16px rgba(15, 23, 42, 0.14);
   transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
   will-change: transform;
 }
@@ -101,8 +97,8 @@ a {
 .section-card:hover {
   transform: translate3d(0, -2px, 0);
   box-shadow:
-    0 30px 80px -55px rgba(15, 23, 42, 0.35),
-    0 12px 36px -26px rgba(15, 23, 42, 0.24);
+    0 26px 60px -48px rgba(15, 23, 42, 0.22),
+    0 10px 28px -22px rgba(15, 23, 42, 0.18);
 }
 
 .workbook-launch {
@@ -110,15 +106,15 @@ a {
   overflow: hidden;
   isolation: isolate;
   border-radius: 999px;
-  border: 1px solid rgba(59, 130, 246, 0.35);
+  border: 1px solid rgba(203, 213, 225, 0.9);
   background:
-    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.18), transparent 55%),
-    linear-gradient(120deg, rgba(255, 255, 255, 0.7), rgba(239, 246, 255, 0.35));
+    radial-gradient(circle at 20% 20%, rgba(37, 99, 235, 0.08), transparent 58%),
+    linear-gradient(120deg, rgba(255, 255, 255, 0.9), rgba(241, 245, 249, 0.65));
   color: var(--text-secondary, #475569);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
-    0 12px 30px -22px rgba(15, 23, 42, 0.3),
-    0 0 20px -16px rgba(59, 130, 246, 0.6);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.7),
+    0 12px 24px -22px rgba(15, 23, 42, 0.18),
+    0 0 16px -18px rgba(37, 99, 235, 0.25);
   transition: transform 200ms ease, box-shadow 220ms ease, border-color 220ms ease, color 200ms ease;
 }
 
@@ -129,9 +125,9 @@ a {
   background: linear-gradient(
     120deg,
     transparent 30%,
-    rgba(59, 130, 246, 0.16) 45%,
-    rgba(255, 255, 255, 0.7) 52%,
-    rgba(59, 130, 246, 0.2) 58%,
+    rgba(37, 99, 235, 0.12) 45%,
+    rgba(255, 255, 255, 0.65) 52%,
+    rgba(37, 99, 235, 0.16) 58%,
     transparent 70%
   );
   transform: translateX(-120%);
@@ -144,23 +140,23 @@ a {
   position: absolute;
   inset: -2px;
   border-radius: inherit;
-  border: 1px solid rgba(59, 130, 246, 0.4);
+  border: 1px solid rgba(37, 99, 235, 0.28);
   opacity: 0;
   box-shadow:
-    0 0 22px rgba(56, 189, 248, 0.35),
-    0 0 40px rgba(59, 130, 246, 0.2);
+    0 0 20px rgba(59, 130, 246, 0.18),
+    0 0 34px rgba(37, 99, 235, 0.14);
   transition: opacity 220ms ease;
   pointer-events: none;
 }
 
 .workbook-launch:hover {
   transform: translate3d(0, -1px, 0) scale(1.02);
-  border-color: rgba(59, 130, 246, 0.6);
+  border-color: rgba(37, 99, 235, 0.45);
   color: var(--text-primary, #0f172a);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.75),
-    0 18px 45px -26px rgba(15, 23, 42, 0.35),
-    0 0 26px -14px rgba(59, 130, 246, 0.75);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.85),
+    0 16px 36px -24px rgba(15, 23, 42, 0.22),
+    0 0 22px -16px rgba(37, 99, 235, 0.45);
 }
 
 .workbook-launch:hover::before {
@@ -172,7 +168,7 @@ a {
 }
 
 .workbook-launch:focus-visible {
-  outline: 2px solid rgba(56, 189, 248, 0.6);
+  outline: 2px solid rgba(37, 99, 235, 0.45);
   outline-offset: 2px;
 }
 

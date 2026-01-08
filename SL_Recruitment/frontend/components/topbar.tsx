@@ -81,19 +81,19 @@ export function Topbar() {
           {loading ? (
             <div className="h-10 w-52 animate-pulse rounded-xl bg-white/20" />
           ) : me ? (
-            <div className="flex items-center gap-2 rounded-xl bg-gradient-to-tr from-violet-500/90 to-emerald-500 px-3 py-2 text-sm font-medium text-white shadow-lg">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/25">
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white/75 px-3 py-2 text-sm font-medium text-slate-800 shadow-sm">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
                 <User className="h-4 w-4" />
               </div>
               <div className="leading-tight">
-                <p className="text-xs tracking-tight text-white/80">{firstName(me)}</p>
-                <p className="text-sm">
+                <p className="text-xs tracking-tight text-slate-500">{firstName(me)}</p>
+                <p className="text-sm text-slate-800">
                   {me.platform_role_name || roleLabel[primaryRole || ""] || primaryRole || me.platform_role_code || "Viewer"}
                 </p>
               </div>
               <button
                 onClick={signOut}
-                className="ml-2 inline-flex items-center gap-1 rounded-lg bg-white/15 px-2 py-1 text-xs font-semibold hover:bg-white/20"
+                className="ml-2 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
                 title="Sign out"
               >
                 <LogOut className="h-3.5 w-3.5" />

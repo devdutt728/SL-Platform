@@ -42,6 +42,16 @@ export default async function CandidateDetailPage({ params }: { params: { id: st
     (me?.platform_role_id ?? null) === 5 ||
     ["2", "5"].includes((me?.platform_role_code ?? "").trim());
   const canSkip = (me?.platform_role_id ?? null) === 2 || (me?.platform_role_code ?? "").trim() === "2";
+  const canCancelInterview = canSkip;
 
-  return <Candidate360Client candidateId={params.id} initial={full} canDelete={canDelete} canSchedule={canSchedule} canSkip={canSkip} />;
+  return (
+    <Candidate360Client
+      candidateId={params.id}
+      initial={full}
+      canDelete={canDelete}
+      canSchedule={canSchedule}
+      canSkip={canSkip}
+      canCancelInterview={canCancelInterview}
+    />
+  );
 }

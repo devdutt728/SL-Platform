@@ -10,6 +10,7 @@ import { parseDateUtc } from "@/lib/datetime";
 type Props = {
   initialUpcoming: Interview[];
   initialPending: Interview[];
+  useMeFilter: boolean;
 };
 
 type FeedbackForm = {
@@ -44,6 +45,12 @@ function formatDateTime(raw?: string | null) {
     minute: "2-digit",
     timeZone: "Asia/Kolkata",
   });
+}
+
+function isCancelled(interview: Interview) {
+  if ((interview.decision || "").toLowerCase() === "cancelled") return true;
+  const note = (interview.notes_internal || "").toLowerCase();
+  return note.includes("cancelled by superadmin");
 }
 
 function chipTone(kind: "neutral" | "green" | "amber" | "red" | "blue") {
@@ -143,7 +150,7 @@ function InterviewCard({ interview, onSelect }: { interview: Interview; onSelect
   );
 }
 
-export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
+export function InterviewerClient({ initialUpcoming, initialPending, useMeFilter }: Props) {
   const [upcoming, setUpcoming] = useState<Interview[]>(initialUpcoming);
   const [pending, setPending] = useState<Interview[]>(initialPending);
   const [active, setActive] = useState<Interview | null>(null);
@@ -170,7 +177,6 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
     comments_for_candidate: "",
   });
 
-  const pendingCount = pending.length;
 
   const activeCandidateLabel = useMemo(() => {
     if (!active) return "";
@@ -198,8 +204,8 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
     setError(null);
     try {
       const [nextUpcoming, nextPending] = await Promise.all([
-        fetchInterviews({ interviewer: "me", upcoming: "true" }),
-        fetchInterviews({ interviewer: "me", pending_feedback: "true" }),
+        fetchInterviews({ ...(useMeFilter ? { interviewer: "me" } : {}), upcoming: "true" }),
+        fetchInterviews({ ...(useMeFilter ? { interviewer: "me" } : {}), pending_feedback: "true" }),
       ]);
       setUpcoming(nextUpcoming);
       setPending(nextPending);
@@ -209,6 +215,10 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
       setBusy(false);
     }
   }
+
+  const upcomingView = useMemo(() => upcoming.filter((item) => !isCancelled(item)), [upcoming]);
+  const pendingView = useMemo(() => pending.filter((item) => !isCancelled(item)), [pending]);
+  const pendingCount = pendingView.length;
 
   async function refreshSprints() {
     setSprintsBusy(true);
@@ -336,12 +346,12 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
             <span className="text-xs text-slate-600">Next 7 days</span>
           </div>
           <div className="mt-3 space-y-2">
-            {upcoming.length === 0 ? (
+            {upcomingView.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/30 p-4 text-sm text-slate-600">
                 No interviews scheduled yet.
               </div>
             ) : (
-              upcoming.map((slot) => <InterviewCard key={slot.candidate_interview_id} interview={slot} onSelect={openFeedback} />)
+              upcomingView.map((slot) => <InterviewCard key={slot.candidate_interview_id} interview={slot} onSelect={openFeedback} />)
             )}
           </div>
         </div>
@@ -352,12 +362,12 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
             <span className="rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-600">{pendingCount}</span>
           </div>
           <div className="mt-3 space-y-2">
-            {pending.length === 0 ? (
+            {pendingView.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-amber-200 bg-amber-500/5 p-4 text-sm text-amber-700">
                 All feedback is up to date.
               </div>
             ) : (
-              pending.map((item) => (
+              pendingView.map((item) => (
                 <button
                   key={item.candidate_interview_id}
                   type="button"

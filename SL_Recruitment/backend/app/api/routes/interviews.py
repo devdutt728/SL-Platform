@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
@@ -80,6 +80,14 @@ def _round_to_transition(round_type: str, decision: str) -> str | None:
     if "l1" in round_norm:
         return "l1_feedback"
     return None
+
+
+def _is_superadmin(user: UserContext) -> bool:
+    if (user.platform_role_id or None) == 2:
+        return True
+    if user.platform_role_id is None and Role.HR_ADMIN in user.roles and settings.environment != "production":
+        return True
+    return False
 
 
 def _normalize_to_utc(dt: datetime) -> datetime:
@@ -401,8 +409,26 @@ async def create_interview(
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
 
+    is_superadmin = _is_superadmin(user)
+    existing_query = select(RecCandidateInterview).where(
+        RecCandidateInterview.candidate_id == candidate_id,
+        RecCandidateInterview.round_type == payload.round_type,
+    )
+    if is_superadmin:
+        existing_query = existing_query.where(
+            or_(
+                RecCandidateInterview.decision.is_(None),
+                RecCandidateInterview.decision != "cancelled",
+            )
+        )
+    existing = (await session.execute(existing_query)).scalars().first()
+    if existing:
+        detail = "Interview already scheduled. Only Superadmin can schedule again." if not is_superadmin else "Interview already scheduled."
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+
     interview = RecCandidateInterview(
         candidate_id=candidate_id,
+        stage_name=_normalize_round(payload.round_type),
         round_type=payload.round_type,
         interviewer_person_id_platform=_clean_platform_person_id(payload.interviewer_person_id_platform),
         scheduled_start_at=start_at,
@@ -553,6 +579,23 @@ async def propose_interview_slots(
         interviewer_email = (interviewer_meta or {}).get("email")
     if not interviewer_email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Interviewer email is required")
+
+    is_superadmin = _is_superadmin(user)
+    existing_query = select(RecCandidateInterview).where(
+        RecCandidateInterview.candidate_id == candidate_id,
+        RecCandidateInterview.round_type == payload.round_type,
+    )
+    if is_superadmin:
+        existing_query = existing_query.where(
+            or_(
+                RecCandidateInterview.decision.is_(None),
+                RecCandidateInterview.decision != "cancelled",
+            )
+        )
+    existing = (await session.execute(existing_query)).scalars().first()
+    if existing:
+        detail = "Interview already scheduled. Only Superadmin can schedule again." if not is_superadmin else "Interview already scheduled."
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
     tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
     start_day = payload.start_date or datetime.now(tz).date()
@@ -892,11 +935,13 @@ async def select_interview_slot(
             )
 
         if slot.status != "proposed":
-            return _render_page(
-                "Slot no longer available",
-                "<p>Please select a different slot.</p>",
-                status_code=409,
+            title = "Slot already selected" if slot.status in {"reserved", "confirmed"} else "Slot no longer available"
+            message = (
+                "<p>This slot has already been selected. Please contact HR for changes.</p>"
+                if slot.status in {"reserved", "confirmed"}
+                else "<p>Please select a different slot.</p>"
             )
+            return _render_page(title, message, status_code=409)
 
         if slot.expires_at and slot.expires_at < datetime.utcnow():
             slot.status = "expired"
@@ -979,6 +1024,10 @@ async def select_interview_slot(
                 select(RecCandidateInterview).where(
                     RecCandidateInterview.candidate_id == slot.candidate_id,
                     RecCandidateInterview.round_type == slot.round_type,
+                    or_(
+                        RecCandidateInterview.decision.is_(None),
+                        RecCandidateInterview.decision != "cancelled",
+                    ),
                 )
             )
         )
@@ -990,13 +1039,14 @@ async def select_interview_slot(
         slot.updated_at = datetime.utcnow()
         await session.commit()
         return _render_page(
-            "Interview already scheduled",
-            "<p>Please contact HR for changes.</p>",
+            "Slot already selected",
+            "<p>An interview is already scheduled for this round. Please contact HR for changes.</p>",
             status_code=409,
         )
 
     interview = RecCandidateInterview(
         candidate_id=slot.candidate_id,
+        stage_name=_normalize_round(slot.round_type),
         round_type=slot.round_type,
         interviewer_person_id_platform=str(slot.interviewer_person_id_platform) if slot.interviewer_person_id_platform is not None else None,
         scheduled_start_at=slot.slot_start_at,
@@ -1053,7 +1103,12 @@ async def select_interview_slot(
 
     await session.execute(
         RecCandidateInterviewSlot.__table__.update()
-        .where(RecCandidateInterviewSlot.batch_id == slot.batch_id, RecCandidateInterviewSlot.candidate_interview_slot_id != slot.candidate_interview_slot_id)
+        .where(
+            RecCandidateInterviewSlot.candidate_id == slot.candidate_id,
+            RecCandidateInterviewSlot.round_type == slot.round_type,
+            RecCandidateInterviewSlot.candidate_interview_slot_id != slot.candidate_interview_slot_id,
+            RecCandidateInterviewSlot.status.in_(["proposed", "reserved"]),
+        )
         .values(status="expired", updated_at=datetime.utcnow())
     )
 
@@ -1146,6 +1201,7 @@ async def cancel_interview(
             )
         except Exception:
             pass
+    interview.decision = "cancelled"
     interview.notes_internal = (interview.notes_internal or "") + "\nCancelled by Superadmin."
     interview.updated_at = datetime.utcnow()
     await session.commit()
