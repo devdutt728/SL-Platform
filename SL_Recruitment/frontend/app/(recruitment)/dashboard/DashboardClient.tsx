@@ -134,19 +134,19 @@ export default function DashboardClient({ initialMetrics, initialEvents, initial
                 label: "Total applications",
                 value: metrics?.total_applications_received ?? "--",
                 gradient: "from-cyan-500/25 via-teal-400/20 to-transparent",
-                href: "/candidates",
+                href: "/candidates?status_view=all",
               },
               {
                 label: "Active candidates",
                 value: metrics?.total_active_candidates ?? "--",
                 gradient: "from-violet-500/25 via-amber-400/20 to-transparent",
-                href: "/candidates",
+                href: "/candidates?status_view=active",
               },
               {
                 label: "CAF today",
                 value: metrics?.caf_submitted_today ?? "--",
                 gradient: "from-emerald-500/25 via-cyan-400/20 to-transparent",
-                href: "/candidates",
+                href: "/candidates?status_view=all&caf_today=1",
               },
             ].map((item) => (
               <Link
@@ -211,7 +211,7 @@ export default function DashboardClient({ initialMetrics, initialEvents, initial
             ].map(([key, label]) => (
               <Link
                 key={key}
-                href="/offers"
+                href={`/offers?status=${key}`}
                 className="flex items-center justify-between rounded-xl border border-white/60 bg-white/35 px-3 py-2 shadow-sm transition hover:bg-white/55"
               >
                 <p className="text-[12px] font-semibold text-slate-800">{label}</p>
@@ -239,8 +239,9 @@ export default function DashboardClient({ initialMetrics, initialEvents, initial
             {allStages.map((stage) => {
               const pct = Math.round((stage.count / totalStageCount) * 100);
               return (
-                <div
+                <Link
                   key={stage.key}
+                  href={`/candidates?status_view=active&stage=${encodeURIComponent(stage.key)}`}
                   className="group relative overflow-hidden rounded-2xl border border-white/60 bg-white/35 p-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-white/80 hover:bg-white/60 hover:shadow-lg"
                 >
                   <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/80 via-white/20 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
@@ -258,7 +259,7 @@ export default function DashboardClient({ initialMetrics, initialEvents, initial
                       style={{ width: `${pct}%` }}
                     />
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>

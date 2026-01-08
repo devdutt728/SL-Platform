@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { CandidateOffer } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
 
@@ -41,6 +42,8 @@ export function OffersClient() {
   const [status, setStatus] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const [initialized, setInitialized] = useState(false);
 
   const loadOffers = async () => {
     setLoading(true);
@@ -62,6 +65,15 @@ export function OffersClient() {
   useEffect(() => {
     void loadOffers();
   }, [status]);
+
+  useEffect(() => {
+    if (initialized) return;
+    const rawStatus = (searchParams.get("status") || "").trim().toLowerCase();
+    if (rawStatus && statusOptions.includes(rawStatus)) {
+      setStatus(rawStatus);
+    }
+    setInitialized(true);
+  }, [initialized, searchParams]);
 
   useEffect(() => {
     let cancelled = false;
