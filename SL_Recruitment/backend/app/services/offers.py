@@ -502,21 +502,41 @@ async def send_offer(session: AsyncSession, *, offer: RecCandidateOffer, user: U
     return offer
 
 
-async def record_candidate_response(session: AsyncSession, *, offer: RecCandidateOffer, decision: str, reason: str | None = None) -> RecCandidateOffer:
+async def record_candidate_response(
+    session: AsyncSession,
+    *,
+    offer: RecCandidateOffer,
+    decision: str,
+    reason: str | None = None,
+    allow_override: bool = False,
+) -> RecCandidateOffer:
     now = datetime.utcnow()
-    if offer.offer_status not in {"sent", "viewed"}:
+    if offer.offer_status not in {"sent", "viewed"} and not allow_override:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer is not awaiting candidate response.")
+    if allow_override and offer.offer_status in {"accepted", "declined", "withdrawn"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer decision is already final.")
     normalized = decision.strip().lower()
     if normalized not in {"accept", "decline"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Decision must be accept or decline.")
+    candidate = await session.get(RecCandidate, offer.candidate_id)
     if normalized == "accept":
         offer.offer_status = "accepted"
         offer.accepted_at = now
         action = "offer_accepted"
+        if candidate:
+            candidate.status = "offer"
+            candidate.final_decision = None
+            candidate.updated_at = now
+            await _transition_stage(session, candidate_id=candidate.candidate_id, to_stage="joining_documents", user=None)
     else:
         offer.offer_status = "declined"
         offer.declined_at = now
         action = "offer_declined"
+        if candidate:
+            candidate.status = "declined"
+            candidate.final_decision = "declined"
+            candidate.updated_at = now
+            await _transition_stage(session, candidate_id=candidate.candidate_id, to_stage="declined", user=None)
     offer.updated_at = now
     await log_event(
         session,

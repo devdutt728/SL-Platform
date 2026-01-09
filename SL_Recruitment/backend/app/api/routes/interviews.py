@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select, or_
+from sqlalchemy import func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
@@ -218,6 +218,22 @@ def _render_page(title: str, body_html: str, status_code: int) -> HTMLResponse:
     return HTMLResponse(html, status_code=status_code)
 
 
+def _reservation_stale_cutoff(now: datetime) -> datetime:
+    return now - timedelta(minutes=10)
+
+
+async def _release_stale_reservations(session: AsyncSession, *, batch_id: str, now: datetime) -> None:
+    await session.execute(
+        RecCandidateInterviewSlot.__table__.update()
+        .where(
+            RecCandidateInterviewSlot.batch_id == batch_id,
+            RecCandidateInterviewSlot.status == "reserved",
+            RecCandidateInterviewSlot.updated_at < _reservation_stale_cutoff(now),
+        )
+        .values(status="proposed", updated_at=now)
+    )
+
+
 async def _render_slot_conflict(
     session: AsyncSession,
     request: Request,
@@ -225,6 +241,19 @@ async def _render_slot_conflict(
     tz: ZoneInfo,
 ) -> HTMLResponse:
     now = datetime.utcnow()
+    latest_expiry = (
+        await session.execute(
+            select(func.max(RecCandidateInterviewSlot.expires_at)).where(
+                RecCandidateInterviewSlot.batch_id == slot.batch_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if latest_expiry and latest_expiry < now:
+        return _render_page(
+            "Slot invitation expired",
+            "<p>Please contact HR for a new invitation.</p>",
+            status_code=410,
+        )
     remaining = (
         (
             await session.execute(
@@ -247,7 +276,7 @@ async def _render_slot_conflict(
         return _render_page(
             "Slot unavailable",
             "<p>Please contact HR for a new invitation.</p>",
-            status_code=409,
+            status_code=200,
         )
 
     interviewer_email = slot.interviewer_email or ""
@@ -255,50 +284,19 @@ async def _render_slot_conflict(
         return _render_page(
             "Slot unavailable",
             "<p>Please contact HR for a new invitation.</p>",
-            status_code=409,
-        )
-
-    window_start = remaining[0].slot_start_at.replace(tzinfo=timezone.utc)
-    window_end = remaining[-1].slot_end_at.replace(tzinfo=timezone.utc)
-    busy = query_freebusy(
-        calendar_ids=[interviewer_email],
-        start_at=window_start,
-        end_at=window_end,
-        subject_email=interviewer_email,
-    ).get(interviewer_email, [])
-
-    def _overlaps_busy(slot_item: RecCandidateInterviewSlot) -> bool:
-        slot_start = slot_item.slot_start_at.replace(tzinfo=timezone.utc)
-        slot_end = slot_item.slot_end_at.replace(tzinfo=timezone.utc)
-        for item in busy:
-            start_raw = item.get("start")
-            end_raw = item.get("end")
-            if not start_raw or not end_raw:
-                continue
-            busy_start = _parse_rfc3339(start_raw).astimezone(timezone.utc)
-            busy_end = _parse_rfc3339(end_raw).astimezone(timezone.utc)
-            if slot_start < busy_end and slot_end > busy_start:
-                return True
-        return False
-
-    available = [r for r in remaining if not _overlaps_busy(r)]
-    if not available:
-        return _render_page(
-            "No slots left",
-            "<p>Please contact HR for a new invitation.</p>",
-            status_code=409,
+            status_code=200,
         )
 
     base_url = str(request.base_url).rstrip("/")
     slots_html = "\n".join(
         f'<li class="slot"><span>{_format_slot_label(r.slot_start_at, tz)}</span>'
         f'<a href="{_public_slot_link(base_url, build_signed_selection_token(r.selection_token))}">Select</a></li>'
-        for r in available
+        for r in remaining
     )
     return _render_page(
         "Slot just got booked",
         f"<p>Please select another available slot:</p><ul class=\"slot-list\">{slots_html}</ul>",
-        status_code=409,
+        status_code=200,
     )
 
 
@@ -354,6 +352,7 @@ def _build_interview_out(
     return InterviewOut(
         candidate_interview_id=interview.candidate_interview_id,
         candidate_id=interview.candidate_id,
+        stage_name=interview.stage_name,
         round_type=interview.round_type,
         interviewer_person_id_platform=interview.interviewer_person_id_platform,
         interviewer_name=(interviewer_meta or {}).get("name"),
@@ -609,7 +608,9 @@ async def propose_interview_slots(
 
     now_utc = datetime.utcnow()
     batch_id = build_selection_token()
-    expires_at = (free_slots[-1].end_at.astimezone(timezone.utc)).replace(tzinfo=None)
+    last_slot_end = (free_slots[-1].end_at.astimezone(timezone.utc)).replace(tzinfo=None)
+    ttl_floor = datetime.utcnow() + timedelta(hours=settings.public_link_ttl_hours)
+    expires_at = max(last_slot_end, ttl_floor)
     created_by = _platform_person_id_int(user)
     slots: list[RecCandidateInterviewSlot] = []
     for slot in free_slots:
@@ -934,14 +935,18 @@ async def select_interview_slot(
                 status_code=404,
             )
 
+        await _release_stale_reservations(session, batch_id=slot.batch_id, now=datetime.utcnow())
+
         if slot.status != "proposed":
+            if slot.status in {"reserved", "conflict", "expired"}:
+                return await _render_slot_conflict(session, request, slot, tz=ZoneInfo(settings.calendar_timezone or "Asia/Kolkata"))
             title = "Slot already selected" if slot.status in {"reserved", "confirmed"} else "Slot no longer available"
             message = (
                 "<p>This slot has already been selected. Please contact HR for changes.</p>"
                 if slot.status in {"reserved", "confirmed"}
                 else "<p>Please select a different slot.</p>"
             )
-            return _render_page(title, message, status_code=409)
+            return _render_page(title, message, status_code=200)
 
         if slot.expires_at and slot.expires_at < datetime.utcnow():
             slot.status = "expired"
@@ -977,46 +982,7 @@ async def select_interview_slot(
     tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
     slot_start_utc = slot.slot_start_at.replace(tzinfo=timezone.utc)
     slot_end_utc = slot.slot_end_at.replace(tzinfo=timezone.utc)
-    try:
-        busy = query_freebusy(
-            calendar_ids=[interviewer_email],
-            start_at=slot_start_utc,
-            end_at=slot_end_utc,
-            subject_email=interviewer_email,
-        ).get(interviewer_email, [])
-    except Exception:
-        slot.status = "proposed"
-        await session.commit()
-        return _render_page(
-            "Temporarily unavailable",
-            "<p>Please retry in a moment. If the issue continues, contact HR.</p>",
-            status_code=503,
-        )
-
-    if busy:
-        slot.status = "conflict"
-        slot.updated_at = datetime.utcnow()
-        await session.commit()
-        return await _render_slot_conflict(session, request, slot, tz)
-
-    interviewer_overlap = (
-        (
-            await session.execute(
-                select(RecCandidateInterview).where(
-                    RecCandidateInterview.interviewer_person_id_platform == str(slot.interviewer_person_id_platform),
-                    RecCandidateInterview.scheduled_start_at < slot.slot_end_at,
-                    RecCandidateInterview.scheduled_end_at > slot.slot_start_at,
-                )
-            )
-        )
-        .scalars()
-        .first()
-    )
-    if interviewer_overlap:
-        slot.status = "conflict"
-        slot.updated_at = datetime.utcnow()
-        await session.commit()
-        return await _render_slot_conflict(session, request, slot, tz)
+    # Allow selection for pre-proposed slots even if the calendar changed after the invite was sent.
 
     existing = (
         (
@@ -1041,7 +1007,7 @@ async def select_interview_slot(
         return _render_page(
             "Slot already selected",
             "<p>An interview is already scheduled for this round. Please contact HR for changes.</p>",
-            status_code=409,
+            status_code=200,
         )
 
     interview = RecCandidateInterview(

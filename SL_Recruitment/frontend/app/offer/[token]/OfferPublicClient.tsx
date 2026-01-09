@@ -32,6 +32,7 @@ export function OfferPublicClient({ token }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [decision, setDecision] = useState<"accepted" | "declined" | null>(null);
+  const canRespond = offer?.offer_status === "sent" || offer?.offer_status === "viewed";
 
   const loadOffer = async () => {
     setLoading(true);
@@ -72,6 +73,12 @@ export function OfferPublicClient({ token }: Props) {
   useEffect(() => {
     void loadOffer();
   }, []);
+
+  useEffect(() => {
+    if (!offer?.offer_status) return;
+    if (offer.offer_status === "accepted") setDecision("accepted");
+    if (offer.offer_status === "declined") setDecision("declined");
+  }, [offer?.offer_status]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 px-4 py-10">
@@ -120,7 +127,7 @@ export function OfferPublicClient({ token }: Props) {
             <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
               {decision === "accepted" ? "Thanks! Your acceptance has been recorded." : "We have recorded your decision."}
             </div>
-          ) : (
+          ) : canRespond ? (
             <div className="flex gap-2">
               <button
                 className="flex-1 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow-lg disabled:opacity-60"
@@ -137,7 +144,19 @@ export function OfferPublicClient({ token }: Props) {
                 Decline offer
               </button>
             </div>
+          ) : (
+            <div className="rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm text-slate-700">
+              Offer response will be available after the offer is sent to the candidate.
+            </div>
           )}
+          {offer.offer_status === "accepted" ? (
+            <a
+              href={`${basePath}/joining/${encodeURIComponent(token)}`}
+              className="inline-flex items-center justify-center rounded-xl border border-white/60 bg-white/60 px-4 py-2 text-sm font-semibold text-slate-800 backdrop-blur"
+            >
+              Upload joining documents
+            </a>
+          ) : null}
         </div>
       ) : null}
     </main>

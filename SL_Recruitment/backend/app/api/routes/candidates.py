@@ -759,8 +759,10 @@ async def transition_stage(
     )
     session.add(new_stage)
 
-    if payload.to_stage in {"rejected", "hired"}:
+    if payload.to_stage in {"rejected", "hired", "declined"}:
         candidate.status = payload.to_stage
+    elif payload.to_stage == "joining_documents":
+        candidate.status = "offer"
     else:
         candidate.status = "in_process"
     candidate.updated_at = now

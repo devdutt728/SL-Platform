@@ -260,6 +260,33 @@ async def reject_offer_route(
     )
 
 
+@router.post("/{offer_id}/decision", response_model=OfferOut)
+async def admin_offer_decision(
+    offer_id: int,
+    payload: OfferDecisionIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    offer = await session.get(RecCandidateOffer, offer_id)
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    if offer.offer_status not in {"approved", "sent", "viewed"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer is not ready for acceptance/decline.")
+    await record_candidate_response(
+        session,
+        offer=offer,
+        decision=payload.decision,
+        reason=payload.reason,
+        allow_override=True,
+    )
+    await session.commit()
+    await session.refresh(offer)
+    return OfferOut(
+        **_offer_base_payload(offer),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
+
+
 @router.post("/{offer_id}/send", response_model=OfferOut)
 async def send_offer_route(
     offer_id: int,

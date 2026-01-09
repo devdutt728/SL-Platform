@@ -61,6 +61,23 @@ function chipTone(kind: "neutral" | "green" | "amber" | "red" | "blue") {
   return "bg-slate-500/10 text-slate-700 ring-1 ring-slate-500/15";
 }
 
+function normalizeStage(raw?: string | null) {
+  const value = (raw || "").trim().toLowerCase();
+  if (!value) return "";
+  if (value === "caf") return "hr_screening";
+  if (value === "l2") return "l2_interview";
+  if (value === "l1") return "l1_interview";
+  return value.replace(/\s+/g, "_");
+}
+
+function stageLabel(raw?: string | null) {
+  const key = normalizeStage(raw);
+  if (!key) return "";
+  if (key === "l2_feedback") return "L2 feedback";
+  if (key === "l1_feedback") return "L1 feedback";
+  return key.replace(/_/g, " ");
+}
+
 function parseInternalNotes(raw?: string | null) {
   const empty = { strengths: "", concerns: "" };
   if (!raw) return { ...empty, other: "" };
@@ -124,6 +141,7 @@ function InterviewCard({ interview, onSelect }: { interview: Interview; onSelect
   const label = interview.round_type || "Interview";
   const candidate = interview.candidate_name || `Candidate ${interview.candidate_id}`;
   const role = interview.opening_title || "Opening";
+  const feedbackStage = stageLabel(interview.stage_name);
   return (
     <button
       type="button"
@@ -135,7 +153,12 @@ function InterviewCard({ interview, onSelect }: { interview: Interview; onSelect
           <p className="text-sm font-semibold text-slate-900">{candidate}</p>
           <p className="text-xs text-slate-600">{role}</p>
         </div>
-        <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{label}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {feedbackStage ? (
+            <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("amber"))}>{feedbackStage}</span>
+          ) : null}
+          <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{label}</span>
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
         <span className="inline-flex items-center gap-1"><CalendarCheck2 className="h-3.5 w-3.5" />{formatDateTime(interview.scheduled_start_at)}</span>
@@ -375,7 +398,12 @@ export function InterviewerClient({ initialUpcoming, initialPending, useMeFilter
                   onClick={() => openFeedback(item)}
                 >
                   <div className="flex items-center gap-2">
-                    <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("amber"))}>{item.round_type}</span>
+                    {stageLabel(item.stage_name) ? (
+                      <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("amber"))}>
+                        {stageLabel(item.stage_name)}
+                      </span>
+                    ) : null}
+                    <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
                     <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
                   </div>
                   <p className="mt-1 text-xs text-slate-600">{item.opening_title || "Opening"} - {formatDateTime(item.scheduled_start_at)}</p>

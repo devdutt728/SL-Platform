@@ -54,6 +54,7 @@ export type CandidateEvent = {
 export type Interview = {
   candidate_interview_id: number;
   candidate_id: number;
+  stage_name?: string | null;
   round_type: string;
   interviewer_person_id_platform?: string | null;
   interviewer_name?: string | null;
@@ -303,4 +304,33 @@ export type OfferPublic = {
   offer_status: string;
   pdf_url?: string | null;
   pdf_download_url?: string | null;
+};
+
+export type JoiningDoc = {
+  joining_doc_id: number;
+  candidate_id: number;
+  doc_type: string;
+  file_name: string;
+  content_type?: string | null;
+  uploaded_by: string;
+  uploaded_by_person_id_platform?: number | null;
+  created_at: string;
+  file_url: string;
+};
+
+export type JoiningDocPublic = {
+  joining_doc_id: number;
+  doc_type: string;
+  file_name: string;
+  uploaded_by: string;
+  created_at: string;
+};
+
+export type JoiningDocsPublicContext = {
+  candidate_id: number;
+  candidate_name: string;
+  opening_title?: string | null;
+  joining_docs_status: string;
+  required_doc_types: string[];
+  docs: JoiningDocPublic[];
 };

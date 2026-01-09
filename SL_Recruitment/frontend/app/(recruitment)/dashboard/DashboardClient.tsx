@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { clsx } from "clsx";
 import type { CandidateEvent, CandidateOffer, DashboardMetrics } from "@/lib/types";
 import { LayoutPanelLeft, UsersRound, Briefcase } from "lucide-react";
 import NeedsReviewCard from "./NeedsReviewCard";
@@ -24,9 +25,27 @@ const stageOrder = [
   { key: "l1_interview", label: "L1 interview" },
   { key: "l1_feedback", label: "L1 feedback" },
   { key: "offer", label: "Offer" },
+  { key: "joining_documents", label: "Joining documents" },
   { key: "hired", label: "Hired" },
+  { key: "declined", label: "Declined" },
   { key: "rejected", label: "Rejected" },
 ];
+
+const pipelineStages = [
+  "enquiry",
+  "hr_screening",
+  "l2_shortlist",
+  "l2_interview",
+  "l2_feedback",
+  "sprint",
+  "l1_shortlist",
+  "l1_interview",
+  "l1_feedback",
+  "offer",
+];
+
+const postOfferStages = ["joining_documents"];
+const outcomeStages = ["hired", "declined", "rejected"];
 
 function normalizeStage(raw?: string | null) {
   const value = (raw || "").trim().toLowerCase();
@@ -64,13 +83,19 @@ export default function DashboardClient({ initialMetrics, initialEvents, initial
   const extraStages = perStage
     .filter((row) => !knownKeys.has(normalizeStage(row.stage)))
     .map((row) => ({ key: normalizeStage(row.stage) || row.stage, label: stageLabel(row.stage), count: row.count }));
-  const orderedStages = stageOrder.map((s) => ({
-    key: s.key,
-    label: s.label,
-    count: stageCounts.get(s.key) ?? 0,
-  }));
-  const allStages = [...orderedStages, ...extraStages];
-  const totalStageCount = Math.max(1, allStages.reduce((sum, s) => sum + s.count, 0));
+
+  const stageData = (key: string) => {
+    const label = stageOrder.find((stage) => stage.key === key)?.label || stageLabel(key);
+    return { key, label, count: stageCounts.get(key) ?? 0 };
+  };
+
+  const pipelineList = [
+    ...pipelineStages.map(stageData),
+    ...extraStages.filter((stage) => !postOfferStages.includes(stage.key) && !outcomeStages.includes(stage.key)),
+  ];
+  const postOfferList = postOfferStages.map(stageData);
+  const outcomeList = outcomeStages.map(stageData);
+  const pipelineTotal = Math.max(1, pipelineList.reduce((sum, s) => sum + s.count, 0));
 
   useEffect(() => {
     let cancelled = false;
@@ -236,12 +261,13 @@ export default function DashboardClient({ initialMetrics, initialEvents, initial
             </Link>
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-            {allStages.map((stage) => {
-              const pct = Math.round((stage.count / totalStageCount) * 100);
+            {pipelineList.map((stage) => {
+              const pct = Math.round((stage.count / pipelineTotal) * 100);
+              const statusView = "active";
               return (
                 <Link
                   key={stage.key}
-                  href={`/candidates?status_view=active&stage=${encodeURIComponent(stage.key)}`}
+                  href={`/candidates?status_view=${statusView}&stage=${encodeURIComponent(stage.key)}`}
                   className="group relative overflow-hidden rounded-2xl border border-white/60 bg-white/35 p-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-white/80 hover:bg-white/60 hover:shadow-lg"
                 >
                   <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/80 via-white/20 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
@@ -262,6 +288,50 @@ export default function DashboardClient({ initialMetrics, initialEvents, initial
                 </Link>
               );
             })}
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            <div className="rounded-2xl border border-white/70 bg-white/40 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Post-offer</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {postOfferList.map((stage) => (
+                  <Link
+                    key={stage.key}
+                    href={`/candidates?status_view=active&stage=${encodeURIComponent(stage.key)}`}
+                    className="inline-flex items-center gap-2 rounded-full border border-emerald-200/60 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-500/20"
+                  >
+                    <span>{stage.label}</span>
+                    <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-emerald-900">
+                      {stage.count}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/70 bg-white/40 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Outcomes</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {outcomeList.map((stage) => {
+                  const statusView = stage.key === "hired" ? "hired" : "rejected";
+                  return (
+                    <Link
+                      key={stage.key}
+                      href={`/candidates?status_view=${statusView}&stage=${encodeURIComponent(stage.key)}`}
+                      className={clsx(
+                        "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold hover:opacity-90",
+                        stage.key === "hired"
+                          ? "border-emerald-200/70 bg-emerald-500/10 text-emerald-800"
+                          : "border-rose-200/70 bg-rose-500/10 text-rose-800"
+                      )}
+                    >
+                      <span>{stage.label}</span>
+                      <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-slate-900">
+                        {stage.count}
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
 

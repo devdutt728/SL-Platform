@@ -35,6 +35,7 @@ class InterviewReschedule(BaseModel):
 class InterviewOut(BaseModel):
     candidate_interview_id: int
     candidate_id: int
+    stage_name: Optional[str] = None
     round_type: str
     interviewer_person_id_platform: Optional[str] = None
     interviewer_name: Optional[str] = None

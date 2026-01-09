@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CandidateFull, CandidateOffer, CandidateStage, CandidateSprint, Interview, PlatformPersonSuggestion, Screening, SprintTemplate } from "@/lib/types";
+import { CandidateFull, CandidateOffer, CandidateStage, CandidateSprint, Interview, JoiningDoc, PlatformPersonSuggestion, Screening, SprintTemplate } from "@/lib/types";
 import { clsx } from "clsx";
 import { CheckCircle2, Copy, ExternalLink, FileText, Layers, Mail, Phone, XCircle } from "lucide-react";
 import { DeleteCandidateButton } from "./DeleteCandidateButton";
@@ -15,6 +15,7 @@ type Props = {
   canSchedule: boolean;
   canSkip: boolean;
   canCancelInterview: boolean;
+  canUploadJoiningDocs: boolean;
 };
 
 type SlotPreview = {
@@ -34,9 +35,28 @@ const stageOrder = [
   { key: "l1_interview", label: "L1 interview" },
   { key: "l1_feedback", label: "L1 feedback" },
   { key: "offer", label: "Offer" },
+  { key: "joining_documents", label: "Joining documents" },
   { key: "hired", label: "Hired" },
+  { key: "declined", label: "Declined" },
   { key: "rejected", label: "Rejected" },
 ];
+
+const pipelineStages = [
+  "enquiry",
+  "hr_screening",
+  "l2_shortlist",
+  "l2_interview",
+  "l2_feedback",
+  "sprint",
+  "l1_shortlist",
+  "l1_interview",
+  "l1_feedback",
+  "offer",
+];
+
+const postAcceptanceStages = ["joining_documents", "hired"];
+const postDeclineStages = ["declined"];
+const postRejectStages = ["rejected"];
 
 function normalizeStage(raw?: string | null) {
   const s = (raw || "").trim().toLowerCase();
@@ -124,7 +144,7 @@ function docTone(status?: string | null) {
 
 function statusTone(status?: string | null) {
   const s = (status || "").toLowerCase();
-  if (s === "rejected") return chipTone("red");
+  if (s === "rejected" || s === "declined") return chipTone("red");
   if (s === "hired") return chipTone("green");
   if (s === "offer") return chipTone("blue");
   return chipTone("neutral");
@@ -188,9 +208,24 @@ const skipStageOptions = [
   { value: "l1_interview", label: "L1 interview" },
   { value: "l1_feedback", label: "L1 feedback" },
   { value: "offer", label: "Offer" },
+  { value: "joining_documents", label: "Joining documents" },
   { value: "hired", label: "Hired" },
+  { value: "declined", label: "Declined" },
   { value: "rejected", label: "Rejected" },
 ];
+
+const joiningDocOptions = [
+  { value: "pan", label: "PAN card" },
+  { value: "aadhaar", label: "Aadhaar card" },
+  { value: "marksheets", label: "Marksheets" },
+  { value: "experience_letters", label: "Experience letters" },
+  { value: "salary_slips", label: "Salary slips" },
+  { value: "other", label: "Other documents" },
+];
+
+function joiningDocLabel(value: string) {
+  return joiningDocOptions.find((doc) => doc.value === value)?.label || value.replace(/_/g, " ");
+}
 
 async function fetchInterviews(candidateId: string) {
   const res = await fetch(`/api/rec/interviews?candidate_id=${encodeURIComponent(candidateId)}`, { cache: "no-store" });
@@ -219,6 +254,24 @@ async function fetchCandidateOffers(candidateId: string) {
   const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/offers`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateOffer[];
+}
+
+async function fetchJoiningDocs(candidateId: string) {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/joining-docs`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as JoiningDoc[];
+}
+
+async function uploadJoiningDoc(candidateId: string, payload: { doc_type: string; file: File }) {
+  const form = new FormData();
+  form.append("doc_type", payload.doc_type);
+  form.append("file", payload.file);
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/joining-docs`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as JoiningDoc;
 }
 
 async function createOffer(candidateId: string, payload: Record<string, unknown>) {
@@ -259,6 +312,16 @@ async function rejectOffer(offerId: number, reason?: string) {
 
 async function sendOffer(offerId: number) {
   const res = await fetch(`/api/rec/offers/${offerId}/send`, { method: "POST" });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as CandidateOffer;
+}
+
+async function adminDecideOffer(offerId: number, decision: "accept" | "decline") {
+  const res = await fetch(`/api/rec/offers/${offerId}/decision`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decision }),
+  });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateOffer;
 }
@@ -388,7 +451,7 @@ function cleanLetterOverrides(raw: Record<string, string>) {
   return cleaned;
 }
 
-export function Candidate360Client({ candidateId, initial, canDelete, canSchedule, canSkip, canCancelInterview }: Props) {
+export function Candidate360Client({ candidateId, initial, canDelete, canSchedule, canSkip, canCancelInterview, canUploadJoiningDocs }: Props) {
   const [data, setData] = useState<CandidateFull>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -408,6 +471,12 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [candidateOffers, setCandidateOffers] = useState<CandidateOffer[] | null>(null);
   const [offersBusy, setOffersBusy] = useState(false);
   const [offersError, setOffersError] = useState<string | null>(null);
+  const [joiningDocs, setJoiningDocs] = useState<JoiningDoc[] | null>(null);
+  const [joiningDocsBusy, setJoiningDocsBusy] = useState(false);
+  const [joiningDocsError, setJoiningDocsError] = useState<string | null>(null);
+  const [joiningDocsNotice, setJoiningDocsNotice] = useState<string | null>(null);
+  const [joiningDocType, setJoiningDocType] = useState(joiningDocOptions[0]?.value || "pan");
+  const [joiningDocFile, setJoiningDocFile] = useState<File | null>(null);
   const [offerTemplateCode, setOfferTemplateCode] = useState("STD_OFFER");
   const [offerDesignation, setOfferDesignation] = useState("");
   const [offerCurrency, setOfferCurrency] = useState("INR");
@@ -615,6 +684,40 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
+  async function refreshJoiningDocs() {
+    setJoiningDocsBusy(true);
+    setJoiningDocsError(null);
+    try {
+      const docs = await fetchJoiningDocs(candidateId);
+      setJoiningDocs(docs);
+    } catch (e: any) {
+      setJoiningDocsError(e?.message || "Could not load joining documents.");
+    } finally {
+      setJoiningDocsBusy(false);
+    }
+  }
+
+  async function handleUploadJoiningDoc() {
+    if (!joiningDocFile) {
+      setJoiningDocsError("Select a file to upload.");
+      return;
+    }
+    setJoiningDocsBusy(true);
+    setJoiningDocsError(null);
+    setJoiningDocsNotice(null);
+    try {
+      await uploadJoiningDoc(candidateId, { doc_type: joiningDocType, file: joiningDocFile });
+      setJoiningDocFile(null);
+      setJoiningDocsNotice("Joining document uploaded.");
+      await refreshJoiningDocs();
+      await refreshAll();
+    } catch (e: any) {
+      setJoiningDocsError(e?.message || "Joining document upload failed.");
+    } finally {
+      setJoiningDocsBusy(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     let inFlight = false;
@@ -632,6 +735,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         await refreshInterviews();
         await refreshSprints();
         await refreshOffers();
+        await refreshJoiningDocs();
       } finally {
         inFlight = false;
         if (pending && !cancelled) {
@@ -831,6 +935,21 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
+  async function handleAdminDecision(offerId: number, decision: "accept" | "decline") {
+    if (!confirm(`Mark offer as ${decision}? This will update candidate status and stage.`)) return;
+    setOffersBusy(true);
+    setOffersError(null);
+    try {
+      await adminDecideOffer(offerId, decision);
+      await refreshOffers();
+      await refreshAll();
+    } catch (e: any) {
+      setOffersError(e?.message || "Offer decision failed.");
+    } finally {
+      setOffersBusy(false);
+    }
+  }
+
   async function handleSaveDraftOverrides(offerId: number) {
     setOffersBusy(true);
     setOffersError(null);
@@ -898,12 +1017,18 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       setInterviewsError("Select an interviewer.");
       return;
     }
-    const startIso = selectedSlot ? `${selectedSlot.slot_start_at}Z` : `${scheduleStartAt}:00+05:30`;
-    const endIso = selectedSlot ? `${selectedSlot.slot_end_at}Z` : `${scheduleEndAt}:00+05:30`;
-    if (!selectedSlot && (!scheduleStartAt || !scheduleEndAt)) {
-      setInterviewsError("Provide a slot or both start and end time.");
+    const roundUpper = scheduleRound.toUpperCase();
+    const isSlotRound = roundUpper === "L1" || roundUpper === "L2";
+    if (!isSlotRound) {
+      setInterviewsError("Manual scheduling has been removed. Use the slot planner for L1/L2.");
       return;
     }
+    if (!selectedSlot) {
+      setInterviewsError("Select a slot from the planner.");
+      return;
+    }
+    const startIso = `${selectedSlot.slot_start_at}Z`;
+    const endIso = `${selectedSlot.slot_end_at}Z`;
     const start = new Date(startIso);
     const end = new Date(endIso);
     if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end <= start) {
@@ -961,26 +1086,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         return;
       }
 
-      const fallbackSlot = slotPreviewSlots[0] || null;
-      const startIso = selectedSlot
-        ? `${selectedSlot.slot_start_at}Z`
-        : fallbackSlot
-          ? `${fallbackSlot.slot_start_at}Z`
-          : `${scheduleStartAt}:00+05:30`;
-      if (!selectedSlot && !fallbackSlot && !scheduleStartAt) {
-        setScheduleEmailPreviewError("Pick a slot or start time to preview the email.");
-        return;
-      }
-      const url = new URL(`${basePath}/api/rec/interviews/email-preview`, window.location.origin);
-      url.searchParams.set("candidate_id", candidateId);
-      url.searchParams.set("round_type", scheduleRound);
-      url.searchParams.set("scheduled_start_at", startIso);
-      if (scheduleMeetLink) url.searchParams.set("meeting_link", scheduleMeetLink);
-      const res = await fetch(url.toString(), { cache: "no-store" });
-      if (!res.ok) throw new Error(await res.text());
-      const html = await res.text();
-      setScheduleEmailPreviewHtml(html);
-      setScheduleEmailPreviewOpen(true);
+      setScheduleEmailPreviewError("Slot scheduling is available only for L1/L2 rounds.");
     } catch (e: any) {
       setScheduleEmailPreviewError(e?.message || "Email preview failed.");
     } finally {
@@ -1044,6 +1150,12 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       void refreshOffers();
     }
   }, [candidateOffers]);
+
+  useEffect(() => {
+    if (joiningDocs === null) {
+      void refreshJoiningDocs();
+    }
+  }, [joiningDocs]);
 
   useEffect(() => {
     if (!scheduleOpen) return;
@@ -1342,8 +1454,18 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         },
       ];
     }
+    if (current === "joining_documents") {
+      return [
+        {
+          label: "Go to documents",
+          tone: "bg-slate-900 hover:bg-slate-800",
+          icon: <Layers className="h-4 w-4" />,
+          action: () => focusSection("documents", documentsRef),
+        },
+      ];
+    }
     return [];
-  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef]);
+  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef]);
 
   const screening = data.screening as Screening | null | undefined;
   const interviewUpcoming = useMemo(() => {
@@ -1364,6 +1486,27 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       .sort((a, b) => getTs(b.scheduled_start_at) - getTs(a.scheduled_start_at));
   }, [interviews]);
   const latestOffer = candidateOffers && candidateOffers.length > 0 ? candidateOffers[0] : null;
+  const stageProgressSteps = useMemo(() => {
+    const hasStage = (key: string) => data.stages.some((stage) => normalizeStage(stage.stage_name) === key);
+    const status = (candidate.status || "").toLowerCase();
+    const offerStatus = (latestOffer?.offer_status || "").toLowerCase();
+    const isDeclined = status === "declined" || offerStatus === "declined" || hasStage("declined");
+    const isRejected = status === "rejected" || hasStage("rejected");
+    const isAccepted = offerStatus === "accepted" || hasStage("joining_documents") || hasStage("hired") || status === "hired";
+
+    let steps = [...pipelineStages];
+    if (isRejected) {
+      steps = [...steps, ...postRejectStages];
+    } else if (isDeclined) {
+      steps = [...steps, ...postDeclineStages];
+    } else if (isAccepted) {
+      steps = [...steps, ...postAcceptanceStages];
+    }
+
+    return steps
+      .map((key) => stageOrder.find((stage) => stage.key === key))
+      .filter((step): step is { key: string; label: string } => Boolean(step));
+  }, [candidate.status, data.stages, latestOffer?.offer_status]);
 
   useEffect(() => {
     if (!latestOffer) {
@@ -1525,30 +1668,49 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
               <div className="mt-4 space-y-4">
                 <div>
                   <p className="text-xs uppercase tracking-tight text-slate-500">Stage progress</p>
-                  <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-white/70 bg-white/40 px-4 py-3">
-                    {stageOrder.map((step, idx) => {
-                      const state = stageStateKey(data.stages, currentStageKey, step.key);
-                      const stageRow = findStage(data.stages, step.key);
-                      const tone =
-                        state === "done"
-                          ? "bg-emerald-500 text-white"
-                          : state === "current"
-                            ? "bg-violet-600 text-white"
-                            : "bg-white text-slate-700 border border-slate-200";
-                      return (
-                        <div key={step.key} className="flex items-center gap-3">
-                          <div className={clsx("flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm", tone)}>
-                            <span>{step.label}</span>
-                            <span className="text-[10px] opacity-80">
-                              {stageRow?.started_at ? formatDate(stageRow.started_at) : ""}
-                            </span>
+                  <div className="stage-rail mt-3 rounded-2xl border border-white/70 px-4 py-4">
+                    <div className="flex flex-wrap items-center gap-3">
+                      {stageProgressSteps.map((step, idx) => {
+                        const state = stageStateKey(data.stages, currentStageKey, step.key);
+                        const stageRow = findStage(data.stages, step.key);
+                        const isTerminal = ["declined", "rejected", "hired"].includes(step.key);
+                        const isNegative = ["declined", "rejected"].includes(step.key);
+                        const staggerClass = `stage-node-stagger-${(idx % 4) + 1}`;
+                        const motion = state === "current" ? `stage-node-active ${staggerClass}` : "";
+                        const tone =
+                          state === "done"
+                            ? isNegative
+                              ? "bg-rose-600 text-white"
+                              : "bg-emerald-500 text-white"
+                            : state === "current"
+                              ? isTerminal
+                                ? isNegative
+                                  ? "bg-rose-600 text-white shadow-[0_0_20px_rgba(244,63,94,0.45)]"
+                                  : "bg-emerald-600 text-white shadow-[0_0_20px_rgba(16,185,129,0.45)]"
+                                : "bg-slate-900 text-white shadow-[0_0_20px_rgba(15,23,42,0.35)]"
+                              : "bg-white text-slate-700 border border-slate-200";
+                        return (
+                          <div key={step.key} className="flex items-center gap-3">
+                            <div className={clsx("flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm", tone, motion)}>
+                              <span>{step.label}</span>
+                              <span className="text-[10px] opacity-80">
+                                {stageRow?.started_at ? formatDate(stageRow.started_at) : ""}
+                              </span>
+                            </div>
+                            {idx < stageProgressSteps.length - 1 ? (
+                              <div className={clsx("stage-connector", state === "current" ? "" : "stage-connector--idle")} />
+                            ) : null}
                           </div>
-                          {idx < stageOrder.length - 1 ? (
-                            <div className="h-[1px] w-10 bg-gradient-to-r from-slate-200 via-slate-400 to-slate-200" />
-                          ) : null}
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
+                    <p className="mt-3 text-xs text-slate-500">
+                      {latestOffer?.offer_status === "declined"
+                        ? "Offer declined. Joining documents and hiring steps are closed."
+                        : latestOffer?.offer_status === "accepted"
+                          ? "Offer accepted. Collect joining documents before final hire."
+                          : "Offer decision will unlock the next path."}
+                    </p>
                   </div>
                 </div>
 
@@ -1791,6 +1953,80 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                   ) : (
                     <span className="text-sm text-slate-600">No Drive folder linked yet.</span>
                   )}
+                </div>
+
+                <div className="mt-4 border-t border-white/60 pt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold">Joining documents</p>
+                    {joiningDocsNotice ? (
+                      <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-500/20">
+                        {joiningDocsNotice}
+                      </span>
+                    ) : null}
+                  </div>
+                  {joiningDocsError ? (
+                    <div className="mt-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-700">
+                      {joiningDocsError}
+                    </div>
+                  ) : null}
+                  {joiningDocsBusy && !joiningDocs ? (
+                    <div className="mt-3 text-sm text-slate-600">Loading joining documents...</div>
+                  ) : null}
+                  {joiningDocs && joiningDocs.length ? (
+                    <ul className="mt-3 space-y-2 text-sm text-slate-700">
+                      {joiningDocs.map((doc) => (
+                        <li key={doc.joining_doc_id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/70 bg-white/60 px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold">{joiningDocLabel(doc.doc_type)}</p>
+                            <p className="truncate text-xs text-slate-500">{doc.file_name}</p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs text-slate-500">{formatDateTime(doc.created_at)}</span>
+                            <span className="rounded-full bg-white/80 px-2 py-1 text-xs text-slate-600">
+                              {doc.uploaded_by === "candidate" ? "Candidate" : "HR"}
+                            </span>
+                            <Link
+                              href={doc.file_url}
+                              target="_blank"
+                              className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white hover:bg-slate-800"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              Open
+                            </Link>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : joiningDocs && !joiningDocs.length ? (
+                    <p className="mt-3 text-sm text-slate-600">No joining documents uploaded yet.</p>
+                  ) : null}
+
+                  {canUploadJoiningDocs ? (
+                    <div className="mt-4 grid gap-3 md:grid-cols-[1.1fr_1.7fr_auto]">
+                      <select
+                        className="w-full rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-800"
+                        value={joiningDocType}
+                        onChange={(event) => setJoiningDocType(event.target.value)}
+                      >
+                        {joiningDocOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <input
+                        className="w-full rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-700"
+                        type="file"
+                        onChange={(event) => setJoiningDocFile(event.target.files?.[0] || null)}
+                      />
+                      <button
+                        type="button"
+                        className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        onClick={() => void handleUploadJoiningDoc()}
+                        disabled={!joiningDocFile || joiningDocsBusy}
+                      >
+                        {joiningDocsBusy ? "Uploading..." : "Upload"}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             )}
@@ -2160,30 +2396,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     </div>
                   ) : null}
 
-                  <p className="text-[11px] text-slate-500">Manual scheduling (optional)</p>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <label className="space-y-1 text-xs text-slate-600">
-                      Start time
-                      <input
-                        type="datetime-local"
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                        value={scheduleStartAt}
-                        onChange={(e) => setScheduleStartAt(e.target.value)}
-                        disabled={!!selectedSlot}
-                      />
-                    </label>
-                    <label className="space-y-1 text-xs text-slate-600">
-                      End time
-                      <input
-                        type="datetime-local"
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                        value={scheduleEndAt}
-                        onChange={(e) => setScheduleEndAt(e.target.value)}
-                        disabled={!!selectedSlot}
-                      />
-                    </label>
-                  </div>
-                <p className="text-[11px] text-slate-500">All times are stored as IST.</p>
+                <p className="text-[11px] text-slate-500">Select a slot from the planner to schedule the interview.</p>
 
                 <label className="space-y-1 text-xs text-slate-600">
                   Location
@@ -2526,6 +2739,26 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                         >
                           Send to candidate
                         </button>
+                      ) : null}
+                      {canSkip && ["approved", "sent", "viewed"].includes(latestOffer.offer_status) ? (
+                        <>
+                          <button
+                            type="button"
+                            className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
+                            onClick={() => void handleAdminDecision(latestOffer.candidate_offer_id, "accept")}
+                            disabled={offersBusy}
+                          >
+                            Mark accepted
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-full bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white"
+                            onClick={() => void handleAdminDecision(latestOffer.candidate_offer_id, "decline")}
+                            disabled={offersBusy}
+                          >
+                            Mark declined
+                          </button>
+                        </>
                       ) : null}
                       {latestOffer.offer_status === "accepted" ? (
                         <button

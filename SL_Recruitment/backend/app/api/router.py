@@ -5,6 +5,7 @@ from app.api.routes import caf
 from app.api.routes import candidates
 from app.api.routes import dashboard
 from app.api.routes import interviews
+from app.api.routes import joining_docs
 from app.api.routes import openings
 from app.api.routes import offers
 from app.api.routes import platform_people
@@ -23,5 +24,7 @@ api_router.include_router(public_apply.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(interviews.router)
 api_router.include_router(interviews.public_router)
+api_router.include_router(joining_docs.router)
+api_router.include_router(joining_docs.public_router)
 api_router.include_router(sprints.router)
 api_router.include_router(sprints.public_router)

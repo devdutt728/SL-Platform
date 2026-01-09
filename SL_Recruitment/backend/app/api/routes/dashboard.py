@@ -43,7 +43,7 @@ async def get_dashboard_metrics(
         await session.execute(
             select(func.count())
             .select_from(RecCandidate)
-            .where(RecCandidate.status.notin_(["hired", "rejected"]))
+            .where(RecCandidate.status.notin_(["hired", "rejected", "declined"]))
         )
     ).scalar_one()
 

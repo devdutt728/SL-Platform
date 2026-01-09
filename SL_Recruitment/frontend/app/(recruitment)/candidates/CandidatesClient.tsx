@@ -26,7 +26,9 @@ const stageTone: Record<string, string> = {
   l1_interview: "bg-indigo-600/10 text-indigo-700 ring-1 ring-indigo-600/10",
   l1_feedback: "bg-indigo-600/10 text-indigo-700 ring-1 ring-indigo-600/10",
   offer: "bg-emerald-600/10 text-emerald-700 ring-1 ring-emerald-600/10",
+  joining_documents: "bg-emerald-600/10 text-emerald-700 ring-1 ring-emerald-600/10",
   hired: "bg-emerald-600/10 text-emerald-700 ring-1 ring-emerald-600/10",
+  declined: "bg-rose-600/10 text-rose-700 ring-1 ring-rose-600/10",
   rejected: "bg-rose-600/10 text-rose-700 ring-1 ring-rose-600/10",
 };
 
@@ -41,7 +43,9 @@ const stageLabels: Record<string, string> = {
   l1_interview: "L1 interview",
   l1_feedback: "L1 feedback",
   offer: "Offer",
+  joining_documents: "Joining documents",
   hired: "Hired",
+  declined: "Declined",
   rejected: "Rejected",
 };
 
@@ -97,7 +101,9 @@ const STAGE_OPTIONS = [
   "l1_interview",
   "l1_feedback",
   "offer",
+  "joining_documents",
   "hired",
+  "declined",
   "rejected",
 ];
 
@@ -111,7 +117,10 @@ async function fetchCandidates(params: {
   if (params.openingId) url.searchParams.set("opening_id", params.openingId);
 
   if (params.statusView === "hired") url.searchParams.append("status", "hired");
-  if (params.statusView === "rejected") url.searchParams.append("status", "rejected");
+  if (params.statusView === "rejected") {
+    url.searchParams.append("status", "rejected");
+    url.searchParams.append("status", "declined");
+  }
   if (params.statusView === "active") {
     for (const s of ["new", "enquiry", "in_process", "offer"]) url.searchParams.append("status", s);
   }
@@ -481,7 +490,7 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
                 </div>
                 <div className="whitespace-nowrap text-center text-sm text-slate-800">{c.ageing_days}d</div>
                 <div className="whitespace-nowrap">
-                  <span className={clsx("rounded-full px-2 py-1 text-xs font-semibold", chipTone(c.status === "rejected" ? "red" : c.status === "hired" ? "green" : "neutral"))}>
+                  <span className={clsx("rounded-full px-2 py-1 text-xs font-semibold", chipTone(c.status === "rejected" || c.status === "declined" ? "red" : c.status === "hired" ? "green" : "neutral"))}>
                     {c.status.split("_").join(" ")}
                   </span>
                 </div>
