@@ -10,7 +10,7 @@ export default function AdminUsersPage() {
           Manage roles and access. The last active superadmin cannot be removed.
         </p>
       </section>
-      <RoleGuard allowed={["admin"]}>
+      <RoleGuard allowed={[]}>
         <UserAdminTable />
       </RoleGuard>
     </div>

@@ -3,6 +3,12 @@ import { internalUrl } from "@/lib/internal";
 import { Interview } from "@/lib/types";
 import { InterviewerClient } from "./InterviewerClient";
 
+type Me = {
+  platform_role_id?: number | null;
+  platform_role_code?: string | null;
+  roles?: string[] | null;
+};
+
 async function fetchInterviews(params: Record<string, string>) {
   const url = new URL(internalUrl("/api/rec/interviews"));
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
@@ -17,10 +23,19 @@ async function fetchInterviews(params: Record<string, string>) {
 }
 
 export default async function InterviewerPage() {
+  const cookieHeader = cookies().toString();
+  const meRes = await fetch(internalUrl("/api/auth/me"), {
+    cache: "no-store",
+    headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+  });
+  const me = (meRes.ok ? ((await meRes.json()) as Me) : null) || null;
+  const roles = (me?.roles || []).map((role) => String(role).toLowerCase());
+  const useMeFilter = roles.includes("interviewer") && !roles.includes("hr_admin") && !roles.includes("hr_exec");
+
   const [upcoming, pending] = await Promise.all([
-    fetchInterviews({ interviewer: "me", upcoming: "true" }),
-    fetchInterviews({ interviewer: "me", pending_feedback: "true" }),
+    fetchInterviews({ ...(useMeFilter ? { interviewer: "me" } : {}), upcoming: "true" }),
+    fetchInterviews({ ...(useMeFilter ? { interviewer: "me" } : {}), pending_feedback: "true" }),
   ]);
 
-  return <InterviewerClient initialUpcoming={upcoming} initialPending={pending} />;
+  return <InterviewerClient initialUpcoming={upcoming} initialPending={pending} useMeFilter={useMeFilter} />;
 }

@@ -12,6 +12,7 @@ class RecCandidateInterview(Base):
     candidate_interview_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     candidate_id: Mapped[int] = mapped_column(Integer, index=True)
 
+    stage_name: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     round_type: Mapped[str] = mapped_column(String(50))
     interviewer_person_id_platform: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 

@@ -2,9 +2,9 @@
 
 import { useRef, useState } from "react";
 import { Briefcase, CalendarClock, FileText, Sparkles } from "lucide-react";
-import { withBasePath } from "@/lib/base-path";
 
 export function ApplyForm({ openingCode }: { openingCode: string }) {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<boolean>(false);
   const [alreadyApplied, setAlreadyApplied] = useState<boolean>(false);
@@ -15,14 +15,22 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
   const idempotencyKeyRef = useRef<string | null>(null);
 
   async function onSubmit(formData: FormData) {
-    const cv = formData.get("cv_file") as File | null;
-    const portfolio = formData.get("portfolio_file") as File | null;
+    const cvRaw = formData.get("cv_file");
+    const portfolioRaw = formData.get("portfolio_file");
+    const cv = cvRaw instanceof File && cvRaw.size > 0 ? cvRaw : null;
+    const portfolio = portfolioRaw instanceof File && portfolioRaw.size > 0 ? portfolioRaw : null;
+    const portfolioReason = String(formData.get("portfolio_not_uploaded_reason") || "").trim();
     if (cv && cv.size > 2 * 1024 * 1024) {
       setError("CV file is too large. Max 2MB.");
       return;
     }
     if (portfolio && portfolio.size > 10 * 1024 * 1024) {
       setError("Portfolio file is too large. Max 10MB.");
+      return;
+    }
+    const hasPortfolio = Boolean(portfolio && portfolio.size > 0) || Boolean(portfolioName);
+    if (!hasPortfolio && !portfolioReason) {
+      setError("Please provide a reason if you are not uploading a portfolio.");
       return;
     }
 
@@ -33,7 +41,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
 
     let res: Response;
     try {
-      res = await fetch(withBasePath(`/api/apply/${encodeURIComponent(openingCode)}`), {
+      res = await fetch(`${basePath}/api/apply/${openingCode}`, {
         method: "POST",
         body: formData,
         headers: { "Idempotency-Key": idempotencyKeyRef.current },
@@ -166,7 +174,10 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
               name="cv_file"
               accept=".pdf,.doc,.docx"
               filename={cvName}
-              onPick={setCvName}
+              onPick={(value) => {
+                setCvName(value);
+                if (value) setError(null);
+              }}
               icon={<FileText className="h-4 w-4 text-blue-600" />}
             />
             <FilePicker
@@ -175,23 +186,28 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
               name="portfolio_file"
               accept=".pdf,.ppt,.pptx,.zip"
               filename={portfolioName}
-              onPick={setPortfolioName}
+              onPick={(value) => {
+                setPortfolioName(value);
+                if (value) setError(null);
+              }}
               icon={<Briefcase className="h-4 w-4 text-violet-600" />}
             />
             </div>
 
-              {!portfolioName ? (
-                <label className="block space-y-1">
-                  <span className="text-[12px] font-medium text-[var(--text-secondary)]">
-                    If you are not uploading a portfolio, you can share a reason (optional)
-                  </span>
-                  <textarea
-                    name="portfolio_not_uploaded_reason"
-                    rows={2}
-                    className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[13px] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
-                    placeholder="e.g. NDA / work is confidential / still compiling / no portfolio available"
-                  />
-                </label>
+            {!portfolioName ? (
+              <label className="block space-y-1">
+                <span className="text-[12px] font-medium text-[var(--text-secondary)]">If you are not uploading a portfolio, please share a reason</span>
+                <textarea
+                  name="portfolio_not_uploaded_reason"
+                  required
+                  rows={2}
+                  onChange={(e) => {
+                    if (e.target.value.trim()) setError(null);
+                  }}
+                  className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[13px] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                  placeholder="e.g. NDA / work is confidential / still compiling / no portfolio available"
+                />
+              </label>
             ) : (
               <input type="hidden" name="portfolio_not_uploaded_reason" value="" />
             )}
@@ -247,16 +263,31 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
                 className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
               />
             </Field>
-            <Field dense label="Willing to Relocate Delhi?">
-              <select
-                name="willing_to_relocate"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
-              >
-                <option value="">Select</option>
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-                              </select>
-            </Field>
+            <div className="md:col-span-2">
+              <Field dense label="Willing to Relocate Delhi?">
+                <select
+                  name="willing_to_relocate"
+                  className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                >
+                  <option value="">Select</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </Field>
+            </div>
+            <div className="md:col-span-2">
+              <Field dense label="Commit to a 2-year tenure with our organisation?">
+                <select
+                  name="two_year_commitment"
+                  required
+                  className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                >
+                  <option value="">Select</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </Field>
+            </div>
             <Field dense label="Notice period (days)">
               <input
                 name="notice_period_days"

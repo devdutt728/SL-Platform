@@ -1,62 +1,103 @@
 from __future__ import annotations
 
 from datetime import datetime
-import logging
-from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from starlette.responses import FileResponse, RedirectResponse
+import json
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from urllib.parse import urlparse, parse_qs
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.core.auth import require_roles, require_superadmin
+from app.core.config import settings
 from app.core.roles import Role
 from app.models.candidate import RecCandidate
 from app.models.candidate_offer import RecCandidateOffer
 from app.models.opening import RecOpening
 from app.models.stage import RecCandidateStage
-from app.schemas.offer import (
-    OfferCreateIn,
-    OfferDecisionIn,
-    OfferDocumentGenerateIn,
-    OfferOut,
-    OfferPublicOut,
-    OfferUpdateIn,
-)
+from app.schemas.offer import OfferCreateIn, OfferDecisionIn, OfferOut, OfferPublicOut, OfferUpdateIn
 from app.schemas.user import UserContext
 from app.services.offers import (
-    _platform_person_id,
     approve_offer,
     convert_candidate_to_employee,
     create_offer,
     record_candidate_response,
     reject_offer,
+    _resolve_candidate_address,
+    _resolve_reporting_to,
+    _ensure_offer_pdf,
+    _offer_public_link,
+    _offer_public_pdf_link,
+    offer_pdf_signed_url,
+    verify_offer_pdf_signature,
+    render_offer_letter,
+    _render_offer_pdf_bytes,
     send_offer,
     submit_for_approval,
     update_offer_details,
 )
 from app.services.events import log_event
-from app.services.offer_documents import generate_offer_document
-from app.services.drive import delete_drive_item, move_candidate_folder
-from app.services.email import send_email
+from app.services.drive import delete_drive_item, move_candidate_folder, upload_offer_doc
+from app.services.email import render_template, send_email
 
 router = APIRouter(prefix="/rec/offers", tags=["offers"])
 public_router = APIRouter(prefix="/offer", tags=["offers-public"])
-logger = logging.getLogger(__name__)
 
 
-def _resolve_offer_path(raw_path: str, root: Path) -> Path:
-    path = Path(raw_path)
-    if not path.is_absolute():
-        path = (root / path).resolve()
-    return path
-
-
-def _drive_file_id_from_url(url: str) -> str | None:
-    if "drive.google.com/file/d/" not in url:
+def _extract_drive_file_id(raw_url: str | None) -> str | None:
+    if not raw_url:
         return None
-    parts = url.split("/file/d/", 1)[1].split("/", 1)
-    return parts[0] if parts and parts[0] else None
+    try:
+        parsed = urlparse(raw_url)
+        if parsed.query:
+            query = parse_qs(parsed.query)
+            if "id" in query and query["id"]:
+                return query["id"][0]
+        parts = parsed.path.split("/")
+        if "d" in parts:
+            idx = parts.index("d")
+            if idx + 1 < len(parts):
+                return parts[idx + 1]
+    except Exception:
+        return None
+    return None
+
+
+def _decode_letter_overrides(raw: str | None) -> dict[str, str] | None:
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    cleaned: dict[str, str] = {}
+    for key, value in data.items():
+        if not isinstance(key, str):
+            continue
+        if value is None:
+            continue
+        cleaned[key] = str(value)
+    return cleaned or None
+
+
+def _safe_person_id(raw: str | None) -> int | None:
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except Exception:
+        return None
+
+
+def _offer_base_payload(offer: RecCandidateOffer) -> dict:
+    data = OfferOut.model_validate(offer).model_dump()
+    data.pop("candidate_name", None)
+    data.pop("candidate_code", None)
+    data.pop("opening_title", None)
+    data.pop("letter_overrides", None)
+    return data
 
 
 @router.get("", response_model=list[OfferOut])
@@ -83,13 +124,14 @@ async def list_offers(
     out: list[OfferOut] = []
     for row in rows:
         offer = row[0]
-        base = OfferOut.model_validate(offer).model_dump(exclude={"candidate_name", "candidate_code", "opening_title"})
         out.append(
             OfferOut(
-                **base,
+                **_offer_base_payload(offer),
                 candidate_name=row[1],
                 candidate_code=row[2],
                 opening_title=row[3],
+                pdf_download_url=offer_pdf_signed_url(offer.public_token),
+                letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
             )
         )
     return out
@@ -118,12 +160,13 @@ async def get_offer(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
     offer = row[0]
-    base = OfferOut.model_validate(offer).model_dump(exclude={"candidate_name", "candidate_code", "opening_title"})
     return OfferOut(
-        **base,
+        **_offer_base_payload(offer),
         candidate_name=row[1],
         candidate_code=row[2],
         opening_title=row[3],
+        pdf_download_url=offer_pdf_signed_url(offer.public_token),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
     )
 
 
@@ -145,7 +188,38 @@ async def update_offer(
         await submit_for_approval(session, offer=offer, user=user)
     await session.commit()
     await session.refresh(offer)
-    return OfferOut.model_validate(offer)
+    return OfferOut(
+        **_offer_base_payload(offer),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
+
+
+@router.delete("/{offer_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_offer(
+    offer_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    offer = await session.get(RecCandidateOffer, offer_id)
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    if offer.offer_status != "draft":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only draft offers can be deleted")
+    file_id = _extract_drive_file_id(offer.pdf_url)
+    if file_id:
+        delete_drive_item(file_id)
+    await log_event(
+        session,
+        candidate_id=offer.candidate_id,
+        action_type="offer_draft_deleted",
+        performed_by_person_id_platform=_safe_person_id(user.person_id_platform),
+        related_entity_type="offer",
+        related_entity_id=offer.candidate_offer_id,
+        meta_json={"offer_id": offer.candidate_offer_id},
+    )
+    await session.delete(offer)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{offer_id}/approve", response_model=OfferOut)
@@ -160,7 +234,10 @@ async def approve_offer_route(
     await approve_offer(session, offer=offer, user=user)
     await session.commit()
     await session.refresh(offer)
-    return OfferOut.model_validate(offer)
+    return OfferOut(
+        **_offer_base_payload(offer),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
 
 
 @router.post("/{offer_id}/reject", response_model=OfferOut)
@@ -177,7 +254,37 @@ async def reject_offer_route(
     await reject_offer(session, offer=offer, user=user, reason=reason)
     await session.commit()
     await session.refresh(offer)
-    return OfferOut.model_validate(offer)
+    return OfferOut(
+        **_offer_base_payload(offer),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
+
+
+@router.post("/{offer_id}/decision", response_model=OfferOut)
+async def admin_offer_decision(
+    offer_id: int,
+    payload: OfferDecisionIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    offer = await session.get(RecCandidateOffer, offer_id)
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    if offer.offer_status not in {"approved", "sent", "viewed"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer is not ready for acceptance/decline.")
+    await record_candidate_response(
+        session,
+        offer=offer,
+        decision=payload.decision,
+        reason=payload.reason,
+        allow_override=True,
+    )
+    await session.commit()
+    await session.refresh(offer)
+    return OfferOut(
+        **_offer_base_payload(offer),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
 
 
 @router.post("/{offer_id}/send", response_model=OfferOut)
@@ -203,8 +310,10 @@ async def send_offer_route(
             context={
                 "candidate_name": candidate.full_name,
                 "opening_title": opening.title if opening else "",
-                "offer_link": f"/offer/{offer.public_token}",
+                "offer_link": _offer_public_link(offer.public_token),
                 "joining_date": offer.joining_date,
+                "offer_file_url": offer_pdf_signed_url(offer.public_token),
+                "sender_name": "Studio Lotus Team",
             },
             email_type="offer_sent",
             related_entity_type="offer",
@@ -213,199 +322,64 @@ async def send_offer_route(
         )
     await session.commit()
     await session.refresh(offer)
-    return OfferOut.model_validate(offer)
+    return OfferOut(
+        **_offer_base_payload(offer),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
 
 
-@router.post("/{offer_id}/decision", response_model=OfferOut)
-async def decide_offer_admin(
+@router.get("/{offer_id}/preview")
+async def preview_offer_letter(
     offer_id: int,
-    payload: OfferDecisionIn,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_superadmin()),
-):
-    offer = await session.get(RecCandidateOffer, offer_id)
-    if not offer:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
-    await record_candidate_response(session, offer=offer, decision=payload.decision, reason=payload.reason)
-
-    candidate = await session.get(RecCandidate, offer.candidate_id)
-    if candidate and payload.decision.strip().lower() == "decline":
-        candidate.status = "rejected"
-        candidate.final_decision = "not_hired"
-        candidate.updated_at = datetime.utcnow()
-        current = (
-            await session.execute(
-                select(RecCandidateStage)
-                .where(RecCandidateStage.candidate_id == candidate.candidate_id, RecCandidateStage.stage_status == "pending")
-                .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
-                .limit(1)
-            )
-        ).scalars().first()
-        now = datetime.utcnow()
-        if current:
-            current.stage_status = "completed"
-            current.ended_at = now
-        session.add(
-            RecCandidateStage(
-                candidate_id=candidate.candidate_id,
-                stage_name="rejected",
-                stage_status="pending",
-                started_at=now,
-                created_at=now,
-            )
-        )
-        if candidate.drive_folder_id:
-            try:
-                move_candidate_folder(candidate.drive_folder_id, "Not Appointed")
-                await log_event(
-                    session,
-                    candidate_id=candidate.candidate_id,
-                    action_type="drive_folder_moved",
-                    performed_by_person_id_platform=_platform_person_id(user),
-                    related_entity_type="candidate",
-                    related_entity_id=candidate.candidate_id,
-                    meta_json={"bucket": "Not Appointed"},
-                )
-            except Exception:
-                pass
-    await session.commit()
-    await session.refresh(offer)
-    return OfferOut.model_validate(offer)
-
-
-@router.post("/{offer_id}/document", response_model=OfferOut)
-async def generate_offer_document_route(
-    offer_id: int,
-    payload: OfferDocumentGenerateIn,
-    session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
 ):
     offer = await session.get(RecCandidateOffer, offer_id)
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
     candidate = await session.get(RecCandidate, offer.candidate_id)
-    if not candidate:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
-    try:
-        await generate_offer_document(
-            session,
-            offer=offer,
-            candidate=candidate,
-            opening=opening,
-            payload=payload.model_dump(),
-            user=user,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-    except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
-    except OSError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
-    except Exception as exc:
-        logger.exception("Offer document generation failed", extra={"offer_id": offer_id, "candidate_id": offer.candidate_id})
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Offer letter generation failed: {type(exc).__name__}: {exc}",
-        )
-    try:
-        await session.commit()
-    except Exception as exc:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
-    try:
-        await session.refresh(offer)
-    except Exception as exc:
-        logger.warning("Offer refresh failed after document generation", exc_info=exc)
-    return OfferOut.model_validate(offer)
-
-
-@router.get("/{offer_id}/document")
-async def download_offer_document(
-    offer_id: int,
-    session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
-):
-    offer = await session.get(RecCandidateOffer, offer_id)
-    if not offer or not offer.docx_url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer document not found")
-    path = _resolve_offer_path(offer.docx_url, Path(__file__).resolve().parents[2])
-    if not path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer document not found")
-    filename = path.name
-    return FileResponse(
-        path,
-        filename=filename,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    sender_name = "Studio Lotus Team"
+    reporting_to = await _resolve_reporting_to(opening)
+    candidate_address = await _resolve_candidate_address(session, candidate, opening)
+    unit_name = opening.title if opening and opening.title else "Studio Lotus"
+    html = render_offer_letter(
+        offer=offer,
+        candidate=candidate,
+        opening=opening,
+        sender_name=sender_name,
+        candidate_address=candidate_address,
+        reporting_to=reporting_to,
+        unit_name=unit_name,
     )
+    return Response(content=html, media_type="text/html")
 
 
-@router.get("/{offer_id}/document/pdf")
-async def download_offer_pdf(
+@router.get("/{offer_id}/email-preview")
+async def preview_offer_email(
     offer_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
-):
-    offer = await session.get(RecCandidateOffer, offer_id)
-    if not offer or not offer.pdf_url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer PDF not found")
-    if str(offer.pdf_url).lower().startswith("http"):
-        return RedirectResponse(offer.pdf_url)
-    path = _resolve_offer_path(offer.pdf_url, Path(__file__).resolve().parents[2])
-    if not path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer PDF not found")
-    filename = path.name
-    return FileResponse(path, filename=filename, media_type="application/pdf")
-
-
-@router.delete("/{offer_id}/document", response_model=OfferOut)
-async def delete_offer_document(
-    offer_id: int,
-    session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_superadmin()),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
 ):
     offer = await session.get(RecCandidateOffer, offer_id)
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
-    root = Path(__file__).resolve().parents[2]
-    removed = []
-    if offer.pdf_url and str(offer.pdf_url).lower().startswith("http"):
-        file_id = _drive_file_id_from_url(offer.pdf_url)
-        if file_id:
-            try:
-                delete_drive_item(file_id)
-                removed.append(offer.pdf_url)
-            except Exception:
-                pass
-    for raw_path in (offer.docx_url, offer.pdf_url):
-        if not raw_path:
-            continue
-        if str(raw_path).lower().startswith("http"):
-            continue
-        path = _resolve_offer_path(raw_path, root)
-        if path.exists():
-            try:
-                path.unlink()
-                removed.append(str(path))
-            except Exception:
-                pass
-    offer.docx_url = None
-    offer.pdf_url = None
-    offer.updated_at = datetime.utcnow()
-    await log_event(
-        session,
-        candidate_id=offer.candidate_id,
-        action_type="offer_document_deleted",
-        performed_by_person_id_platform=_platform_person_id(user),
-        related_entity_type="offer",
-        related_entity_id=offer.candidate_offer_id,
-        meta_json={"offer_id": offer.candidate_offer_id, "removed": removed},
+    candidate = await session.get(RecCandidate, offer.candidate_id)
+    opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
+    offer_link = _offer_public_link(offer.public_token)
+    offer_pdf_link = offer_pdf_signed_url(offer.public_token)
+    html = render_template(
+        "offer_sent",
+        {
+            "candidate_name": candidate.full_name if candidate else "",
+            "opening_title": opening.title if opening else "",
+            "offer_link": offer_link,
+            "joining_date": offer.joining_date or "",
+            "offer_file_url": offer_pdf_link,
+            "sender_name": "Studio Lotus Team",
+        },
     )
-    await session.commit()
-    await session.refresh(offer)
-    return OfferOut.model_validate(offer)
+    return Response(content=html, media_type="text/html")
 
 
 @router.get("/candidates/{candidate_id}", response_model=list[OfferOut])
@@ -421,7 +395,14 @@ async def list_candidate_offers(
             .order_by(RecCandidateOffer.created_at.desc(), RecCandidateOffer.candidate_offer_id.desc())
         )
     ).scalars().all()
-    return [OfferOut.model_validate(row) for row in rows]
+    return [
+        OfferOut(
+            **_offer_base_payload(row),
+            pdf_download_url=offer_pdf_signed_url(row.public_token),
+            letter_overrides=_decode_letter_overrides(row.offer_letter_overrides),
+        )
+        for row in rows
+    ]
 
 
 @router.post("/candidates/{candidate_id}", response_model=OfferOut, status_code=status.HTTP_201_CREATED)
@@ -438,9 +419,25 @@ async def create_candidate_offer(
     if candidate.opening_id:
         opening = await session.get(RecOpening, candidate.opening_id)
     offer = await create_offer(session, candidate=candidate, opening=opening, payload=payload.model_dump(exclude_none=True), user=user)
+    try:
+        await _ensure_offer_pdf(
+            session=session,
+            offer=offer,
+            candidate=candidate,
+            opening=opening,
+            sender_name=user.full_name or "Studio Lotus Team",
+            candidate_address=await _resolve_candidate_address(session, candidate, opening),
+            reporting_to=await _resolve_reporting_to(opening),
+            unit_name=opening.title if opening and opening.title else "Studio Lotus",
+        )
+    except Exception:
+        pass
     await session.commit()
     await session.refresh(offer)
-    return OfferOut.model_validate(offer)
+    return OfferOut(
+        **_offer_base_payload(offer),
+        letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
 
 
 @public_router.get("/{token}", response_model=OfferPublicOut)
@@ -460,9 +457,6 @@ async def get_public_offer(
     if offer.offer_status == "sent" and offer.viewed_at is None:
         offer.viewed_at = datetime.utcnow()
         await session.commit()
-    pdf_url = offer.pdf_url
-    if pdf_url and not str(pdf_url).lower().startswith("http"):
-        pdf_url = f"/offer/{token}/document"
     return OfferPublicOut(
         candidate_name=candidate.full_name if candidate else None,
         candidate_code=candidate.candidate_code if candidate else None,
@@ -476,9 +470,59 @@ async def get_public_offer(
         probation_months=offer.probation_months,
         offer_valid_until=offer.offer_valid_until,
         offer_status=offer.offer_status,
-        docx_url=offer.docx_url,
-        pdf_url=pdf_url,
+        pdf_url=offer.pdf_url,
+        pdf_download_url=offer_pdf_signed_url(offer.public_token),
     )
+
+
+@public_router.get("/{token}/pdf")
+async def get_public_offer_pdf(
+    token: str,
+    request: Request,
+    session: AsyncSession = Depends(deps.get_db_session),
+):
+    exp = request.query_params.get("exp")
+    sig = request.query_params.get("sig")
+    has_internal_cookie = bool(request.cookies.get("slr_token"))
+    if settings.environment == "production" or not has_internal_cookie:
+        valid = verify_offer_pdf_signature(token, exp, sig)
+        if not valid:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired link")
+    download_flag = request.query_params.get("download", "1")
+    offer = (
+        await session.execute(select(RecCandidateOffer).where(RecCandidateOffer.public_token == token))
+    ).scalars().first()
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    candidate = await session.get(RecCandidate, offer.candidate_id)
+    opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
+    sender_name = "Studio Lotus Team"
+    reporting_to = await _resolve_reporting_to(opening)
+    candidate_address = await _resolve_candidate_address(session, candidate, opening)
+    unit_name = opening.title if opening and opening.title else "Studio Lotus"
+    html = render_offer_letter(
+        offer=offer,
+        candidate=candidate,
+        opening=opening,
+        sender_name=sender_name,
+        candidate_address=candidate_address,
+        reporting_to=reporting_to,
+        unit_name=unit_name,
+    )
+    pdf_bytes = _render_offer_pdf_bytes(html)
+    filename = f"{candidate.candidate_code if candidate else token}-offer-letter.pdf"
+    if candidate and candidate.drive_folder_id:
+        _, file_url = upload_offer_doc(
+            candidate.drive_folder_id,
+            filename=filename,
+            content_type="application/pdf",
+            data=pdf_bytes,
+        )
+        offer.pdf_url = file_url
+        await session.flush()
+    disposition = "attachment" if download_flag == "1" else "inline"
+    headers = {"Content-Disposition": f'{disposition}; filename="{filename}"'}
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
 @public_router.post("/{token}/decision", response_model=OfferPublicOut)
@@ -537,9 +581,6 @@ async def decide_public_offer(
                 pass
     await session.commit()
     opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
-    pdf_url = offer.pdf_url
-    if pdf_url and not str(pdf_url).lower().startswith("http"):
-        pdf_url = f"/offer/{token}/document"
     return OfferPublicOut(
         candidate_name=candidate.full_name if candidate else None,
         candidate_code=candidate.candidate_code if candidate else None,
@@ -553,25 +594,6 @@ async def decide_public_offer(
         probation_months=offer.probation_months,
         offer_valid_until=offer.offer_valid_until,
         offer_status=offer.offer_status,
-        docx_url=offer.docx_url,
-        pdf_url=pdf_url,
+        pdf_url=offer.pdf_url,
+        pdf_download_url=offer_pdf_signed_url(offer.public_token),
     )
-
-
-@public_router.get("/{token}/document")
-async def download_public_offer_pdf(
-    token: str,
-    session: AsyncSession = Depends(deps.get_db_session),
-):
-    offer = (
-        await session.execute(select(RecCandidateOffer).where(RecCandidateOffer.public_token == token))
-    ).scalars().first()
-    if not offer or not offer.pdf_url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer PDF not found")
-    if str(offer.pdf_url).lower().startswith("http"):
-        return RedirectResponse(offer.pdf_url)
-    path = _resolve_offer_path(offer.pdf_url, Path(__file__).resolve().parents[2])
-    if not path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer PDF not found")
-    filename = path.name
-    return FileResponse(path, filename=filename, media_type="application/pdf")

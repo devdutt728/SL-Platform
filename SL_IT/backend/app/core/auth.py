@@ -54,7 +54,7 @@ async def get_current_user(request: Request) -> UserContext:
         if identity.status and not is_active_status(identity.status):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not active")
 
-        roles = _map_platform_role_to_app_roles(identity.role_id, identity.role_code)
+        roles = _map_platform_roles_to_app_roles(identity.role_ids, identity.role_codes)
         if Role.VIEWER in roles and len(roles) == 1:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
 
@@ -67,6 +67,8 @@ async def get_current_user(request: Request) -> UserContext:
             platform_role_id=identity.role_id,
             platform_role_code=identity.role_code,
             platform_role_name=identity.role_name,
+            platform_role_ids=identity.role_ids,
+            platform_role_codes=identity.role_codes,
         )
 
     if settings.auth_mode == "google":
@@ -141,25 +143,26 @@ def _verify_google_id_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
 
 
-def _map_platform_role_to_app_roles(role_id: int | None, role_code: str | None) -> list[Role]:
+def _map_platform_roles_to_app_roles(role_ids: list[int], role_codes: list[str]) -> list[Role]:
     role_map = settings.role_map
-    if role_id is not None and role_id in role_map:
-        roles: list[Role] = []
-        for role_name in role_map[role_id]:
+    roles: list[Role] = []
+    for role_id in role_ids:
+        if role_id in role_map:
+            for role_name in role_map[role_id]:
+                try:
+                    roles.append(Role(role_name))
+                except Exception:
+                    continue
+
+    if not roles:
+        for code in role_codes:
+            normalized = code.strip().lower()
             try:
-                roles.append(Role(role_name))
+                roles.append(Role(normalized))
             except Exception:
                 continue
-        return roles or [Role.VIEWER]
 
-    if role_code:
-        normalized = role_code.strip().lower()
-        try:
-            return [Role(normalized)]
-        except Exception:
-            pass
-
-    return [Role.VIEWER]
+    return roles or [Role.VIEWER]
 
 
 def _derive_name_from_email(email: str) -> str:

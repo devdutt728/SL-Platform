@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CandidateFull, CandidateOffer, CandidateStage, CandidateSprint, Interview, PlatformPersonSuggestion, Screening, SprintTemplate } from "@/lib/types";
+import { CandidateFull, CandidateOffer, CandidateStage, CandidateSprint, Interview, JoiningDoc, PlatformPersonSuggestion, Screening, SprintTemplate } from "@/lib/types";
 import { clsx } from "clsx";
 import { CheckCircle2, Copy, ExternalLink, FileText, Layers, Mail, Phone, XCircle } from "lucide-react";
 import { DeleteCandidateButton } from "./DeleteCandidateButton";
-import { withBasePath } from "@/lib/base-path";
+import { parseDateUtc } from "@/lib/datetime";
 
 type Props = {
   candidateId: string;
@@ -14,6 +14,14 @@ type Props = {
   canDelete: boolean;
   canSchedule: boolean;
   canSkip: boolean;
+  canCancelInterview: boolean;
+  canUploadJoiningDocs: boolean;
+};
+
+type SlotPreview = {
+  slot_start_at: string;
+  slot_end_at: string;
+  label: string;
 };
 
 const stageOrder = [
@@ -27,9 +35,28 @@ const stageOrder = [
   { key: "l1_interview", label: "L1 interview" },
   { key: "l1_feedback", label: "L1 feedback" },
   { key: "offer", label: "Offer" },
+  { key: "joining_documents", label: "Joining documents" },
   { key: "hired", label: "Hired" },
+  { key: "declined", label: "Declined" },
   { key: "rejected", label: "Rejected" },
 ];
+
+const pipelineStages = [
+  "enquiry",
+  "hr_screening",
+  "l2_shortlist",
+  "l2_interview",
+  "l2_feedback",
+  "sprint",
+  "l1_shortlist",
+  "l1_interview",
+  "l1_feedback",
+  "offer",
+];
+
+const postAcceptanceStages = ["joining_documents", "hired"];
+const postDeclineStages = ["declined"];
+const postRejectStages = ["rejected"];
 
 function normalizeStage(raw?: string | null) {
   const s = (raw || "").trim().toLowerCase();
@@ -47,15 +74,9 @@ function stageLabel(raw?: string | null) {
   return stageOrder.find((s) => s.key === key)?.label || key.split("_").join(" ");
 }
 
-function parseAsUtc(raw: string) {
-  if (!raw) return null;
-  const hasZone = /[zZ]$|[+\-]\d{2}:\d{2}$/.test(raw);
-  return new Date(hasZone ? raw : `${raw}Z`);
-}
-
 function formatDateTime(raw?: string | null) {
   if (!raw) return "";
-  const d = parseAsUtc(raw);
+  const d = parseDateUtc(raw);
   if (!d) return "";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleString("en-IN", {
@@ -69,23 +90,15 @@ function formatDateTime(raw?: string | null) {
 
 function formatDate(raw?: string | null) {
   if (!raw) return "";
-  const d = parseAsUtc(raw);
+  const d = parseDateUtc(raw);
   if (!d) return "";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleDateString("en-IN", { month: "short", day: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" });
 }
 
-function formatLetterDate(raw?: string | null) {
-  if (!raw) return "";
-  const d = parseAsUtc(raw);
-  if (!d) return "";
-  if (Number.isNaN(d.getTime())) return raw;
-  return d.toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric", timeZone: "Asia/Kolkata" });
-}
-
 function formatRelativeDue(raw?: string | null) {
   if (!raw) return "No due date";
-  const due = parseAsUtc(raw);
+  const due = parseDateUtc(raw);
   if (!due || Number.isNaN(due.getTime())) return raw;
   const diffMs = due.getTime() - Date.now();
   const diffDays = Math.ceil(Math.abs(diffMs) / (1000 * 60 * 60 * 24));
@@ -131,7 +144,7 @@ function docTone(status?: string | null) {
 
 function statusTone(status?: string | null) {
   const s = (status || "").toLowerCase();
-  if (s === "rejected") return chipTone("red");
+  if (s === "rejected" || s === "declined") return chipTone("red");
   if (s === "hired") return chipTone("green");
   if (s === "offer") return chipTone("blue");
   return chipTone("neutral");
@@ -142,6 +155,7 @@ function decisionTone(decision?: string | null) {
   if (d === "advance") return chipTone("green");
   if (d === "reject") return chipTone("red");
   if (d === "keep_warm") return chipTone("amber");
+  if (d === "cancelled") return chipTone("red");
   return chipTone("neutral");
 }
 
@@ -171,13 +185,13 @@ function bestEffortFromMeta(meta: Record<string, unknown>, key: string) {
 }
 
 async function fetchFull(candidateId: string) {
-  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/full`), { cache: "no-store" });
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/full`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateFull;
 }
 
 async function fetchCafLink(candidateId: string) {
-  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/caf-link`), { cache: "no-store" });
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/caf-link`, { cache: "no-store" });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as { caf_token: string; caf_url: string };
@@ -194,36 +208,89 @@ const skipStageOptions = [
   { value: "l1_interview", label: "L1 interview" },
   { value: "l1_feedback", label: "L1 feedback" },
   { value: "offer", label: "Offer" },
+  { value: "joining_documents", label: "Joining documents" },
   { value: "hired", label: "Hired" },
+  { value: "declined", label: "Declined" },
   { value: "rejected", label: "Rejected" },
 ];
 
+const joiningDocOptions = [
+  { value: "pan", label: "PAN card" },
+  { value: "aadhaar", label: "Aadhaar card" },
+  { value: "marksheets", label: "Marksheets" },
+  { value: "experience_letters", label: "Experience letters" },
+  { value: "salary_slips", label: "Salary slips" },
+  { value: "other", label: "Other documents" },
+];
+
+function joiningDocLabel(value: string) {
+  return joiningDocOptions.find((doc) => doc.value === value)?.label || value.replace(/_/g, " ");
+}
+
+async function readError(res: Response) {
+  const raw = await res.text();
+  if (!raw) return `Request failed (${res.status})`;
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown; message?: unknown };
+    if (parsed && typeof parsed === "object") {
+      if (typeof parsed.detail === "string") return parsed.detail;
+      if (typeof parsed.message === "string") return parsed.message;
+    }
+  } catch {
+    // Fall back to raw text.
+  }
+  return raw;
+}
+
 async function fetchInterviews(candidateId: string) {
-  const res = await fetch(withBasePath(`/api/rec/interviews?candidate_id=${encodeURIComponent(candidateId)}`), { cache: "no-store" });
+  const res = await fetch(`/api/rec/interviews?candidate_id=${encodeURIComponent(candidateId)}`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as Interview[];
 }
 
+async function cancelInterview(interviewId: number) {
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/cancel`, { method: "POST" });
+  if (!res.ok) throw new Error(await res.text());
+}
+
 async function fetchCandidateSprints(candidateId: string) {
-  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/sprints`), { cache: "no-store" });
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/sprints`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateSprint[];
 }
 
 async function fetchSprintTemplates() {
-  const res = await fetch(withBasePath("/api/rec/sprint-templates"), { cache: "no-store" });
+  const res = await fetch("/api/rec/sprint-templates", { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as SprintTemplate[];
 }
 
 async function fetchCandidateOffers(candidateId: string) {
-  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/offers`), { cache: "no-store" });
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/offers`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateOffer[];
 }
 
+async function fetchJoiningDocs(candidateId: string) {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/joining-docs`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as JoiningDoc[];
+}
+
+async function uploadJoiningDoc(candidateId: string, payload: { doc_type: string; file: File }) {
+  const form = new FormData();
+  form.append("doc_type", payload.doc_type);
+  form.append("file", payload.file);
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/joining-docs`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as JoiningDoc;
+}
+
 async function createOffer(candidateId: string, payload: Record<string, unknown>) {
-  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/offers`), {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/offers`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -233,7 +300,7 @@ async function createOffer(candidateId: string, payload: Record<string, unknown>
 }
 
 async function updateOffer(offerId: number, payload: Record<string, unknown>) {
-  const res = await fetch(withBasePath(`/api/rec/offers/${offerId}`), {
+  const res = await fetch(`/api/rec/offers/${offerId}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -243,13 +310,13 @@ async function updateOffer(offerId: number, payload: Record<string, unknown>) {
 }
 
 async function approveOffer(offerId: number) {
-  const res = await fetch(withBasePath(`/api/rec/offers/${offerId}/approve`), { method: "POST" });
+  const res = await fetch(`/api/rec/offers/${offerId}/approve`, { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateOffer;
 }
 
 async function rejectOffer(offerId: number, reason?: string) {
-  const res = await fetch(withBasePath(`/api/rec/offers/${offerId}/reject`), {
+  const res = await fetch(`/api/rec/offers/${offerId}/reject`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ decision: "reject", reason }),
@@ -259,50 +326,34 @@ async function rejectOffer(offerId: number, reason?: string) {
 }
 
 async function sendOffer(offerId: number) {
-  const res = await fetch(withBasePath(`/api/rec/offers/${offerId}/send`), { method: "POST" });
+  const res = await fetch(`/api/rec/offers/${offerId}/send`, { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateOffer;
 }
 
-async function decideOffer(offerId: number, decision: "accept" | "decline", reason?: string) {
-  const res = await fetch(withBasePath(`/api/rec/offers/${offerId}/decision`), {
+async function adminDecideOffer(offerId: number, decision: "accept" | "decline") {
+  const res = await fetch(`/api/rec/offers/${offerId}/decision`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ decision, reason }),
+    body: JSON.stringify({ decision }),
   });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateOffer;
 }
 
-async function generateOfferDocument(offerId: number, payload: Record<string, unknown>) {
-  const res = await fetch(withBasePath(`/api/rec/offers/${offerId}/document`), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    let message = text;
-    try {
-      const parsed = JSON.parse(text) as { detail?: string };
-      if (parsed?.detail) message = parsed.detail;
-    } catch {
-      // keep raw text
-    }
-    if (!message) message = `Offer letter generation failed (${res.status}).`;
-    throw new Error(message);
-  }
-  return (text ? (JSON.parse(text) as CandidateOffer) : ({} as CandidateOffer));
+async function deleteOffer(offerId: number) {
+  const res = await fetch(`/api/rec/offers/${encodeURIComponent(String(offerId))}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 async function convertCandidate(candidateId: string) {
-  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/convert`), { method: "POST" });
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/convert`, { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
   return await res.json();
 }
 
 async function assignSprint(candidateId: string, payload: Record<string, unknown>) {
-  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/sprints`), {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/sprints`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -312,23 +363,34 @@ async function assignSprint(candidateId: string, payload: Record<string, unknown
 }
 
 async function createInterview(candidateId: string, payload: Record<string, unknown>) {
-  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/interviews`), {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/interviews`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await readError(res));
   return (await res.json()) as Interview;
 }
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 async function fetchPeople(query: string) {
-  const res = await fetch(withBasePath(`/api/platform/people?q=${encodeURIComponent(query)}`), { cache: "no-store" });
+  const res = await fetch(`${basePath}/api/platform/people?q=${encodeURIComponent(query)}&limit=10`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as PlatformPersonSuggestion[];
 }
 
+async function fetchSlotPreview(interviewerId: string, startDate: string) {
+  const url = new URL(`${basePath}/api/rec/interview-slots/preview`, window.location.origin);
+  url.searchParams.set("interviewer_email", interviewerId);
+  if (startDate) url.searchParams.set("start_date", startDate);
+  const res = await fetch(url.toString(), { cache: "no-store" });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as SlotPreview[];
+}
+
 async function transition(candidateId: string, payload: { to_stage: string; decision?: string; note?: string }) {
-  const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/transition`), {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/transition`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -358,28 +420,53 @@ function formatMoney(raw?: number | null) {
   }
 }
 
-function formatMonthlyRupees(annual?: number | null) {
-  if (annual === null || annual === undefined) return "";
-  const monthly = Math.round(annual / 12);
-  try {
-    const formatted = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(monthly);
-    return `Rs. ${formatted}/-`;
-  } catch {
-    return `Rs. ${monthly}/-`;
-  }
+const offerTemplateOptions = [
+  { code: "STD_OFFER", label: "Standard offer" },
+  { code: "ARCH_L2_STD", label: "Architect L2 standard" },
+  { code: "ID_JUNIOR_STD", label: "Interior junior standard" },
+];
+
+const letterOverrideFields = [
+  { key: "candidate_address", label: "Candidate address" },
+  { key: "unit_name", label: "Unit name" },
+  { key: "reporting_to", label: "Reporting to" },
+  { key: "joining_address", label: "Joining address" },
+  { key: "joining_bonus_monthly", label: "Joining bonus monthly (Rs.)" },
+  { key: "joining_bonus_until", label: "Joining bonus until" },
+  { key: "ctc_revision_from", label: "CTC revision from" },
+  { key: "ctc_revision_window", label: "CTC revision window" },
+  { key: "ctc_revision_payout", label: "CTC revision payout" },
+  { key: "minimum_commitment_years", label: "Minimum commitment (years)" },
+  { key: "probation_notice_days", label: "Probation notice (days)" },
+  { key: "signatory_name", label: "Signatory name" },
+  { key: "signatory_title", label: "Signatory title" },
+];
+
+function suggestOfferTemplate(openingTitle?: string | null) {
+  const title = (openingTitle || "").toLowerCase();
+  if (!title) return "STD_OFFER";
+  if (title.includes("architect")) return "ARCH_L2_STD";
+  if (title.includes("interior") || title.includes("id ")) return "ID_JUNIOR_STD";
+  return "STD_OFFER";
 }
 
-function parseOfferDocPayload(raw?: string | null) {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
+function parseMoneyString(raw: string) {
+  const cleaned = raw.replace(/,/g, "").trim();
+  if (!cleaned) return null;
+  const value = Number(cleaned);
+  return Number.isFinite(value) ? value : null;
 }
 
-export function Candidate360Client({ candidateId, initial, canDelete, canSchedule, canSkip }: Props) {
+function cleanLetterOverrides(raw: Record<string, string>) {
+  const cleaned: Record<string, string> = {};
+  Object.entries(raw).forEach(([key, value]) => {
+    const trimmed = value.trim();
+    if (trimmed) cleaned[key] = trimmed;
+  });
+  return cleaned;
+}
+
+export function Candidate360Client({ candidateId, initial, canDelete, canSchedule, canSkip, canCancelInterview, canUploadJoiningDocs }: Props) {
   const [data, setData] = useState<CandidateFull>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -389,12 +476,22 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [interviewsError, setInterviewsError] = useState<string | null>(null);
   const [interviewsNotice, setInterviewsNotice] = useState<string | null>(null);
   const [expandedInterviewId, setExpandedInterviewId] = useState<number | null>(null);
+  const [scheduleEmailPreviewOpen, setScheduleEmailPreviewOpen] = useState(false);
+  const [scheduleEmailPreviewHtml, setScheduleEmailPreviewHtml] = useState("");
+  const [scheduleEmailPreviewBusy, setScheduleEmailPreviewBusy] = useState(false);
+  const [scheduleEmailPreviewError, setScheduleEmailPreviewError] = useState<string | null>(null);
   const [candidateSprints, setCandidateSprints] = useState<CandidateSprint[] | null>(null);
   const [sprintsBusy, setSprintsBusy] = useState(false);
   const [sprintsError, setSprintsError] = useState<string | null>(null);
   const [candidateOffers, setCandidateOffers] = useState<CandidateOffer[] | null>(null);
   const [offersBusy, setOffersBusy] = useState(false);
   const [offersError, setOffersError] = useState<string | null>(null);
+  const [joiningDocs, setJoiningDocs] = useState<JoiningDoc[] | null>(null);
+  const [joiningDocsBusy, setJoiningDocsBusy] = useState(false);
+  const [joiningDocsError, setJoiningDocsError] = useState<string | null>(null);
+  const [joiningDocsNotice, setJoiningDocsNotice] = useState<string | null>(null);
+  const [joiningDocType, setJoiningDocType] = useState(joiningDocOptions[0]?.value || "pan");
+  const [joiningDocFile, setJoiningDocFile] = useState<File | null>(null);
   const [offerTemplateCode, setOfferTemplateCode] = useState("STD_OFFER");
   const [offerDesignation, setOfferDesignation] = useState("");
   const [offerCurrency, setOfferCurrency] = useState("INR");
@@ -405,38 +502,26 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [offerProbationMonths, setOfferProbationMonths] = useState("3");
   const [offerGradeId, setOfferGradeId] = useState("");
   const [offerNotes, setOfferNotes] = useState("");
-  const [offerDocOpen, setOfferDocOpen] = useState(false);
-  const [offerDocBusy, setOfferDocBusy] = useState(false);
-  const [offerDocDeleteBusy, setOfferDocDeleteBusy] = useState(false);
-  const [offerDocError, setOfferDocError] = useState<string | null>(null);
-  const [offerDocNotice, setOfferDocNotice] = useState<string | null>(null);
-  const [docSalutation, setDocSalutation] = useState("Mr");
-  const [docCandidateName, setDocCandidateName] = useState("");
-  const [docCandidateAddress, setDocCandidateAddress] = useState("");
-  const [docIssueDate, setDocIssueDate] = useState("");
-  const [docDesignation, setDocDesignation] = useState("");
-  const [docCurrentCtc, setDocCurrentCtc] = useState("");
-  const [docExpectedCtc, setDocExpectedCtc] = useState("");
-  const [docUnit, setDocUnit] = useState("");
-  const [docReportingTo, setDocReportingTo] = useState("");
-  const [reportToQuery, setReportToQuery] = useState("");
-  const [reportToResults, setReportToResults] = useState<PlatformPersonSuggestion[]>([]);
-  const [reportToBusy, setReportToBusy] = useState(false);
-  const [reportToPerson, setReportToPerson] = useState<PlatformPersonSuggestion | null>(null);
-  const [docJoiningDate, setDocJoiningDate] = useState("");
-  const [docOfficeAddress, setDocOfficeAddress] = useState("F 301, Ch. Prem Singh House, Lado Sarai, New Delhi 110030");
-  const [docGrossMonthly, setDocGrossMonthly] = useState("");
-  const [docIncludeJoiningBonus, setDocIncludeJoiningBonus] = useState(false);
-  const [docJoiningBonusMonthly, setDocJoiningBonusMonthly] = useState("");
-  const [docJoiningBonusInstallment, setDocJoiningBonusInstallment] = useState("");
-  const [docJoiningBonusEndMonthYear, setDocJoiningBonusEndMonthYear] = useState("");
-  const [docVariableStart, setDocVariableStart] = useState("");
-  const [docVariableEvalRange, setDocVariableEvalRange] = useState("");
-  const [docVariablePayoutRange, setDocVariablePayoutRange] = useState("");
-  const [docSignatoryName, setDocSignatoryName] = useState("Harsh Vardhan");
-  const [docSignatoryTitle, setDocSignatoryTitle] = useState("Principal");
-  const [docCandidateSignatureName, setDocCandidateSignatureName] = useState("");
-  const [docCandidateSignatureDate, setDocCandidateSignatureDate] = useState("");
+  function isCancelled(item: Interview) {
+    if ((item.decision || "").toLowerCase() === "cancelled") return true;
+    const note = (item.notes_internal || "").toLowerCase();
+    return note.includes("cancelled by superadmin");
+  }
+
+  const scheduleAllowed = useMemo(() => {
+    if (!canSchedule) return false;
+    if (canSkip) return true;
+    if (!interviews) return false;
+    return interviews.length === 0;
+  }, [canSchedule, canSkip, interviews]);
+  const [offerLetterOverrides, setOfferLetterOverrides] = useState<Record<string, string>>({});
+  const [draftLetterOverrides, setDraftLetterOverrides] = useState<Record<string, string>>({});
+  const [draftOverridesOpen, setDraftOverridesOpen] = useState(false);
+  const [offerPreviewOpen, setOfferPreviewOpen] = useState(false);
+  const [offerPreviewHtml, setOfferPreviewHtml] = useState("");
+  const [offerPreviewTitle, setOfferPreviewTitle] = useState("");
+  const [offerPreviewBusy, setOfferPreviewBusy] = useState(false);
+  const [offerPreviewError, setOfferPreviewError] = useState<string | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
   const [sprintTemplates, setSprintTemplates] = useState<SprintTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
@@ -453,6 +538,13 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [personQuery, setPersonQuery] = useState("");
   const [personResults, setPersonResults] = useState<PlatformPersonSuggestion[]>([]);
   const [personBusy, setPersonBusy] = useState(false);
+  const [personOpen, setPersonOpen] = useState(false);
+  const [personHighlight, setPersonHighlight] = useState(0);
+  const [slotPreviewDate, setSlotPreviewDate] = useState("");
+  const [slotPreviewSlots, setSlotPreviewSlots] = useState<SlotPreview[]>([]);
+  const [slotPreviewBusy, setSlotPreviewBusy] = useState(false);
+  const [slotPreviewError, setSlotPreviewError] = useState<string | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<SlotPreview | null>(null);
   const schedulePanelRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const screeningRef = useRef<HTMLDivElement | null>(null);
@@ -471,9 +563,6 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   });
 
   const candidate = data.candidate;
-  const screening = data.screening;
-  const screeningCurrentCtc = screening?.current_ctc_annual != null ? `Rs. ${formatMoney(screening.current_ctc_annual)}` : "";
-  const screeningExpectedCtc = screening?.expected_ctc_annual != null ? `Rs. ${formatMoney(screening.expected_ctc_annual)}` : "";
   const candidateInitials = useMemo(() => {
     const parts = (candidate.name || "").trim().split(/\s+/).filter(Boolean);
     const first = parts[0]?.[0] || "";
@@ -483,10 +572,14 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const currentStageKey = normalizeStage(candidate.current_stage);
 
   useEffect(() => {
-    if (offerDesignation.trim()) return;
-    const fallback = candidate.opening_title || candidate.current_stage || "";
-    if (fallback) setOfferDesignation(fallback);
-  }, [candidate.opening_title, candidate.current_stage, offerDesignation]);
+    if (candidate.opening_title && !offerDesignation) {
+      setOfferDesignation(candidate.opening_title);
+    }
+    if (offerTemplateCode === "STD_OFFER") {
+      const suggestion = suggestOfferTemplate(candidate.opening_title);
+      setOfferTemplateCode(suggestion);
+    }
+  }, [candidate.opening_title]);
 
   const cafState = useMemo(() => {
     const generated = !!candidate.caf_sent_at || !!cafLink?.caf_token;
@@ -606,11 +699,45 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
+  async function refreshJoiningDocs() {
+    setJoiningDocsBusy(true);
+    setJoiningDocsError(null);
+    try {
+      const docs = await fetchJoiningDocs(candidateId);
+      setJoiningDocs(docs);
+    } catch (e: any) {
+      setJoiningDocsError(e?.message || "Could not load joining documents.");
+    } finally {
+      setJoiningDocsBusy(false);
+    }
+  }
+
+  async function handleUploadJoiningDoc() {
+    if (!joiningDocFile) {
+      setJoiningDocsError("Select a file to upload.");
+      return;
+    }
+    setJoiningDocsBusy(true);
+    setJoiningDocsError(null);
+    setJoiningDocsNotice(null);
+    try {
+      await uploadJoiningDoc(candidateId, { doc_type: joiningDocType, file: joiningDocFile });
+      setJoiningDocFile(null);
+      setJoiningDocsNotice("Joining document uploaded.");
+      await refreshJoiningDocs();
+      await refreshAll();
+    } catch (e: any) {
+      setJoiningDocsError(e?.message || "Joining document upload failed.");
+    } finally {
+      setJoiningDocsBusy(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     let inFlight = false;
     let pending = false;
-    const source = new EventSource(withBasePath("/api/rec/events/stream"));
+    const source = new EventSource("/api/rec/events/stream");
 
     async function refreshAllData() {
       if (inFlight) {
@@ -623,6 +750,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         await refreshInterviews();
         await refreshSprints();
         await refreshOffers();
+        await refreshJoiningDocs();
       } finally {
         inFlight = false;
         if (pending && !cancelled) {
@@ -730,6 +858,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
     setOffersBusy(true);
     try {
+      const overrides = cleanLetterOverrides(offerLetterOverrides);
       await createOffer(candidateId, {
         offer_template_code: offerTemplateCode.trim(),
         designation_title: offerDesignation.trim() || candidate.opening_title || candidate.current_stage,
@@ -741,12 +870,31 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         probation_months: offerProbationMonths ? Number(offerProbationMonths) : null,
         grade_id_platform: offerGradeId ? Number(offerGradeId) : null,
         notes_internal: offerNotes.trim() || null,
+        letter_overrides: Object.keys(overrides).length ? overrides : {},
       });
       await refreshOffers();
     } catch (e: any) {
       setOffersError(e?.message || "Offer creation failed.");
     } finally {
       setOffersBusy(false);
+    }
+  }
+
+  async function handleOfferPreview(offerId: number, kind: "letter" | "email") {
+    setOfferPreviewBusy(true);
+    setOfferPreviewError(null);
+    try {
+      const endpoint = kind === "email" ? "email-preview" : "preview";
+      const res = await fetch(`/api/rec/offers/${offerId}/${endpoint}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(await res.text());
+      const html = await res.text();
+      setOfferPreviewHtml(html);
+      setOfferPreviewTitle(kind === "email" ? "Offer email preview" : "Offer letter preview");
+      setOfferPreviewOpen(true);
+    } catch (e: any) {
+      setOfferPreviewError(e?.message || "Preview failed.");
+    } finally {
+      setOfferPreviewBusy(false);
     }
   }
 
@@ -802,15 +950,14 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
-  async function handleDecisionOffer(offerId: number, decision: "accept" | "decline") {
-    if (decision === "decline" && !window.confirm("Mark this offer as declined? This will move the candidate to rejected.")) {
-      return;
-    }
+  async function handleAdminDecision(offerId: number, decision: "accept" | "decline") {
+    if (!confirm(`Mark offer as ${decision}? This will update candidate status and stage.`)) return;
     setOffersBusy(true);
     setOffersError(null);
     try {
-      await decideOffer(offerId, decision);
+      await adminDecideOffer(offerId, decision);
       await refreshOffers();
+      await refreshAll();
     } catch (e: any) {
       setOffersError(e?.message || "Offer decision failed.");
     } finally {
@@ -818,145 +965,31 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
-  function openOfferDocument(offer: CandidateOffer) {
-    setOfferDocError(null);
-    setOfferDocNotice(null);
-    const payload = parseOfferDocPayload(offer.offer_doc_payload);
-    const payloadString = (key: string) => {
-      const value = payload?.[key];
-      return typeof value === "string" ? value : "";
-    };
-    const payloadBool = (key: string) => {
-      const value = payload?.[key];
-      return typeof value === "boolean" ? value : false;
-    };
-    const candidateName = payloadString("candidate_name") || candidate.name || offer.candidate_name || offer.candidate_code || "";
-    const designation = payloadString("designation") || offer.designation_title || candidate.opening_title || "";
-    const issueDate = payloadString("issue_date") || formatLetterDate(new Date().toISOString());
-    const unit = payloadString("unit");
-    const reportingTo = payloadString("reporting_to");
-    const candidateAddress = payloadString("candidate_address");
-    const joiningDate = payloadString("joining_date") || formatLetterDate(offer.joining_date);
-    const officeAddress = payloadString("office_address") || docOfficeAddress;
-    const grossMonthly = payloadString("gross_salary_monthly") || formatMonthlyRupees(offer.gross_ctc_annual);
-    const includeJoiningBonus = payloadBool("include_joining_bonus");
-    const currentCtc = payloadString("current_ctc_annual") || screeningCurrentCtc;
-    const expectedCtc = payloadString("expected_ctc_annual") || screeningExpectedCtc;
-
-    setDocSalutation(payloadString("salutation") || "Mr");
-    setDocCandidateName(candidateName);
-    setDocCandidateAddress(candidateAddress);
-    setDocIssueDate(issueDate);
-    setDocDesignation(designation);
-    setDocCurrentCtc(currentCtc);
-    setDocExpectedCtc(expectedCtc);
-    setDocUnit(unit);
-    setDocReportingTo(reportingTo);
-    setReportToQuery(reportingTo);
-    setReportToResults([]);
-    setReportToPerson(null);
-    setDocJoiningDate(joiningDate);
-    setDocOfficeAddress(officeAddress);
-    setDocGrossMonthly(grossMonthly);
-    setDocIncludeJoiningBonus(includeJoiningBonus);
-    setDocJoiningBonusMonthly(payloadString("joining_bonus_monthly"));
-    setDocJoiningBonusInstallment(payloadString("joining_bonus_installment"));
-    setDocJoiningBonusEndMonthYear(payloadString("joining_bonus_end_month_year"));
-    setDocVariableStart(payloadString("variable_start_month_year"));
-    setDocVariableEvalRange(payloadString("variable_eval_year_range"));
-    setDocVariablePayoutRange(payloadString("variable_payout_year_range"));
-    setDocSignatoryName(payloadString("signatory_name") || "Harsh Vardhan");
-    setDocSignatoryTitle(payloadString("signatory_title") || "Principal");
-    setDocCandidateSignatureName(payloadString("candidate_signature_name") || candidateName);
-    setDocCandidateSignatureDate(payloadString("candidate_signature_date"));
-    setOfferDocOpen(true);
-  }
-
-  async function handleGenerateOfferDocument(offerId: number) {
-    setOfferDocError(null);
-    setOfferDocNotice(null);
-    if (!docSalutation.trim()) {
-      setOfferDocError("Select a salutation.");
-      return;
-    }
-    if (!docCandidateName.trim()) {
-      setOfferDocError("Candidate name is required.");
-      return;
-    }
-    if (!docCandidateAddress.trim()) {
-      setOfferDocError("Candidate address is required.");
-      return;
-    }
-    if (!docUnit.trim() || !docReportingTo.trim()) {
-      setOfferDocError("Unit and reporting-to are required.");
-      return;
-    }
-    if (!docOfficeAddress.trim()) {
-      setOfferDocError("Office address is required.");
-      return;
-    }
-    if (!docGrossMonthly.trim()) {
-      setOfferDocError("Gross salary (monthly) is required.");
-      return;
-    }
-    if (docIncludeJoiningBonus) {
-      if (!docJoiningBonusMonthly.trim() || !docJoiningBonusInstallment.trim() || !docJoiningBonusEndMonthYear.trim()) {
-        setOfferDocError("Fill all joining bonus fields or disable the bonus section.");
-        return;
-      }
-    }
-
-    setOfferDocBusy(true);
+  async function handleSaveDraftOverrides(offerId: number) {
+    setOffersBusy(true);
+    setOffersError(null);
     try {
-        await generateOfferDocument(offerId, {
-          salutation: docSalutation.trim(),
-          candidate_name: docCandidateName.trim(),
-          candidate_address: docCandidateAddress.trim(),
-          issue_date: docIssueDate.trim(),
-          designation: docDesignation.trim(),
-          current_ctc_annual: docCurrentCtc.trim(),
-          expected_ctc_annual: docExpectedCtc.trim(),
-          unit: docUnit.trim(),
-          reporting_to: docReportingTo.trim(),
-          joining_date: docJoiningDate.trim(),
-        office_address: docOfficeAddress.trim(),
-        gross_salary_monthly: docGrossMonthly.trim(),
-        include_joining_bonus: docIncludeJoiningBonus,
-        joining_bonus_monthly: docJoiningBonusMonthly.trim(),
-        joining_bonus_installment: docJoiningBonusInstallment.trim(),
-        joining_bonus_end_month_year: docJoiningBonusEndMonthYear.trim(),
-        variable_start_month_year: docVariableStart.trim(),
-        variable_eval_year_range: docVariableEvalRange.trim(),
-        variable_payout_year_range: docVariablePayoutRange.trim(),
-        signatory_name: docSignatoryName.trim(),
-        signatory_title: docSignatoryTitle.trim(),
-        candidate_signature_name: docCandidateSignatureName.trim(),
-        candidate_signature_date: docCandidateSignatureDate.trim(),
-      });
-      setOfferDocNotice("Offer letter generated.");
+      const overrides = cleanLetterOverrides(draftLetterOverrides);
+      await updateOffer(offerId, { letter_overrides: overrides });
       await refreshOffers();
     } catch (e: any) {
-      setOfferDocError(e?.message || "Offer letter generation failed.");
+      setOffersError(e?.message || "Offer update failed.");
     } finally {
-      setOfferDocBusy(false);
+      setOffersBusy(false);
     }
   }
 
-  async function handleDeleteOfferDocument(offerId: number) {
-    if (!offerId) return;
-    if (!window.confirm("Delete the generated offer letter? This cannot be undone.")) return;
-    setOfferDocError(null);
-    setOfferDocNotice(null);
-    setOfferDocDeleteBusy(true);
+  async function handleDeleteOffer(offerId: number) {
+    if (!confirm("Delete this draft offer? This cannot be undone.")) return;
+    setOffersBusy(true);
+    setOffersError(null);
     try {
-      const res = await fetch(withBasePath(`/api/rec/offers/${offerId}/document`), { method: "DELETE" });
-      if (!res.ok) throw new Error(await res.text());
-      setOfferDocNotice("Offer letter deleted.");
+      await deleteOffer(offerId);
       await refreshOffers();
     } catch (e: any) {
-      setOfferDocError(e?.message || "Offer letter delete failed.");
+      setOffersError(e?.message || "Offer deletion failed.");
     } finally {
-      setOfferDocDeleteBusy(false);
+      setOffersBusy(false);
     }
   }
 
@@ -982,6 +1015,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     setScheduleInterviewer(null);
     setPersonQuery("");
     setPersonResults([]);
+    setSlotPreviewDate("");
+    setSlotPreviewSlots([]);
+    setSlotPreviewError(null);
+    setSelectedSlot(null);
+    setScheduleEmailPreviewError(null);
     setScheduleOpen(true);
     setInterviewsError(null);
     setInterviewsNotice(null);
@@ -994,12 +1032,18 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       setInterviewsError("Select an interviewer.");
       return;
     }
-    if (!scheduleStartAt || !scheduleEndAt) {
-      setInterviewsError("Provide both start and end time.");
+    const roundUpper = scheduleRound.toUpperCase();
+    const isSlotRound = roundUpper === "L1" || roundUpper === "L2";
+    if (!isSlotRound) {
+      setInterviewsError("Manual scheduling has been removed. Use the slot planner for L1/L2.");
       return;
     }
-    const startIso = `${scheduleStartAt}:00+05:30`;
-    const endIso = `${scheduleEndAt}:00+05:30`;
+    if (!selectedSlot) {
+      setInterviewsError("Select a slot from the planner.");
+      return;
+    }
+    const startIso = `${selectedSlot.slot_start_at}Z`;
+    const endIso = `${selectedSlot.slot_end_at}Z`;
     const start = new Date(startIso);
     const end = new Date(endIso);
     if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end <= start) {
@@ -1017,11 +1061,51 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         meeting_link: scheduleMeetLink || undefined,
       });
       setScheduleOpen(false);
+      setSelectedSlot(null);
       await refreshInterviews();
     } catch (e: any) {
       setInterviewsError(e?.message || "Could not schedule interview.");
     } finally {
       setInterviewsBusy(false);
+    }
+  }
+
+  async function handleScheduleEmailPreview() {
+    setScheduleEmailPreviewError(null);
+    const roundUpper = scheduleRound.toUpperCase();
+    const isSlotInvite = roundUpper === "L1" || roundUpper === "L2";
+    setScheduleEmailPreviewBusy(true);
+    try {
+      if (isSlotInvite) {
+        if (!scheduleInterviewer?.email) {
+          setScheduleEmailPreviewError("Select an interviewer to preview the slot email.");
+          return;
+        }
+        const startDate =
+          slotPreviewDate ||
+          (scheduleStartAt ? scheduleStartAt.split("T")[0] : "");
+        if (!startDate) {
+          setScheduleEmailPreviewError("Select a first day to preview the slot email.");
+          return;
+        }
+        const url = new URL(`${basePath}/api/rec/interview-slots/email-preview`, window.location.origin);
+        url.searchParams.set("candidate_id", candidateId);
+        url.searchParams.set("round_type", scheduleRound);
+        url.searchParams.set("interviewer_email", scheduleInterviewer.email);
+        url.searchParams.set("start_date", startDate);
+        const res = await fetch(url.toString(), { cache: "no-store" });
+        if (!res.ok) throw new Error(await res.text());
+        const html = await res.text();
+        setScheduleEmailPreviewHtml(html);
+        setScheduleEmailPreviewOpen(true);
+        return;
+      }
+
+      setScheduleEmailPreviewError("Slot scheduling is available only for L1/L2 rounds.");
+    } catch (e: any) {
+      setScheduleEmailPreviewError(e?.message || "Email preview failed.");
+    } finally {
+      setScheduleEmailPreviewBusy(false);
     }
   }
 
@@ -1032,6 +1116,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       setInterviewsError("Select an interviewer.");
       return;
     }
+    if (!scheduleInterviewer.email) {
+      setInterviewsError("Interviewer email is required for slot invites.");
+      return;
+    }
     const roundUpper = scheduleRound.toUpperCase();
     if (roundUpper !== "L1" && roundUpper !== "L2") {
       setInterviewsError("Slot invites are supported only for L1/L2 rounds.");
@@ -1039,12 +1127,14 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
     setSlotInviteBusy(true);
     try {
-      const res = await fetch(withBasePath(`/api/rec/candidates/${encodeURIComponent(candidateId)}/interview-slots/propose`), {
+      const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/interview-slots/propose`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           round_type: roundUpper,
+          interviewer_email: scheduleInterviewer.email,
           interviewer_person_id_platform: scheduleInterviewer.person_id,
+          start_date: slotPreviewDate || undefined,
         }),
       });
       if (!res.ok) {
@@ -1077,14 +1167,28 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }, [candidateOffers]);
 
   useEffect(() => {
+    if (joiningDocs === null) {
+      void refreshJoiningDocs();
+    }
+  }, [joiningDocs]);
+
+  useEffect(() => {
     if (!scheduleOpen) return;
     const query = personQuery.trim();
     let ignore = false;
     const handle = window.setTimeout(() => {
+      if (query.length < 2) {
+        setPersonResults([]);
+        setPersonBusy(false);
+        return;
+      }
       setPersonBusy(true);
       fetchPeople(query)
         .then((rows) => {
-          if (!ignore) setPersonResults(rows);
+          if (!ignore) {
+            setPersonResults(rows);
+            setPersonHighlight(0);
+          }
         })
         .catch(() => {
           if (!ignore) setPersonResults([]);
@@ -1100,40 +1204,55 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }, [personQuery, scheduleOpen]);
 
   useEffect(() => {
-    if (!offerDocOpen) return;
-    const query = reportToQuery.trim();
-    let ignore = false;
-    if (query.length < 2) {
-      setReportToResults([]);
-      setReportToBusy(false);
-      return () => {
-        ignore = true;
-      };
+    if (!scheduleOpen) return;
+    const roundUpper = scheduleRound.toUpperCase();
+    if (roundUpper !== "L1" && roundUpper !== "L2") return;
+    if (!scheduleInterviewer || !slotPreviewDate) {
+      setSlotPreviewSlots([]);
+      setSelectedSlot(null);
+      return;
     }
+    let ignore = false;
     const handle = window.setTimeout(() => {
-      setReportToBusy(true);
-      fetchPeople(query)
-        .then((rows) => {
-          if (!ignore) setReportToResults(rows);
+      setSlotPreviewBusy(true);
+      setSlotPreviewError(null);
+      if (!scheduleInterviewer.email) {
+        setSlotPreviewError("Interviewer email is required for slot lookup.");
+        setSlotPreviewBusy(false);
+        return;
+      }
+      fetchSlotPreview(scheduleInterviewer.email, slotPreviewDate)
+        .then((slots) => {
+          if (!ignore) {
+            setSlotPreviewSlots(slots);
+            if (slots.length === 0) setSelectedSlot(null);
+          }
         })
-        .catch(() => {
-          if (!ignore) setReportToResults([]);
+        .catch((e: any) => {
+          if (!ignore) {
+            setSlotPreviewSlots([]);
+            setSlotPreviewError(e?.message || "Could not fetch slots.");
+          }
         })
         .finally(() => {
-          if (!ignore) setReportToBusy(false);
+          if (!ignore) setSlotPreviewBusy(false);
         });
     }, 250);
     return () => {
       ignore = true;
       window.clearTimeout(handle);
     };
-  }, [reportToQuery, offerDocOpen]);
+  }, [scheduleInterviewer, scheduleOpen, scheduleRound, slotPreviewDate]);
 
   useEffect(() => {
     if (!scheduleOpen) return;
     const node = schedulePanelRef.current;
     if (node) node.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [scheduleOpen]);
+
+  useEffect(() => {
+    setSelectedSlot(null);
+  }, [scheduleRound]);
 
   const stageButtons = useMemo(() => {
     const current = currentStageKey;
@@ -1350,25 +1469,68 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         },
       ];
     }
+    if (current === "joining_documents") {
+      return [
+        {
+          label: "Go to documents",
+          tone: "bg-slate-900 hover:bg-slate-800",
+          icon: <Layers className="h-4 w-4" />,
+          action: () => focusSection("documents", documentsRef),
+        },
+      ];
+    }
     return [];
-  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef]);
+  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef]);
 
+  const screening = data.screening as Screening | null | undefined;
   const interviewUpcoming = useMemo(() => {
     if (!interviews) return [] as Interview[];
     const now = new Date();
+    const getTs = (value?: string | null) => parseDateUtc(value)?.getTime() ?? 0;
     return [...interviews]
-      .filter((item) => new Date(item.scheduled_start_at).getTime() >= now.getTime())
-      .sort((a, b) => new Date(a.scheduled_start_at).getTime() - new Date(b.scheduled_start_at).getTime());
+      .filter((item) => getTs(item.scheduled_start_at) >= now.getTime())
+      .sort((a, b) => getTs(a.scheduled_start_at) - getTs(b.scheduled_start_at));
   }, [interviews]);
 
   const interviewPast = useMemo(() => {
     if (!interviews) return [] as Interview[];
     const now = new Date();
+    const getTs = (value?: string | null) => parseDateUtc(value)?.getTime() ?? 0;
     return [...interviews]
-      .filter((item) => new Date(item.scheduled_start_at).getTime() < now.getTime())
-      .sort((a, b) => new Date(b.scheduled_start_at).getTime() - new Date(a.scheduled_start_at).getTime());
+      .filter((item) => isCancelled(item) || getTs(item.scheduled_start_at) < now.getTime())
+      .sort((a, b) => getTs(b.scheduled_start_at) - getTs(a.scheduled_start_at));
   }, [interviews]);
   const latestOffer = candidateOffers && candidateOffers.length > 0 ? candidateOffers[0] : null;
+  const stageProgressSteps = useMemo(() => {
+    const hasStage = (key: string) => data.stages.some((stage) => normalizeStage(stage.stage_name) === key);
+    const status = (candidate.status || "").toLowerCase();
+    const offerStatus = (latestOffer?.offer_status || "").toLowerCase();
+    const isDeclined = status === "declined" || offerStatus === "declined" || hasStage("declined");
+    const isRejected = status === "rejected" || hasStage("rejected");
+    const isAccepted = offerStatus === "accepted" || hasStage("joining_documents") || hasStage("hired") || status === "hired";
+
+    let steps = [...pipelineStages];
+    if (isRejected) {
+      steps = [...steps, ...postRejectStages];
+    } else if (isDeclined) {
+      steps = [...steps, ...postDeclineStages];
+    } else if (isAccepted) {
+      steps = [...steps, ...postAcceptanceStages];
+    }
+
+    return steps
+      .map((key) => stageOrder.find((stage) => stage.key === key))
+      .filter((step): step is { key: string; label: string } => Boolean(step));
+  }, [candidate.status, data.stages, latestOffer?.offer_status]);
+
+  useEffect(() => {
+    if (!latestOffer) {
+      setDraftLetterOverrides({});
+      setDraftOverridesOpen(false);
+      return;
+    }
+    setDraftLetterOverrides(latestOffer.letter_overrides || {});
+  }, [latestOffer?.candidate_offer_id]);
 
   return (
     <main className="content-pad space-y-4">
@@ -1521,30 +1683,49 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
               <div className="mt-4 space-y-4">
                 <div>
                   <p className="text-xs uppercase tracking-tight text-slate-500">Stage progress</p>
-                  <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-white/70 bg-white/40 px-4 py-3">
-                    {stageOrder.map((step, idx) => {
-                      const state = stageStateKey(data.stages, currentStageKey, step.key);
-                      const stageRow = findStage(data.stages, step.key);
-                      const tone =
-                        state === "done"
-                          ? "bg-emerald-500 text-white"
-                          : state === "current"
-                            ? "bg-violet-600 text-white"
-                            : "bg-white text-slate-700 border border-slate-200";
-                      return (
-                        <div key={step.key} className="flex items-center gap-3">
-                          <div className={clsx("flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm", tone)}>
-                            <span>{step.label}</span>
-                            <span className="text-[10px] opacity-80">
-                              {stageRow?.started_at ? formatDate(stageRow.started_at) : ""}
-                            </span>
+                  <div className="stage-rail mt-3 rounded-2xl border border-white/70 px-4 py-4">
+                    <div className="flex flex-wrap items-center gap-3">
+                      {stageProgressSteps.map((step, idx) => {
+                        const state = stageStateKey(data.stages, currentStageKey, step.key);
+                        const stageRow = findStage(data.stages, step.key);
+                        const isTerminal = ["declined", "rejected", "hired"].includes(step.key);
+                        const isNegative = ["declined", "rejected"].includes(step.key);
+                        const staggerClass = `stage-node-stagger-${(idx % 4) + 1}`;
+                        const motion = state === "current" ? `stage-node-active ${staggerClass}` : "";
+                        const tone =
+                          state === "done"
+                            ? isNegative
+                              ? "bg-rose-600 text-white"
+                              : "bg-emerald-500 text-white"
+                            : state === "current"
+                              ? isTerminal
+                                ? isNegative
+                                  ? "bg-rose-600 text-white shadow-[0_0_20px_rgba(244,63,94,0.45)]"
+                                  : "bg-emerald-600 text-white shadow-[0_0_20px_rgba(16,185,129,0.45)]"
+                                : "bg-slate-900 text-white shadow-[0_0_20px_rgba(15,23,42,0.35)]"
+                              : "bg-white text-slate-700 border border-slate-200";
+                        return (
+                          <div key={step.key} className="flex items-center gap-3">
+                            <div className={clsx("flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm", tone, motion)}>
+                              <span>{step.label}</span>
+                              <span className="text-[10px] opacity-80">
+                                {stageRow?.started_at ? formatDate(stageRow.started_at) : ""}
+                              </span>
+                            </div>
+                            {idx < stageProgressSteps.length - 1 ? (
+                              <div className={clsx("stage-connector", state === "current" ? "" : "stage-connector--idle")} />
+                            ) : null}
                           </div>
-                          {idx < stageOrder.length - 1 ? (
-                            <div className="h-[1px] w-10 bg-gradient-to-r from-slate-200 via-slate-400 to-slate-200" />
-                          ) : null}
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
+                    <p className="mt-3 text-xs text-slate-500">
+                      {latestOffer?.offer_status === "declined"
+                        ? "Offer declined. Joining documents and hiring steps are closed."
+                        : latestOffer?.offer_status === "accepted"
+                          ? "Offer accepted. Collect joining documents before final hire."
+                          : "Offer decision will unlock the next path."}
+                    </p>
                   </div>
                 </div>
 
@@ -1751,6 +1932,30 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                   </Chip>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
+                  {candidate.cv_url ? (
+                    <Link
+                      href={candidate.cv_url}
+                      target="_blank"
+                      className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-white"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open CV
+                    </Link>
+                  ) : null}
+                  {candidate.portfolio_url ? (
+                    <Link
+                      href={candidate.portfolio_url}
+                      target="_blank"
+                      className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-white"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open Portfolio
+                    </Link>
+                  ) : candidate.portfolio_not_uploaded_reason ? (
+                    <span className="inline-flex items-center rounded-xl border border-white/60 bg-white/30 px-4 py-2 text-sm text-slate-700">
+                      Portfolio not uploaded: {candidate.portfolio_not_uploaded_reason}
+                    </span>
+                  ) : null}
                   {candidate.drive_folder_url ? (
                     <Link
                       href={candidate.drive_folder_url}
@@ -1763,6 +1968,80 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                   ) : (
                     <span className="text-sm text-slate-600">No Drive folder linked yet.</span>
                   )}
+                </div>
+
+                <div className="mt-4 border-t border-white/60 pt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold">Joining documents</p>
+                    {joiningDocsNotice ? (
+                      <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-500/20">
+                        {joiningDocsNotice}
+                      </span>
+                    ) : null}
+                  </div>
+                  {joiningDocsError ? (
+                    <div className="mt-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-700">
+                      {joiningDocsError}
+                    </div>
+                  ) : null}
+                  {joiningDocsBusy && !joiningDocs ? (
+                    <div className="mt-3 text-sm text-slate-600">Loading joining documents...</div>
+                  ) : null}
+                  {joiningDocs && joiningDocs.length ? (
+                    <ul className="mt-3 space-y-2 text-sm text-slate-700">
+                      {joiningDocs.map((doc) => (
+                        <li key={doc.joining_doc_id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/70 bg-white/60 px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold">{joiningDocLabel(doc.doc_type)}</p>
+                            <p className="truncate text-xs text-slate-500">{doc.file_name}</p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs text-slate-500">{formatDateTime(doc.created_at)}</span>
+                            <span className="rounded-full bg-white/80 px-2 py-1 text-xs text-slate-600">
+                              {doc.uploaded_by === "candidate" ? "Candidate" : "HR"}
+                            </span>
+                            <Link
+                              href={doc.file_url}
+                              target="_blank"
+                              className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white hover:bg-slate-800"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              Open
+                            </Link>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : joiningDocs && !joiningDocs.length ? (
+                    <p className="mt-3 text-sm text-slate-600">No joining documents uploaded yet.</p>
+                  ) : null}
+
+                  {canUploadJoiningDocs ? (
+                    <div className="mt-4 grid gap-3 md:grid-cols-[1.1fr_1.7fr_auto]">
+                      <select
+                        className="w-full rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-800"
+                        value={joiningDocType}
+                        onChange={(event) => setJoiningDocType(event.target.value)}
+                      >
+                        {joiningDocOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <input
+                        className="w-full rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-700"
+                        type="file"
+                        onChange={(event) => setJoiningDocFile(event.target.files?.[0] || null)}
+                      />
+                      <button
+                        type="button"
+                        className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        onClick={() => void handleUploadJoiningDoc()}
+                        disabled={!joiningDocFile || joiningDocsBusy}
+                      >
+                        {joiningDocsBusy ? "Uploading..." : "Upload"}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             )}
@@ -1787,7 +2066,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
             {collapsedSections.interviews ? null : (
               <>
                 <p className="mt-2 text-sm text-slate-600">Scheduling, feedback, and outcomes in one view.</p>
-                {canSchedule ? (
+                {scheduleAllowed ? (
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
                       type="button"
@@ -1821,6 +2100,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     >
                       Schedule L1 interview
                     </button>
+                  </div>
+                ) : null}
+                {!canSkip && canSchedule && interviews && interviews.length > 0 ? (
+                  <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-2 text-xs text-amber-700">
+                    Only Superadmin can schedule another interview after the first one.
                   </div>
                 ) : null}
                 {interviewsError ? (
@@ -1864,7 +2148,37 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                   Meeting link
                                 </a>
                               ) : null}
+                              {isCancelled(item) ? <Chip className={chipTone("red")}>Cancelled</Chip> : null}
                             </div>
+                            {canCancelInterview && !isCancelled(item) ? (
+                              <div className="mt-3">
+                                <button
+                                  type="button"
+                                  className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                                  onClick={() => {
+                                    if (!window.confirm("Cancel this interview? This will remove it from the interviewer calendar.")) return;
+                                    void (async () => {
+                                      setBusy(true);
+                                      setInterviewsError(null);
+                                      setInterviewsNotice(null);
+                                      try {
+                                        await cancelInterview(item.candidate_interview_id);
+                                        const next = await fetchInterviews(candidateId);
+                                        setInterviews(next);
+                                        setInterviewsNotice("Interview cancelled.");
+                                      } catch (e: any) {
+                                        setInterviewsError(e?.message || "Could not cancel interview.");
+                                      } finally {
+                                        setBusy(false);
+                                      }
+                                    })();
+                                  }}
+                                  disabled={busy}
+                                >
+                                  Cancel interview
+                                </button>
+                              </div>
+                            ) : null}
                           </div>
                         ))
                       )}
@@ -1886,7 +2200,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                 <p className="text-sm font-semibold">{item.round_type}</p>
                                 <p className="text-xs text-slate-600">{formatDateTime(item.scheduled_start_at)}</p>
                               </div>
-                              <Chip className={decisionTone(item.decision)}>{item.decision || "No decision"}</Chip>
+                              <Chip className={decisionTone(item.decision)}>
+                                {item.decision === "cancelled" ? "Cancelled" : item.decision || "No decision"}
+                              </Chip>
                             </div>
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                               {item.rating_overall ? <Chip className={chipTone("neutral")}>Overall {item.rating_overall}/5</Chip> : null}
@@ -1955,74 +2271,147 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                   </select>
                 </label>
 
-                <label className="space-y-1 text-xs text-slate-600">
-                  Interviewer
-                  <div className="relative">
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={personQuery}
-                      placeholder={scheduleInterviewer ? scheduleInterviewer.full_name : "Search by name or email"}
-                      onChange={(e) => setPersonQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && personResults.length > 0) {
-                          e.preventDefault();
-                          const [first] = personResults;
-                          if (first) {
-                            setScheduleInterviewer(first);
-                            setPersonQuery(first.full_name);
-                            setPersonResults([]);
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Interviewer
+                    <div className="relative">
+                      <input
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={personQuery}
+                        placeholder={scheduleInterviewer ? scheduleInterviewer.full_name : "Search by name or email"}
+                        onChange={(e) => {
+                          setPersonQuery(e.target.value);
+                          setPersonOpen(true);
+                        }}
+                        onFocus={() => setPersonOpen(true)}
+                        onBlur={() => {
+                          window.setTimeout(() => setPersonOpen(false), 120);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "ArrowDown" && personResults.length > 0) {
+                            e.preventDefault();
+                            setPersonHighlight((prev) => Math.min(prev + 1, personResults.length - 1));
                           }
-                        }
-                      }}
-                    />
-                    {personResults.length > 0 ? (
-                      <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-40 overflow-auto rounded-xl border border-slate-200 bg-white shadow-card">
-                        {personResults.map((person) => (
-                          <button
-                            key={person.person_id}
-                            type="button"
-                            className="flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50"
-                            onClick={() => {
-                              setScheduleInterviewer(person);
-                              setPersonQuery(person.full_name);
-                              setPersonResults([]);
-                            }}
-                          >
-                            <span className="truncate">
-                              <span className="font-medium">{person.full_name}</span>{" "}
-                              <span className="text-slate-500">({person.email})</span>
-                            </span>
-                            <span className="shrink-0 text-xs text-slate-500">{person.role_name || person.role_code}</span>
-                          </button>
-                        ))}
+                          if (e.key === "ArrowUp" && personResults.length > 0) {
+                            e.preventDefault();
+                            setPersonHighlight((prev) => Math.max(prev - 1, 0));
+                          }
+                          if (e.key === "Enter" && personResults.length > 0) {
+                            e.preventDefault();
+                            const pick = personResults[personHighlight] || personResults[0];
+                            setScheduleInterviewer(pick);
+                            setPersonQuery(pick.full_name);
+                            setPersonResults([]);
+                            setPersonOpen(false);
+                          }
+                        }}
+                      />
+                      {personOpen ? (
+                        <div className="absolute left-0 right-0 top-full z-10 mt-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
+                          {personQuery.trim().length < 2 ? (
+                            <p className="px-3 py-2 text-xs text-slate-500">Type at least 2 characters to search.</p>
+                          ) : personBusy ? (
+                            <p className="px-3 py-2 text-xs text-slate-500">Searching...</p>
+                          ) : personResults.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-slate-500">No matches found.</p>
+                          ) : (
+                            <div className="max-h-48 overflow-auto">
+                              {personResults.map((person, index) => {
+                                const active = index === personHighlight;
+                                return (
+                            <button
+                              key={person.person_id}
+                              type="button"
+                              className={`flex w-full items-start justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm ${
+                                active ? "bg-slate-900 text-white" : "text-slate-800 hover:bg-slate-50"
+                              }`}
+                              onClick={() => {
+                                setScheduleInterviewer(person);
+                                setPersonQuery(person.full_name);
+                                setPersonResults([]);
+                                setPersonOpen(false);
+                              }}
+                            >
+                              <span className="truncate">
+                                <span className="font-medium">{person.full_name}</span>{" "}
+                                <span className={active ? "text-slate-200" : "text-slate-500"}>({person.email})</span>
+                              </span>
+                              <span className={active ? "shrink-0 text-xs text-slate-200" : "shrink-0 text-xs text-slate-500"}>
+                                {person.role_name || person.role_code}
+                              </span>
+                            </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  </label>
+
+                  {["L1", "L2"].includes(scheduleRound.toUpperCase()) ? (
+                    <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Slot planner</p>
+                      <p className="text-[11px] text-slate-500">6 slots • 30 mins • 3 business days</p>
                       </div>
-                    ) : null}
-                  </div>
-                </label>
+                      <div className="mt-3 grid gap-3 md:grid-cols-[220px_1fr]">
+                        <label className="space-y-1 text-xs text-slate-600">
+                          First day
+                          <input
+                            type="date"
+                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                            value={slotPreviewDate}
+                            onChange={(e) => {
+                              setSlotPreviewDate(e.target.value);
+                              setSelectedSlot(null);
+                            }}
+                          />
+                        </label>
+                        <div className="rounded-xl border border-slate-200/70 bg-white/80 p-3">
+                          {slotPreviewBusy ? (
+                            <p className="text-xs text-slate-500">Fetching slots...</p>
+                          ) : slotPreviewError ? (
+                            <p className="text-xs text-rose-600">{slotPreviewError}</p>
+                          ) : slotPreviewSlots.length === 0 ? (
+                            <p className="text-xs text-slate-500">
+                              {!scheduleInterviewer
+                                ? "Select an interviewer to view available slots."
+                                : !slotPreviewDate
+                                  ? "Select a first day to view available slots."
+                                  : "No available slots in the selected window."}
+                            </p>
+                          ) : (
+                            <div className="grid gap-2 md:grid-cols-2">
+                              {slotPreviewSlots.map((slot) => {
+                                const active = selectedSlot?.slot_start_at === slot.slot_start_at;
+                                return (
+                                  <button
+                                    key={slot.slot_start_at}
+                                    type="button"
+                                    className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left text-xs font-semibold ${
+                                      active
+                                        ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-700"
+                                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                    }`}
+                                    onClick={() => {
+                                      setSelectedSlot(slot);
+                                      setScheduleStartAt("");
+                                      setScheduleEndAt("");
+                                    }}
+                                  >
+                                    <span>{slot.label}</span>
+                                    <span>{active ? "Selected" : "Use"}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
-                {personBusy ? <p className="text-xs text-slate-500">Searching...</p> : null}
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Start time
-                    <input
-                      type="datetime-local"
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={scheduleStartAt}
-                      onChange={(e) => setScheduleStartAt(e.target.value)}
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    End time
-                    <input
-                      type="datetime-local"
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={scheduleEndAt}
-                      onChange={(e) => setScheduleEndAt(e.target.value)}
-                    />
-                  </label>
-                </div>
-                <p className="text-[11px] text-slate-500">All times are stored as IST.</p>
+                <p className="text-[11px] text-slate-500">Select a slot from the planner to schedule the interview.</p>
 
                 <label className="space-y-1 text-xs text-slate-600">
                   Location
@@ -2045,6 +2434,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                 </label>
               </div>
 
+              {scheduleEmailPreviewError ? (
+                <div className="mt-3 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-700">
+                  {scheduleEmailPreviewError}
+                </div>
+              ) : null}
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
@@ -2053,345 +2447,30 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                 >
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  className="rounded-xl border border-slate-900/20 bg-white px-4 py-2 text-xs font-semibold text-slate-900"
-                  onClick={() => void handleSendSlotInvite()}
-                  disabled={slotInviteBusy || interviewsBusy}
-                >
-                  {slotInviteBusy ? "Sending..." : "Send slot options"}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
-                  onClick={() => void handleScheduleSubmit()}
-                  disabled={interviewsBusy}
-                >
-                  {interviewsBusy ? "Saving..." : "Schedule interview"}
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          {offerDocOpen ? (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
-              <div className="w-full max-w-3xl rounded-3xl border border-white/20 bg-white/95 p-5 shadow-xl">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-tight text-slate-500">Offer letter</p>
-                    <h3 className="text-lg font-semibold">Generate appointment letter</h3>
-                  </div>
                   <button
                     type="button"
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                    onClick={() => setOfferDocOpen(false)}
+                    className="rounded-xl border border-slate-900/20 bg-white px-4 py-2 text-xs font-semibold text-slate-900"
+                    onClick={() => void handleSendSlotInvite()}
+                    disabled={slotInviteBusy || interviewsBusy}
                   >
-                    Close
+                    {slotInviteBusy ? "Sending..." : "Send slot options"}
                   </button>
-                </div>
-
-                {offerDocError ? (
-                  <div className="mt-3 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">
-                    {offerDocError}
-                  </div>
-                ) : null}
-                {offerDocNotice ? (
-                  <div className="mt-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
-                    {offerDocNotice}
-                  </div>
-                ) : null}
-
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Salutation
-                    <select
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docSalutation}
-                      onChange={(e) => setDocSalutation(e.target.value)}
-                    >
-                      <option value="Mr">Mr</option>
-                      <option value="Ms">Ms</option>
-                      <option value="Mrs">Mrs</option>
-                    </select>
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Candidate name
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docCandidateName}
-                      onChange={(e) => setDocCandidateName(e.target.value)}
-                      placeholder="Full name"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600 md:col-span-2">
-                    Candidate address
-                    <textarea
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      rows={2}
-                      value={docCandidateAddress}
-                      onChange={(e) => setDocCandidateAddress(e.target.value)}
-                      placeholder="Address / City"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Issue date
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docIssueDate}
-                      onChange={(e) => setDocIssueDate(e.target.value)}
-                      placeholder="December 11, 2025"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Designation
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docDesignation}
-                      onChange={(e) => setDocDesignation(e.target.value)}
-                      placeholder="Architect/ Designer"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Current CTC (annual)
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docCurrentCtc}
-                      onChange={(e) => setDocCurrentCtc(e.target.value)}
-                      placeholder="Rs. 6,00,000"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Expected CTC (annual)
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docExpectedCtc}
-                      onChange={(e) => setDocExpectedCtc(e.target.value)}
-                      placeholder="Rs. 9,00,000"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Unit
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docUnit}
-                      onChange={(e) => setDocUnit(e.target.value)}
-                      placeholder="Unit / Studio"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Reporting to
-                    <div className="relative">
-                      <input
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                        value={reportToQuery}
-                        placeholder={reportToPerson ? reportToPerson.full_name : "Search active users"}
-                        onChange={(e) => {
-                          setReportToQuery(e.target.value);
-                          setReportToPerson(null);
-                          setDocReportingTo("");
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && reportToResults.length > 0) {
-                            e.preventDefault();
-                            const query = reportToQuery.trim().toLowerCase();
-                            const exact =
-                              reportToResults.find((person) => person.full_name.toLowerCase() === query) || reportToResults[0];
-                            if (exact) {
-                              setReportToPerson(exact);
-                              setDocReportingTo(exact.full_name);
-                              setReportToQuery(exact.full_name);
-                              setReportToResults([]);
-                            }
-                          }
-                        }}
-                      />
-                      {reportToQuery.trim().length >= 2 && reportToResults.length > 0 ? (
-                        <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-40 overflow-auto rounded-xl border border-slate-200 bg-white shadow-card">
-                          {reportToResults.map((person) => (
-                            <button
-                              key={person.person_id}
-                              type="button"
-                              className="flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                setReportToPerson(person);
-                                setDocReportingTo(person.full_name);
-                                setReportToQuery(person.full_name);
-                                setReportToResults([]);
-                              }}
-                            >
-                              <span className="truncate">
-                                <span className="font-medium">{person.full_name}</span>{" "}
-                                <span className="text-slate-500">({person.email})</span>
-                              </span>
-                              <span className="shrink-0 text-xs text-slate-500">{person.role_name || person.role_code}</span>
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                    {reportToQuery.trim().length >= 2 && reportToBusy ? <p className="text-[11px] text-slate-500">Searching active users...</p> : null}
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Joining date (letter format)
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docJoiningDate}
-                      onChange={(e) => setDocJoiningDate(e.target.value)}
-                      placeholder="January 15, 2026"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Gross salary monthly
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docGrossMonthly}
-                      onChange={(e) => setDocGrossMonthly(e.target.value)}
-                      placeholder="Rs. 1,00,000/-"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600 md:col-span-2">
-                    Office address
-                    <textarea
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      rows={2}
-                      value={docOfficeAddress}
-                      onChange={(e) => setDocOfficeAddress(e.target.value)}
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-4 rounded-2xl border border-slate-200 bg-white/60 p-3">
-                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
-                    <input type="checkbox" checked={docIncludeJoiningBonus} onChange={(e) => setDocIncludeJoiningBonus(e.target.checked)} />
-                    Include joining bonus section
-                  </label>
-                  {docIncludeJoiningBonus ? (
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      <label className="space-y-1 text-xs text-slate-600">
-                        Joining bonus monthly
-                        <input
-                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                          value={docJoiningBonusMonthly}
-                          onChange={(e) => setDocJoiningBonusMonthly(e.target.value)}
-                          placeholder="Rs. 25,000/-"
-                        />
-                      </label>
-                      <label className="space-y-1 text-xs text-slate-600">
-                        Monthly installment
-                        <input
-                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                          value={docJoiningBonusInstallment}
-                          onChange={(e) => setDocJoiningBonusInstallment(e.target.value)}
-                          placeholder="Rs. 25,000"
-                        />
-                      </label>
-                      <label className="space-y-1 text-xs text-slate-600">
-                        Bonus end month/year
-                        <input
-                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                          value={docJoiningBonusEndMonthYear}
-                          onChange={(e) => setDocJoiningBonusEndMonthYear(e.target.value)}
-                          placeholder="March 2027"
-                        />
-                      </label>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Variable start month/year
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docVariableStart}
-                      onChange={(e) => setDocVariableStart(e.target.value)}
-                      placeholder="April 2027"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Variable evaluation year range
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docVariableEvalRange}
-                      onChange={(e) => setDocVariableEvalRange(e.target.value)}
-                      placeholder="April 2026 - March 2027"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Variable payout year range
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docVariablePayoutRange}
-                      onChange={(e) => setDocVariablePayoutRange(e.target.value)}
-                      placeholder="2027-28"
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Signatory name
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docSignatoryName}
-                      onChange={(e) => setDocSignatoryName(e.target.value)}
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Signatory title
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docSignatoryTitle}
-                      onChange={(e) => setDocSignatoryTitle(e.target.value)}
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Candidate signature name
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docCandidateSignatureName}
-                      onChange={(e) => setDocCandidateSignatureName(e.target.value)}
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs text-slate-600">
-                    Candidate signature date
-                    <input
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                      value={docCandidateSignatureDate}
-                      onChange={(e) => setDocCandidateSignatureDate(e.target.value)}
-                      placeholder="(optional)"
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-4 flex justify-end gap-2">
                   <button
                     type="button"
-                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
-                    onClick={() => setOfferDocOpen(false)}
+                    className="rounded-xl border border-slate-900/20 bg-white px-4 py-2 text-xs font-semibold text-slate-900"
+                    onClick={() => void handleScheduleEmailPreview()}
+                    disabled={scheduleEmailPreviewBusy}
                   >
-                    Cancel
+                    {scheduleEmailPreviewBusy ? "Loading..." : "Preview email"}
                   </button>
-                  {canDelete && latestOffer?.candidate_offer_id && (latestOffer.pdf_url || latestOffer.docx_url) ? (
-                    <button
-                      type="button"
-                      className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-xs font-semibold text-rose-600"
-                      onClick={() => void handleDeleteOfferDocument(latestOffer.candidate_offer_id)}
-                      disabled={offerDocBusy || offerDocDeleteBusy}
-                    >
-                      {offerDocDeleteBusy ? "Deleting..." : "Delete letter"}
-                    </button>
-                  ) : null}
                   <button
                     type="button"
                     className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
-                    onClick={() => void handleGenerateOfferDocument(latestOffer?.candidate_offer_id || 0)}
-                    disabled={offerDocBusy || offerDocDeleteBusy || !latestOffer}
-                  >
-                    {offerDocBusy ? "Generating..." : "Generate letter"}
-                  </button>
-                </div>
+                    onClick={() => void handleScheduleSubmit()}
+                    disabled={interviewsBusy}
+                >
+                  {interviewsBusy ? "Saving..." : "Schedule interview"}
+                </button>
               </div>
             </div>
           ) : null}
@@ -2568,6 +2647,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     {offersError}
                   </div>
                 ) : null}
+                {offerPreviewError ? (
+                  <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">
+                    {offerPreviewError}
+                  </div>
+                ) : null}
                 {offersBusy && !candidateOffers ? (
                   <div className="rounded-2xl border border-white/60 bg-white/30 p-4 text-sm text-slate-600">Loading offers...</div>
                 ) : latestOffer ? (
@@ -2590,41 +2674,56 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                       {latestOffer.fixed_ctc_annual != null ? <Chip className={chipTone("blue")}>Fixed {formatMoney(latestOffer.fixed_ctc_annual)}</Chip> : null}
                       {latestOffer.variable_ctc_annual != null ? <Chip className={chipTone("amber")}>Variable {formatMoney(latestOffer.variable_ctc_annual)}</Chip> : null}
                       {latestOffer.currency ? <Chip className={chipTone("neutral")}>{latestOffer.currency}</Chip> : null}
-                      {latestOffer.pdf_url ? (
+                      {latestOffer.pdf_download_url ? (
                         <a
                           className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
-                          href={
-                            latestOffer.pdf_url.toLowerCase().startsWith("http")
-                              ? latestOffer.pdf_url
-                              : withBasePath(`/api/rec/offers/${encodeURIComponent(String(latestOffer.candidate_offer_id))}/document/pdf`)
-                          }
+                          href={latestOffer.pdf_download_url}
                           target="_blank"
                           rel="noreferrer"
+                          download
                         >
-                          <ExternalLink className="h-3.5 w-3.5" /> Offer PDF
-                        </a>
-                      ) : null}
-                      {latestOffer.docx_url ? (
-                        <a
-                          className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
-                          href={withBasePath(`/api/rec/offers/${encodeURIComponent(String(latestOffer.candidate_offer_id))}/document`)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <FileText className="h-3.5 w-3.5" /> Offer DOCX
+                          <ExternalLink className="h-3.5 w-3.5" /> Download offer PDF
                         </a>
                       ) : null}
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800"
+                        onClick={() => void handleOfferPreview(latestOffer.candidate_offer_id, "letter")}
+                        disabled={offerPreviewBusy}
+                      >
+                        Preview letter
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800"
+                        onClick={() => void handleOfferPreview(latestOffer.candidate_offer_id, "email")}
+                        disabled={offerPreviewBusy}
+                      >
+                        Preview email
+                      </button>
                       {latestOffer.offer_status === "draft" ? (
-                        <button
-                          type="button"
-                          className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
-                          onClick={() => void handleSubmitOffer(latestOffer.candidate_offer_id)}
-                          disabled={offersBusy}
-                        >
-                          Submit for approval
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
+                            onClick={() => void handleSubmitOffer(latestOffer.candidate_offer_id)}
+                            disabled={offersBusy}
+                          >
+                            Submit for approval
+                          </button>
+                          {canDelete ? (
+                            <button
+                              type="button"
+                              className="rounded-full bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white"
+                              onClick={() => void handleDeleteOffer(latestOffer.candidate_offer_id)}
+                              disabled={offersBusy}
+                            >
+                              Delete draft
+                            </button>
+                          ) : null}
+                        </>
                       ) : null}
                       {latestOffer.offer_status === "pending_approval" ? (
                         <>
@@ -2656,12 +2755,12 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                           Send to candidate
                         </button>
                       ) : null}
-                      {canDelete && (latestOffer.offer_status === "sent" || latestOffer.offer_status === "viewed") ? (
+                      {canSkip && ["approved", "sent", "viewed"].includes(latestOffer.offer_status) ? (
                         <>
                           <button
                             type="button"
                             className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
-                            onClick={() => void handleDecisionOffer(latestOffer.candidate_offer_id, "accept")}
+                            onClick={() => void handleAdminDecision(latestOffer.candidate_offer_id, "accept")}
                             disabled={offersBusy}
                           >
                             Mark accepted
@@ -2669,7 +2768,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                           <button
                             type="button"
                             className="rounded-full bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white"
-                            onClick={() => void handleDecisionOffer(latestOffer.candidate_offer_id, "decline")}
+                            onClick={() => void handleAdminDecision(latestOffer.candidate_offer_id, "decline")}
                             disabled={offersBusy}
                           >
                             Mark declined
@@ -2686,15 +2785,53 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                           Mark as joined
                         </button>
                       ) : null}
-                      <button
-                        type="button"
-                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
-                        onClick={() => openOfferDocument(latestOffer)}
-                        disabled={offersBusy}
-                      >
-                        {canDelete && (latestOffer.pdf_url || latestOffer.docx_url) ? "Edit letter" : "Generate letter"}
-                      </button>
                     </div>
+                    {latestOffer.offer_status === "draft" ? (
+                      <div className="mt-4 rounded-2xl border border-slate-200 bg-white/70 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Appointment letter variables</p>
+                          <button
+                            type="button"
+                            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                            onClick={() => setDraftOverridesOpen((prev) => !prev)}
+                          >
+                            {draftOverridesOpen ? "Hide" : "Edit"}
+                          </button>
+                        </div>
+                        {draftOverridesOpen ? (
+                          <>
+                            <div className="mt-3 grid gap-2 md:grid-cols-2">
+                              {letterOverrideFields.map((field) => (
+                                <label key={field.key} className="space-y-1 text-xs text-slate-600">
+                                  {field.label}
+                                  <input
+                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                                    value={draftLetterOverrides[field.key] || ""}
+                                    onChange={(e) =>
+                                      setDraftLetterOverrides((prev) => ({
+                                        ...prev,
+                                        [field.key]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="-"
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                            <div className="mt-3 flex justify-end">
+                              <button
+                                type="button"
+                                className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
+                                onClick={() => void handleSaveDraftOverrides(latestOffer.candidate_offer_id)}
+                                disabled={offersBusy}
+                              >
+                                Save letter fields
+                              </button>
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-white/60 bg-white/30 p-4">
@@ -2707,9 +2844,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                           value={offerTemplateCode}
                           onChange={(e) => setOfferTemplateCode(e.target.value)}
                         >
-                          <option value="STD_OFFER">STD_OFFER</option>
-                          <option value="ARCH_L2_STD">ARCH_L2_STD</option>
-                          <option value="ID_JUNIOR_STD">ID_JUNIOR_STD</option>
+                          {offerTemplateOptions.map((opt) => (
+                            <option key={opt.code} value={opt.code}>
+                              {opt.code} - {opt.label}
+                            </option>
+                          ))}
                         </select>
                       </label>
                       <label className="space-y-1 text-xs text-slate-600">
@@ -2792,6 +2931,27 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                           placeholder="Offer notes for HR"
                         />
                       </label>
+                      <div className="rounded-2xl border border-slate-200 bg-white/70 p-3 md:col-span-2">
+                        <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Appointment letter variables</p>
+                        <div className="mt-2 grid gap-2 md:grid-cols-2">
+                          {letterOverrideFields.map((field) => (
+                            <label key={field.key} className="space-y-1 text-xs text-slate-600">
+                              {field.label}
+                              <input
+                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                                value={offerLetterOverrides[field.key] || ""}
+                                onChange={(e) =>
+                                  setOfferLetterOverrides((prev) => ({
+                                    ...prev,
+                                    [field.key]: e.target.value,
+                                  }))
+                                }
+                                placeholder="-"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                     <div className="mt-3 flex justify-end">
                       <button
@@ -2810,6 +2970,48 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           </div>
         </section>
       </div>
+      {scheduleEmailPreviewOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-white/30 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-white/80 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-800">Interview email preview</p>
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
+                onClick={() => setScheduleEmailPreviewOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <iframe
+              title="Interview email preview"
+              className="h-[70vh] w-full bg-white"
+              srcDoc={scheduleEmailPreviewHtml}
+            />
+          </div>
+        </div>
+      ) : null}
+      {offerPreviewOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-white/30 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-white/80 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-800">{offerPreviewTitle}</p>
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
+                onClick={() => setOfferPreviewOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <iframe
+              title={offerPreviewTitle}
+              className="h-[70vh] w-full bg-white"
+              srcDoc={offerPreviewHtml}
+            />
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

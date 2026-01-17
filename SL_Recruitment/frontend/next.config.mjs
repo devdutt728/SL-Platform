@@ -14,6 +14,18 @@ const nextConfig = {
   async headers() {
     return [
       {
+        source: "/api/rec/offers/:path*/preview",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
+      {
+        source: "/api/rec/offers/:path*/email-preview",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
+      {
+        source: "/api/offer/:path*/pdf",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
+      {
         source: "/(.*)",
         headers: securityHeaders,
       },

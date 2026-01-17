@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timezone
+import json
 from typing import Any
 from uuid import uuid4
 
@@ -25,6 +26,23 @@ def _calendar_client(subject_email: str | None = None):
     else:
         credentials, _ = google.auth.default(scopes=scopes)
     return build("calendar", "v3", credentials=credentials, cache_discovery=False)
+
+
+def service_account_info() -> dict[str, str]:
+    path = settings.google_application_credentials
+    if not path:
+        return {}
+    try:
+        data = json.loads(resolve_repo_path(path).read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        return {
+            "client_email": str(data.get("client_email") or ""),
+            "client_id": str(data.get("client_id") or ""),
+            "project_id": str(data.get("project_id") or ""),
+        }
+    except Exception:
+        return {}
 
 
 def _find_meeting_link(event: dict[str, Any]) -> str | None:
@@ -173,3 +191,90 @@ def query_freebusy(
     for cid in calendar_ids:
         out[cid] = list(calendars.get(cid, {}).get("busy") or [])
     return out
+
+
+def list_visible_calendar_ids(*, subject_email: str | None = None) -> list[str]:
+    if not settings.enable_calendar:
+        return []
+    service = _calendar_client(subject_email=subject_email)
+    calendar_ids: list[str] = []
+    page_token = None
+    while True:
+        resp = service.calendarList().list(pageToken=page_token).execute()
+        for item in resp.get("items", []) or []:
+            if item.get("deleted"):
+                continue
+            access = (item.get("accessRole") or "").lower()
+            if access in {"none", "freebusy"}:
+                continue
+            if not (item.get("primary") or item.get("selected")):
+                continue
+            cid = (item.get("id") or "").strip()
+            if cid:
+                calendar_ids.append(cid)
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return calendar_ids
+
+
+def list_calendar_list_details(*, subject_email: str | None = None) -> list[dict[str, Any]]:
+    if not settings.enable_calendar:
+        return []
+    service = _calendar_client(subject_email=subject_email)
+    out: list[dict[str, Any]] = []
+    page_token = None
+    while True:
+        resp = service.calendarList().list(pageToken=page_token).execute()
+        for item in resp.get("items", []) or []:
+            if item.get("deleted"):
+                continue
+            out.append(
+                {
+                    "id": item.get("id"),
+                    "summary": item.get("summary"),
+                    "primary": bool(item.get("primary")),
+                    "selected": bool(item.get("selected")),
+                    "accessRole": item.get("accessRole"),
+                }
+            )
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return out
+
+
+def list_calendar_events(
+    *,
+    calendar_id: str | None = None,
+    start_at: datetime,
+    end_at: datetime,
+    subject_email: str | None = None,
+) -> list[dict[str, Any]]:
+    if not settings.enable_calendar:
+        return []
+
+    service = _calendar_client(subject_email=subject_email)
+    time_min = start_at.astimezone(timezone.utc).isoformat()
+    time_max = end_at.astimezone(timezone.utc).isoformat()
+    events: list[dict[str, Any]] = []
+    page_token = None
+    while True:
+        resp = (
+            service.events()
+            .list(
+                calendarId=calendar_id or settings.calendar_id or "primary",
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,
+                orderBy="startTime",
+                showDeleted=False,
+                pageToken=page_token,
+            )
+            .execute()
+        )
+        events.extend(resp.get("items", []) or [])
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return events

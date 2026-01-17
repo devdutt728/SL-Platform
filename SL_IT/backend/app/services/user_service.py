@@ -4,7 +4,7 @@ from sqlalchemy import func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.platform import DimPerson
+from app.models.platform import DimPerson, DimPersonRole
 
 
 def _superadmin_role_ids() -> set[int]:
@@ -31,10 +31,15 @@ async def is_last_superadmin(session: AsyncSession, person_id: str) -> bool:
         DimPerson.status.is_(None),
         func.lower(DimPerson.status).in_(["working", "active"]),
     )
-    count_stmt = select(func.count(DimPerson.person_id)).where(
-        DimPerson.role_id.in_(superadmin_role_ids),
-        DimPerson.is_deleted.is_(None) | (DimPerson.is_deleted == 0),
-        active_status,
+    count_stmt = (
+        select(func.count(func.distinct(DimPerson.person_id)))
+        .select_from(DimPersonRole)
+        .join(DimPerson, DimPerson.person_id == DimPersonRole.person_id)
+        .where(
+            DimPersonRole.role_id.in_(superadmin_role_ids),
+            DimPerson.is_deleted.is_(None) | (DimPerson.is_deleted == 0),
+            active_status,
+        )
     )
     result = await session.execute(count_stmt)
     count = result.scalar() or 0
@@ -49,7 +54,12 @@ async def is_last_superadmin(session: AsyncSession, person_id: str) -> bool:
         return False
     if not is_active_status(current.status):
         return False
-    return current.role_id in superadmin_role_ids
+    current_roles = (
+        await session.execute(
+            select(DimPersonRole.role_id).where(DimPersonRole.person_id == current.person_id)
+        )
+    ).scalars().all()
+    return any(role_id in superadmin_role_ids for role_id in current_roles)
 
 
 async def prevent_last_superadmin_change(
@@ -57,15 +67,19 @@ async def prevent_last_superadmin_change(
     *,
     person: DimPerson,
     new_role_id: int | None,
+    new_role_ids: list[int] | None = None,
     new_status: str | None,
 ) -> None:
     superadmin_role_ids = _superadmin_role_ids()
     if not superadmin_role_ids:
         return
-    if person.role_id not in superadmin_role_ids:
+    existing_roles = (
+        await session.execute(select(DimPersonRole.role_id).where(DimPersonRole.person_id == person.person_id))
+    ).scalars().all()
+    if not any(role_id in superadmin_role_ids for role_id in existing_roles):
         return
-
-    if new_role_id in superadmin_role_ids and (new_status is None or is_active_status(new_status)):
+    desired_roles = new_role_ids if new_role_ids is not None else ([new_role_id] if new_role_id is not None else [])
+    if any(role_id in superadmin_role_ids for role_id in desired_roles) and (new_status is None or is_active_status(new_status)):
         return
 
     if await is_last_superadmin(session, person.person_id):
@@ -88,12 +102,16 @@ async def ensure_superadmin_for_email(session: AsyncSession, email: str) -> bool
         return False
 
     target_role_id = sorted(superadmin_role_ids)[0]
-    if person.role_id == target_role_id and is_active_status(person.status):
+    existing_roles = (
+        await session.execute(select(DimPersonRole.role_id).where(DimPersonRole.person_id == person.person_id))
+    ).scalars().all()
+    if target_role_id in existing_roles and is_active_status(person.status):
         return False
 
     person.role_id = target_role_id
     if person.status is None:
         person.status = "working"
     session.add(person)
+    session.add(DimPersonRole(person_id=person.person_id, role_id=target_role_id))
     await session.commit()
     return True

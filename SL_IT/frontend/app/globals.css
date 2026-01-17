@@ -122,6 +122,77 @@ button {
     0 12px 36px -26px rgba(15, 23, 42, 0.24);
 }
 
+.workbook-launch {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background:
+    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.18), transparent 55%),
+    linear-gradient(120deg, rgba(255, 255, 255, 0.7), rgba(239, 246, 255, 0.35));
+  color: var(--text-secondary, #475569);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+    0 12px 30px -22px rgba(15, 23, 42, 0.3),
+    0 0 20px -16px rgba(59, 130, 246, 0.6);
+  transition: transform 200ms ease, box-shadow 220ms ease, border-color 220ms ease, color 200ms ease;
+}
+
+.workbook-launch::before {
+  content: "";
+  position: absolute;
+  inset: -40% 0;
+  background: linear-gradient(
+    120deg,
+    transparent 30%,
+    rgba(59, 130, 246, 0.16) 45%,
+    rgba(255, 255, 255, 0.7) 52%,
+    rgba(59, 130, 246, 0.2) 58%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  transition: transform 650ms ease;
+  mix-blend-mode: screen;
+}
+
+.workbook-launch::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  opacity: 0;
+  box-shadow:
+    0 0 22px rgba(56, 189, 248, 0.35),
+    0 0 40px rgba(59, 130, 246, 0.2);
+  transition: opacity 220ms ease;
+  pointer-events: none;
+}
+
+.workbook-launch:hover {
+  transform: translate3d(0, -1px, 0) scale(1.02);
+  border-color: rgba(59, 130, 246, 0.6);
+  color: var(--text-primary, #0f172a);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.75),
+    0 18px 45px -26px rgba(15, 23, 42, 0.35),
+    0 0 26px -14px rgba(59, 130, 246, 0.75);
+}
+
+.workbook-launch:hover::before {
+  transform: translateX(120%);
+}
+
+.workbook-launch:hover::after {
+  opacity: 1;
+}
+
+.workbook-launch:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.6);
+  outline-offset: 2px;
+}
+
 @keyframes fade-up {
   from {
     opacity: 0;
@@ -174,7 +245,12 @@ button {
 
   .glass,
   .glass-panel,
-  .section-card {
+  .section-card,
+  .workbook-launch {
+    transition: none !important;
+  }
+
+  .workbook-launch::before {
     transition: none !important;
   }
 }

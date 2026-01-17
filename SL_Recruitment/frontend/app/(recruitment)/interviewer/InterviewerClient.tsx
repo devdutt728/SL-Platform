@@ -5,11 +5,12 @@ import { useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import { CalendarCheck2, ExternalLink, Loader2, UserRound } from "lucide-react";
 import { CandidateSprint, Interview } from "@/lib/types";
-import { withBasePath } from "@/lib/base-path";
+import { parseDateUtc } from "@/lib/datetime";
 
 type Props = {
   initialUpcoming: Interview[];
   initialPending: Interview[];
+  useMeFilter: boolean;
 };
 
 type FeedbackForm = {
@@ -34,7 +35,8 @@ const ratingOptions = ["", "1", "2", "3", "4", "5"];
 
 function formatDateTime(raw?: string | null) {
   if (!raw) return "";
-  const d = new Date(raw);
+  const d = parseDateUtc(raw);
+  if (!d) return "";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleString("en-IN", {
     month: "short",
@@ -45,12 +47,35 @@ function formatDateTime(raw?: string | null) {
   });
 }
 
+function isCancelled(interview: Interview) {
+  if ((interview.decision || "").toLowerCase() === "cancelled") return true;
+  const note = (interview.notes_internal || "").toLowerCase();
+  return note.includes("cancelled by superadmin");
+}
+
 function chipTone(kind: "neutral" | "green" | "amber" | "red" | "blue") {
   if (kind === "green") return "bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/20";
   if (kind === "amber") return "bg-amber-500/15 text-amber-700 ring-1 ring-amber-500/20";
   if (kind === "red") return "bg-rose-500/15 text-rose-700 ring-1 ring-rose-500/20";
   if (kind === "blue") return "bg-blue-500/15 text-blue-700 ring-1 ring-blue-500/20";
   return "bg-slate-500/10 text-slate-700 ring-1 ring-slate-500/15";
+}
+
+function normalizeStage(raw?: string | null) {
+  const value = (raw || "").trim().toLowerCase();
+  if (!value) return "";
+  if (value === "caf") return "hr_screening";
+  if (value === "l2") return "l2_interview";
+  if (value === "l1") return "l1_interview";
+  return value.replace(/\s+/g, "_");
+}
+
+function stageLabel(raw?: string | null) {
+  const key = normalizeStage(raw);
+  if (!key) return "";
+  if (key === "l2_feedback") return "L2 feedback";
+  if (key === "l1_feedback") return "L1 feedback";
+  return key.replace(/_/g, " ");
 }
 
 function parseInternalNotes(raw?: string | null) {
@@ -77,7 +102,7 @@ function buildInternalNotes(form: FeedbackForm) {
 }
 
 async function fetchInterviews(params: Record<string, string>) {
-  const url = new URL(withBasePath("/api/rec/interviews"), window.location.origin);
+  const url = new URL("/api/rec/interviews", window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   const res = await fetch(url.toString(), { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
@@ -85,7 +110,7 @@ async function fetchInterviews(params: Record<string, string>) {
 }
 
 async function submitFeedback(interviewId: number, payload: Record<string, unknown>) {
-  const res = await fetch(withBasePath(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}`), {
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -95,7 +120,7 @@ async function submitFeedback(interviewId: number, payload: Record<string, unkno
 }
 
 async function fetchSprints(params: Record<string, string>) {
-  const url = new URL(withBasePath("/api/rec/sprints"), window.location.origin);
+  const url = new URL("/api/rec/sprints", window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   const res = await fetch(url.toString(), { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
@@ -103,7 +128,7 @@ async function fetchSprints(params: Record<string, string>) {
 }
 
 async function submitSprintReview(sprintId: number, payload: Record<string, unknown>) {
-  const res = await fetch(withBasePath(`/api/rec/sprints/${encodeURIComponent(String(sprintId))}`), {
+  const res = await fetch(`/api/rec/sprints/${encodeURIComponent(String(sprintId))}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -116,6 +141,7 @@ function InterviewCard({ interview, onSelect }: { interview: Interview; onSelect
   const label = interview.round_type || "Interview";
   const candidate = interview.candidate_name || `Candidate ${interview.candidate_id}`;
   const role = interview.opening_title || "Opening";
+  const feedbackStage = stageLabel(interview.stage_name);
   return (
     <button
       type="button"
@@ -127,7 +153,12 @@ function InterviewCard({ interview, onSelect }: { interview: Interview; onSelect
           <p className="text-sm font-semibold text-slate-900">{candidate}</p>
           <p className="text-xs text-slate-600">{role}</p>
         </div>
-        <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{label}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {feedbackStage ? (
+            <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("amber"))}>{feedbackStage}</span>
+          ) : null}
+          <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{label}</span>
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
         <span className="inline-flex items-center gap-1"><CalendarCheck2 className="h-3.5 w-3.5" />{formatDateTime(interview.scheduled_start_at)}</span>
@@ -142,7 +173,7 @@ function InterviewCard({ interview, onSelect }: { interview: Interview; onSelect
   );
 }
 
-export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
+export function InterviewerClient({ initialUpcoming, initialPending, useMeFilter }: Props) {
   const [upcoming, setUpcoming] = useState<Interview[]>(initialUpcoming);
   const [pending, setPending] = useState<Interview[]>(initialPending);
   const [active, setActive] = useState<Interview | null>(null);
@@ -169,7 +200,6 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
     comments_for_candidate: "",
   });
 
-  const pendingCount = pending.length;
 
   const activeCandidateLabel = useMemo(() => {
     if (!active) return "";
@@ -197,8 +227,8 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
     setError(null);
     try {
       const [nextUpcoming, nextPending] = await Promise.all([
-        fetchInterviews({ interviewer: "me", upcoming: "true" }),
-        fetchInterviews({ interviewer: "me", pending_feedback: "true" }),
+        fetchInterviews({ ...(useMeFilter ? { interviewer: "me" } : {}), upcoming: "true" }),
+        fetchInterviews({ ...(useMeFilter ? { interviewer: "me" } : {}), pending_feedback: "true" }),
       ]);
       setUpcoming(nextUpcoming);
       setPending(nextPending);
@@ -208,6 +238,10 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
       setBusy(false);
     }
   }
+
+  const upcomingView = useMemo(() => upcoming.filter((item) => !isCancelled(item)), [upcoming]);
+  const pendingView = useMemo(() => pending.filter((item) => !isCancelled(item)), [pending]);
+  const pendingCount = pendingView.length;
 
   async function refreshSprints() {
     setSprintsBusy(true);
@@ -262,7 +296,7 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
     let cancelled = false;
     let inFlight = false;
     let pending = false;
-    const source = new EventSource(withBasePath("/api/rec/events/stream"));
+    const source = new EventSource("/api/rec/events/stream");
 
     async function refreshAll() {
       if (inFlight) {
@@ -335,12 +369,12 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
             <span className="text-xs text-slate-600">Next 7 days</span>
           </div>
           <div className="mt-3 space-y-2">
-            {upcoming.length === 0 ? (
+            {upcomingView.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/30 p-4 text-sm text-slate-600">
                 No interviews scheduled yet.
               </div>
             ) : (
-              upcoming.map((slot) => <InterviewCard key={slot.candidate_interview_id} interview={slot} onSelect={openFeedback} />)
+              upcomingView.map((slot) => <InterviewCard key={slot.candidate_interview_id} interview={slot} onSelect={openFeedback} />)
             )}
           </div>
         </div>
@@ -351,12 +385,12 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
             <span className="rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-600">{pendingCount}</span>
           </div>
           <div className="mt-3 space-y-2">
-            {pending.length === 0 ? (
+            {pendingView.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-amber-200 bg-amber-500/5 p-4 text-sm text-amber-700">
                 All feedback is up to date.
               </div>
             ) : (
-              pending.map((item) => (
+              pendingView.map((item) => (
                 <button
                   key={item.candidate_interview_id}
                   type="button"
@@ -364,7 +398,12 @@ export function InterviewerClient({ initialUpcoming, initialPending }: Props) {
                   onClick={() => openFeedback(item)}
                 >
                   <div className="flex items-center gap-2">
-                    <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("amber"))}>{item.round_type}</span>
+                    {stageLabel(item.stage_name) ? (
+                      <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("amber"))}>
+                        {stageLabel(item.stage_name)}
+                      </span>
+                    ) : null}
+                    <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
                     <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
                   </div>
                   <p className="mt-1 text-xs text-slate-600">{item.opening_title || "Opening"} - {formatDateTime(item.scheduled_start_at)}</p>

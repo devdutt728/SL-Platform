@@ -1,64 +1,63 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { apiFetch } from "@/lib/api";
+import { apiFetch, API_BASE } from "@/lib/api";
+import type { License, LicenseAssignment, Vendor } from "@/lib/types";
 
-type Vendor = {
-  vendor_id: number;
-  name: string;
-  is_active: boolean;
-};
+const LICENSE_TYPES = ["SUBSCRIPTION", "PERPETUAL"] as const;
+const BILLING_CYCLES = ["MONTHLY", "QUARTERLY", "ANNUAL", "ONE_TIME"] as const;
+const MAX_CSV_BYTES = 5 * 1024 * 1024;
 
-type License = {
-  license_id: number;
-  vendor_id?: number | null;
-  name: string;
-  sku?: string | null;
-  license_type: string;
-  total_seats: number;
-  assigned_seats?: number | null;
-  billing_cycle?: string | null;
-  renewal_date?: string | null;
-  registered_email?: string | null;
-  cost_amount?: number | null;
-  cost_currency?: string | null;
-  is_active: boolean;
-};
+function downloadText(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
-type Assignment = {
-  assignment_id: number;
-  license_id: number;
-  asset_id?: number | null;
-  assigned_person_id?: string | null;
-  assigned_email?: string | null;
-  assigned_name?: string | null;
-  status: string;
-  assigned_at?: string | null;
-  unassigned_at?: string | null;
-};
+function validateCsvFile(file: File) {
+  const name = file.name.toLowerCase();
+  const type = file.type.toLowerCase();
+  if (!name.endsWith(".csv") && !type.includes("csv")) {
+    return "Only CSV files are allowed.";
+  }
+  if (file.size > MAX_CSV_BYTES) {
+    return "CSV file is too large. Please upload a file under 5MB.";
+  }
+  return null;
+}
 
-const licenseTypes = ["SUBSCRIPTION", "PERPETUAL", "CONCURRENT", "NAMED_USER", "DEVICE"];
-const billingCycles = ["MONTHLY", "ANNUAL", "ONE_TIME"];
-const assignmentStatuses = ["ACTIVE", "REVOKED", "EXPIRED"];
+function toIsoOrNull(dateValue: string) {
+  if (!dateValue) return null;
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
 
 export function ItLicensesAdmin() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [licenses, setLicenses] = useState<License[]>([]);
-  const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [selectedLicenseId, setSelectedLicenseId] = useState<number | "">("");
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importResult, setImportResult] = useState<string>("");
-  const [assignmentFile, setAssignmentFile] = useState<File | null>(null);
-  const [assignmentResult, setAssignmentResult] = useState<string>("");
+  const [assignments, setAssignments] = useState<LicenseAssignment[]>([]);
+  const [selectedLicenseId, setSelectedLicenseId] = useState<number | null>(null);
+
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [csvError, setCsvError] = useState<string | null>(null);
+
   const [vendorName, setVendorName] = useState("");
   const [licenseForm, setLicenseForm] = useState({
-    vendor_id: "",
     name: "",
+    vendor_id: "",
     sku: "",
     license_type: "SUBSCRIPTION",
-    total_seats: 1,
+    total_seats: "1",
     billing_cycle: "ANNUAL",
+    contract_start: "",
+    contract_end: "",
     renewal_date: "",
     registered_email: "",
     cost_amount: "",
@@ -67,462 +66,428 @@ export function ItLicensesAdmin() {
   });
   const [assignmentForm, setAssignmentForm] = useState({
     asset_id: "",
-    assigned_email: "",
-    assigned_name: "",
-    assigned_person_id: "",
-    status: "ACTIVE",
+    assignee_email: "",
+    assignee_name: "",
+    status: "ASSIGNED",
+    notes: "",
   });
 
-  const loadVendors = () => {
-    apiFetch<Vendor[]>("/it/admin/vendors")
-      .then(setVendors)
-      .catch(() => setVendors([]));
+  const licenseInputRef = useRef<HTMLInputElement | null>(null);
+  const assignmentCsvRef = useRef<HTMLInputElement | null>(null);
+  const [licenseCsvFile, setLicenseCsvFile] = useState<File | null>(null);
+  const [assignmentCsvFile, setAssignmentCsvFile] = useState<File | null>(null);
+
+  const selectedLicense = useMemo(() => {
+    if (!selectedLicenseId) return null;
+    return licenses.find((l) => l.license_id === selectedLicenseId) || null;
+  }, [licenses, selectedLicenseId]);
+
+  const loadVendors = async () => {
+    const rows = await apiFetch<Vendor[]>("/it/admin/vendors");
+    setVendors(rows);
+  };
+  const loadLicenses = async () => {
+    const rows = await apiFetch<License[]>("/it/admin/licenses");
+    setLicenses(rows);
+  };
+  const loadAssignments = async (licenseId: number) => {
+    const rows = await apiFetch<LicenseAssignment[]>(`/it/admin/license-assignments?license_id=${encodeURIComponent(String(licenseId))}`);
+    setAssignments(rows);
   };
 
-  const loadLicenses = () => {
-    apiFetch<License[]>("/it/admin/licenses")
-      .then(setLicenses)
-      .catch(() => setLicenses([]));
-  };
-
-  const loadAssignments = (licenseId: number) => {
-    apiFetch<Assignment[]>(`/it/admin/licenses/${licenseId}/assignments`)
-      .then(setAssignments)
-      .catch(() => setAssignments([]));
+  const loadAll = async () => {
+    setError(null);
+    try {
+      await Promise.all([loadVendors(), loadLicenses()]);
+    } catch (e: any) {
+      setError(e?.message || "Failed to load licenses data");
+    }
   };
 
   useEffect(() => {
-    loadVendors();
-    loadLicenses();
+    void loadAll();
   }, []);
 
   useEffect(() => {
-    if (selectedLicenseId) {
-      loadAssignments(Number(selectedLicenseId));
-    } else {
+    if (!selectedLicenseId) {
       setAssignments([]);
+      return;
     }
+    void loadAssignments(selectedLicenseId);
   }, [selectedLicenseId]);
 
-  const selectedLicense = useMemo(
-    () => licenses.find((license) => license.license_id === Number(selectedLicenseId)),
-    [licenses, selectedLicenseId]
-  );
-
-  const createVendor = async () => {
+  const addVendor = async () => {
     if (!vendorName.trim()) return;
-    await apiFetch("/it/admin/vendors", {
-      method: "POST",
-      body: JSON.stringify({ name: vendorName, is_active: true }),
-    });
-    setVendorName("");
-    loadVendors();
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch<Vendor>("/it/admin/vendors", {
+        method: "POST",
+        body: JSON.stringify({ name: vendorName.trim() }),
+      });
+      setVendorName("");
+      await loadVendors();
+    } catch (e: any) {
+      setError(e?.message || "Failed to add vendor");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const createLicense = async () => {
+  const addLicense = async () => {
     if (!licenseForm.name.trim()) return;
-    await apiFetch("/it/admin/licenses", {
-      method: "POST",
-      body: JSON.stringify({
-        vendor_id: licenseForm.vendor_id ? Number(licenseForm.vendor_id) : null,
-        name: licenseForm.name.trim(),
-        sku: licenseForm.sku || null,
-        license_type: licenseForm.license_type,
-        total_seats: Number(licenseForm.total_seats),
-        billing_cycle: licenseForm.billing_cycle || null,
-        renewal_date: licenseForm.renewal_date || null,
-        registered_email: licenseForm.registered_email || null,
-        cost_amount: licenseForm.cost_amount ? Number(licenseForm.cost_amount) : null,
-        cost_currency: licenseForm.cost_currency || null,
-        notes: licenseForm.notes || null,
-        is_active: true,
-      }),
-    });
-    setLicenseForm({
-      vendor_id: "",
-      name: "",
-      sku: "",
-      license_type: "SUBSCRIPTION",
-      total_seats: 1,
-      billing_cycle: "ANNUAL",
-      renewal_date: "",
-      registered_email: "",
-      cost_amount: "",
-      cost_currency: "INR",
-      notes: "",
-    });
-    loadLicenses();
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch<License>("/it/admin/licenses", {
+        method: "POST",
+        body: JSON.stringify({
+          name: licenseForm.name.trim(),
+          vendor_id: licenseForm.vendor_id ? Number(licenseForm.vendor_id) : null,
+          sku: licenseForm.sku.trim() || null,
+          license_type: licenseForm.license_type,
+          billing_cycle: licenseForm.billing_cycle,
+          total_seats: Number(licenseForm.total_seats || "1"),
+          contract_start: toIsoOrNull(licenseForm.contract_start),
+          contract_end: toIsoOrNull(licenseForm.contract_end),
+          renewal_date: toIsoOrNull(licenseForm.renewal_date),
+          registered_email: licenseForm.registered_email.trim() || null,
+          cost_currency: licenseForm.cost_currency.trim() || "INR",
+          cost_amount: licenseForm.cost_amount ? Number(licenseForm.cost_amount) : null,
+          notes: licenseForm.notes.trim() || null,
+          is_active: true,
+        }),
+      });
+      setLicenseForm({
+        name: "",
+        vendor_id: "",
+        sku: "",
+        license_type: "SUBSCRIPTION",
+        total_seats: "1",
+        billing_cycle: "ANNUAL",
+        contract_start: "",
+        contract_end: "",
+        renewal_date: "",
+        registered_email: "",
+        cost_amount: "",
+        cost_currency: "INR",
+        notes: "",
+      });
+      await loadLicenses();
+    } catch (e: any) {
+      setError(e?.message || "Failed to add license");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const createAssignment = async () => {
+  const addAssignment = async () => {
     if (!selectedLicenseId) return;
-    await apiFetch(`/it/admin/licenses/${selectedLicenseId}/assignments`, {
-      method: "POST",
-      body: JSON.stringify({
-        asset_id: assignmentForm.asset_id ? Number(assignmentForm.asset_id) : null,
-        assigned_email: assignmentForm.assigned_email || null,
-        assigned_name: assignmentForm.assigned_name || null,
-        assigned_person_id: assignmentForm.assigned_person_id || null,
-        status: assignmentForm.status,
-      }),
-    });
-    setAssignmentForm({
-      asset_id: "",
-      assigned_email: "",
-      assigned_name: "",
-      assigned_person_id: "",
-      status: "ACTIVE",
-    });
-    loadAssignments(Number(selectedLicenseId));
-    loadLicenses();
-  };
-
-  const revokeAssignment = async (assignmentId: number) => {
-    await apiFetch(`/it/admin/assignments/${assignmentId}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        status: "REVOKED",
-        unassigned_at: new Date().toISOString(),
-      }),
-    });
-    if (selectedLicenseId) {
-      loadAssignments(Number(selectedLicenseId));
-      loadLicenses();
+    if (!assignmentForm.assignee_email.trim() && !assignmentForm.assignee_name.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch<LicenseAssignment>("/it/admin/license-assignments", {
+        method: "POST",
+        body: JSON.stringify({
+          license_id: selectedLicenseId,
+          asset_id: assignmentForm.asset_id ? Number(assignmentForm.asset_id) : null,
+          assignee_email: assignmentForm.assignee_email.trim() || null,
+          assignee_name: assignmentForm.assignee_name.trim() || null,
+          status: assignmentForm.status.trim() || "ASSIGNED",
+          notes: assignmentForm.notes.trim() || null,
+        }),
+      });
+      setAssignmentForm({ asset_id: "", assignee_email: "", assignee_name: "", status: "ASSIGNED", notes: "" });
+      await loadAssignments(selectedLicenseId);
+    } catch (e: any) {
+      setError(e?.message || "Failed to add assignment");
+    } finally {
+      setBusy(false);
     }
   };
 
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const downloadLicenseSample = () => {
+    downloadText(
+      "it-licenses-sample.csv",
+      [
+        "name,vendor,sku,license_type,billing_cycle,total_seats,contract_start,contract_end,renewal_date,registered_email,cost_currency,cost_amount,notes",
+        "Notion,Notion,TEAM,SUBSCRIPTION,ANNUAL,10,2025-01-10,2026-01-10,2026-01-10,admin@company.com,INR,25000,Workspace seats",
+      ].join("\n")
+    );
+  };
 
-  const importLicenses = async () => {
-    if (!importFile) return;
-    setImportResult("Uploading...");
-    const formData = new FormData();
-    formData.append("file", importFile);
-    const res = await fetch(`${basePath}/api/it/admin/licenses/import`, {
-      method: "POST",
-      body: formData,
-      credentials: "include",
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setImportResult(data?.detail || "Import failed");
+  const uploadLicenseCsv = async (file: File) => {
+    const validation = validateCsvFile(file);
+    if (validation) {
+      setCsvError(validation);
       return;
     }
-    setImportResult(`Imported ${data.inserted} rows, ${data.errors.length} errors`);
-    setImportFile(null);
-    loadLicenses();
+    setBusy(true);
+    setError(null);
+    setCsvError(null);
+    try {
+      const formData = new FormData();
+      formData.append("upload", file);
+      const res = await fetch(`${API_BASE}/it/admin/licenses/import`, { method: "POST", body: formData, credentials: "include" });
+      if (!res.ok) throw new Error(await res.text());
+      await loadAll();
+    } catch (e: any) {
+      setError(e?.message || "License CSV import failed");
+    } finally {
+      setBusy(false);
+      if (licenseInputRef.current) licenseInputRef.current.value = "";
+      setLicenseCsvFile(null);
+    }
   };
 
-  const importAssignments = async () => {
-    if (!assignmentFile) return;
-    setAssignmentResult("Uploading...");
-    const formData = new FormData();
-    formData.append("file", assignmentFile);
-    const res = await fetch(`${basePath}/api/it/admin/assignments/import`, {
-      method: "POST",
-      body: formData,
-      credentials: "include",
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setAssignmentResult(data?.detail || "Import failed");
+  const downloadAssignmentSample = () => {
+    downloadText(
+      "it-license-assignments-sample.csv",
+      ["license_id,asset_id,assignee_email,assignee_name,status,notes", "1,2,devdutt.kumar@studiolotus.in,Devdutt,ASSIGNED,Seat assignment"].join("\n")
+    );
+  };
+
+  const uploadAssignmentCsv = async (file: File) => {
+    const validation = validateCsvFile(file);
+    if (validation) {
+      setCsvError(validation);
       return;
     }
-    setAssignmentResult(`Imported ${data.inserted} rows, ${data.errors.length} errors`);
-    setAssignmentFile(null);
-    loadLicenses();
+    setBusy(true);
+    setError(null);
+    setCsvError(null);
+    try {
+      const formData = new FormData();
+      formData.append("upload", file);
+      const res = await fetch(`${API_BASE}/it/admin/license-assignments/import`, { method: "POST", body: formData, credentials: "include" });
+      if (!res.ok) throw new Error(await res.text());
+      await loadAll();
+      if (selectedLicenseId) await loadAssignments(selectedLicenseId);
+    } catch (e: any) {
+      setError(e?.message || "Assignments CSV import failed");
+    } finally {
+      setBusy(false);
+      if (assignmentCsvRef.current) assignmentCsvRef.current.value = "";
+      setAssignmentCsvFile(null);
+    }
   };
 
   return (
     <div className="space-y-6">
       <section className="section-card">
-        <h2 className="text-xl font-semibold">Vendors</h2>
-        <div className="mt-4 flex gap-3">
+        <h1 className="text-2xl font-semibold">Software Licenses</h1>
+        <p className="mt-2 text-steel">Track vendors, seats, renewals, and assignments.</p>
+      </section>
+
+      {error ? (
+        <section className="section-card border border-rose-500/20 bg-rose-500/10 text-rose-700">{error}</section>
+      ) : null}
+      {csvError ? (
+        <section className="section-card border border-rose-500/20 bg-rose-500/10 text-rose-700">{csvError}</section>
+      ) : null}
+
+      <section className="section-card">
+        <h2 className="text-lg font-semibold">Vendors</h2>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
           <input
-            className="flex-1 rounded-xl border border-black/10 bg-white px-4 py-2"
+            className="flex-1 min-w-[240px] rounded-xl border border-black/10 bg-white/60 px-4 py-2"
             placeholder="Vendor name"
             value={vendorName}
-            onChange={(event) => setVendorName(event.target.value)}
+            onChange={(e) => setVendorName(e.target.value)}
           />
-          <button className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white" onClick={createVendor}>
+          <button
+            type="button"
+            disabled={busy || !vendorName.trim()}
+            onClick={() => void addVendor()}
+            className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
             Add vendor
           </button>
         </div>
-        <div className="mt-4 grid gap-2 text-sm text-steel">
-          {vendors.map((vendor) => (
-            <div key={vendor.vendor_id} className="rounded-xl bg-white/80 px-4 py-2">
-              {vendor.name}
-            </div>
-          ))}
-        </div>
       </section>
 
       <section className="section-card">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold">Add license</h2>
-          <div className="flex flex-wrap items-center gap-2 rounded-full border border-white/60 bg-white/70 px-3 py-1 text-xs font-semibold text-slate-700">
-            <a
-              href={`${basePath}/templates/licenses_import_sample.csv`}
-              className="rounded-full border border-black/10 px-3 py-1"
-            >
+          <h2 className="text-lg font-semibold">Add license</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="rounded-full border border-black/10 bg-white/60 px-4 py-2 text-sm font-semibold" onClick={downloadLicenseSample}>
               Sample CSV
-            </a>
-            <label className="rounded-full border border-black/10 px-3 py-1">
+            </button>
+            <label className="rounded-full border border-black/10 bg-white/60 px-4 py-2 text-sm font-semibold cursor-pointer">
+              Choose CSV
               <input
+                ref={licenseInputRef}
                 type="file"
-                accept=".csv"
+                accept=".csv,text/csv"
                 className="hidden"
-                onChange={(event) => setImportFile(event.target.files?.[0] || null)}
+                disabled={busy}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setCsvError(null);
+                  setLicenseCsvFile(file);
+                }}
               />
-              {importFile ? "File selected" : "Choose CSV"}
             </label>
             <button
-              className="rounded-full bg-ink px-3 py-1 text-white disabled:opacity-50"
-              onClick={importLicenses}
-              disabled={!importFile}
+              type="button"
+              className="rounded-full border border-black/10 bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={busy || !licenseCsvFile}
+              onClick={() => licenseCsvFile && void uploadLicenseCsv(licenseCsvFile)}
             >
-              Upload
+              Upload CSV
             </button>
           </div>
         </div>
-        {importResult && <div className="mt-3 text-xs text-steel">{importResult}</div>}
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <input
-            className="rounded-xl border border-black/10 bg-white px-4 py-2"
-            placeholder="License name"
-            value={licenseForm.name}
-            onChange={(event) => setLicenseForm({ ...licenseForm, name: event.target.value })}
-          />
-          <select
-            className="rounded-xl border border-black/10 bg-white px-4 py-2"
-            value={licenseForm.vendor_id}
-            onChange={(event) => setLicenseForm({ ...licenseForm, vendor_id: event.target.value })}
-          >
+
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" placeholder="License name" value={licenseForm.name} onChange={(e) => setLicenseForm((s) => ({ ...s, name: e.target.value }))} />
+          <select className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" value={licenseForm.vendor_id} onChange={(e) => setLicenseForm((s) => ({ ...s, vendor_id: e.target.value }))}>
             <option value="">Select vendor</option>
-            {vendors.map((vendor) => (
-              <option key={vendor.vendor_id} value={vendor.vendor_id}>
-                {vendor.name}
+            {vendors.map((v) => (
+              <option key={v.vendor_id} value={String(v.vendor_id)}>
+                {v.name}
               </option>
             ))}
           </select>
-          <input
-            className="rounded-xl border border-black/10 bg-white px-4 py-2"
-            placeholder="SKU / plan"
-            value={licenseForm.sku}
-            onChange={(event) => setLicenseForm({ ...licenseForm, sku: event.target.value })}
-          />
-          <select
-            className="rounded-xl border border-black/10 bg-white px-4 py-2"
-            value={licenseForm.license_type}
-            onChange={(event) => setLicenseForm({ ...licenseForm, license_type: event.target.value })}
-          >
-            {licenseTypes.map((type) => (
-              <option key={type} value={type}>
-                {type}
+          <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" placeholder="SKU / plan" value={licenseForm.sku} onChange={(e) => setLicenseForm((s) => ({ ...s, sku: e.target.value }))} />
+
+          <select className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" value={licenseForm.license_type} onChange={(e) => setLicenseForm((s) => ({ ...s, license_type: e.target.value }))}>
+            {LICENSE_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
               </option>
             ))}
           </select>
-          <input
-            className="rounded-xl border border-black/10 bg-white px-4 py-2"
-            type="number"
-            min={1}
-            placeholder="Total seats"
-            value={licenseForm.total_seats}
-            onChange={(event) =>
-              setLicenseForm({ ...licenseForm, total_seats: Number(event.target.value) })
-            }
-          />
-          <select
-            className="rounded-xl border border-black/10 bg-white px-4 py-2"
-            value={licenseForm.billing_cycle}
-            onChange={(event) => setLicenseForm({ ...licenseForm, billing_cycle: event.target.value })}
-          >
-            {billingCycles.map((cycle) => (
-              <option key={cycle} value={cycle}>
-                {cycle}
+          <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" type="number" min={1} placeholder="Total seats" value={licenseForm.total_seats} onChange={(e) => setLicenseForm((s) => ({ ...s, total_seats: e.target.value }))} />
+          <select className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" value={licenseForm.billing_cycle} onChange={(e) => setLicenseForm((s) => ({ ...s, billing_cycle: e.target.value }))}>
+            {BILLING_CYCLES.map((t) => (
+              <option key={t} value={t}>
+                {t}
               </option>
             ))}
           </select>
-          <input
-            className="rounded-xl border border-black/10 bg-white px-4 py-2"
-            type="date"
-            value={licenseForm.renewal_date}
-            onChange={(event) => setLicenseForm({ ...licenseForm, renewal_date: event.target.value })}
-          />
-          <input
-            className="rounded-xl border border-black/10 bg-white px-4 py-2"
-            placeholder="Registered email"
-            value={licenseForm.registered_email}
-            onChange={(event) => setLicenseForm({ ...licenseForm, registered_email: event.target.value })}
-          />
-          <input
-            className="rounded-xl border border-black/10 bg-white px-4 py-2"
-            placeholder="Cost amount"
-            value={licenseForm.cost_amount}
-            onChange={(event) => setLicenseForm({ ...licenseForm, cost_amount: event.target.value })}
-          />
-          <input
-            className="rounded-xl border border-black/10 bg-white px-4 py-2"
-            placeholder="Currency (INR)"
-            value={licenseForm.cost_currency}
-            onChange={(event) => setLicenseForm({ ...licenseForm, cost_currency: event.target.value })}
-          />
+
+          <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" type="date" value={licenseForm.contract_start} onChange={(e) => setLicenseForm((s) => ({ ...s, contract_start: e.target.value }))} />
+          <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" placeholder="Registered email" value={licenseForm.registered_email} onChange={(e) => setLicenseForm((s) => ({ ...s, registered_email: e.target.value }))} />
+          <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" placeholder="Cost amount" value={licenseForm.cost_amount} onChange={(e) => setLicenseForm((s) => ({ ...s, cost_amount: e.target.value }))} />
+
+          <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" value={licenseForm.cost_currency} onChange={(e) => setLicenseForm((s) => ({ ...s, cost_currency: e.target.value }))} />
+          <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" type="date" value={licenseForm.contract_end} onChange={(e) => setLicenseForm((s) => ({ ...s, contract_end: e.target.value }))} />
+          <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" type="date" value={licenseForm.renewal_date} onChange={(e) => setLicenseForm((s) => ({ ...s, renewal_date: e.target.value }))} />
+          <div />
         </div>
-        <textarea
-          className="mt-3 w-full rounded-xl border border-black/10 bg-white px-4 py-2"
-          placeholder="Notes"
-          value={licenseForm.notes}
-          onChange={(event) => setLicenseForm({ ...licenseForm, notes: event.target.value })}
-        />
-        <button className="mt-4 rounded-full bg-ink px-5 py-2 text-sm font-semibold text-white" onClick={createLicense}>
-          Save license
-        </button>
+
+        <textarea className="mt-3 w-full rounded-xl border border-black/10 bg-white/60 px-4 py-3" placeholder="Notes" value={licenseForm.notes} onChange={(e) => setLicenseForm((s) => ({ ...s, notes: e.target.value }))} />
+
+        <div className="mt-4 flex justify-start">
+          <button type="button" disabled={busy || !licenseForm.name.trim()} onClick={() => void addLicense()} className="rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50">
+            Save license
+          </button>
+        </div>
       </section>
 
       <section className="section-card">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold">Licenses</h2>
-          <select
-            className="rounded-full border border-black/10 bg-white px-4 py-2 text-sm"
-            value={selectedLicenseId}
-            onChange={(event) => setSelectedLicenseId(event.target.value ? Number(event.target.value) : "")}
-          >
+          <h2 className="text-lg font-semibold">Licenses</h2>
+          <select className="rounded-full border border-black/10 bg-white/60 px-4 py-2 text-sm font-semibold" value={selectedLicenseId ? String(selectedLicenseId) : ""} onChange={(e) => setSelectedLicenseId(e.target.value ? Number(e.target.value) : null)}>
             <option value="">Select license for assignments</option>
-            {licenses.map((license) => (
-              <option key={license.license_id} value={license.license_id}>
-                {license.name}
+            {licenses.map((l) => (
+              <option key={l.license_id} value={String(l.license_id)}>
+                {l.name} (#{l.license_id})
               </option>
             ))}
           </select>
         </div>
-        <div className="mt-4 grid gap-3">
-          {licenses.map((license) => (
-            <div key={license.license_id} className="rounded-2xl bg-white/80 px-4 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold">{license.name}</div>
-                  <div className="text-xs text-steel">
-                    {license.license_type} · Seats {license.assigned_seats || 0}/{license.total_seats}
-                  </div>
-                </div>
-                <div className="text-xs text-steel">
-                  Renewal {license.renewal_date || "NA"}
-                </div>
-              </div>
-              <div className="mt-2 text-xs text-steel">
-                {license.registered_email || "No registered email"} {license.sku ? `• ${license.sku}` : ""}
-              </div>
-            </div>
-          ))}
-        </div>
+        {!licenses.length ? <p className="mt-4 text-sm text-steel">No licenses yet.</p> : null}
       </section>
 
       <section className="section-card">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold">Assignments</h2>
-          <div className="flex flex-wrap items-center gap-2 rounded-full border border-white/60 bg-white/70 px-3 py-1 text-xs font-semibold text-slate-700">
-            <a
-              href={`${basePath}/templates/assignments_import_sample.csv`}
-              className="rounded-full border border-black/10 px-3 py-1"
-            >
+          <h2 className="text-lg font-semibold">Assignments</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="rounded-full border border-black/10 bg-white/60 px-4 py-2 text-sm font-semibold" onClick={downloadAssignmentSample}>
               Sample CSV
-            </a>
-            <label className="rounded-full border border-black/10 px-3 py-1">
+            </button>
+            <label className="rounded-full border border-black/10 bg-white/60 px-4 py-2 text-sm font-semibold cursor-pointer">
+              Choose CSV
               <input
+                ref={assignmentCsvRef}
                 type="file"
-                accept=".csv"
+                accept=".csv,text/csv"
                 className="hidden"
-                onChange={(event) => setAssignmentFile(event.target.files?.[0] || null)}
+                disabled={busy}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setCsvError(null);
+                  setAssignmentCsvFile(file);
+                }}
               />
-              {assignmentFile ? "File selected" : "Choose CSV"}
             </label>
             <button
-              className="rounded-full bg-ink px-3 py-1 text-white disabled:opacity-50"
-              onClick={importAssignments}
-              disabled={!assignmentFile}
+              type="button"
+              className="rounded-full border border-black/10 bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={busy || !assignmentCsvFile}
+              onClick={() => assignmentCsvFile && void uploadAssignmentCsv(assignmentCsvFile)}
             >
-              Upload
+              Upload CSV
             </button>
           </div>
         </div>
-        {!selectedLicenseId && <p className="mt-2 text-sm text-steel">Pick a license to assign seats.</p>}
-        {selectedLicenseId && (
+
+        {!selectedLicense ? <p className="mt-3 text-sm text-steel">Pick a license to assign seats.</p> : null}
+
+        {selectedLicense ? (
           <>
-            {assignmentResult && <div className="mt-3 text-xs text-steel">{assignmentResult}</div>}
             <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <input
-                className="rounded-xl border border-black/10 bg-white px-4 py-2"
-                placeholder="Asset ID (optional)"
-                value={assignmentForm.asset_id}
-                onChange={(event) => setAssignmentForm({ ...assignmentForm, asset_id: event.target.value })}
-              />
-              <input
-                className="rounded-xl border border-black/10 bg-white px-4 py-2"
-                placeholder="Person ID (optional)"
-                value={assignmentForm.assigned_person_id}
-                onChange={(event) =>
-                  setAssignmentForm({ ...assignmentForm, assigned_person_id: event.target.value })
-                }
-              />
-              <input
-                className="rounded-xl border border-black/10 bg-white px-4 py-2"
-                placeholder="Assignee email"
-                value={assignmentForm.assigned_email}
-                onChange={(event) => setAssignmentForm({ ...assignmentForm, assigned_email: event.target.value })}
-              />
-              <input
-                className="rounded-xl border border-black/10 bg-white px-4 py-2"
-                placeholder="Assignee name"
-                value={assignmentForm.assigned_name}
-                onChange={(event) => setAssignmentForm({ ...assignmentForm, assigned_name: event.target.value })}
-              />
-              <select
-                className="rounded-xl border border-black/10 bg-white px-4 py-2"
-                value={assignmentForm.status}
-                onChange={(event) => setAssignmentForm({ ...assignmentForm, status: event.target.value })}
-              >
-                {assignmentStatuses.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
+              <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" placeholder="Asset ID (optional)" value={assignmentForm.asset_id} onChange={(e) => setAssignmentForm((s) => ({ ...s, asset_id: e.target.value }))} />
+              <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" placeholder="Assignee email" value={assignmentForm.assignee_email} onChange={(e) => setAssignmentForm((s) => ({ ...s, assignee_email: e.target.value }))} />
+              <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" placeholder="Assignee name" value={assignmentForm.assignee_name} onChange={(e) => setAssignmentForm((s) => ({ ...s, assignee_name: e.target.value }))} />
+              <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" placeholder="Status" value={assignmentForm.status} onChange={(e) => setAssignmentForm((s) => ({ ...s, status: e.target.value }))} />
+              <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" placeholder="Notes" value={assignmentForm.notes} onChange={(e) => setAssignmentForm((s) => ({ ...s, notes: e.target.value }))} />
             </div>
-            <button
-              className="mt-4 rounded-full bg-ink px-5 py-2 text-sm font-semibold text-white"
-              onClick={createAssignment}
-            >
-              Assign seat
-            </button>
-            <div className="mt-4 grid gap-2">
-              {assignments.map((assignment) => (
-                <div key={assignment.assignment_id} className="rounded-xl bg-white/80 px-4 py-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span>
-                      {assignment.assigned_name || "Unassigned"}{" "}
-                      {assignment.assigned_email ? `• ${assignment.assigned_email}` : ""}
-                    </span>
-                    <span className="text-xs text-steel">{assignment.status}</span>
-                  </div>
-                  <div className="mt-2 text-xs text-steel">
-                    Asset {assignment.asset_id || "NA"} · Person {assignment.assigned_person_id || "NA"}
-                  </div>
-                  {assignment.status === "ACTIVE" && (
-                    <button
-                      className="mt-2 rounded-full border border-black/10 px-3 py-1 text-xs font-semibold"
-                      onClick={() => revokeAssignment(assignment.assignment_id)}
-                    >
-                      Revoke
-                    </button>
-                  )}
+            <div className="mt-4">
+              <button type="button" disabled={busy} onClick={() => void addAssignment()} className="rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50">
+                Add assignment
+              </button>
+            </div>
+
+            <div className="mt-6">
+              <p className="text-sm text-steel">
+                Showing assignments for <span className="font-semibold text-slate-900">{selectedLicense.name}</span>
+              </p>
+              {!assignments.length ? <p className="mt-3 text-sm text-steel">No assignments yet.</p> : null}
+              {assignments.length ? (
+                <div className="mt-3 overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="text-left text-slate-600">
+                      <tr>
+                        <th className="py-2 pr-4">Asset ID</th>
+                        <th className="py-2 pr-4">Assignee</th>
+                        <th className="py-2 pr-4">Email</th>
+                        <th className="py-2 pr-4">Assigned</th>
+                        <th className="py-2 pr-4">Status</th>
+                        <th className="py-2 pr-4">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-slate-800">
+                      {assignments.map((a) => (
+                        <tr key={a.assignment_id} className="border-t border-white/40">
+                          <td className="py-2 pr-4">{a.asset_id ?? "-"}</td>
+                          <td className="py-2 pr-4 font-semibold">{a.assignee_name || "-"}</td>
+                          <td className="py-2 pr-4">{a.assignee_email || "-"}</td>
+                          <td className="py-2 pr-4">{new Date(a.assigned_at).toLocaleDateString()}</td>
+                          <td className="py-2 pr-4">{a.status || "-"}</td>
+                          <td className="py-2 pr-4">{a.notes || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              ))}
-              {!assignments.length && (
-                <div className="text-sm text-steel">No assignments yet for this license.</div>
-              )}
+              ) : null}
             </div>
           </>
-        )}
+        ) : null}
       </section>
     </div>
   );

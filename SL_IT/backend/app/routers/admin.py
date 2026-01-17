@@ -2,25 +2,17 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from fastapi.responses import StreamingResponse
-from sqlalchemy import or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.platform_session import get_platform_session
 from app.db.session import get_session
-from app.models.platform import DimPerson, DimRole
+from app.models.platform import DimPerson, DimPersonRole, DimRole
 from app.request_context import get_request_context
-from app.rbac import require_admin
-from app.schemas.user import (
-    PlatformRoleOut,
-    PlatformUserCreate,
-    PlatformUserListItem,
-    PlatformUserUpdate,
-    UserContext,
-)
+from app.rbac import require_superadmin
+from app.schemas.user import PlatformRoleOut, PlatformUserCreate, PlatformUserListItem, PlatformUserUpdate, UserContext
 from app.services.audit_service import write_audit_log
 from app.services.user_service import prevent_last_superadmin_change
 
@@ -33,35 +25,47 @@ def _format_full_name(person: DimPerson) -> str:
     return (person.display_name or person.full_name or f"{first_name} {last_name}").strip() or (person.email or "")
 
 
-def _derive_names(first_name: str | None, last_name: str | None, full_name: str | None, display_name: str | None, email: str | None) -> tuple[str | None, str | None]:
-    if first_name:
-        return first_name, last_name
-    source = full_name or display_name
-    if source:
-        parts = source.split()
-        if len(parts) == 1:
-            return parts[0], last_name
-        return parts[0], " ".join(parts[1:])
-    if email:
-        handle = email.split("@")[0]
-        return handle, last_name
-    return None, last_name
+async def _role_map_for_people(platform_session: AsyncSession, person_ids: list[str]) -> dict[str, list[DimRole]]:
+    if not person_ids:
+        return {}
+    rows = (
+        await platform_session.execute(
+            select(DimPersonRole.person_id, DimRole)
+            .select_from(DimPersonRole)
+            .join(DimRole, DimRole.role_id == DimPersonRole.role_id)
+            .where(DimPersonRole.person_id.in_(person_ids))
+        )
+    ).all()
+    mapping: dict[str, list[DimRole]] = {pid: [] for pid in person_ids}
+    for person_id, role in rows:
+        mapping.setdefault(person_id, []).append(role)
+    return mapping
+
+
+def _primary_role_id(role_ids: list[int]) -> int | None:
+    if not role_ids:
+        return None
+    if 2 in role_ids:
+        return 2
+    return sorted(role_ids)[0]
 
 
 @router.get("/users", response_model=list[PlatformUserListItem])
 async def list_users(
     q: str | None = None,
-    status: str | None = None,
-    status_group: str | None = None,
-    role_id: int | None = None,
-    include_relived: bool = False,
-    include_deleted: bool = False,
     platform_session: AsyncSession = Depends(get_platform_session),
-    user: UserContext = Depends(require_admin()),
+    user: UserContext = Depends(require_superadmin()),
 ):
     stmt = select(DimPerson, DimRole).outerjoin(DimRole, DimRole.role_id == DimPerson.role_id)
     if q:
         like = f"%{q}%"
+        role_person_ids = (
+            select(DimPersonRole.person_id)
+            .select_from(DimPersonRole)
+            .join(DimRole, DimRole.role_id == DimPersonRole.role_id)
+            .where(or_(DimRole.role_name.like(like), DimRole.role_code.like(like)))
+            .subquery()
+        )
         stmt = stmt.where(
             or_(
                 DimPerson.email.like(like),
@@ -69,32 +73,36 @@ async def list_users(
                 DimPerson.last_name.like(like),
                 DimPerson.display_name.like(like),
                 DimRole.role_name.like(like),
+                DimPerson.person_id.in_(select(role_person_ids.c.person_id)),
             )
         )
-    if status:
-        stmt = stmt.where(DimPerson.status == status)
-    elif status_group == "active":
-        stmt = stmt.where(DimPerson.status.in_(["Working", "Active"]))
-    if role_id is not None:
-        stmt = stmt.where(DimPerson.role_id == role_id)
-    if not include_relived:
-        stmt = stmt.where(or_(DimPerson.status.is_(None), DimPerson.status.notin_(["Relieved", "relieved"])))
-    if not include_deleted:
-        stmt = stmt.where(or_(DimPerson.is_deleted.is_(None), DimPerson.is_deleted != 1))
     stmt = stmt.order_by(DimPerson.email.asc())
 
     result = await platform_session.execute(stmt)
     rows = result.all()
+    person_ids = [person.person_id for person, _ in rows]
+    role_map = await _role_map_for_people(platform_session, person_ids)
     users: list[PlatformUserListItem] = []
     for person, role in rows:
+        roles_for_person = role_map.get(person.person_id, [])
+        if not roles_for_person and person.role_id is not None:
+            roles_for_person = [role] if role else []
+        role_ids = [r.role_id for r in roles_for_person if r and r.role_id is not None]
+        role_codes = [r.role_code for r in roles_for_person if r and r.role_code]
+        role_names = [r.role_name for r in roles_for_person if r and r.role_name]
+        primary_id = _primary_role_id(role_ids) or person.role_id
+        primary_role = next((r for r in roles_for_person if r.role_id == primary_id), role)
         users.append(
             PlatformUserListItem(
                 person_id=person.person_id,
                 email=person.email,
                 full_name=_format_full_name(person),
-                role_id=person.role_id,
-                role_code=role.role_code if role else None,
-                role_name=role.role_name if role else None,
+                role_id=primary_id,
+                role_code=primary_role.role_code if primary_role else None,
+                role_name=primary_role.role_name if primary_role else None,
+                role_ids=role_ids,
+                role_codes=role_codes,
+                role_names=role_names,
                 status=person.status,
                 is_deleted=person.is_deleted,
             )
@@ -102,325 +110,10 @@ async def list_users(
     return users
 
 
-@router.get("/users/export")
-async def export_users(
-    platform_session: AsyncSession = Depends(get_platform_session),
-    user: UserContext = Depends(require_admin()),
-):
-    result = await platform_session.execute(
-        select(DimPerson, DimRole)
-        .outerjoin(DimRole, DimRole.role_id == DimPerson.role_id)
-        .order_by(DimPerson.email.asc())
-    )
-    rows = result.all()
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(
-        [
-            "person_id",
-            "person_code",
-            "personal_id",
-            "email",
-            "first_name",
-            "last_name",
-            "role_id",
-            "role_code",
-            "role_name",
-            "grade_id",
-            "department_id",
-            "manager_id",
-            "employment_type",
-            "join_date",
-            "exit_date",
-            "mobile_number",
-            "status",
-            "is_deleted",
-            "source_system",
-            "created_at",
-            "updated_at",
-            "full_name",
-            "display_name",
-        ]
-    )
-    for person, role in rows:
-        writer.writerow(
-            [
-                person.person_id,
-                person.person_code,
-                person.personal_id,
-                person.email,
-                person.first_name,
-                person.last_name,
-                person.role_id,
-                role.role_code if role else None,
-                role.role_name if role else None,
-                person.grade_id,
-                person.department_id,
-                person.manager_id,
-                person.employment_type,
-                person.join_date.isoformat() if person.join_date else None,
-                person.exit_date.isoformat() if person.exit_date else None,
-                person.mobile_number,
-                person.status,
-                person.is_deleted,
-                person.source_system,
-                person.created_at.isoformat() if person.created_at else None,
-                person.updated_at.isoformat() if person.updated_at else None,
-                person.full_name,
-                person.display_name,
-            ]
-        )
-
-    output.seek(0)
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=users_export.csv"},
-    )
-
-
-@router.post("/users/import", response_model=dict)
-async def import_users(
-    request: Request,
-    file: UploadFile = File(...),
-    platform_session: AsyncSession = Depends(get_platform_session),
-    it_session: AsyncSession = Depends(get_session),
-    actor: UserContext = Depends(require_admin()),
-):
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="csv_required")
-
-    content = (await file.read()).decode("utf-8").splitlines()
-    reader = csv.DictReader(content)
-    inserted = 0
-    updated = 0
-    skipped = 0
-    errors: list[dict] = []
-
-    def _non_empty(value: str | None) -> str | None:
-        if value is None:
-            return None
-        value = value.strip()
-        return value if value else None
-
-    def _to_int(value: str | None) -> int | None:
-        if value is None:
-            return None
-        value = value.strip()
-        if not value:
-            return None
-        return int(value)
-
-    def _to_date(value: str | None) -> date | None:
-        if value is None:
-            return None
-        value = value.strip()
-        if not value:
-            return None
-        return date.fromisoformat(value)
-
-    for index, row in enumerate(reader, start=2):
-        person_id = _non_empty(row.get("person_id"))
-        person_code = _non_empty(row.get("person_code"))
-        email = _non_empty(row.get("email"))
-        if not person_id:
-            person_id = person_code or email
-        email = _non_empty(row.get("email"))
-        if not person_id:
-            errors.append({"row": index, "error": "missing_person_id"})
-            continue
-
-        person = (
-            await platform_session.execute(select(DimPerson).where(DimPerson.person_id == person_id))
-        ).scalars().one_or_none()
-
-        if not person:
-            first_name = _non_empty(row.get("first_name"))
-            last_name = _non_empty(row.get("last_name"))
-            full_name = _non_empty(row.get("full_name"))
-            display_name = _non_empty(row.get("display_name"))
-            derived_first, derived_last = _derive_names(first_name, last_name, full_name, display_name, email)
-            if not person_code:
-                person_code = person_id
-            if not person_code or not derived_first:
-                errors.append({"row": index, "error": "missing_required_fields"})
-                continue
-
-            person = DimPerson(
-                person_id=person_id,
-                person_code=person_code,
-                personal_id=_non_empty(row.get("personal_id")),
-                email=email,
-                first_name=derived_first,
-                last_name=derived_last,
-                role_id=_to_int(row.get("role_id")),
-                grade_id=_to_int(row.get("grade_id")),
-                department_id=_to_int(row.get("department_id")),
-                manager_id=_non_empty(row.get("manager_id")),
-                employment_type=_non_empty(row.get("employment_type")),
-                join_date=_to_date(row.get("join_date")),
-                exit_date=_to_date(row.get("exit_date")),
-                mobile_number=_non_empty(row.get("mobile_number")),
-                status=_non_empty(row.get("status")),
-                is_deleted=_to_int(row.get("is_deleted")),
-                full_name=full_name,
-                display_name=display_name,
-                source_system=_non_empty(row.get("source_system")),
-            )
-            platform_session.add(person)
-            inserted += 1
-            continue
-
-        updates: dict[str, object] = {}
-        for field, parser in [
-            ("person_code", _non_empty),
-            ("personal_id", _non_empty),
-            ("email", _non_empty),
-            ("first_name", _non_empty),
-            ("last_name", _non_empty),
-            ("role_id", _to_int),
-            ("grade_id", _to_int),
-            ("department_id", _to_int),
-            ("manager_id", _non_empty),
-            ("employment_type", _non_empty),
-            ("join_date", _to_date),
-            ("exit_date", _to_date),
-            ("mobile_number", _non_empty),
-            ("status", _non_empty),
-            ("is_deleted", _to_int),
-            ("full_name", _non_empty),
-            ("display_name", _non_empty),
-            ("source_system", _non_empty),
-        ]:
-            try:
-                value = parser(row.get(field))
-            except ValueError:
-                errors.append({"row": index, "error": f"invalid_{field}"})
-                value = None
-            if value is not None and getattr(person, field) != value:
-                setattr(person, field, value)
-                updates[field] = value
-
-        if updates:
-            try:
-                await prevent_last_superadmin_change(
-                    platform_session,
-                    person=person,
-                    new_role_id=updates.get("role_id", person.role_id),
-                    new_status=updates.get("status", person.status),
-                )
-            except ValueError as exc:
-                errors.append({"row": index, "error": str(exc)})
-                continue
-            updated += 1
-        else:
-            skipped += 1
-
-    await platform_session.commit()
-
-    await write_audit_log(
-        it_session,
-        actor=actor,
-        action="USER_BULK_IMPORT",
-        entity_type="sl_platform.dim_person",
-        entity_id="bulk",
-        before=None,
-        after={"inserted": inserted, "updated": updated, "skipped": skipped, "errors": len(errors)},
-        context=get_request_context(request),
-    )
-    await it_session.commit()
-
-    return {"inserted": inserted, "updated": updated, "skipped": skipped, "errors": errors}
-
-
-@router.post("/users", response_model=PlatformUserListItem, status_code=status.HTTP_201_CREATED)
-async def create_user(
-    payload: PlatformUserCreate,
-    request: Request,
-    platform_session: AsyncSession = Depends(get_platform_session),
-    it_session: AsyncSession = Depends(get_session),
-    actor: UserContext = Depends(require_admin()),
-):
-    person_id = payload.person_id or payload.person_code or payload.email
-    if not person_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="person_id_required")
-
-    existing = (
-        await platform_session.execute(select(DimPerson).where(DimPerson.person_id == person_id))
-    ).scalars().one_or_none()
-    if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="person_id_exists")
-
-    first_name, last_name = _derive_names(
-        payload.first_name,
-        payload.last_name,
-        payload.full_name,
-        payload.display_name,
-        payload.email,
-    )
-    if not first_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="first_name_required")
-
-    person = DimPerson(
-        person_id=person_id,
-        person_code=payload.person_code or person_id,
-        personal_id=payload.personal_id,
-        email=str(payload.email) if payload.email else None,
-        first_name=first_name,
-        last_name=last_name,
-        role_id=payload.role_id,
-        grade_id=payload.grade_id,
-        department_id=payload.department_id,
-        manager_id=payload.manager_id,
-        employment_type=payload.employment_type,
-        join_date=payload.join_date,
-        exit_date=payload.exit_date,
-        mobile_number=payload.mobile_number,
-        status=payload.status,
-        is_deleted=payload.is_deleted,
-        full_name=payload.full_name or f"{first_name} {last_name}".strip(),
-        display_name=payload.display_name or f"{first_name} {last_name}".strip(),
-        source_system=payload.source_system,
-    )
-
-    platform_session.add(person)
-    await platform_session.commit()
-
-    await write_audit_log(
-        it_session,
-        actor=actor,
-        action="USER_CREATE",
-        entity_type="sl_platform.dim_person",
-        entity_id=str(person.person_id),
-        before=None,
-        after={"person_id": person.person_id, "email": person.email},
-        context=get_request_context(request),
-    )
-    await it_session.commit()
-
-    role = None
-    if person.role_id is not None:
-        role = (
-            await platform_session.execute(select(DimRole).where(DimRole.role_id == person.role_id))
-        ).scalars().one_or_none()
-
-    return PlatformUserListItem(
-        person_id=person.person_id,
-        email=person.email,
-        full_name=_format_full_name(person),
-        role_id=person.role_id,
-        role_code=role.role_code if role else None,
-        role_name=role.role_name if role else None,
-        status=person.status,
-        is_deleted=person.is_deleted,
-    )
-
-
 @router.get("/roles", response_model=list[PlatformRoleOut])
 async def list_roles(
     platform_session: AsyncSession = Depends(get_platform_session),
-    user: UserContext = Depends(require_admin()),
+    user: UserContext = Depends(require_superadmin()),
 ):
     result = await platform_session.execute(select(DimRole).order_by(DimRole.role_name.asc()))
     roles = result.scalars().all()
@@ -434,7 +127,7 @@ async def update_user(
     request: Request,
     platform_session: AsyncSession = Depends(get_platform_session),
     it_session: AsyncSession = Depends(get_session),
-    actor: UserContext = Depends(require_admin()),
+    actor: UserContext = Depends(require_superadmin()),
 ):
     result = await platform_session.execute(
         select(DimPerson, DimRole).outerjoin(DimRole, DimRole.role_id == DimPerson.role_id).where(DimPerson.person_id == person_id)
@@ -444,20 +137,47 @@ async def update_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user_not_found")
 
     person, role = row
-    before = {"role_id": person.role_id, "status": person.status}
+    existing_roles = (
+        await platform_session.execute(
+            select(DimPersonRole.role_id).where(DimPersonRole.person_id == person.person_id)
+        )
+    ).scalars().all()
+    before = {"role_id": person.role_id, "role_ids": existing_roles, "status": person.status}
+
+    desired_role_ids = payload.role_ids
+    if desired_role_ids is None and payload.role_id is not None:
+        desired_role_ids = [payload.role_id]
+    if desired_role_ids is not None:
+        desired_role_ids = sorted({int(role_id) for role_id in desired_role_ids if role_id is not None})
+        if not desired_role_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="missing_role_ids")
 
     try:
         await prevent_last_superadmin_change(
             platform_session,
             person=person,
             new_role_id=payload.role_id,
+            new_role_ids=desired_role_ids,
             new_status=payload.status,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    if payload.role_id is not None:
-        person.role_id = payload.role_id
+    if desired_role_ids is not None:
+        existing_set = {int(role_id) for role_id in existing_roles if role_id is not None}
+        desired_set = set(desired_role_ids)
+        to_add = desired_set - existing_set
+        to_remove = existing_set - desired_set
+        if to_remove:
+            await platform_session.execute(
+                delete(DimPersonRole).where(
+                    DimPersonRole.person_id == person.person_id,
+                    DimPersonRole.role_id.in_(list(to_remove)),
+                )
+            )
+        for role_id in sorted(to_add):
+            platform_session.add(DimPersonRole(person_id=person.person_id, role_id=role_id))
+        person.role_id = _primary_role_id(desired_role_ids)
     if payload.status is not None:
         person.status = payload.status
 
@@ -477,11 +197,16 @@ async def update_user(
         entity_type="sl_platform.dim_person",
         entity_id=str(person.person_id),
         before=before,
-        after={"role_id": person.role_id, "status": person.status},
+        after={"role_id": person.role_id, "role_ids": desired_role_ids, "status": person.status},
         context=get_request_context(request),
     )
     await it_session.commit()
 
+    role_rows = []
+    if desired_role_ids:
+        role_rows = (
+            await platform_session.execute(select(DimRole).where(DimRole.role_id.in_(desired_role_ids)))
+        ).scalars().all()
     role_to_use = updated_role or role
     return PlatformUserListItem(
         person_id=person.person_id,
@@ -490,6 +215,193 @@ async def update_user(
         role_id=person.role_id,
         role_code=role_to_use.role_code if role_to_use else None,
         role_name=role_to_use.role_name if role_to_use else None,
+        role_ids=desired_role_ids or [],
+        role_codes=[r.role_code for r in role_rows if r.role_code],
+        role_names=[r.role_name for r in role_rows if r.role_name],
         status=person.status,
         is_deleted=person.is_deleted,
     )
+
+
+@router.post("/users", response_model=PlatformUserListItem, status_code=status.HTTP_201_CREATED)
+async def create_user(
+    payload: PlatformUserCreate,
+    request: Request,
+    platform_session: AsyncSession = Depends(get_platform_session),
+    it_session: AsyncSession = Depends(get_session),
+    actor: UserContext = Depends(require_superadmin()),
+):
+    person_id = payload.person_id.strip()
+    person_code = payload.person_code.strip()
+    first_name = payload.first_name.strip()
+    last_name = (payload.last_name or "").strip() or None
+    email = (payload.email or "").strip().lower() or None
+    status_value = (payload.status or "").strip() or None
+    if not person_id or not person_code or not first_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="missing_required_fields")
+
+    role_ids = payload.role_ids
+    if role_ids is None and payload.role_id is not None:
+        role_ids = [payload.role_id]
+    if role_ids is not None:
+        role_ids = sorted({int(role_id) for role_id in role_ids if role_id is not None})
+    if not role_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="missing_role_ids")
+
+    existing_stmt = select(DimPerson).where(DimPerson.person_id == person_id)
+    if email:
+        existing_stmt = existing_stmt.where(
+            or_(DimPerson.person_id == person_id, func.lower(DimPerson.email) == email)
+        )
+    existing = (await platform_session.execute(existing_stmt)).scalars().first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="user_already_exists")
+
+    full_name = " ".join(part for part in [first_name, last_name] if part).strip()
+    person = DimPerson(
+        person_id=person_id,
+        person_code=person_code,
+        email=email,
+        first_name=first_name,
+        last_name=last_name,
+        role_id=_primary_role_id(role_ids),
+        status=status_value or "working",
+        is_deleted=0,
+        full_name=full_name or None,
+        display_name=full_name or None,
+    )
+    platform_session.add(person)
+    await platform_session.commit()
+
+    for rid in role_ids:
+        platform_session.add(DimPersonRole(person_id=person.person_id, role_id=rid))
+    await platform_session.commit()
+
+    role = None
+    if person.role_id is not None:
+        role = (
+            await platform_session.execute(select(DimRole).where(DimRole.role_id == person.role_id))
+        ).scalars().one_or_none()
+
+    await write_audit_log(
+        it_session,
+        actor=actor,
+        action="USER_CREATE",
+        entity_type="sl_platform.dim_person",
+        entity_id=str(person.person_id),
+        before=None,
+        after={"role_id": person.role_id, "role_ids": role_ids, "status": person.status, "email": person.email},
+        context=get_request_context(request),
+    )
+    await it_session.commit()
+
+    role_rows = (
+        await platform_session.execute(select(DimRole).where(DimRole.role_id.in_(role_ids)))
+    ).scalars().all()
+    return PlatformUserListItem(
+        person_id=person.person_id,
+        email=person.email,
+        full_name=_format_full_name(person),
+        role_id=person.role_id,
+        role_code=role.role_code if role else None,
+        role_name=role.role_name if role else None,
+        role_ids=role_ids,
+        role_codes=[r.role_code for r in role_rows if r.role_code],
+        role_names=[r.role_name for r in role_rows if r.role_name],
+        status=person.status,
+        is_deleted=person.is_deleted,
+    )
+
+
+@router.post("/users/import", response_model=dict)
+async def import_users_csv(
+    request: Request,
+    upload: UploadFile = File(...),
+    platform_session: AsyncSession = Depends(get_platform_session),
+    it_session: AsyncSession = Depends(get_session),
+    actor: UserContext = Depends(require_superadmin()),
+):
+    if upload.content_type and "csv" not in upload.content_type.lower():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_file_type")
+    raw = await upload.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
+
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    created = 0
+    skipped = 0
+    row_limit = 5000
+
+    for row in reader:
+        if created + skipped >= row_limit:
+            break
+        person_id = (row.get("person_id") or "").strip()
+        person_code = (row.get("person_code") or "").strip()
+        first_name = (row.get("first_name") or "").strip()
+        if not person_id or not person_code or not first_name:
+            skipped += 1
+            continue
+
+        last_name = (row.get("last_name") or "").strip() or None
+        email = (row.get("email") or "").strip().lower() or None
+        status_value = (row.get("status") or "").strip() or None
+        role_ids_raw = (row.get("role_ids") or "").strip()
+        role_raw = (row.get("role_id") or "").strip()
+        role_ids: list[int] = []
+        if role_ids_raw:
+            for part in role_ids_raw.replace("|", ",").split(","):
+                part = part.strip()
+                if part.isdigit():
+                    role_ids.append(int(part))
+        elif role_raw.isdigit():
+            role_ids = [int(role_raw)]
+
+        if not role_ids:
+            skipped += 1
+            continue
+
+        existing_stmt = select(DimPerson).where(DimPerson.person_id == person_id)
+        if email:
+            existing_stmt = existing_stmt.where(
+                or_(DimPerson.person_id == person_id, func.lower(DimPerson.email) == email)
+            )
+        exists = (await platform_session.execute(existing_stmt)).scalars().first()
+        if exists:
+            skipped += 1
+            continue
+
+        full_name = " ".join(part for part in [first_name, last_name] if part).strip()
+        person = DimPerson(
+            person_id=person_id,
+            person_code=person_code,
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            role_id=_primary_role_id(role_ids),
+            status=status_value or "working",
+            is_deleted=0,
+            full_name=full_name or None,
+            display_name=full_name or None,
+        )
+        platform_session.add(person)
+        created += 1
+
+        for rid in sorted(set(role_ids)):
+            platform_session.add(DimPersonRole(person_id=person_id, role_id=rid))
+
+    await platform_session.commit()
+
+    await write_audit_log(
+        it_session,
+        actor=actor,
+        action="USER_IMPORT",
+        entity_type="sl_platform.dim_person",
+        entity_id="bulk",
+        before=None,
+        after={"created": created, "skipped": skipped, "filename": upload.filename},
+        context=get_request_context(request),
+    )
+    await it_session.commit()
+
+    return {"created": created, "skipped": skipped}

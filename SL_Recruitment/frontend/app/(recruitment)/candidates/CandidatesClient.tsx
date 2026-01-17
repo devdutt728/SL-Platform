@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
 import { CandidateListItem, OpeningListItem } from "@/lib/types";
 import { AlertTriangle, CheckCircle2, Filter, XCircle } from "lucide-react";
-import { withBasePath } from "@/lib/base-path";
+import { parseDateUtc } from "@/lib/datetime";
 
 type Props = {
   initialCandidates: CandidateListItem[];
@@ -25,7 +26,9 @@ const stageTone: Record<string, string> = {
   l1_interview: "bg-indigo-600/10 text-indigo-700 ring-1 ring-indigo-600/10",
   l1_feedback: "bg-indigo-600/10 text-indigo-700 ring-1 ring-indigo-600/10",
   offer: "bg-emerald-600/10 text-emerald-700 ring-1 ring-emerald-600/10",
+  joining_documents: "bg-emerald-600/10 text-emerald-700 ring-1 ring-emerald-600/10",
   hired: "bg-emerald-600/10 text-emerald-700 ring-1 ring-emerald-600/10",
+  declined: "bg-rose-600/10 text-rose-700 ring-1 ring-rose-600/10",
   rejected: "bg-rose-600/10 text-rose-700 ring-1 ring-rose-600/10",
 };
 
@@ -40,7 +43,9 @@ const stageLabels: Record<string, string> = {
   l1_interview: "L1 interview",
   l1_feedback: "L1 feedback",
   offer: "Offer",
+  joining_documents: "Joining documents",
   hired: "Hired",
+  declined: "Declined",
   rejected: "Rejected",
 };
 
@@ -96,7 +101,9 @@ const STAGE_OPTIONS = [
   "l1_interview",
   "l1_feedback",
   "offer",
+  "joining_documents",
   "hired",
+  "declined",
   "rejected",
 ];
 
@@ -105,12 +112,15 @@ async function fetchCandidates(params: {
   openingId: string;
   statusView: "all" | "active" | "hired" | "rejected";
 }) {
-  const url = new URL(withBasePath("/api/rec/candidates"), window.location.origin);
+  const url = new URL("/api/rec/candidates", window.location.origin);
   for (const st of params.stage) url.searchParams.append("stage", st);
   if (params.openingId) url.searchParams.set("opening_id", params.openingId);
 
   if (params.statusView === "hired") url.searchParams.append("status", "hired");
-  if (params.statusView === "rejected") url.searchParams.append("status", "rejected");
+  if (params.statusView === "rejected") {
+    url.searchParams.append("status", "rejected");
+    url.searchParams.append("status", "declined");
+  }
   if (params.statusView === "active") {
     for (const s of ["new", "enquiry", "in_process", "offer"]) url.searchParams.append("status", s);
   }
@@ -124,6 +134,8 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
   const [candidates, setCandidates] = useState<CandidateListItem[]>(initialCandidates);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const [initialized, setInitialized] = useState(false);
 
   const tableGrid =
     "grid grid-cols-[minmax(220px,2.6fr)_minmax(220px,2.6fr)_minmax(160px,1.5fr)_minmax(220px,2fr)_minmax(70px,0.7fr)_minmax(120px,1fr)]";
@@ -132,13 +144,49 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
   const [openingId, setOpeningId] = useState("");
   const [statusView, setStatusView] = useState<"all" | "active" | "hired" | "rejected">("active");
   const [needsAttention, setNeedsAttention] = useState(false);
+  const [cafToday, setCafToday] = useState(false);
 
   function resetFilters() {
     setSelectedStages([]);
     setOpeningId("");
     setStatusView("active");
     setNeedsAttention(false);
+    setCafToday(false);
   }
+
+  function toDayKey(value: Date, tz: string) {
+    return value.toLocaleDateString("en-CA", { timeZone: tz });
+  }
+
+  useEffect(() => {
+    if (initialized) return;
+    const stageValues = new Set<string>();
+    const rawStages = searchParams.getAll("stage");
+    if (rawStages.length) {
+      rawStages.forEach((raw) => {
+        const cleaned = normalizeStage(raw);
+        if (cleaned) stageValues.add(cleaned);
+      });
+    } else {
+      const raw = searchParams.get("stage") || "";
+      raw.split(",").forEach((item) => {
+        const cleaned = normalizeStage(item);
+        if (cleaned) stageValues.add(cleaned);
+      });
+    }
+    if (stageValues.size) setSelectedStages(Array.from(stageValues));
+
+    const nextStatus = (searchParams.get("status_view") || "").trim().toLowerCase();
+    if (nextStatus === "all" || nextStatus === "active" || nextStatus === "hired" || nextStatus === "rejected") {
+      setStatusView(nextStatus);
+    }
+    const nextOpening = searchParams.get("opening_id") || "";
+    if (nextOpening) setOpeningId(nextOpening);
+
+    setNeedsAttention(searchParams.get("needs_attention") === "1");
+    setCafToday(searchParams.get("caf_today") === "1");
+    setInitialized(true);
+  }, [initialized, searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -166,7 +214,7 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
     let cancelled = false;
     let inFlight = false;
     let pending = false;
-    const source = new EventSource(withBasePath("/api/rec/events/stream"));
+    const source = new EventSource("/api/rec/events/stream");
 
     async function refresh() {
       if (inFlight) {
@@ -202,8 +250,18 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
   }, [selectedStages, openingId, statusView]);
 
   const filtered = useMemo(() => {
-    if (!needsAttention) return candidates;
-    return candidates.filter((c) => {
+    let current = candidates;
+    if (cafToday) {
+      const todayKey = toDayKey(new Date(), "Asia/Kolkata");
+      current = current.filter((c) => {
+        if (!c.caf_submitted_at) return false;
+        const parsed = parseDateUtc(c.caf_submitted_at);
+        if (!parsed || Number.isNaN(parsed.getTime())) return false;
+        return toDayKey(parsed, "Asia/Kolkata") === todayKey;
+      });
+    }
+    if (!needsAttention) return current;
+    return current.filter((c) => {
       const screening = (c.screening_result || "").trim().toLowerCase();
       const isHighAge = (c.ageing_days || 0) >= 2;
       const isHigh = screening === "red" || screening === "high";
@@ -212,7 +270,7 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
       const cafPendingTooLong = normalizeStage(c.current_stage) === "hr_screening" && !c.caf_submitted_at && (c.ageing_days || 0) >= 3;
       return isHighAge || isHigh || isMedium || isLow || cafPendingTooLong || !!c.needs_hr_review;
     });
-  }, [candidates, needsAttention]);
+  }, [candidates, needsAttention, cafToday]);
 
   const uniqueStages = useMemo(() => {
     const built = new Set<string>([
@@ -244,7 +302,8 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
           <h1 className="mt-1 text-2xl font-semibold">Candidates</h1>
           <p className="mt-1 text-sm text-slate-600">
             Showing <span className="font-semibold">{filtered.length}</span> candidates
-            {needsAttention ? " (needs attention)" : ""}.
+            {needsAttention ? " (needs attention)" : ""}
+            {cafToday ? " (CAF today)" : ""}.
           </p>
         </div>
 
@@ -259,6 +318,16 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
           >
             <AlertTriangle className="h-4 w-4" />
             Needs attention
+          </button>
+          <button
+            type="button"
+            className={clsx(
+              "inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold ring-1",
+              cafToday ? "bg-emerald-500/15 text-emerald-800 ring-emerald-500/20" : "bg-white/50 text-slate-800 ring-white/70 hover:bg-white/70"
+            )}
+            onClick={() => setCafToday((v) => !v)}
+          >
+            CAF today
           </button>
         </div>
       </div>
@@ -421,7 +490,7 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
                 </div>
                 <div className="whitespace-nowrap text-center text-sm text-slate-800">{c.ageing_days}d</div>
                 <div className="whitespace-nowrap">
-                  <span className={clsx("rounded-full px-2 py-1 text-xs font-semibold", chipTone(c.status === "rejected" ? "red" : c.status === "hired" ? "green" : "neutral"))}>
+                  <span className={clsx("rounded-full px-2 py-1 text-xs font-semibold", chipTone(c.status === "rejected" || c.status === "declined" ? "red" : c.status === "hired" ? "green" : "neutral"))}>
                     {c.status.split("_").join(" ")}
                   </span>
                 </div>

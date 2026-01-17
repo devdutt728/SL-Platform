@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+import json
+import base64
+import hashlib
+import hmac
 from typing import Any
 from uuid import uuid4
 
@@ -14,10 +18,259 @@ from app.models.candidate_offer import RecCandidateOffer
 from app.models.opening import RecOpening
 from app.models.platform_person import DimPerson
 from app.models.stage import RecCandidateStage
+from app.models.screening import RecCandidateScreening
 from app.schemas.user import UserContext
-from app.services.drive import move_candidate_folder
+from app.core.config import settings
+from app.core.paths import resolve_repo_path
+from app.services.drive import move_candidate_folder, upload_offer_doc
 from app.services.events import log_event
 
+
+def _format_date(value) -> str:
+    if not value:
+        return "-"
+    try:
+        return value.strftime("%d %b %Y")
+    except Exception:
+        return str(value)
+
+
+def _format_money(value) -> str:
+    if value is None:
+        return "-"
+    try:
+        return f"{float(value):,.0f}"
+    except Exception:
+        return str(value)
+
+def _logo_data_uri() -> str:
+    preferred = resolve_repo_path("backend/app/templates/offer_letter_logo.png")
+    fallback = resolve_repo_path("frontend/public/Studio Lotus Logo (TM).png")
+    path = preferred if preferred.exists() else fallback
+    if not path.exists():
+        return ""
+    data = path.read_bytes()
+    b64 = base64.b64encode(data).decode("ascii")
+    return f"data:image/png;base64,{b64}"
+
+def _public_origin() -> str:
+    if settings.public_app_origin:
+        return settings.public_app_origin.rstrip("/")
+    if settings.environment != "production":
+        return "http://localhost:3000"
+    return ""
+
+def _public_base_path() -> str:
+    base_path = (settings.public_app_base_path or "").strip()
+    if not base_path:
+        return ""
+    if not base_path.startswith("/"):
+        base_path = f"/{base_path}"
+    return base_path.rstrip("/")
+
+def _offer_public_link(token: str) -> str:
+    base = _public_origin()
+    prefix = _public_base_path()
+    path = f"{prefix}/offer/{token}" if prefix else f"/offer/{token}"
+    return f"{base}{path}" if base else path
+
+def _offer_public_pdf_link(token: str) -> str:
+    base = _public_origin()
+    prefix = _public_base_path()
+    path = f"{prefix}/api/offer/{token}/pdf" if prefix else f"/api/offer/{token}/pdf"
+    return f"{base}{path}" if base else path
+
+def _offer_pdf_signature(token: str, expires_at: int) -> str:
+    signing_key = (settings.public_link_signing_key or settings.secret_key).strip()
+    payload = f"{token}:{int(expires_at)}"
+    digest = hmac.new(
+        signing_key.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+def offer_pdf_signed_url(token: str, *, download: bool = True) -> str:
+    expires_at = int((datetime.now(timezone.utc) + timedelta(hours=settings.public_link_ttl_hours)).timestamp())
+    sig = _offer_pdf_signature(token, expires_at)
+    base = _offer_public_pdf_link(token)
+    download_flag = "1" if download else "0"
+    return f"{base}?exp={expires_at}&sig={sig}&download={download_flag}"
+
+def verify_offer_pdf_signature(token: str, exp: str | None, sig: str | None) -> bool:
+    if not exp or not sig:
+        return False
+    try:
+        exp_int = int(exp)
+    except ValueError:
+        return False
+    if datetime.now(timezone.utc).timestamp() > exp_int:
+        return False
+    expected = _offer_pdf_signature(token, exp_int)
+    return hmac.compare_digest(expected, sig)
+
+
+def _parse_letter_overrides(raw: str | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    cleaned: dict[str, str] = {}
+    for key, value in data.items():
+        if not isinstance(key, str):
+            continue
+        if value is None:
+            continue
+        cleaned[key] = str(value)
+    return cleaned
+
+def _render_offer_pdf_bytes(html: str) -> bytes:
+    try:
+        from weasyprint import HTML
+    except Exception as exc:
+        raise RuntimeError(
+            "WeasyPrint is required to generate offer PDFs. Install weasyprint and its system dependencies."
+        ) from exc
+    try:
+        return HTML(string=html).write_pdf()
+    except Exception as exc:
+        raise RuntimeError("Failed to render offer letter PDF.") from exc
+
+async def _resolve_reporting_to(opening: RecOpening | None) -> str:
+    if not opening or not opening.reporting_person_id_platform:
+        return ""
+    person_id = str(opening.reporting_person_id_platform).strip()
+    if not person_id:
+        return ""
+    try:
+        async with PlatformSessionLocal() as platform_session:
+            person = await platform_session.get(DimPerson, person_id)
+            if not person:
+                return ""
+            return person.display_name or person.full_name or person.email or ""
+    except Exception:
+        return ""
+
+
+async def _resolve_candidate_address(session: AsyncSession, candidate: RecCandidate | None, opening: RecOpening | None) -> str:
+    if candidate and candidate.current_location:
+        return candidate.current_location
+    if candidate:
+        try:
+            screening = (
+                await session.execute(
+                    select(RecCandidateScreening.current_city).where(RecCandidateScreening.candidate_id == candidate.candidate_id)
+                )
+            ).scalar_one_or_none()
+            if screening:
+                return screening
+        except Exception:
+            pass
+    city = opening.location_city if opening else None
+    country = opening.location_country if opening else None
+    parts = [p for p in [city, country] if p]
+    return ", ".join(parts) if parts else ""
+
+
+async def _ensure_offer_pdf(
+    *,
+    session: AsyncSession,
+    offer: RecCandidateOffer,
+    candidate: RecCandidate | None,
+    opening: RecOpening | None,
+    sender_name: str,
+    candidate_address: str,
+    reporting_to: str,
+    unit_name: str,
+    force: bool = False,
+) -> str | None:
+    if not candidate or not candidate.drive_folder_id:
+        return None
+    if not force and offer.pdf_url and offer.pdf_url.lower().endswith(".pdf"):
+        return offer.pdf_url
+    html = render_offer_letter(
+        offer=offer,
+        candidate=candidate,
+        opening=opening,
+        sender_name=sender_name,
+        candidate_address=candidate_address,
+        reporting_to=reporting_to,
+        unit_name=unit_name,
+    )
+    pdf_bytes = _render_offer_pdf_bytes(html)
+    filename = f"{candidate.candidate_code}-offer-letter.pdf"
+    _, file_url = upload_offer_doc(
+        candidate.drive_folder_id,
+        filename=filename,
+        content_type="application/pdf",
+        data=pdf_bytes,
+    )
+    offer.pdf_url = file_url
+    await session.flush()
+    return file_url
+
+def render_offer_letter(
+    *,
+    offer: RecCandidateOffer,
+    candidate: RecCandidate | None,
+    opening: RecOpening | None,
+    sender_name: str,
+    candidate_address: str,
+    reporting_to: str,
+    unit_name: str,
+) -> str:
+    path = resolve_repo_path("backend/app/templates/offer_letter.html")
+    raw = path.read_text(encoding="utf-8")
+    joining_address = "F 301, Ch. Prem Singh House, Lado Sarai, New Delhi 110030"
+    gross_monthly = None
+    if offer.gross_ctc_annual is not None:
+        try:
+            gross_monthly = float(offer.gross_ctc_annual) / 12
+        except Exception:
+            gross_monthly = None
+    joining_bonus_monthly = "-"
+    letter_date = _format_date(offer.generated_at or offer.created_at)
+    context = {
+        "logo_data_uri": _logo_data_uri(),
+        "letter_date": letter_date,
+        "candidate_name": candidate.full_name if candidate else "",
+        "candidate_code": candidate.candidate_code if candidate else "",
+        "candidate_address": candidate_address or "Address / City.",
+        "designation_title": offer.designation_title or (opening.title if opening else ""),
+        "opening_title": opening.title if opening else "",
+        "joining_date": _format_date(offer.joining_date),
+        "joining_address": joining_address,
+        "gross_ctc": _format_money(offer.gross_ctc_annual),
+        "fixed_ctc": _format_money(offer.fixed_ctc_annual),
+        "variable_ctc": _format_money(offer.variable_ctc_annual),
+        "currency": offer.currency or "INR",
+        "probation_months": f"{offer.probation_months} months" if offer.probation_months is not None else "6 months",
+        "valid_until": _format_date(offer.offer_valid_until),
+        "gross_salary_monthly": _format_money(gross_monthly),
+        "joining_bonus_monthly": joining_bonus_monthly,
+        "joining_bonus_until": "March 2027",
+        "ctc_revision_from": "April 2027",
+        "ctc_revision_window": "April 2026 - March 2027",
+        "ctc_revision_payout": "2027-28",
+        "unit_name": unit_name or (opening.title if opening else "Studio Lotus"),
+        "reporting_to": reporting_to or "-",
+        "minimum_commitment_years": "2",
+        "probation_notice_days": "15",
+        "signatory_name": "Harsh Vardhan",
+        "signatory_title": "Principal",
+        "footer_note": "",
+        "sender_name": sender_name,
+        "offer_public_link": _offer_public_link(offer.public_token),
+    }
+    overrides = _parse_letter_overrides(offer.offer_letter_overrides)
+    for key, value in overrides.items():
+        if key in context and value.strip():
+            context[key] = value.strip()
+    return raw.format_map({k: ("" if v is None else v) for k, v in context.items()})
 
 def _platform_person_id(user: UserContext) -> int | None:
     raw = (user.person_id_platform or "").strip()
@@ -78,6 +331,14 @@ async def _transition_stage(session: AsyncSession, *, candidate_id: int, to_stag
 
 async def create_offer(session: AsyncSession, *, candidate: RecCandidate, opening: RecOpening | None, payload: dict[str, Any], user: UserContext) -> RecCandidateOffer:
     now = datetime.utcnow()
+    letter_overrides = payload.get("letter_overrides")
+    if isinstance(letter_overrides, dict):
+        try:
+            letter_overrides = json.dumps(letter_overrides)
+        except Exception:
+            letter_overrides = None
+    else:
+        letter_overrides = None
     offer = RecCandidateOffer(
         candidate_id=candidate.candidate_id,
         opening_id=candidate.opening_id,
@@ -97,6 +358,7 @@ async def create_offer(session: AsyncSession, *, candidate: RecCandidate, openin
         generated_by_person_id_platform=_platform_person_id(user),
         generated_at=now,
         notes_internal=payload.get("notes_internal"),
+        offer_letter_overrides=letter_overrides,
         created_at=now,
         updated_at=now,
     )
@@ -118,6 +380,15 @@ async def update_offer_details(session: AsyncSession, *, offer: RecCandidateOffe
     if offer.offer_status != "draft":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only draft offers can be edited.")
     for key, value in payload.items():
+        if key == "letter_overrides":
+            if isinstance(value, dict):
+                try:
+                    offer.offer_letter_overrides = json.dumps(value)
+                except Exception:
+                    offer.offer_letter_overrides = None
+            elif value is None:
+                offer.offer_letter_overrides = None
+            continue
         if hasattr(offer, key) and value is not None:
             setattr(offer, key, value)
     offer.updated_at = datetime.utcnow()
@@ -196,6 +467,29 @@ async def send_offer(session: AsyncSession, *, offer: RecCandidateOffer, user: U
     offer.offer_status = "sent"
     offer.sent_at = now
     offer.updated_at = now
+
+    candidate = await session.get(RecCandidate, offer.candidate_id)
+    opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
+    sender_name = user.full_name or "SL Recruitment"
+    reporting_to = await _resolve_reporting_to(opening)
+    candidate_address = await _resolve_candidate_address(session, candidate, opening)
+    unit_name = opening.title if opening and opening.title else "Studio Lotus"
+
+    try:
+        await _ensure_offer_pdf(
+            session=session,
+            offer=offer,
+            candidate=candidate,
+            opening=opening,
+            sender_name=sender_name,
+            candidate_address=candidate_address,
+            reporting_to=reporting_to,
+            unit_name=unit_name,
+        )
+    except Exception:
+        # Best-effort upload; do not block send
+        pass
+
     await log_event(
         session,
         candidate_id=offer.candidate_id,
@@ -208,21 +502,41 @@ async def send_offer(session: AsyncSession, *, offer: RecCandidateOffer, user: U
     return offer
 
 
-async def record_candidate_response(session: AsyncSession, *, offer: RecCandidateOffer, decision: str, reason: str | None = None) -> RecCandidateOffer:
+async def record_candidate_response(
+    session: AsyncSession,
+    *,
+    offer: RecCandidateOffer,
+    decision: str,
+    reason: str | None = None,
+    allow_override: bool = False,
+) -> RecCandidateOffer:
     now = datetime.utcnow()
-    if offer.offer_status not in {"sent", "viewed"}:
+    if offer.offer_status not in {"sent", "viewed"} and not allow_override:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer is not awaiting candidate response.")
+    if allow_override and offer.offer_status in {"accepted", "declined", "withdrawn"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer decision is already final.")
     normalized = decision.strip().lower()
     if normalized not in {"accept", "decline"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Decision must be accept or decline.")
+    candidate = await session.get(RecCandidate, offer.candidate_id)
     if normalized == "accept":
         offer.offer_status = "accepted"
         offer.accepted_at = now
         action = "offer_accepted"
+        if candidate:
+            candidate.status = "offer"
+            candidate.final_decision = None
+            candidate.updated_at = now
+            await _transition_stage(session, candidate_id=candidate.candidate_id, to_stage="joining_documents", user=None)
     else:
         offer.offer_status = "declined"
         offer.declined_at = now
         action = "offer_declined"
+        if candidate:
+            candidate.status = "declined"
+            candidate.final_decision = "declined"
+            candidate.updated_at = now
+            await _transition_stage(session, candidate_id=candidate.candidate_id, to_stage="declined", user=None)
     offer.updated_at = now
     await log_event(
         session,

@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { CandidateOffer } from "@/lib/types";
-import { withBasePath } from "@/lib/base-path";
+import { parseDateUtc } from "@/lib/datetime";
 
 const statusTone: Record<string, string> = {
   draft: "bg-slate-500/10 text-slate-600",
@@ -30,7 +31,8 @@ const statusOptions = [
 
 function formatDate(raw?: string | null) {
   if (!raw) return "-";
-  const d = new Date(raw);
+  const d = parseDateUtc(raw);
+  if (!d) return "-";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleDateString("en-IN", { month: "short", day: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" });
 }
@@ -40,12 +42,14 @@ export function OffersClient() {
   const [status, setStatus] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const [initialized, setInitialized] = useState(false);
 
   const loadOffers = async () => {
     setLoading(true);
     setError(null);
     try {
-      const url = new URL(withBasePath("/api/rec/offers"), window.location.origin);
+      const url = new URL("/api/rec/offers", window.location.origin);
       if (status !== "all") url.searchParams.append("status", status);
       const res = await fetch(url.toString(), { cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
@@ -63,10 +67,19 @@ export function OffersClient() {
   }, [status]);
 
   useEffect(() => {
+    if (initialized) return;
+    const rawStatus = (searchParams.get("status") || "").trim().toLowerCase();
+    if (rawStatus && statusOptions.includes(rawStatus)) {
+      setStatus(rawStatus);
+    }
+    setInitialized(true);
+  }, [initialized, searchParams]);
+
+  useEffect(() => {
     let cancelled = false;
     let inFlight = false;
     let pending = false;
-    const source = new EventSource(withBasePath("/api/rec/events/stream"));
+    const source = new EventSource("/api/rec/events/stream");
 
     async function refresh() {
       if (inFlight) {

@@ -52,13 +52,11 @@ body {
 
 body {
   color-scheme: light;
-  background-color: #f8fafc;
+  background-color: #f5f7fb;
   background-image:
-    radial-gradient(circle at 12% 18%, rgba(59, 130, 246, 0.22), transparent 45%),
-    radial-gradient(circle at 82% 16%, rgba(236, 72, 153, 0.16), transparent 42%),
-    radial-gradient(circle at 72% 72%, rgba(34, 211, 238, 0.18), transparent 46%),
-    radial-gradient(circle at 24% 82%, rgba(168, 85, 247, 0.14), transparent 46%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(248, 250, 252, 0.95));
+    radial-gradient(circle at 18% 8%, rgba(37, 99, 235, 0.08), transparent 44%),
+    radial-gradient(circle at 82% 12%, rgba(14, 116, 144, 0.06), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(245, 247, 251, 0.95));
   background-attachment: fixed;
 }
 
@@ -69,13 +67,13 @@ a {
 
 .glass,
 .glass-panel {
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(226, 232, 240, 0.8);
   box-shadow:
-    0 24px 60px -40px rgba(15, 23, 42, 0.28),
-    0 10px 30px -22px rgba(15, 23, 42, 0.24);
+    0 20px 40px -32px rgba(15, 23, 42, 0.18),
+    0 8px 20px -18px rgba(15, 23, 42, 0.16);
   border-radius: var(--panel-radius);
   transition: background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
   will-change: transform;
@@ -84,16 +82,14 @@ a {
 .section-card {
   border-radius: var(--panel-radius);
   padding: var(--panel-padding);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.45)),
-    radial-gradient(circle at 12% 12%, rgba(59, 130, 246, 0.14), transparent 40%),
-    radial-gradient(circle at 88% 10%, rgba(168, 85, 247, 0.12), transparent 40%);
-  border: 1px solid rgba(255, 255, 255, 0.55);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 252, 0.9));
+  border: 1px solid rgba(226, 232, 240, 0.9);
   box-shadow:
-    0 24px 60px -40px rgba(15, 23, 42, 0.28),
-    0 10px 30px -22px rgba(15, 23, 42, 0.22);
+    0 18px 36px -28px rgba(15, 23, 42, 0.18),
+    0 6px 16px -16px rgba(15, 23, 42, 0.14);
   transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
   will-change: transform;
 }
@@ -101,8 +97,79 @@ a {
 .section-card:hover {
   transform: translate3d(0, -2px, 0);
   box-shadow:
-    0 30px 80px -55px rgba(15, 23, 42, 0.35),
-    0 12px 36px -26px rgba(15, 23, 42, 0.24);
+    0 26px 60px -48px rgba(15, 23, 42, 0.22),
+    0 10px 28px -22px rgba(15, 23, 42, 0.18);
+}
+
+.workbook-launch {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 999px;
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  background:
+    radial-gradient(circle at 20% 20%, rgba(37, 99, 235, 0.08), transparent 58%),
+    linear-gradient(120deg, rgba(255, 255, 255, 0.9), rgba(241, 245, 249, 0.65));
+  color: var(--text-secondary, #475569);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.7),
+    0 12px 24px -22px rgba(15, 23, 42, 0.18),
+    0 0 16px -18px rgba(37, 99, 235, 0.25);
+  transition: transform 200ms ease, box-shadow 220ms ease, border-color 220ms ease, color 200ms ease;
+}
+
+.workbook-launch::before {
+  content: "";
+  position: absolute;
+  inset: -40% 0;
+  background: linear-gradient(
+    120deg,
+    transparent 30%,
+    rgba(37, 99, 235, 0.12) 45%,
+    rgba(255, 255, 255, 0.65) 52%,
+    rgba(37, 99, 235, 0.16) 58%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  transition: transform 650ms ease;
+  mix-blend-mode: screen;
+}
+
+.workbook-launch::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  opacity: 0;
+  box-shadow:
+    0 0 20px rgba(59, 130, 246, 0.18),
+    0 0 34px rgba(37, 99, 235, 0.14);
+  transition: opacity 220ms ease;
+  pointer-events: none;
+}
+
+.workbook-launch:hover {
+  transform: translate3d(0, -1px, 0) scale(1.02);
+  border-color: rgba(37, 99, 235, 0.45);
+  color: var(--text-primary, #0f172a);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.85),
+    0 16px 36px -24px rgba(15, 23, 42, 0.22),
+    0 0 22px -16px rgba(37, 99, 235, 0.45);
+}
+
+.workbook-launch:hover::before {
+  transform: translateX(120%);
+}
+
+.workbook-launch:hover::after {
+  opacity: 1;
+}
+
+.workbook-launch:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
 }
 
 @keyframes fade-up {
@@ -136,6 +203,60 @@ a {
   }
 }
 
+@keyframes stage-flow {
+  0% {
+    background-position: 0% 50%;
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.95;
+  }
+  100% {
+    background-position: 200% 50%;
+    opacity: 0.55;
+  }
+}
+
+@keyframes stage-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 12px rgba(99, 102, 241, 0.35),
+      0 0 24px rgba(14, 116, 144, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 18px rgba(99, 102, 241, 0.6),
+      0 0 36px rgba(14, 116, 144, 0.28);
+  }
+}
+
+@keyframes stage-rail {
+  0% {
+    background-position: 0% 50%;
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    background-position: 200% 50%;
+    opacity: 0.6;
+  }
+}
+
+@keyframes stage-glow {
+  0%,
+  100% {
+    transform: translateX(-30%);
+    opacity: 0.15;
+  }
+  50% {
+    transform: translateX(30%);
+    opacity: 0.35;
+  }
+}
+
 .motion-fade-up {
   animation: fade-up 520ms ease both;
 }
@@ -148,16 +269,87 @@ a {
   animation: float-slow 10.5s ease-in-out infinite;
 }
 
+.stage-connector {
+  height: 2px;
+  width: 42px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0.2), rgba(99, 102, 241, 0.7), rgba(14, 116, 144, 0.5));
+  background-size: 200% 100%;
+  animation: stage-flow 2.8s ease-in-out infinite;
+  opacity: 0.7;
+}
+
+.stage-connector--idle {
+  opacity: 0.35;
+  animation-duration: 4.2s;
+}
+
+.stage-node-active {
+  animation: stage-pulse 2.4s ease-in-out infinite;
+}
+
+.stage-rail {
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  background: linear-gradient(120deg, rgba(99, 102, 241, 0.08), rgba(14, 116, 144, 0.06), rgba(59, 130, 246, 0.1));
+}
+
+.stage-rail::before {
+  content: "";
+  position: absolute;
+  inset: -40% 0;
+  background: linear-gradient(90deg, transparent 10%, rgba(99, 102, 241, 0.35) 40%, rgba(14, 116, 144, 0.3) 60%, transparent 90%);
+  background-size: 200% 100%;
+  animation: stage-rail 3.2s ease-in-out infinite;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.stage-rail::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 20% 50%, rgba(99, 102, 241, 0.25), transparent 55%);
+  animation: stage-glow 4.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.stage-node-stagger-1 {
+  animation-delay: 0.2s;
+}
+
+.stage-node-stagger-2 {
+  animation-delay: 0.4s;
+}
+
+.stage-node-stagger-3 {
+  animation-delay: 0.6s;
+}
+
+.stage-node-stagger-4 {
+  animation-delay: 0.8s;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .motion-fade-up,
   .motion-float,
-  .motion-float-slow {
+  .motion-float-slow,
+  .stage-connector,
+  .stage-node-active,
+  .stage-rail::before,
+  .stage-rail::after {
     animation: none !important;
   }
 
   .glass,
   .glass-panel,
-  .section-card {
+  .section-card,
+  .workbook-launch {
+    transition: none !important;
+  }
+
+  .workbook-launch::before {
     transition: none !important;
   }
 }

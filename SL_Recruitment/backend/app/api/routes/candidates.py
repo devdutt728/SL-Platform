@@ -1,8 +1,10 @@
 from datetime import datetime
+import logging
 from uuid import uuid4
 
 import anyio
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import RedirectResponse
 import json
 from pydantic import BaseModel
 from sqlalchemy import func, select, delete, text
@@ -11,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
 from app.api import deps
 from app.core.auth import require_roles, require_superadmin
+from app.core.config import settings
 from app.core.roles import Role
 from app.models.candidate import RecCandidate
 from app.models.candidate_offer import RecCandidateOffer
@@ -25,7 +28,7 @@ from app.schemas.candidate_full import CandidateFullOut
 from app.schemas.screening import ScreeningOut, ScreeningUpsertIn
 from app.schemas.stage import CandidateStageOut, StageTransitionRequest
 from app.schemas.user import UserContext
-from app.services.drive import create_candidate_folder, delete_drive_item, delete_all_candidate_folders
+from app.services.drive import create_candidate_folder, delete_candidate_folder, delete_all_candidate_folders
 from app.services.email import send_email
 from app.services.events import log_event
 from app.services.offers import convert_candidate_to_employee, create_offer
@@ -33,10 +36,11 @@ from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
 
 router = APIRouter(prefix="/rec/candidates", tags=["candidates"])
+logger = logging.getLogger("slr.candidates")
 
 
 def _candidate_code(candidate_id: int) -> str:
-    return f"SLR-{candidate_id:03d}"
+    return f"SLR-{candidate_id:04d}"
 
 
 def _split_name(full_name: str) -> tuple[str, str | None]:
@@ -60,10 +64,16 @@ def _platform_person_id(user: UserContext) -> int | None:
 
 async def _delete_candidate_with_dependents(session: AsyncSession, candidate: RecCandidate, *, delete_drive: bool = True):
     cid = candidate.candidate_id
-    # Delete known dependent tables (raw SQL to cover tables without models)
-    await session.execute(delete(RecCandidateEvent).where(RecCandidateEvent.candidate_id == cid))
-    await session.execute(delete(RecCandidateStage).where(RecCandidateStage.candidate_id == cid))
-    await session.execute(delete(RecCandidateScreening).where(RecCandidateScreening.candidate_id == cid))
+    # Delete known dependent tables (best-effort to tolerate missing tables/migrations).
+    for stmt, label in [
+        (delete(RecCandidateEvent).where(RecCandidateEvent.candidate_id == cid), "rec_candidate_event"),
+        (delete(RecCandidateStage).where(RecCandidateStage.candidate_id == cid), "rec_candidate_stage"),
+        (delete(RecCandidateScreening).where(RecCandidateScreening.candidate_id == cid), "rec_candidate_screening"),
+    ]:
+        try:
+            await session.execute(stmt)
+        except SQLAlchemyError as exc:
+            logger.warning("Skip delete on %s due to DB error: %s", label, exc)
     # Best-effort deletes for other dependent tables
     for table in [
         "rec_candidate_interview",
@@ -76,8 +86,15 @@ async def _delete_candidate_with_dependents(session: AsyncSession, candidate: Re
         except Exception:
             # Ignore if table missing or FK differs
             continue
-    if delete_drive and candidate.drive_folder_id:
-        await anyio.to_thread.run_sync(delete_drive_item, candidate.drive_folder_id)
+    if delete_drive:
+        try:
+            await anyio.to_thread.run_sync(
+                delete_candidate_folder,
+                candidate_code=candidate.candidate_code,
+                folder_id=candidate.drive_folder_id,
+            )
+        except Exception as exc:
+            logger.warning("Drive delete failed for candidate_id=%s: %s", cid, exc)
     await session.delete(candidate)
 
 
@@ -132,7 +149,6 @@ async def create_candidate(
         opening_id=payload.opening_id,
         source_channel=payload.source_channel,
         status="enquiry",
-        final_decision="pending",
         cv_url=payload.cv_url,
         caf_token=uuid4().hex,
         caf_sent_at=now,
@@ -141,7 +157,6 @@ async def create_candidate(
         created_at=now,
         updated_at=now,
     )
-    candidate.final_decision = candidate.final_decision or "pending"
     session.add(candidate)
     await session.flush()
 
@@ -252,6 +267,8 @@ async def create_candidate(
         final_decision=candidate.final_decision,
         hired_person_id_platform=candidate.hired_person_id_platform,
         cv_url=candidate.cv_url,
+        portfolio_url=candidate.portfolio_url,
+        portfolio_not_uploaded_reason=candidate.portfolio_not_uploaded_reason,
         drive_folder_url=candidate.drive_folder_url,
         caf_sent_at=candidate.caf_sent_at,
         caf_submitted_at=candidate.caf_submitted_at,
@@ -368,6 +385,8 @@ async def get_candidate(
         final_decision=candidate.final_decision,
         hired_person_id_platform=candidate.hired_person_id_platform,
         cv_url=candidate.cv_url,
+        portfolio_url=candidate.portfolio_url,
+        portfolio_not_uploaded_reason=candidate.portfolio_not_uploaded_reason,
         drive_folder_url=candidate.drive_folder_url,
         caf_sent_at=candidate.caf_sent_at,
         caf_submitted_at=candidate.caf_submitted_at,
@@ -377,6 +396,32 @@ async def get_candidate(
         created_at=candidate.created_at,
         updated_at=candidate.updated_at,
     )
+
+
+@router.get("/{candidate_id}/documents/{kind}")
+async def download_candidate_application_document(
+    candidate_id: int,
+    kind: str,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+):
+    normalized = (kind or "").strip().lower()
+    if normalized not in {"cv", "portfolio"}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+
+    url = candidate.cv_url if normalized == "cv" else candidate.portfolio_url
+    if not url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    if url.startswith("/"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Document stored locally; Drive storage is required.",
+        )
+    return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/{candidate_id}/full", response_model=CandidateFullOut)
@@ -531,19 +576,31 @@ async def update_candidate(
 async def delete_candidate(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(deps.get_user),
+    user: UserContext = Depends(require_superadmin()),
 ):
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
-    if (user.platform_role_id or None) != 2:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Delete not permitted for this role.")
     try:
         await _delete_candidate_with_dependents(session, candidate)
         await session.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     except SQLAlchemyError as exc:
         await session.rollback()
+        remaining = await session.get(RecCandidate, candidate_id)
+        if remaining is None:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Candidate could not be deleted: {exc}")
+    except Exception as exc:
+        await session.rollback()
+        logger.exception("Candidate delete failed: candidate_id=%s error=%s", candidate_id, exc)
+        remaining = await session.get(RecCandidate, candidate_id)
+        if remaining is None:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        detail = "Candidate could not be deleted."
+        if settings.environment != "production":
+            detail = f"Candidate could not be deleted: {exc}"
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
 
 
 class DriveCleanupRequest(BaseModel):
@@ -554,10 +611,8 @@ class DriveCleanupRequest(BaseModel):
 async def cleanup_candidate_folders(
     payload: DriveCleanupRequest,
     _session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(deps.get_user),
+    user: UserContext = Depends(require_superadmin()),
 ):
-    if (user.platform_role_id or None) != 2:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Delete not permitted for this role.")
     bucket = payload.bucket
     if bucket not in {"Ongoing", "Appointed", "Not Appointed"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid bucket")
@@ -704,8 +759,10 @@ async def transition_stage(
     )
     session.add(new_stage)
 
-    if payload.to_stage in {"rejected", "hired"}:
+    if payload.to_stage in {"rejected", "hired", "declined"}:
         candidate.status = payload.to_stage
+    elif payload.to_stage == "joining_documents":
+        candidate.status = "offer"
     else:
         candidate.status = "in_process"
     candidate.updated_at = now

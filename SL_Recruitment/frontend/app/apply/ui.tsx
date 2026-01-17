@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -16,76 +16,66 @@ export function PublicOpeningsClient({ openings }: { openings: OpeningPublicList
   }, [openings, query]);
 
   return (
-    <section className="rounded-[28px] border border-white/50 bg-white/70 p-6 shadow-[0_18px_50px_rgba(15,23,42,0.14)] backdrop-blur-xl">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-1 flex-col gap-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Search roles</p>
-          <div className="relative">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">Search</span>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by code, title, or location"
-              className="w-full rounded-2xl border border-slate-200/70 bg-white/90 px-16 py-3 text-sm text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.08)] outline-none transition focus:border-slate-400 focus:bg-white"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-center">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Matches</p>
-            <p className="mt-1 text-lg font-semibold text-slate-900">{filtered.length}</p>
-          </div>
-          <div className="rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 text-center">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">All roles</p>
-            <p className="mt-1 text-lg font-semibold text-slate-900">{openings.length}</p>
+    <div className="section-card">
+      <div className="grid items-stretch gap-4 lg:grid-cols-[1.2fr_0.4fr]">
+        <label className="relative flex h-full">
+          <span className="sr-only">Search roles</span>
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{">"}</span>
+          <span className="pointer-events-none absolute inset-x-4 top-2 h-px bg-gradient-to-r from-transparent via-cyan-300/60 to-transparent" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by code, title, city..."
+            className="h-14 w-full rounded-2xl border border-white/60 bg-white/60 pl-8 pr-4 text-sm text-slate-700 shadow-sm transition focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-200"
+          />
+        </label>
+        <div className="relative flex h-14 items-center justify-between gap-3 overflow-hidden rounded-2xl border border-white/60 bg-gradient-to-br from-white/80 to-white/40 px-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div className="absolute -right-6 -top-6 h-16 w-16 rounded-full bg-cyan-400/20 blur-2xl" />
+          <div className="absolute -left-8 bottom-4 h-12 w-12 rounded-full bg-indigo-400/20 blur-2xl" />
+          <p className="relative text-xs font-semibold text-slate-500">Roles available</p>
+          <div className="relative flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.75)]" />
+            <p className="text-3xl font-semibold text-slate-800">{filtered.length}</p>
           </div>
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        {filtered.map((o) => {
-          const location = [o.location_city, o.location_country].filter(Boolean).join(", ");
-          return (
-            <div
-              key={o.opening_code}
-              className="group relative overflow-hidden rounded-[22px] border border-slate-200/60 bg-white/80 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.12)] transition hover:-translate-y-1 hover:border-slate-300 hover:shadow-[0_22px_50px_rgba(15,23,42,0.18)]"
-            >
-              <div className="absolute inset-0 opacity-0 transition group-hover:opacity-100">
-                <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-[radial-gradient(circle_at_center,rgba(14,165,233,0.2),rgba(14,165,233,0))]" />
-                <div className="absolute bottom-0 left-0 h-28 w-28 rounded-full bg-[radial-gradient(circle_at_center,rgba(251,191,36,0.18),rgba(251,191,36,0))]" />
-              </div>
-              <div className="relative flex h-full flex-col gap-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-lg font-semibold text-slate-900">{o.opening_title || "Job opening"}</p>
-                    <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500">{o.opening_code}</p>
-                  </div>
-                  <span className="rounded-full border border-slate-200/70 bg-white px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-                    {location || "Remote / Global"}
-                  </span>
-                </div>
-                <p className="text-sm text-slate-600">
-                  Join Studio Lotus and work on projects that blend architecture, technology, and climate intelligence.
+      <div className="mt-5 grid gap-4">
+        {filtered.map((o) => (
+          <div
+            key={o.opening_code}
+            className="group relative overflow-hidden rounded-2xl border border-white/60 bg-white/55 p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-white hover:bg-white/70"
+          >
+            <div className="absolute -right-10 -top-8 h-24 w-24 rounded-full bg-gradient-to-br from-cyan-400/20 to-blue-500/10 blur-2xl transition group-hover:opacity-90" />
+            <div className="absolute -left-8 -bottom-10 h-24 w-24 rounded-full bg-gradient-to-br from-rose-400/20 to-amber-400/10 blur-2xl opacity-70 transition group-hover:opacity-90" />
+            <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{o.opening_code}</p>
+                <p className="mt-1 text-base font-semibold text-slate-900">{o.opening_title || "Job opening"}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {[o.location_city, o.location_country].filter(Boolean).join(", ") || "Remote-ready team"}
                 </p>
-                <div className="mt-auto flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Apply in 3 mins</span>
-                  <Link
-                    href={`/apply/${encodeURIComponent(o.opening_code)}`}
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-[0_10px_25px_rgba(15,23,42,0.25)] transition group-hover:translate-x-1"
-                  >
-                    Apply now
-                  </Link>
-                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="rounded-full border border-white/70 bg-white/60 px-3 py-1 text-xs font-semibold text-slate-600">
+                  Impact role
+                </span>
+                <Link
+                  href={`/apply/${encodeURIComponent(o.opening_code)}`}
+                  className="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-slate-900 to-slate-700 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-slate-900/15 transition group-hover:translate-x-1"
+                >
+                  Apply now
+                </Link>
               </div>
             </div>
-          );
-        })}
+          </div>
+        ))}
         {filtered.length === 0 ? (
-          <div className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-white/80 p-10 text-center text-sm text-slate-500">
-            No matching roles. Try a different title or location.
+          <div className="rounded-2xl border border-white/60 bg-white/60 p-8 text-center text-sm text-slate-600">
+            No matching roles. Try a different keyword.
           </div>
         ) : null}
       </div>
-    </section>
+    </div>
   );
 }

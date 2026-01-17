@@ -4,7 +4,7 @@ import json
 from uuid import uuid4
 
 import anyio
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select
@@ -23,6 +23,7 @@ from app.services.events import log_event
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
 from app.schemas.screening import ScreeningUpsertIn
+from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, SPRINT_EXTENSIONS, SPRINT_MIME_TYPES, validate_upload
 
 router = APIRouter(prefix="/apply", tags=["apply"])
 
@@ -65,7 +66,7 @@ class OpeningPublicListItemOut(BaseModel):
 
 
 def _candidate_code(candidate_id: int) -> str:
-    return f"SLR-{candidate_id:03d}"
+    return f"SLR-{candidate_id:04d}"
 
 
 def _client_ip(request: Request) -> str | None:
@@ -218,15 +219,11 @@ async def get_opening_apply_prefill(
     opening_code: str,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
-    opening_id = None
     opening = (
         await session.execute(select(RecOpening).where(RecOpening.opening_code == opening_code))
     ).scalars().first()
     if not opening or not bool(opening.is_active):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not available")
-    opening_id = opening.opening_id
-    if opening_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Opening is missing an ID")
     return OpeningApplyPrefillOut(
         opening_id=opening.opening_id,
         opening_code=opening_code,
@@ -252,6 +249,7 @@ async def apply_for_opening(
     current_ctc_annual: str | None = Form(default=None),
     expected_ctc_annual: str | None = Form(default=None),
     willing_to_relocate: str | None = Form(default=None),
+    two_year_commitment: str | None = Form(default=None),
     notice_period_days: str | None = Form(default=None),
     expected_joining_date: str | None = Form(default=None),
     relocation_notes: str | None = Form(default=None),
@@ -260,11 +258,10 @@ async def apply_for_opening(
     gender_identity: str | None = Form(default=None),
     gender_self_describe: str | None = Form(default=None),
     portfolio_not_uploaded_reason: str | None = Form(default=None),
-    cv_file: UploadFile | None = None,
-    portfolio_file: UploadFile | None = None,
+    cv_file: UploadFile | None = File(default=None),
+    portfolio_file: UploadFile | None = File(default=None),
     session: AsyncSession = Depends(deps.get_db_session),
 ):
-    opening_id_value: int | None = None
     idempotency_key = (request.headers.get("idempotency-key") or request.headers.get("Idempotency-Key") or "").strip()
     if not idempotency_key:
         raise HTTPException(
@@ -277,9 +274,6 @@ async def apply_for_opening(
     ).scalars().first()
     if not opening or not bool(opening.is_active):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not available")
-    opening_id_value = opening.opening_id
-    if opening_id_value is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Opening is missing an ID")
 
     now = datetime.utcnow()
     email_normalized = str(email).strip().lower()
@@ -331,6 +325,7 @@ async def apply_for_opening(
             "current_ctc_annual": (current_ctc_annual or "").strip() if current_ctc_annual else None,
             "expected_ctc_annual": (expected_ctc_annual or "").strip() if expected_ctc_annual else None,
             "willing_to_relocate": (willing_to_relocate or "").strip() if willing_to_relocate else None,
+            "two_year_commitment": (two_year_commitment or "").strip() if two_year_commitment else None,
             "notice_period_days": (notice_period_days or "").strip() if notice_period_days else None,
             "expected_joining_date": (expected_joining_date or "").strip() if expected_joining_date else None,
             "relocation_notes": (relocation_notes or "").strip() if relocation_notes else None,
@@ -390,7 +385,7 @@ async def apply_for_opening(
         await session.execute(
             select(RecCandidate)
             .where(
-                RecCandidate.opening_id == opening_id_value,
+                RecCandidate.opening_id == opening.opening_id,
                 func.lower(RecCandidate.email) == email_normalized,
             )
             .order_by(RecCandidate.candidate_id.desc())
@@ -439,9 +434,8 @@ async def apply_for_opening(
         email=email_normalized,
         phone=phone,
         source_channel="website",
-        opening_id=opening_id_value,
+        opening_id=opening.opening_id,
         status="enquiry",
-        final_decision="pending",
         cv_url=None,
         caf_token=caf_token,
         caf_sent_at=now,
@@ -450,7 +444,6 @@ async def apply_for_opening(
         created_at=now,
         updated_at=now,
     )
-    candidate.final_decision = "pending"
     session.add(candidate)
     try:
         await session.flush()
@@ -460,7 +453,7 @@ async def apply_for_opening(
             await session.execute(
                 select(RecCandidate)
                 .where(
-                    RecCandidate.opening_id == opening_id_value,
+                    RecCandidate.opening_id == opening.opening_id,
                     func.lower(RecCandidate.email) == email_normalized,
                 )
                 .order_by(RecCandidate.candidate_id.desc())
@@ -534,7 +527,7 @@ async def apply_for_opening(
         related_entity_id=candidate.candidate_id,
         meta_json={
             "source_channel": "website",
-            "opening_id": opening_id_value,
+            "opening_id": opening.opening_id,
             "opening_code": opening_code,
             "linkedin": linkedin,
             "note": note,
@@ -561,7 +554,7 @@ async def apply_for_opening(
         meta_extra={"caf_token": caf_token},
     )
 
-    # Best-effort Drive folder creation
+    # Drive folder creation (required)
     drive_folder_id: str | None = None
     drive_folder_url: str | None = None
     try:
@@ -589,22 +582,35 @@ async def apply_for_opening(
             related_entity_id=candidate.candidate_id,
             meta_json={"error": str(exc)},
         )
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to create candidate folder in Drive. Please retry later.",
+        )
 
-    def _clean_name(name: str | None) -> str:
-        if not name:
-            return "file"
-        return name.replace("/", "_").replace("\\", "_")
-
-    async def _upload(kind: str, upload: UploadFile, max_bytes: int) -> str | None:
-        if not drive_folder_id:
-            return None
+    async def _upload(
+        kind: str,
+        upload: UploadFile,
+        max_bytes: int,
+        *,
+        allowed_extensions: set[str],
+        allowed_mime_types: set[str],
+    ) -> str | None:
+        safe_name = validate_upload(upload, allowed_extensions=allowed_extensions, allowed_mime_types=allowed_mime_types)
         data = await upload.read()
         if len(data) > max_bytes:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"{kind.upper()} file too large. Max allowed is {max_bytes // (1024 * 1024)}MB.",
             )
-        filename = f"{candidate.candidate_code}-{kind}-{_clean_name(upload.filename)}"
+
+        if not drive_folder_id:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Drive folder missing; please retry later.",
+            )
+
+        filename = f"{candidate.candidate_code}-{kind}-{safe_name}"
         try:
             _, file_url = await anyio.to_thread.run_sync(
                 lambda: upload_application_doc(
@@ -621,7 +627,11 @@ async def apply_for_opening(
                 performed_by_person_id_platform=None,
                 related_entity_type="candidate",
                 related_entity_id=candidate.candidate_id,
-                meta_json={"file_url": file_url, "drive_folder_id": drive_folder_id, "drive_folder_url": drive_folder_url},
+                meta_json={
+                    "file_url": file_url,
+                    "drive_folder_id": drive_folder_id,
+                    "drive_folder_url": drive_folder_url,
+                },
             )
             return file_url
         except Exception as exc:  # noqa: BLE001
@@ -632,36 +642,45 @@ async def apply_for_opening(
                 performed_by_person_id_platform=None,
                 related_entity_type="candidate",
                 related_entity_id=candidate.candidate_id,
-                meta_json={"error": str(exc)},
+                meta_json={
+                    "error": str(exc),
+                    "drive_folder_id": drive_folder_id,
+                    "drive_folder_url": drive_folder_url,
+                },
             )
             raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Drive upload failed for {kind}: {exc}",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Unable to upload {kind} to Drive. Please retry later.",
             )
 
     cv_url: str | None = None
     portfolio_url: str | None = None
     if cv_file:
-        cv_url = await _upload("cv", cv_file, max_bytes=2 * 1024 * 1024)
+        cv_url = await _upload(
+            "cv",
+            cv_file,
+            max_bytes=2 * 1024 * 1024,
+            allowed_extensions=DOC_EXTENSIONS,
+            allowed_mime_types=DOC_MIME_TYPES,
+        )
     if portfolio_file:
-        portfolio_url = await _upload("portfolio", portfolio_file, max_bytes=10 * 1024 * 1024)
+        portfolio_url = await _upload(
+            "portfolio",
+            portfolio_file,
+            max_bytes=10 * 1024 * 1024,
+            allowed_extensions=SPRINT_EXTENSIONS,
+            allowed_mime_types=SPRINT_MIME_TYPES,
+        )
 
+    if cv_url:
+        candidate.cv_url = cv_url
     if portfolio_url:
+        candidate.portfolio_url = portfolio_url
         candidate.portfolio_not_uploaded_reason = None
     else:
         candidate.portfolio_not_uploaded_reason = (portfolio_not_uploaded_reason or "").strip() or None
 
-    if cv_url:
-        candidate.cv_url = cv_url if not portfolio_url else f"{cv_url};portfolio={portfolio_url}"
-        candidate.portfolio_url = portfolio_url
-        application_docs_status = "complete"
-    elif portfolio_url:
-        candidate.cv_url = f"portfolio={portfolio_url}"
-        candidate.portfolio_url = portfolio_url
-        application_docs_status = "complete"
-    else:
-        application_docs_status = "none"
-    candidate.application_docs_status = application_docs_status
+    candidate.application_docs_status = "complete" if (cv_url or portfolio_url) else "none"
     candidate.linkedin_url = linkedin or None
 
     # Auto-submit CAF data from the same form
@@ -673,6 +692,7 @@ async def apply_for_opening(
         "current_ctc_annual": _validate_currency(_float_or_none(current_ctc_annual), "Current CTC"),
         "expected_ctc_annual": _validate_currency(_float_or_none(expected_ctc_annual), "Expected CTC"),
         "willing_to_relocate": _bool_or_none(willing_to_relocate),
+        "two_year_commitment": _bool_or_none(two_year_commitment),
         "notice_period_days": _int_or_none(notice_period_days),
         "expected_joining_date": _date_or_none(expected_joining_date),
         "reason_for_job_change": (reason_for_job_change or "").strip() or None,

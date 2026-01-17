@@ -26,6 +26,8 @@ export type CandidateDetail = {
   final_decision?: string | null;
   hired_person_id_platform?: number | null;
   cv_url?: string | null;
+  portfolio_url?: string | null;
+  portfolio_not_uploaded_reason?: string | null;
   drive_folder_url?: string | null;
   caf_sent_at?: string | null;
   caf_submitted_at?: string | null;
@@ -52,6 +54,7 @@ export type CandidateEvent = {
 export type Interview = {
   candidate_interview_id: number;
   candidate_id: number;
+  stage_name?: string | null;
   round_type: string;
   interviewer_person_id_platform?: string | null;
   interviewer_name?: string | null;
@@ -152,6 +155,7 @@ export type Screening = {
   expected_ctc_annual?: number | null;
   salary_band_fit?: string | null;
   willing_to_relocate?: boolean | null;
+  two_year_commitment?: boolean | null;
   notice_period_days?: number | null;
   expected_joining_date?: string | null;
   gender_identity?: string | null;
@@ -275,10 +279,10 @@ export type CandidateOffer = {
   viewed_at?: string | null;
   accepted_at?: string | null;
   declined_at?: string | null;
-  docx_url?: string | null;
   pdf_url?: string | null;
-  offer_doc_payload?: string | null;
+  pdf_download_url?: string | null;
   notes_internal?: string | null;
+  letter_overrides?: Record<string, string> | null;
   created_at: string;
   updated_at: string;
   candidate_name?: string | null;
@@ -299,6 +303,63 @@ export type OfferPublic = {
   probation_months?: number | null;
   offer_valid_until?: string | null;
   offer_status: string;
-  docx_url?: string | null;
   pdf_url?: string | null;
+  pdf_download_url?: string | null;
+};
+
+export type JoiningDoc = {
+  joining_doc_id: number;
+  candidate_id: number;
+  doc_type: string;
+  file_name: string;
+  content_type?: string | null;
+  uploaded_by: string;
+  uploaded_by_person_id_platform?: number | null;
+  created_at: string;
+  file_url: string;
+};
+
+export type JoiningDocPublic = {
+  joining_doc_id: number;
+  doc_type: string;
+  file_name: string;
+  uploaded_by: string;
+  created_at: string;
+};
+
+export type JoiningDocsPublicContext = {
+  candidate_id: number;
+  candidate_name: string;
+  opening_title?: string | null;
+  joining_docs_status: string;
+  required_doc_types: string[];
+  docs: JoiningDocPublic[];
+};
+
+export type ReportColumn = {
+  key: string;
+  label: string;
+};
+
+export type ReportMeta = {
+  report_id: string;
+  label: string;
+  description: string;
+  columns: ReportColumn[];
+  default_columns: string[];
+  filters: {
+    date_field?: string | null;
+    opening_id?: boolean;
+    status?: boolean;
+    is_active?: boolean;
+  };
+};
+
+export type ReportPreview = {
+  report_id: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total: number;
+  limit: number;
+  offset: number;
 };

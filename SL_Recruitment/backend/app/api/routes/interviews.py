@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
+from sqlalchemy import delete, func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
@@ -21,13 +21,19 @@ from app.models.opening import RecOpening
 from app.models.platform_person import DimPerson
 from app.models.platform_role import DimRole
 from app.schemas.interview import InterviewCreate, InterviewOut, InterviewReschedule, InterviewUpdate
-from app.schemas.interview_slots import InterviewSlotOut, InterviewSlotProposalIn
+from app.schemas.interview_slots import InterviewSlotOut, InterviewSlotPreviewOut, InterviewSlotProposalIn
 from app.schemas.stage import StageTransitionRequest
 from app.schemas.user import UserContext
 from app.services.calendar import create_calendar_event, delete_calendar_event, query_freebusy, update_calendar_event
-from app.services.email import send_email
+from app.services.calendar import list_calendar_events, list_calendar_list_details, list_visible_calendar_ids, service_account_info
+from app.services.email import render_template, send_email
 from app.services.events import log_event
-from app.services.interview_slots import build_selection_token, filter_free_slots, generate_candidate_slots
+from app.services.interview_slots import (
+    build_selection_token,
+    build_signed_selection_token,
+    filter_free_slots,
+    verify_signed_selection_token,
+)
 
 router = APIRouter(prefix="/rec", tags=["interviews"])
 public_router = APIRouter(prefix="/interview", tags=["interviews-public"])
@@ -76,6 +82,14 @@ def _round_to_transition(round_type: str, decision: str) -> str | None:
     return None
 
 
+def _is_superadmin(user: UserContext) -> bool:
+    if (user.platform_role_id or None) == 2:
+        return True
+    if user.platform_role_id is None and Role.HR_ADMIN in user.roles and settings.environment != "production":
+        return True
+    return False
+
+
 def _normalize_to_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=IST).astimezone(timezone.utc).replace(tzinfo=None)
@@ -102,6 +116,124 @@ def _parse_rfc3339(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+def _unwrap_selection_token(raw: str) -> str | None:
+    token = verify_signed_selection_token(raw)
+    if token:
+        return token
+    if settings.environment != "production":
+        return raw
+    return None
+
+
+def _render_page(title: str, body_html: str, status_code: int) -> HTMLResponse:
+    html = f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <style>
+      :root {{
+        color-scheme: light;
+      }}
+      body {{
+        margin: 0;
+        font-family: "Manrope", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        background: radial-gradient(circle at 20% 20%, #e9f0ff 0%, #f8fbff 40%, #ffffff 100%);
+        color: #0f172a;
+      }}
+      .wrap {{
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }}
+      .card {{
+        width: 100%;
+        max-width: 720px;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid #e2e8f0;
+        border-radius: 20px;
+        padding: 28px;
+        box-shadow: 0 25px 60px rgba(15, 23, 42, 0.08);
+      }}
+      h1 {{
+        margin: 0 0 12px;
+        font-size: 26px;
+        letter-spacing: -0.01em;
+      }}
+      p {{
+        margin: 0 0 12px;
+        line-height: 1.6;
+        color: #334155;
+      }}
+      .slot-list {{
+        list-style: none;
+        padding: 0;
+        margin: 18px 0 0;
+        display: grid;
+        gap: 12px;
+      }}
+      .slot {{
+        background: #0f172a;
+        color: #f8fafc;
+        border-radius: 12px;
+        padding: 14px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }}
+      .slot a {{
+        color: #f8fafc;
+        text-decoration: none;
+        font-weight: 600;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: linear-gradient(120deg, #2563eb, #0ea5e9);
+      }}
+      .pill {{
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: #e2e8f0;
+        color: #0f172a;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <span class="pill">Interview Scheduling</span>
+        <h1>{title}</h1>
+        {body_html}
+      </div>
+    </div>
+  </body>
+</html>"""
+    return HTMLResponse(html, status_code=status_code)
+
+
+def _reservation_stale_cutoff(now: datetime) -> datetime:
+    return now - timedelta(minutes=10)
+
+
+async def _release_stale_reservations(session: AsyncSession, *, batch_id: str, now: datetime) -> None:
+    await session.execute(
+        RecCandidateInterviewSlot.__table__.update()
+        .where(
+            RecCandidateInterviewSlot.batch_id == batch_id,
+            RecCandidateInterviewSlot.status == "reserved",
+            RecCandidateInterviewSlot.updated_at < _reservation_stale_cutoff(now),
+        )
+        .values(status="proposed", updated_at=now)
+    )
+
+
 async def _render_slot_conflict(
     session: AsyncSession,
     request: Request,
@@ -109,6 +241,19 @@ async def _render_slot_conflict(
     tz: ZoneInfo,
 ) -> HTMLResponse:
     now = datetime.utcnow()
+    latest_expiry = (
+        await session.execute(
+            select(func.max(RecCandidateInterviewSlot.expires_at)).where(
+                RecCandidateInterviewSlot.batch_id == slot.batch_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if latest_expiry and latest_expiry < now:
+        return _render_page(
+            "Slot invitation expired",
+            "<p>Please contact HR for a new invitation.</p>",
+            status_code=410,
+        )
     remaining = (
         (
             await session.execute(
@@ -128,47 +273,30 @@ async def _render_slot_conflict(
         .all()
     )
     if not remaining:
-        return HTMLResponse("<h2>Slot unavailable</h2><p>Please contact HR for a new invitation.</p>", status_code=409)
+        return _render_page(
+            "Slot unavailable",
+            "<p>Please contact HR for a new invitation.</p>",
+            status_code=200,
+        )
 
     interviewer_email = slot.interviewer_email or ""
     if not interviewer_email:
-        return HTMLResponse("<h2>Slot unavailable</h2><p>Please contact HR for a new invitation.</p>", status_code=409)
-
-    window_start = remaining[0].slot_start_at.replace(tzinfo=timezone.utc)
-    window_end = remaining[-1].slot_end_at.replace(tzinfo=timezone.utc)
-    busy = query_freebusy(
-        calendar_ids=[interviewer_email],
-        start_at=window_start,
-        end_at=window_end,
-        subject_email=interviewer_email,
-    ).get(interviewer_email, [])
-
-    def _overlaps_busy(slot_item: RecCandidateInterviewSlot) -> bool:
-        slot_start = slot_item.slot_start_at.replace(tzinfo=timezone.utc)
-        slot_end = slot_item.slot_end_at.replace(tzinfo=timezone.utc)
-        for item in busy:
-            start_raw = item.get("start")
-            end_raw = item.get("end")
-            if not start_raw or not end_raw:
-                continue
-            busy_start = _parse_rfc3339(start_raw).astimezone(timezone.utc)
-            busy_end = _parse_rfc3339(end_raw).astimezone(timezone.utc)
-            if slot_start < busy_end and slot_end > busy_start:
-                return True
-        return False
-
-    available = [r for r in remaining if not _overlaps_busy(r)]
-    if not available:
-        return HTMLResponse("<h2>No slots left</h2><p>Please contact HR for a new invitation.</p>", status_code=409)
+        return _render_page(
+            "Slot unavailable",
+            "<p>Please contact HR for a new invitation.</p>",
+            status_code=200,
+        )
 
     base_url = str(request.base_url).rstrip("/")
     slots_html = "\n".join(
-        f'<li><a href="{_public_slot_link(base_url, r.selection_token)}">{_format_slot_label(r.slot_start_at, tz)}</a></li>'
-        for r in available
+        f'<li class="slot"><span>{_format_slot_label(r.slot_start_at, tz)}</span>'
+        f'<a href="{_public_slot_link(base_url, build_signed_selection_token(r.selection_token))}">Select</a></li>'
+        for r in remaining
     )
-    return HTMLResponse(
-        f"<h2>Slot just got booked</h2><p>Please select another slot:</p><ul>{slots_html}</ul>",
-        status_code=409,
+    return _render_page(
+        "Slot just got booked",
+        f"<p>Please select another available slot:</p><ul class=\"slot-list\">{slots_html}</ul>",
+        status_code=200,
     )
 
 
@@ -224,6 +352,7 @@ def _build_interview_out(
     return InterviewOut(
         candidate_interview_id=interview.candidate_interview_id,
         candidate_id=interview.candidate_id,
+        stage_name=interview.stage_name,
         round_type=interview.round_type,
         interviewer_person_id_platform=interview.interviewer_person_id_platform,
         interviewer_name=(interviewer_meta or {}).get("name"),
@@ -263,6 +392,18 @@ def _assert_interviewer_access(user: UserContext, interview: RecCandidateIntervi
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
 
 
+def _active_interview_filter():
+    cancelled_values = ("cancelled", "canceled")
+    decision_normalized = func.lower(func.coalesce(RecCandidateInterview.decision, ""))
+    notes_normalized = func.lower(func.coalesce(RecCandidateInterview.notes_internal, ""))
+    cancelled_marker = or_(
+        decision_normalized.in_(cancelled_values),
+        notes_normalized.like("%cancelled%"),
+        notes_normalized.like("%canceled%"),
+    )
+    return ~cancelled_marker
+
+
 @router.post("/candidates/{candidate_id}/interviews", response_model=InterviewOut, status_code=status.HTTP_201_CREATED)
 async def create_interview(
     candidate_id: int,
@@ -278,9 +419,22 @@ async def create_interview(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
+
+    existing_query = select(RecCandidateInterview).where(
+        RecCandidateInterview.candidate_id == candidate_id,
+        RecCandidateInterview.round_type == payload.round_type,
+    )
+    existing_query = existing_query.where(_active_interview_filter())
+    existing = (await session.execute(existing_query)).scalars().first()
+    if existing:
+        is_superadmin = _is_superadmin(user)
+        detail = "Interview already scheduled. Only Superadmin can schedule again." if not is_superadmin else "Interview already scheduled."
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
     interview = RecCandidateInterview(
         candidate_id=candidate_id,
+        stage_name=_normalize_round(payload.round_type),
         round_type=payload.round_type,
         interviewer_person_id_platform=_clean_platform_person_id(payload.interviewer_person_id_platform),
         scheduled_start_at=start_at,
@@ -358,6 +512,8 @@ async def create_interview(
     start_local = start_at.replace(tzinfo=timezone.utc).astimezone(IST)
     start_str = start_local.strftime("%d %b %Y, %I:%M %p %Z")
     meeting_link = interview.meeting_link or payload.meeting_link or ""
+    candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
+    interviewer_name = (interviewer_meta or {}).get("name") or (interviewer_email.split("@")[0] if interviewer_email else "there")
 
     await send_email(
         session,
@@ -383,10 +539,12 @@ async def create_interview(
             session,
             candidate_id=candidate_id,
             to_emails=[interviewer_email],
-            subject="Interview scheduled",
-            template_name="interview_scheduled",
+            subject=f"Interview scheduled for {(opening.title if opening else 'Role')} - {candidate.full_name}",
+            template_name="interview_scheduled_interviewer",
             context={
+                "interviewer_name": interviewer_name,
                 "candidate_name": candidate.full_name,
+                "candidate_code": candidate_code,
                 "round_type": payload.round_type,
                 "opening_title": opening.title if opening else "",
                 "scheduled_start": start_str,
@@ -421,17 +579,31 @@ async def propose_interview_slots(
     if not candidate.email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Candidate email is required")
 
-    interviewer_key = str(payload.interviewer_person_id_platform)
-    interviewer_meta = (await _fetch_platform_people({interviewer_key})).get(
-        interviewer_key, {}
-    )
-    interviewer_email = (interviewer_meta or {}).get("email")
+    interviewer_email = (payload.interviewer_email or "").strip() or None
+    interviewer_pid = _clean_platform_person_id(payload.interviewer_person_id_platform)
+    interviewer_meta = {}
+    if not interviewer_email and interviewer_pid:
+        interviewer_meta = (await _fetch_platform_people({interviewer_pid})).get(
+            interviewer_pid, {}
+        )
+        interviewer_email = (interviewer_meta or {}).get("email")
     if not interviewer_email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Interviewer email is required")
 
+    existing_query = select(RecCandidateInterview).where(
+        RecCandidateInterview.candidate_id == candidate_id,
+        RecCandidateInterview.round_type == payload.round_type,
+    )
+    existing_query = existing_query.where(_active_interview_filter())
+    existing = (await session.execute(existing_query)).scalars().first()
+    if existing:
+        is_superadmin = _is_superadmin(user)
+        detail = "Interview already scheduled. Only Superadmin can schedule again." if not is_superadmin else "Interview already scheduled."
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+
     tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
-    slot_candidates = generate_candidate_slots(tz=tz)
-    free_slots = filter_free_slots(interviewer_email=interviewer_email, slots=slot_candidates, tz=tz)
+    start_day = payload.start_date or datetime.now(tz).date()
+    free_slots = filter_free_slots(interviewer_email=interviewer_email, start_day=start_day, tz=tz)
     if not free_slots:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No free slots found for the next 3 business days")
 
@@ -441,11 +613,10 @@ async def propose_interview_slots(
 
     now_utc = datetime.utcnow()
     batch_id = build_selection_token()
-    expires_at = (free_slots[-1].end_at.astimezone(timezone.utc)).replace(tzinfo=None)
+    last_slot_end = (free_slots[-1].end_at.astimezone(timezone.utc)).replace(tzinfo=None)
+    ttl_floor = datetime.utcnow() + timedelta(hours=settings.public_link_ttl_hours)
+    expires_at = max(last_slot_end, ttl_floor)
     created_by = _platform_person_id_int(user)
-    interviewer_pid = _normalize_person_id_int(payload.interviewer_person_id_platform)
-    if interviewer_pid is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Interviewer id must be numeric")
     slots: list[RecCandidateInterviewSlot] = []
     for slot in free_slots:
         slot_start = slot.start_at.astimezone(timezone.utc).replace(tzinfo=None)
@@ -474,26 +645,35 @@ async def propose_interview_slots(
     slot_links = [
         {
             "label": _format_slot_label(slot.slot_start_at, tz),
-            "link": _public_slot_link(base_url, slot.selection_token),
+            "link": _public_slot_link(base_url, build_signed_selection_token(slot.selection_token)),
         }
         for slot in slots
     ]
     slot_rows = "\n".join(
-        f'<tr><td style="padding:6px 0;">{item["label"]}</td><td style="padding:6px 0;"><a href="{item["link"]}" style="color:#2563eb;font-weight:600;">Select</a></td></tr>'
+        "<tr>"
+        f'<td style="padding:12px 0; color:#0f172a; font-weight:600; font-size:15px;">{item["label"]}</td>'
+        f'<td style="padding:12px 0; text-align:right;">'
+        f'<a href="{item["link"]}" '
+        'style="display:inline-block; padding:10px 18px; border-radius:999px; '
+        'background:linear-gradient(120deg,#0ea5e9,#22c55e); color:#ffffff; text-decoration:none; '
+        'font-weight:700; font-size:13px; letter-spacing:0.02em;">Select slot</a>'
+        "</td>"
+        "</tr>"
         for item in slot_links
     )
 
+    candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
     await send_email(
         session,
         candidate_id=candidate_id,
         to_emails=[candidate.email],
-        subject="Select your interview slot",
+        subject=f"Interview slot selection - {candidate.full_name} ({candidate_code})",
         template_name="interview_slot_options",
         context={
             "candidate_name": candidate.full_name,
+            "candidate_code": candidate_code,
             "round_type": payload.round_type,
             "opening_title": opening.title if opening else "",
-            "interviewer_email": interviewer_email,
             "slots_table": slot_rows,
         },
         email_type="interview_slot_options",
@@ -509,11 +689,225 @@ async def propose_interview_slots(
             candidate_interview_slot_id=slot.candidate_interview_slot_id,
             slot_start_at=slot.slot_start_at,
             slot_end_at=slot.slot_end_at,
-            selection_token=slot.selection_token,
+            selection_token=build_signed_selection_token(slot.selection_token),
             status=slot.status,
         )
         for slot in slots
     ]
+
+
+@router.get("/interview-slots/preview", response_model=list[InterviewSlotPreviewOut])
+async def preview_interview_slots(
+    interviewer_person_id_platform: str | None = Query(default=None, min_length=1, max_length=64),
+    interviewer_email: str | None = Query(default=None),
+    start_date: str | None = Query(default=None),
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
+    parsed_start = None
+    if start_date:
+        try:
+            parsed_start = datetime.fromisoformat(start_date).date()
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start_date format")
+
+    email = (interviewer_email or "").strip() or None
+    interviewer_key = _clean_platform_person_id(interviewer_person_id_platform) if interviewer_person_id_platform else None
+    interviewer_meta = {}
+    if not email and interviewer_key:
+        interviewer_meta = (await _fetch_platform_people({interviewer_key})).get(
+            interviewer_key, {}
+        )
+        email = (interviewer_meta or {}).get("email")
+    if not email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Interviewer email is required")
+
+    start_day = parsed_start or datetime.now(tz).date()
+    free_slots = filter_free_slots(interviewer_email=email, start_day=start_day, tz=tz)
+    return [
+        InterviewSlotPreviewOut(
+            slot_start_at=slot.start_at.astimezone(timezone.utc).replace(tzinfo=None),
+            slot_end_at=slot.end_at.astimezone(timezone.utc).replace(tzinfo=None),
+            label=_format_slot_label(slot.start_at.astimezone(timezone.utc).replace(tzinfo=None), tz),
+        )
+        for slot in free_slots
+    ]
+
+
+@router.get("/interviews/email-preview")
+async def preview_interview_email(
+    candidate_id: int = Query(ge=1),
+    round_type: str = Query(min_length=1, max_length=50),
+    scheduled_start_at: str = Query(min_length=1),
+    meeting_link: str | None = Query(default=None),
+    session: AsyncSession = Depends(deps.get_db_session),
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER])),
+):
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    opening = None
+    if candidate.opening_id is not None:
+        opening = (await session.execute(select(RecOpening).where(RecOpening.opening_id == candidate.opening_id))).scalars().first()
+
+    try:
+        parsed = datetime.fromisoformat(scheduled_start_at)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid scheduled_start_at format")
+    start_at = _normalize_to_utc(parsed)
+    tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
+    start_str = _format_slot_label(start_at, tz)
+    html = render_template(
+        "interview_scheduled",
+        {
+            "candidate_name": candidate.full_name,
+            "round_type": round_type,
+            "opening_title": opening.title if opening else "",
+            "scheduled_start": start_str,
+            "meeting_link": meeting_link or "",
+        },
+    )
+    return Response(content=html, media_type="text/html")
+
+
+@router.get("/interview-slots/email-preview")
+async def preview_interview_slot_email(
+    candidate_id: int = Query(ge=1),
+    round_type: str = Query(min_length=1, max_length=50),
+    interviewer_email: str = Query(min_length=3, max_length=255),
+    start_date: str | None = Query(default=None),
+    session: AsyncSession = Depends(deps.get_db_session),
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER])),
+):
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    opening = None
+    if candidate.opening_id is not None:
+        opening = (await session.execute(select(RecOpening).where(RecOpening.opening_id == candidate.opening_id))).scalars().first()
+
+    parsed_start = None
+    if start_date:
+        try:
+            parsed_start = datetime.fromisoformat(start_date).date()
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start_date format")
+
+    tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
+    start_day = parsed_start or datetime.now(tz).date()
+    free_slots = filter_free_slots(interviewer_email=interviewer_email, start_day=start_day, tz=tz)
+
+    slot_links = [
+        {"label": _format_slot_label(slot.start_at.astimezone(timezone.utc).replace(tzinfo=None), tz), "link": "#"}
+        for slot in free_slots
+    ]
+    if slot_links:
+        slot_rows = "\n".join(
+            "<tr>"
+            f'<td style="padding:12px 0; color:#0f172a; font-weight:600; font-size:15px;">{item["label"]}</td>'
+            f'<td style="padding:12px 0; text-align:right;">'
+            f'<a href="{item["link"]}" '
+            'style="display:inline-block; padding:10px 18px; border-radius:999px; '
+            'background:linear-gradient(120deg,#0ea5e9,#22c55e); color:#ffffff; text-decoration:none; '
+            'font-weight:700; font-size:13px; letter-spacing:0.02em;">Select slot</a>'
+            "</td>"
+            "</tr>"
+            for item in slot_links
+        )
+    else:
+        slot_rows = (
+            "<tr>"
+            "<td style=\"padding:14px 0; color:#64748b; font-size:14px;\">"
+            "No available slots in the selected window."
+            "</td>"
+            "</tr>"
+        )
+
+    html = render_template(
+        "interview_slot_options",
+        {
+            "candidate_name": candidate.full_name,
+            "candidate_code": candidate_code,
+            "round_type": round_type,
+            "opening_title": opening.title if opening else "",
+            "slots_table": slot_rows,
+        },
+    )
+    return Response(content=html, media_type="text/html")
+
+
+@router.get("/interview-slots/debug")
+async def debug_interview_slot_lookup(
+    interviewer_email: str = Query(min_length=3, max_length=255),
+    start_date: str = Query(min_length=1),
+    session: AsyncSession = Depends(deps.get_db_session),
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
+    try:
+        parsed_start = datetime.fromisoformat(start_date).date()
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start_date format")
+
+    day_start = datetime.combine(parsed_start, time(0, 0), tzinfo=tz)
+    day_end = datetime.combine(parsed_start, time(23, 59), tzinfo=tz)
+
+    calendar_ids = [interviewer_email]
+
+    busy_map = query_freebusy(
+        calendar_ids=calendar_ids,
+        start_at=day_start,
+        end_at=day_end,
+        subject_email=interviewer_email,
+    )
+    busy_flat: list[dict[str, str]] = []
+    for cid in calendar_ids:
+        busy_flat.extend(busy_map.get(cid, []))
+
+    events: list[dict[str, str]] = []
+    for cid in calendar_ids:
+        items = list_calendar_events(
+            calendar_id=cid,
+            start_at=day_start,
+            end_at=day_end,
+            subject_email=interviewer_email,
+        )
+        for event in items:
+            if (event.get("status") or "").lower() == "cancelled":
+                continue
+            start_info = event.get("start") or {}
+            end_info = event.get("end") or {}
+            start_raw = start_info.get("dateTime")
+            end_raw = end_info.get("dateTime")
+            if not start_raw or not end_raw:
+                continue
+            events.append(
+                {
+                    "calendar_id": cid,
+                    "summary": (event.get("summary") or "")[:80],
+                    "start": start_raw,
+                    "end": end_raw,
+                }
+            )
+
+    try:
+        calendar_list = list_calendar_list_details(subject_email=interviewer_email)
+    except Exception:
+        calendar_list = []
+
+    return {
+        "settings": {
+            "enable_calendar": settings.enable_calendar,
+            "calendar_id": settings.calendar_id,
+            "calendar_timezone": settings.calendar_timezone,
+            "google_application_credentials": settings.google_application_credentials,
+        },
+        "service_account": service_account_info(),
+        "calendar_list": calendar_list,
+        "calendar_ids": calendar_ids,
+        "busy_ranges": busy_flat,
+        "events": events,
+    }
 
 
 @public_router.get("/slots/{token}", response_class=HTMLResponse)
@@ -522,48 +916,81 @@ async def select_interview_slot(
     request: Request,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
-    slot = (
-        (
-            await session.execute(
-                select(RecCandidateInterviewSlot).where(RecCandidateInterviewSlot.selection_token == token)
-            )
+    raw_token = _unwrap_selection_token(token)
+    if not raw_token:
+        return _render_page(
+            "Slot not found",
+            "<p>Please contact HR for a new invitation.</p>",
+            status_code=404,
         )
-        .scalars()
-        .first()
-    )
-    if not slot:
-        return HTMLResponse("<h2>Slot not found</h2><p>Please contact HR for a new invitation.</p>", status_code=404)
 
-    if slot.status != "proposed":
-        return HTMLResponse("<h2>Slot no longer available</h2><p>Please select a different slot.</p>", status_code=409)
+    async with session.begin():
+        slot = (
+            (
+                await session.execute(
+                    select(RecCandidateInterviewSlot)
+                    .where(RecCandidateInterviewSlot.selection_token == raw_token)
+                    .with_for_update()
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if not slot:
+            return _render_page(
+                "Slot not found",
+                "<p>Please contact HR for a new invitation.</p>",
+                status_code=404,
+            )
 
-    if slot.expires_at and slot.expires_at < datetime.utcnow():
-        slot.status = "expired"
-        await session.commit()
-        return HTMLResponse("<h2>Slot invitation expired</h2><p>Please contact HR for a new invitation.</p>", status_code=410)
+        await _release_stale_reservations(session, batch_id=slot.batch_id, now=datetime.utcnow())
+
+        if slot.status != "proposed":
+            if slot.status in {"reserved", "conflict", "expired"}:
+                return await _render_slot_conflict(session, request, slot, tz=ZoneInfo(settings.calendar_timezone or "Asia/Kolkata"))
+            title = "Slot already selected" if slot.status in {"reserved", "confirmed"} else "Slot no longer available"
+            message = (
+                "<p>This slot has already been selected. Please contact HR for changes.</p>"
+                if slot.status in {"reserved", "confirmed"}
+                else "<p>Please select a different slot.</p>"
+            )
+            return _render_page(title, message, status_code=200)
+
+        if slot.expires_at and slot.expires_at < datetime.utcnow():
+            slot.status = "expired"
+            return _render_page(
+                "Slot invitation expired",
+                "<p>Please contact HR for a new invitation.</p>",
+                status_code=410,
+            )
+
+        slot.status = "reserved"
+        slot.updated_at = datetime.utcnow()
 
     candidate = await session.get(RecCandidate, slot.candidate_id)
     if not candidate:
-        return HTMLResponse("<h2>Candidate not found</h2><p>Please contact HR.</p>", status_code=404)
+        slot.status = "proposed"
+        await session.commit()
+        return _render_page(
+            "Candidate not found",
+            "<p>Please contact HR.</p>",
+            status_code=404,
+        )
 
     interviewer_email = slot.interviewer_email or ""
     if not interviewer_email:
-        return HTMLResponse("<h2>Interviewer missing</h2><p>Please contact HR.</p>", status_code=400)
+        slot.status = "proposed"
+        await session.commit()
+        return _render_page(
+            "Interviewer missing",
+            "<p>Please contact HR.</p>",
+            status_code=400,
+        )
 
     tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
     slot_start_utc = slot.slot_start_at.replace(tzinfo=timezone.utc)
     slot_end_utc = slot.slot_end_at.replace(tzinfo=timezone.utc)
-    busy = query_freebusy(
-        calendar_ids=[interviewer_email],
-        start_at=slot_start_utc,
-        end_at=slot_end_utc,
-        subject_email=interviewer_email,
-    ).get(interviewer_email, [])
-
-    if busy:
-        slot.status = "conflict"
-        await session.commit()
-        return await _render_slot_conflict(session, request, slot, tz)
+    # Allow selection for pre-proposed slots even if the calendar changed after the invite was sent.
 
     existing = (
         (
@@ -571,6 +998,7 @@ async def select_interview_slot(
                 select(RecCandidateInterview).where(
                     RecCandidateInterview.candidate_id == slot.candidate_id,
                     RecCandidateInterview.round_type == slot.round_type,
+                    _active_interview_filter(),
                 )
             )
         )
@@ -578,10 +1006,18 @@ async def select_interview_slot(
         .first()
     )
     if existing:
-        return HTMLResponse("<h2>Interview already scheduled</h2><p>Please contact HR for changes.</p>", status_code=409)
+        slot.status = "conflict"
+        slot.updated_at = datetime.utcnow()
+        await session.commit()
+        return _render_page(
+            "Slot already selected",
+            "<p>An interview is already scheduled for this round. Please contact HR for changes.</p>",
+            status_code=200,
+        )
 
     interview = RecCandidateInterview(
         candidate_id=slot.candidate_id,
+        stage_name=_normalize_round(slot.round_type),
         round_type=slot.round_type,
         interviewer_person_id_platform=str(slot.interviewer_person_id_platform) if slot.interviewer_person_id_platform is not None else None,
         scheduled_start_at=slot.slot_start_at,
@@ -638,7 +1074,12 @@ async def select_interview_slot(
 
     await session.execute(
         RecCandidateInterviewSlot.__table__.update()
-        .where(RecCandidateInterviewSlot.batch_id == slot.batch_id, RecCandidateInterviewSlot.candidate_interview_slot_id != slot.candidate_interview_slot_id)
+        .where(
+            RecCandidateInterviewSlot.candidate_id == slot.candidate_id,
+            RecCandidateInterviewSlot.round_type == slot.round_type,
+            RecCandidateInterviewSlot.candidate_interview_slot_id != slot.candidate_interview_slot_id,
+            RecCandidateInterviewSlot.status.in_(["proposed", "reserved"]),
+        )
         .values(status="expired", updated_at=datetime.utcnow())
     )
 
@@ -660,6 +1101,11 @@ async def select_interview_slot(
 
     start_str = _format_slot_label(slot.slot_start_at, tz)
     meeting_link = interview.meeting_link or ""
+    candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
+    interviewer_meta = (await _fetch_platform_people({slot.interviewer_person_id_platform or ""})).get(
+        _clean_platform_person_id(slot.interviewer_person_id_platform) or "", {}
+    )
+    interviewer_name = (interviewer_meta or {}).get("name") or (interviewer_email.split("@")[0] if interviewer_email else "there")
 
     await send_email(
         session,
@@ -685,10 +1131,12 @@ async def select_interview_slot(
             session,
             candidate_id=slot.candidate_id,
             to_emails=[interviewer_email],
-            subject="Interview scheduled",
-            template_name="interview_scheduled",
+            subject=f"Interview scheduled for {(opening.title if opening else 'Role')} - {candidate.full_name}",
+            template_name="interview_scheduled_interviewer",
             context={
+                "interviewer_name": interviewer_name,
                 "candidate_name": candidate.full_name,
+                "candidate_code": candidate_code,
                 "round_type": slot.round_type,
                 "opening_title": opening.title if opening else "",
                 "scheduled_start": start_str,
@@ -702,8 +1150,9 @@ async def select_interview_slot(
 
     await session.commit()
 
-    return HTMLResponse(
-        f"<h2>Interview confirmed</h2><p>Your interview is scheduled for {start_str}.</p><p>You will receive a confirmation email shortly.</p>",
+    return _render_page(
+        "Interview confirmed",
+        f"<p>Your interview is scheduled for {start_str}.</p><p>You will receive a confirmation email shortly.</p>",
         status_code=200,
     )
 
@@ -730,8 +1179,13 @@ async def cancel_interview(
             )
         except Exception:
             pass
-    interview.notes_internal = (interview.notes_internal or "") + "\nCancelled by Superadmin."
-    interview.updated_at = datetime.utcnow()
+    await session.execute(
+        delete(RecCandidateInterviewSlot).where(
+            RecCandidateInterviewSlot.candidate_id == interview.candidate_id,
+            RecCandidateInterviewSlot.round_type == interview.round_type,
+        )
+    )
+    await session.delete(interview)
     await session.commit()
     return HTMLResponse("<h2>Interview cancelled</h2>", status_code=200)
 
@@ -815,6 +1269,8 @@ async def reschedule_interview(
     tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
     start_str = _format_slot_label(start_at, tz)
     meeting_link = interview.meeting_link or ""
+    candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
+    interviewer_name = (interviewer_meta or {}).get("name") or (interviewer_email.split("@")[0] if interviewer_email else "there")
 
     if candidate and candidate.email:
         await send_email(
@@ -840,10 +1296,12 @@ async def reschedule_interview(
             session,
             candidate_id=candidate.candidate_id if candidate else 0,
             to_emails=[interviewer_email],
-            subject="Interview rescheduled",
-            template_name="interview_scheduled",
+            subject=f"Interview rescheduled for {(opening.title if opening else 'Role')} - {candidate.full_name if candidate else 'Candidate'}",
+            template_name="interview_scheduled_interviewer",
             context={
+                "interviewer_name": interviewer_name,
                 "candidate_name": candidate.full_name if candidate else "Candidate",
+                "candidate_code": candidate_code,
                 "round_type": interview.round_type,
                 "opening_title": opening.title if opening else "",
                 "scheduled_start": start_str,

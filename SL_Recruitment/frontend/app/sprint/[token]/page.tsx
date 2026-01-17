@@ -1,4 +1,5 @@
 import { internalUrl } from "@/lib/internal";
+import { parseDateUtc } from "@/lib/datetime";
 import { SprintPublicClient } from "./SprintPublicClient";
 
 type SprintPublic = {
@@ -32,7 +33,8 @@ async function fetchSprint(token: string) {
 
 function formatDateTime(raw?: string | null) {
   if (!raw) return "";
-  const d = new Date(raw);
+  const d = parseDateUtc(raw);
+  if (!d) return "";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleString("en-IN", {
     month: "short",
@@ -45,7 +47,8 @@ function formatDateTime(raw?: string | null) {
 
 function formatRelativeDue(raw?: string | null) {
   if (!raw) return "No due date";
-  const due = new Date(raw);
+  const due = parseDateUtc(raw);
+  if (!due) return raw || "";
   if (Number.isNaN(due.getTime())) return raw || "";
   const diffMs = due.getTime() - Date.now();
   const diffDays = Math.ceil(Math.abs(diffMs) / (1000 * 60 * 60 * 24));

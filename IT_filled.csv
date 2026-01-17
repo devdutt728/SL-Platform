@@ -1,0 +1,79 @@
+record_type,name,category_name,category_id,subcategory_name,subcategory_id,first_response_minutes,resolution_minutes,priority,default_assignee_person_id,is_active
+category,Access & Login,Access & Login,AUTO,N/A,AUTO,N/A,N/A,N/A,N/A,true
+category,File & Folder,File & Folder,AUTO,N/A,AUTO,N/A,N/A,N/A,N/A,true
+category,Hardware,Hardware,AUTO,N/A,AUTO,N/A,N/A,N/A,N/A,true
+category,Software,Software,AUTO,N/A,AUTO,N/A,N/A,N/A,N/A,true
+category,Network & Connectivity,Network & Connectivity,AUTO,N/A,AUTO,N/A,N/A,N/A,N/A,true
+category,Email & Collaboration,Email & Collaboration,AUTO,N/A,AUTO,N/A,N/A,N/A,N/A,true
+category,Device Setup & Onboarding,Device Setup & Onboarding,AUTO,N/A,AUTO,N/A,N/A,N/A,N/A,true
+category,Security & Compliance,Security & Compliance,AUTO,N/A,AUTO,N/A,N/A,N/A,N/A,true
+category,General IT Support,General IT Support,AUTO,N/A,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Login issue,Access & Login,AUTO,Login issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Password reset,Access & Login,AUTO,Password reset,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,MFA/2FA,Access & Login,AUTO,MFA/2FA,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Account locked,Access & Login,AUTO,Account locked,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Access issue,Access & Login,AUTO,Access issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Role/permission change,Access & Login,AUTO,Role/permission change,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Folder creation,File & Folder,AUTO,Folder creation,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Folder access,File & Folder,AUTO,Folder access,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,File share,File & Folder,AUTO,File share,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Drive permission,File & Folder,AUTO,Drive permission,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Shared drive setup,File & Folder,AUTO,Shared drive setup,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Laptop/Desktop issue,Hardware,AUTO,Laptop/Desktop issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Peripheral issue,Hardware,AUTO,Peripheral issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Monitor issue,Hardware,AUTO,Monitor issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Printer issue,Hardware,AUTO,Printer issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Hardware replacement,Hardware,AUTO,Hardware replacement,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,New software request,Software,AUTO,New software request,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,License request,Software,AUTO,License request,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Installation issue,Software,AUTO,Installation issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Update/patch issue,Software,AUTO,Update/patch issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Wi-Fi issue,Network & Connectivity,AUTO,Wi-Fi issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,VPN issue,Network & Connectivity,AUTO,VPN issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,LAN issue,Network & Connectivity,AUTO,LAN issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Email issue,Email & Collaboration,AUTO,Email issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Calendar issue,Email & Collaboration,AUTO,Calendar issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Teams/Slack issue,Email & Collaboration,AUTO,Teams/Slack issue,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,New device setup,Device Setup & Onboarding,AUTO,New device setup,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Reimage device,Device Setup & Onboarding,AUTO,Reimage device,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Device enrollment,Device Setup & Onboarding,AUTO,Device enrollment,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Phishing report,Security & Compliance,AUTO,Phishing report,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Device lost,Security & Compliance,AUTO,Device lost,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Antivirus alert,Security & Compliance,AUTO,Antivirus alert,AUTO,N/A,N/A,N/A,N/A,true
+subcategory,Misc/Other,General IT Support,AUTO,Misc/Other,AUTO,N/A,N/A,N/A,N/A,true
+sla,Login issue,Access & Login,AUTO,Login issue,AUTO,15,15,standard,N/A,true
+sla,Access issue,Access & Login,AUTO,Access issue,AUTO,15,15,standard,N/A,true
+sla,Folder creation,File & Folder,AUTO,Folder creation,AUTO,30,30,standard,N/A,true
+sla,Folder access,File & Folder,AUTO,Folder access,AUTO,30,120,standard,N/A,true
+sla,File share,File & Folder,AUTO,File share,AUTO,30,120,standard,N/A,true
+sla,Hardware issue,Hardware,AUTO,Laptop/Desktop issue,AUTO,120,1440,standard,N/A,true
+sla,Hardware replacement,Hardware,AUTO,Hardware replacement,AUTO,240,2880,standard,N/A,true
+sla,Software requirement,Software,AUTO,New software request,AUTO,240,4320,standard,N/A,true
+sla,Installation issue,Software,AUTO,Installation issue,AUTO,120,1440,standard,N/A,true
+sla,Update/patch issue,Software,AUTO,Update/patch issue,AUTO,120,1440,standard,N/A,true
+sla,Network/VPN issue,Network & Connectivity,AUTO,VPN issue,AUTO,30,240,standard,N/A,true
+sla,Email issue,Email & Collaboration,AUTO,Email issue,AUTO,30,240,standard,N/A,true
+sla,Calendar issue,Email & Collaboration,AUTO,Calendar issue,AUTO,30,240,standard,N/A,true
+sla,New device setup,Device Setup & Onboarding,AUTO,New device setup,AUTO,240,2880,standard,N/A,true
+sla,Reimage device,Device Setup & Onboarding,AUTO,Reimage device,AUTO,240,2880,standard,N/A,true
+sla,Security incident,Security & Compliance,AUTO,Phishing report,AUTO,15,120,high,N/A,true
+sla,General support,General IT Support,AUTO,Misc/Other,AUTO,120,480,standard,N/A,true
+routing,Route - Login issue,Access & Login,AUTO,Login issue,AUTO,N/A,N/A,N/A,SACHIN_PERSON_ID,true
+routing,Route - Access issue,Access & Login,AUTO,Access issue,AUTO,N/A,N/A,N/A,NITAYEE_PERSON_ID,true
+routing,Route - Password reset,Access & Login,AUTO,Password reset,AUTO,N/A,N/A,N/A,SACHIN_PERSON_ID,true
+routing,Route - Account locked,Access & Login,AUTO,Account locked,AUTO,N/A,N/A,N/A,NITAYEE_PERSON_ID,true
+routing,Route - Folder creation,File & Folder,AUTO,Folder creation,AUTO,N/A,N/A,N/A,SACHIN_PERSON_ID,true
+routing,Route - Folder access,File & Folder,AUTO,Folder access,AUTO,N/A,N/A,N/A,NITAYEE_PERSON_ID,true
+routing,Route - Laptop/Desktop issue,Hardware,AUTO,Laptop/Desktop issue,AUTO,N/A,N/A,N/A,SACHIN_PERSON_ID,true
+routing,Route - Peripheral issue,Hardware,AUTO,Peripheral issue,AUTO,N/A,N/A,N/A,NITAYEE_PERSON_ID,true
+routing,Route - New software request,Software,AUTO,New software request,AUTO,N/A,N/A,N/A,SACHIN_PERSON_ID,true
+routing,Route - Installation issue,Software,AUTO,Installation issue,AUTO,N/A,N/A,N/A,NITAYEE_PERSON_ID,true
+routing,Route - VPN issue,Network & Connectivity,AUTO,VPN issue,AUTO,N/A,N/A,N/A,SACHIN_PERSON_ID,true
+routing,Route - Wi-Fi issue,Network & Connectivity,AUTO,Wi-Fi issue,AUTO,N/A,N/A,N/A,NITAYEE_PERSON_ID,true
+routing,Route - Email issue,Email & Collaboration,AUTO,Email issue,AUTO,N/A,N/A,N/A,SACHIN_PERSON_ID,true
+routing,Route - Calendar issue,Email & Collaboration,AUTO,Calendar issue,AUTO,N/A,N/A,N/A,NITAYEE_PERSON_ID,true
+routing,Route - New device setup,Device Setup & Onboarding,AUTO,New device setup,AUTO,N/A,N/A,N/A,SACHIN_PERSON_ID,true
+routing,Route - Reimage device,Device Setup & Onboarding,AUTO,Reimage device,AUTO,N/A,N/A,N/A,NITAYEE_PERSON_ID,true
+routing,Route - Phishing report,Security & Compliance,AUTO,Phishing report,AUTO,N/A,N/A,N/A,SACHIN_PERSON_ID,true
+routing,Route - Device lost,Security & Compliance,AUTO,Device lost,AUTO,N/A,N/A,N/A,NITAYEE_PERSON_ID,true
+routing,Route - Misc/Other,General IT Support,AUTO,Misc/Other,AUTO,N/A,N/A,N/A,SACHIN_PERSON_ID,true

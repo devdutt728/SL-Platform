@@ -13,50 +13,40 @@ export default async function PublicApplyIndexPage() {
   const openings = await fetchPublicOpenings();
   const visible = openings.filter((o) => o.is_active !== false);
   return (
-    <main
-      className="page-shell relative flex min-h-screen flex-col gap-6 overflow-hidden py-12"
-      style={{ fontFamily: "\"Space Grotesk\", \"Trebuchet MS\", sans-serif" }}
-    >
-      <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute left-[-20%] top-[-30%] h-[60vh] w-[60vh] rounded-full bg-[radial-gradient(circle_at_center,rgba(12,74,110,0.22),rgba(12,74,110,0))]" />
-        <div className="absolute right-[-15%] top-[5%] h-[55vh] w-[55vh] rounded-full bg-[radial-gradient(circle_at_center,rgba(250,204,21,0.20),rgba(250,204,21,0))]" />
-        <div className="absolute bottom-[-25%] left-[20%] h-[60vh] w-[60vh] rounded-full bg-[radial-gradient(circle_at_center,rgba(56,189,248,0.16),rgba(56,189,248,0))]" />
-        <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(255,255,255,0.65),rgba(255,255,255,0.4))]" />
-      </div>
-
-      <section className="relative overflow-hidden rounded-[28px] border border-white/40 bg-white/60 p-8 shadow-[0_20px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+    <main className="page-shell flex min-h-screen flex-col gap-6 py-10">
+      <section className="section-card relative overflow-hidden">
+        <div className="absolute -right-10 top-6 h-40 w-40 rounded-full bg-cyan-400/20 blur-3xl motion-float-slow" />
+        <div className="absolute -left-6 bottom-4 h-32 w-32 rounded-full bg-rose-400/20 blur-3xl motion-float" />
+        <div className="relative flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div className="max-w-2xl">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Apply</p>
-            <h1 className="mt-3 text-4xl font-semibold text-slate-900 sm:text-5xl">
-              Open roles, reimagined.
-            </h1>
-            <p className="mt-3 text-sm text-slate-600 sm:text-base">
-              Explore roles that blend craft, technology, and impact. Apply in minutes.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="rounded-2xl border border-white/40 bg-slate-900 px-4 py-3 text-white">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-300">Open roles</p>
-              <p className="mt-1 text-2xl font-semibold">{visible.length}</p>
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/60 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Apply
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
             </div>
+            <h1 className="mt-4 text-3xl font-semibold leading-tight text-slate-900 md:text-4xl">
+              Future-ready roles for people who build what is next.
+            </h1>
+            <p className="mt-3 text-sm leading-relaxed text-slate-600">
+              Explore Studio Lotus openings and apply with confidence. Every listing is curated for impact,
+              mentorship, and long-term growth.
+            </p>
+            <div className="mt-6 flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-600">
+              <span className="rounded-full border border-white/70 bg-white/60 px-3 py-1">AI-augmented hiring</span>
+              <span className="rounded-full border border-white/70 bg-white/60 px-3 py-1">Transparent stages</span>
+              <span className="rounded-full border border-white/70 bg-white/60 px-3 py-1">Human-first culture</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
             <Link
               href="/"
-              className="rounded-2xl border border-slate-300/70 bg-white/70 px-4 py-3 text-sm font-semibold text-slate-800 shadow-[0_10px_30px_rgba(15,23,42,0.12)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_40px_rgba(15,23,42,0.18)]"
+              className="rounded-2xl border border-white/70 bg-white/60 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-white hover:bg-white"
             >
               Home
             </Link>
+            <div className="hidden rounded-2xl border border-white/60 bg-gradient-to-br from-white/60 to-white/30 px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm md:block">
+              {visible.length} roles live
+            </div>
           </div>
-        </div>
-        <div className="mt-8 flex flex-wrap gap-3">
-          {["Design", "Engineering", "Strategy", "Operations"].map((pill) => (
-            <span
-              key={pill}
-              className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-600 shadow-sm"
-            >
-              {pill}
-            </span>
-          ))}
         </div>
       </section>
 

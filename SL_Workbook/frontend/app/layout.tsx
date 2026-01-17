@@ -11,6 +11,9 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata: Metadata = {
   title: "Studio Lotus Platform",
   description: "Workbook hub for Studio Lotus apps",
+  icons: {
+    icon: "/studio-lotus-logo.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

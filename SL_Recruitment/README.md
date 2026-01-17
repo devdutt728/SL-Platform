@@ -33,6 +33,11 @@ See `backend/.env.example`. Required highlights:
 - `SL_AUTH_MODE=dev|google`
 - Drive config and service account (see below)
 
+### Offer PDF generation
+Offer PDFs are generated with WeasyPrint and require system libraries.
+- Windows: install GTK3 runtime (GTK3-Runtime Win64) and add `C:\Program Files\GTK3-Runtime Win64\bin` to `PATH`.
+- Linux (Debian/Ubuntu): `apt-get install -y libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev`
+
 ### Migrations
 Apply in order to `sl_recruitment`:
 - `backend/migrations/0002_caf_screening.sql`

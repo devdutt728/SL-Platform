@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { OfferPublic } from "@/lib/types";
-import { withBasePath } from "@/lib/base-path";
+import { parseDateUtc } from "@/lib/datetime";
 
 type Props = {
   token: string;
@@ -19,23 +19,26 @@ function formatMoney(value?: number | null) {
 
 function formatDate(raw?: string | null) {
   if (!raw) return "-";
-  const d = new Date(raw);
+  const d = parseDateUtc(raw);
+  if (!d) return "-";
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleDateString("en-IN", { month: "short", day: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" });
 }
 
 export function OfferPublicClient({ token }: Props) {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const [offer, setOffer] = useState<OfferPublic | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [decision, setDecision] = useState<"accepted" | "declined" | null>(null);
+  const canRespond = offer?.offer_status === "sent" || offer?.offer_status === "viewed";
 
   const loadOffer = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(withBasePath(`/api/offer/${encodeURIComponent(token)}`), { cache: "no-store" });
+      const res = await fetch(`${basePath}/api/offer/${encodeURIComponent(token)}`, { cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as OfferPublic;
       setOffer(data);
@@ -51,7 +54,7 @@ export function OfferPublicClient({ token }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(withBasePath(`/api/offer/${encodeURIComponent(token)}/decision`), {
+      const res = await fetch(`${basePath}/api/offer/${encodeURIComponent(token)}/decision`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ decision: value }),
@@ -70,6 +73,12 @@ export function OfferPublicClient({ token }: Props) {
   useEffect(() => {
     void loadOffer();
   }, []);
+
+  useEffect(() => {
+    if (!offer?.offer_status) return;
+    if (offer.offer_status === "accepted") setDecision("accepted");
+    if (offer.offer_status === "declined") setDecision("declined");
+  }, [offer?.offer_status]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 px-4 py-10">
@@ -103,21 +112,22 @@ export function OfferPublicClient({ token }: Props) {
             <span>Fixed: {formatMoney(offer.fixed_ctc_annual)}</span>
             <span>Variable: {formatMoney(offer.variable_ctc_annual)}</span>
           </div>
-          {offer.pdf_url ? (
+          {offer.pdf_download_url ? (
             <a
-              href={offer.pdf_url}
+              href={offer.pdf_download_url}
               target="_blank"
               rel="noreferrer"
               className="text-sm font-semibold text-slate-800 underline decoration-dotted underline-offset-2"
+              download
             >
-              View offer PDF
+              Download offer PDF
             </a>
           ) : null}
           {decision ? (
             <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
               {decision === "accepted" ? "Thanks! Your acceptance has been recorded." : "We have recorded your decision."}
             </div>
-          ) : (
+          ) : canRespond ? (
             <div className="flex gap-2">
               <button
                 className="flex-1 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow-lg disabled:opacity-60"
@@ -134,7 +144,19 @@ export function OfferPublicClient({ token }: Props) {
                 Decline offer
               </button>
             </div>
+          ) : (
+            <div className="rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm text-slate-700">
+              Offer response will be available after the offer is sent to the candidate.
+            </div>
           )}
+          {offer.offer_status === "accepted" ? (
+            <a
+              href={`${basePath}/joining/${encodeURIComponent(token)}`}
+              className="inline-flex items-center justify-center rounded-xl border border-white/60 bg-white/60 px-4 py-2 text-sm font-semibold text-slate-800 backdrop-blur"
+            >
+              Upload joining documents
+            </a>
+          ) : null}
         </div>
       ) : null}
     </main>

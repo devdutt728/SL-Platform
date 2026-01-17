@@ -1,50 +1,45 @@
 from __future__ import annotations
 
 import csv
-
-from datetime import date, datetime, timedelta
+import io
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.crypto import decrypt_secret, encrypt_secret
 from app.core.roles import Role
 from app.db.platform_session import get_platform_session
 from app.db.session import get_session
 from app.models.it import (
     ITAsset,
     ITCategory,
-    ITCredential,
     ITLicense,
     ITLicenseAssignment,
+    ITLicenseAttachment,
     ITLicenseCredential,
+    ITCredential,
+    ITVendor,
     ITRoutingRule,
     ITSlaPolicy,
     ITSubcategory,
     ITTicket,
     ITTicketComment,
-    ITVendor,
 )
 from app.request_context import get_request_context
-from app.rbac import require_admin, require_employee, require_it_agent, require_it_lead
+from app.rbac import require_employee, require_it_agent, require_it_lead
 from app.schemas.it import (
-    CategoryCreate,
-    CategoryOut,
-    CategoryUpdate,
     AssetCreate,
     AssetOut,
     AssetUpdate,
-    CredentialCreate,
-    CredentialOut,
-    CredentialUpdate,
+    CategoryCreate,
+    CategoryOut,
+    CategoryUpdate,
     LicenseAssignmentCreate,
     LicenseAssignmentOut,
-    LicenseAssignmentUpdate,
     LicenseCreate,
     LicenseOut,
     LicenseUpdate,
@@ -64,7 +59,6 @@ from app.schemas.it import (
     TicketUpdate,
     VendorCreate,
     VendorOut,
-    VendorUpdate,
 )
 from app.schemas.user import UserContext
 from app.services.audit_service import write_audit_log
@@ -79,9 +73,6 @@ from app.services.ticketing_service import (
     validate_transition,
 )
 from app.constants import (
-    IT_ASSET_STATUS_VALUES,
-    IT_ASSET_TYPE_VALUES,
-    IT_BILLING_CYCLE_VALUES,
     IT_STATUS_CLOSED,
     IT_STATUS_IN_PROGRESS,
     IT_STATUS_OPEN,
@@ -89,7 +80,6 @@ from app.constants import (
     IT_STATUS_RESOLVED,
     IT_STATUS_TRIAGED,
     IT_STATUS_WAITING_ON_USER,
-    IT_LICENSE_TYPE_VALUES,
 )
 
 router = APIRouter(prefix="/it", tags=["it"])
@@ -118,42 +108,6 @@ def _map_platform_role(role_id: int | None, role_code: str | None) -> list[Role]
         except Exception:
             return [Role.VIEWER]
     return [Role.VIEWER]
-
-
-def _require_encryption_key() -> str:
-    if not settings.credential_encryption_key:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="missing_encryption_key")
-    return settings.credential_encryption_key
-
-
-def _normalize_enum(value: str | None, allowed: list[str], field_name: str) -> str | None:
-    if value is None:
-        return None
-    normalized = value.strip().upper()
-    if normalized not in allowed:
-        raise ValueError(f"invalid_{field_name}")
-    return normalized
-
-
-def _parse_date(value: str | None) -> date | None:
-    if not value:
-        return None
-    return datetime.strptime(value.strip(), "%Y-%m-%d").date()
-
-
-def _parse_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    raw = value.strip()
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-        try:
-            parsed = datetime.strptime(raw, fmt)
-            if fmt == "%Y-%m-%d":
-                return datetime.combine(parsed.date(), datetime.min.time())
-            return parsed
-        except ValueError:
-            continue
-    raise ValueError("invalid_datetime")
 
 
 @router.get("/categories", response_model=list[CategoryOut])
@@ -962,105 +916,206 @@ async def deactivate_routing_rule(
     return {"rule_id": rule.rule_id}
 
 
-@router.post("/admin/vendors", response_model=VendorOut)
-async def create_vendor(
-    payload: VendorCreate,
+@router.post("/admin/policies/import", response_model=dict)
+async def import_policy_csv(
     request: Request,
+    upload: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
     user: UserContext = Depends(require_it_lead()),
 ):
-    vendor = ITVendor(**payload.model_dump())
-    session.add(vendor)
-    await session.flush()
+    if upload.content_type and "csv" not in upload.content_type.lower():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_file_type")
+    raw = await upload.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
+
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    rows: list[dict] = []
+    row_limit = 5000
+    for row in reader:
+        rows.append(row)
+        if len(rows) >= row_limit:
+            break
+
+    def _norm(value: str | None) -> str:
+        return (value or "").strip().lower()
+
+    def _parse_bool(value: str | None, default: bool = True) -> bool:
+        if value is None or value == "":
+            return default
+        return _norm(value) in {"1", "true", "yes", "y"}
+
+    def _parse_int(value: str | None, default: int) -> int:
+        try:
+            return int(str(value).strip())
+        except Exception:
+            return default
+
+    def _parse_category_id(row: dict, by_name: dict[str, int]) -> int | None:
+        raw_id = str(row.get("category_id") or "").strip()
+        if raw_id.isdigit():
+            return int(raw_id)
+        name = _norm(row.get("category_name"))
+        return by_name.get(name)
+
+    def _parse_subcategory_id(row: dict, by_key: dict[tuple[int, str], int], by_name: dict[str, int]) -> int | None:
+        raw_id = str(row.get("subcategory_id") or "").strip()
+        if raw_id.isdigit():
+            return int(raw_id)
+        name = _norm(row.get("subcategory_name"))
+        if not name:
+            return None
+        category_id = _parse_category_id(row, category_name_to_id)
+        if category_id:
+            return by_key.get((category_id, name))
+        return by_name.get(name)
+
+    existing_categories = (await session.execute(select(ITCategory))).scalars().all()
+    category_name_to_id = {_norm(cat.name): cat.category_id for cat in existing_categories}
+
+    existing_subcategories = (await session.execute(select(ITSubcategory))).scalars().all()
+    subcategory_key_to_id: dict[tuple[int, str], int] = {}
+    subcategory_name_to_id: dict[str, int] = {}
+    for sub in existing_subcategories:
+        name = _norm(sub.name)
+        subcategory_key_to_id[(sub.category_id, name)] = sub.subcategory_id
+        if name not in subcategory_name_to_id:
+            subcategory_name_to_id[name] = sub.subcategory_id
+
+    existing_sla = (await session.execute(select(ITSlaPolicy))).scalars().all()
+    sla_names = {_norm(policy.name) for policy in existing_sla}
+
+    existing_rules = (await session.execute(select(ITRoutingRule))).scalars().all()
+    routing_keys = {
+        (rule.category_id, rule.subcategory_id, rule.default_assignee_person_id) for rule in existing_rules
+    }
+
+    created = {"categories": 0, "subcategories": 0, "sla": 0, "routing": 0}
+    skipped = 0
+
+    for row in rows:
+        if _norm(row.get("record_type")) != "category":
+            continue
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        key = _norm(name)
+        if key in category_name_to_id:
+            skipped += 1
+            continue
+        category = ITCategory(name=name, is_active=_parse_bool(row.get("is_active"), True))
+        session.add(category)
+        await session.flush()
+        category_name_to_id[key] = category.category_id
+        created["categories"] += 1
+
+    for row in rows:
+        if _norm(row.get("record_type")) != "subcategory":
+            continue
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        category_id = _parse_category_id(row, category_name_to_id)
+        if not category_id:
+            skipped += 1
+            continue
+        key = (category_id, _norm(name))
+        if key in subcategory_key_to_id:
+            skipped += 1
+            continue
+        subcategory = ITSubcategory(
+            category_id=category_id,
+            name=name,
+            is_active=_parse_bool(row.get("is_active"), True),
+        )
+        session.add(subcategory)
+        await session.flush()
+        subcategory_key_to_id[key] = subcategory.subcategory_id
+        if _norm(name) not in subcategory_name_to_id:
+            subcategory_name_to_id[_norm(name)] = subcategory.subcategory_id
+        created["subcategories"] += 1
+
+    for row in rows:
+        if _norm(row.get("record_type")) != "sla":
+            continue
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        key = _norm(name)
+        if key in sla_names:
+            skipped += 1
+            continue
+        policy = ITSlaPolicy(
+            name=name,
+            category_id=_parse_category_id(row, category_name_to_id),
+            priority=(row.get("priority") or "").strip() or None,
+            first_response_minutes=_parse_int(row.get("first_response_minutes"), 60),
+            resolution_minutes=_parse_int(row.get("resolution_minutes"), 480),
+            is_active=_parse_bool(row.get("is_active"), True),
+        )
+        session.add(policy)
+        await session.flush()
+        sla_names.add(key)
+        created["sla"] += 1
+
+    for row in rows:
+        if _norm(row.get("record_type")) != "routing":
+            continue
+        category_id = _parse_category_id(row, category_name_to_id)
+        subcategory_id = _parse_subcategory_id(row, subcategory_key_to_id, subcategory_name_to_id)
+        assignee = (row.get("default_assignee_person_id") or "").strip() or None
+        key = (category_id, subcategory_id, assignee)
+        if key in routing_keys:
+            skipped += 1
+            continue
+        rule = ITRoutingRule(
+            category_id=category_id,
+            subcategory_id=subcategory_id,
+            default_assignee_person_id=assignee,
+            is_active=_parse_bool(row.get("is_active"), True),
+        )
+        session.add(rule)
+        await session.flush()
+        routing_keys.add(key)
+        created["routing"] += 1
 
     await write_audit_log(
         session,
         actor=user,
-        action="IT_VENDOR_CREATE",
-        entity_type="it_vendor",
-        entity_id=str(vendor.vendor_id),
+        action="IT_POLICY_IMPORT",
+        entity_type="it_policy",
+        entity_id="bulk",
         before=None,
-        after=payload.model_dump(),
+        after={"created": created, "skipped": skipped, "filename": upload.filename},
         context=get_request_context(request),
     )
     await session.commit()
-    return VendorOut.model_validate(vendor)
+
+    return {"created": created, "skipped": skipped}
 
 
-@router.get("/admin/vendors", response_model=list[VendorOut])
-async def list_vendors(session: AsyncSession = Depends(get_session), user: UserContext = Depends(require_it_lead())):
-    result = await session.execute(select(ITVendor).order_by(ITVendor.name.asc()))
+@router.get("/admin/assets", response_model=list[AssetOut])
+async def list_assets(
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    result = await session.execute(select(ITAsset).order_by(ITAsset.updated_at.desc(), ITAsset.asset_id.desc()))
     return result.scalars().all()
 
 
-@router.patch("/admin/vendors/{vendor_id}", response_model=VendorOut)
-async def update_vendor(
-    vendor_id: int,
-    payload: VendorUpdate,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_it_lead()),
-):
-    vendor = (await session.execute(select(ITVendor).where(ITVendor.vendor_id == vendor_id))).scalars().one_or_none()
-    if not vendor:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="vendor_not_found")
-
-    before = {"name": vendor.name, "is_active": vendor.is_active}
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(vendor, key, value)
-
-    session.add(vendor)
-    await write_audit_log(
-        session,
-        actor=user,
-        action="IT_VENDOR_UPDATE",
-        entity_type="it_vendor",
-        entity_id=str(vendor.vendor_id),
-        before=before,
-        after=payload.model_dump(exclude_unset=True),
-        context=get_request_context(request),
-    )
-    await session.commit()
-    return VendorOut.model_validate(vendor)
-
-
-@router.delete("/admin/vendors/{vendor_id}", response_model=VendorOut)
-async def deactivate_vendor(
-    vendor_id: int,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_it_lead()),
-):
-    vendor = (await session.execute(select(ITVendor).where(ITVendor.vendor_id == vendor_id))).scalars().one_or_none()
-    if not vendor:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="vendor_not_found")
-
-    before = {"is_active": vendor.is_active}
-    vendor.is_active = False
-    session.add(vendor)
-
-    await write_audit_log(
-        session,
-        actor=user,
-        action="IT_VENDOR_DEACTIVATE",
-        entity_type="it_vendor",
-        entity_id=str(vendor.vendor_id),
-        before=before,
-        after={"is_active": vendor.is_active},
-        context=get_request_context(request),
-    )
-    await session.commit()
-    return VendorOut.model_validate(vendor)
-
-
-@router.post("/admin/assets", response_model=AssetOut)
+@router.post("/admin/assets", response_model=AssetOut, status_code=status.HTTP_201_CREATED)
 async def create_asset(
     payload: AssetCreate,
     request: Request,
     session: AsyncSession = Depends(get_session),
     user: UserContext = Depends(require_it_lead()),
 ):
-    asset = ITAsset(**payload.model_dump())
+    now = datetime.utcnow()
+    asset = ITAsset(**payload.model_dump(), created_at=now, updated_at=now)
     session.add(asset)
     await session.flush()
 
@@ -1078,89 +1133,6 @@ async def create_asset(
     return AssetOut.model_validate(asset)
 
 
-@router.post("/admin/assets/import", response_model=dict)
-async def import_assets(
-    request: Request,
-    file: UploadFile = File(...),
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_it_lead()),
-):
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="csv_required")
-
-    content = (await file.read()).decode("utf-8").splitlines()
-    reader = csv.DictReader(content)
-    inserted = 0
-    errors: list[dict] = []
-
-    for index, row in enumerate(reader, start=2):
-        asset_tag = (row.get("asset_tag") or "").strip()
-        if not asset_tag:
-            errors.append({"row": index, "error": "missing_asset_tag"})
-            continue
-        try:
-            asset_type = _normalize_enum(row.get("asset_type"), IT_ASSET_TYPE_VALUES, "asset_type")
-            status = _normalize_enum(row.get("status") or "IN_STOCK", IT_ASSET_STATUS_VALUES, "status")
-            purchase_date = _parse_date(row.get("purchase_date"))
-            warranty_end = _parse_date(row.get("warranty_end"))
-        except Exception as exc:
-            errors.append({"row": index, "error": str(exc)})
-            continue
-
-        async with session.begin_nested():
-            try:
-                asset = ITAsset(
-                    asset_tag=asset_tag,
-                    asset_type=asset_type or "LAPTOP",
-                    status=status or "IN_STOCK",
-                    serial_number=(row.get("serial_number") or "").strip() or None,
-                    manufacturer=(row.get("manufacturer") or "").strip() or None,
-                    model=(row.get("model") or "").strip() or None,
-                    operating_system=(row.get("operating_system") or "").strip() or None,
-                    assigned_person_id=(row.get("assigned_person_id") or "").strip() or None,
-                    assigned_email=(row.get("assigned_email") or "").strip() or None,
-                    assigned_name=(row.get("assigned_name") or "").strip() or None,
-                    location=(row.get("location") or "").strip() or None,
-                    notes=(row.get("notes") or "").strip() or None,
-                    purchase_date=purchase_date,
-                    warranty_end=warranty_end,
-                )
-                session.add(asset)
-                await session.flush()
-                inserted += 1
-            except SQLAlchemyError as exc:
-                errors.append({"row": index, "error": str(exc.__class__.__name__)})
-
-    await write_audit_log(
-        session,
-        actor=user,
-        action="IT_ASSET_IMPORT",
-        entity_type="it_asset",
-        entity_id="bulk",
-        before=None,
-        after={"inserted": inserted, "errors": len(errors)},
-        context=get_request_context(request),
-    )
-    await session.commit()
-    return {"inserted": inserted, "errors": errors}
-
-
-@router.get("/admin/assets", response_model=list[AssetOut])
-async def list_assets(
-    status_filter: str | None = None,
-    assigned_person_id: str | None = None,
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_it_lead()),
-):
-    stmt = select(ITAsset)
-    if status_filter:
-        stmt = stmt.where(ITAsset.status == status_filter)
-    if assigned_person_id:
-        stmt = stmt.where(ITAsset.assigned_person_id == assigned_person_id)
-    result = await session.execute(stmt.order_by(ITAsset.updated_at.desc()))
-    return result.scalars().all()
-
-
 @router.patch("/admin/assets/{asset_id}", response_model=AssetOut)
 async def update_asset(
     asset_id: int,
@@ -1173,11 +1145,20 @@ async def update_asset(
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset_not_found")
 
-    before = {"asset_tag": asset.asset_tag, "status": asset.status}
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(asset, key, value)
+    before = {
+        "asset_tag": asset.asset_tag,
+        "asset_type": asset.asset_type,
+        "status": asset.status,
+        "assigned_email": asset.assigned_email,
+        "assigned_name": asset.assigned_name,
+    }
 
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(asset, key, value)
+    asset.updated_at = datetime.utcnow()
     session.add(asset)
+
     await write_audit_log(
         session,
         actor=user,
@@ -1185,256 +1166,111 @@ async def update_asset(
         entity_type="it_asset",
         entity_id=str(asset.asset_id),
         before=before,
-        after=payload.model_dump(exclude_unset=True),
+        after=data,
         context=get_request_context(request),
     )
     await session.commit()
     return AssetOut.model_validate(asset)
 
 
-@router.delete("/admin/assets/{asset_id}", response_model=AssetOut)
-async def retire_asset(
-    asset_id: int,
+@router.post("/admin/assets/import", response_model=dict)
+async def import_assets_csv(
     request: Request,
+    upload: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
     user: UserContext = Depends(require_it_lead()),
 ):
-    asset = (await session.execute(select(ITAsset).where(ITAsset.asset_id == asset_id))).scalars().one_or_none()
-    if not asset:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset_not_found")
+    def _parse_date(raw: str | None) -> datetime | None:
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.strip())
+        except Exception:
+            return None
 
-    before = {"status": asset.status}
-    asset.status = "RETIRED"
-    session.add(asset)
+    raw = await upload.read()
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    created = 0
+    for row in reader:
+        asset_tag = (row.get("asset_tag") or "").strip()
+        if not asset_tag:
+            continue
+        asset = ITAsset(
+            asset_tag=asset_tag,
+            asset_type=(row.get("asset_type") or "OTHER").strip(),
+            status=(row.get("status") or "IN_STOCK").strip(),
+            serial_number=(row.get("serial_number") or "").strip() or None,
+            manufacturer=(row.get("manufacturer") or "").strip() or None,
+            model=(row.get("model") or "").strip() or None,
+            operating_system=(row.get("operating_system") or "").strip() or None,
+            purchase_date=_parse_date(row.get("purchase_date")),
+            warranty_end=_parse_date(row.get("warranty_end")),
+            location=(row.get("location") or "").strip() or None,
+            assigned_person_id=(row.get("assigned_person_id") or "").strip() or None,
+            assigned_email=(row.get("assigned_email") or "").strip() or None,
+            assigned_name=(row.get("assigned_name") or "").strip() or None,
+            notes=(row.get("notes") or "").strip() or None,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        session.add(asset)
+        created += 1
 
     await write_audit_log(
         session,
         actor=user,
-        action="IT_ASSET_RETIRE",
+        action="IT_ASSET_IMPORT",
         entity_type="it_asset",
-        entity_id=str(asset.asset_id),
-        before=before,
-        after={"status": asset.status},
+        entity_id="bulk",
+        before=None,
+        after={"created": created, "filename": upload.filename},
         context=get_request_context(request),
     )
     await session.commit()
-    return AssetOut.model_validate(asset)
+    return {"created": created}
 
 
-@router.post("/admin/licenses", response_model=LicenseOut)
-async def create_license(
-    payload: LicenseCreate,
+@router.get("/admin/vendors", response_model=list[VendorOut])
+async def list_vendors(
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    result = await session.execute(select(ITVendor).order_by(ITVendor.name.asc()))
+    return result.scalars().all()
+
+
+@router.post("/admin/vendors", response_model=VendorOut, status_code=status.HTTP_201_CREATED)
+async def create_vendor(
+    payload: VendorCreate,
     request: Request,
     session: AsyncSession = Depends(get_session),
     user: UserContext = Depends(require_it_lead()),
 ):
-    license_entry = ITLicense(**payload.model_dump())
-    session.add(license_entry)
+    vendor = ITVendor(
+        name=payload.name.strip(),
+        website=(payload.website or "").strip() or None,
+        support_email=(payload.support_email or "").strip() or None,
+        support_phone=(payload.support_phone or "").strip() or None,
+        is_active=bool(payload.is_active),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    session.add(vendor)
     await session.flush()
 
     await write_audit_log(
         session,
         actor=user,
-        action="IT_LICENSE_CREATE",
-        entity_type="it_license",
-        entity_id=str(license_entry.license_id),
+        action="IT_VENDOR_CREATE",
+        entity_type="it_vendor",
+        entity_id=str(vendor.vendor_id),
         before=None,
         after=payload.model_dump(),
         context=get_request_context(request),
     )
     await session.commit()
-    return LicenseOut.model_validate(license_entry)
-
-
-@router.post("/admin/licenses/import", response_model=dict)
-async def import_licenses(
-    request: Request,
-    file: UploadFile = File(...),
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_it_lead()),
-):
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="csv_required")
-
-    content = (await file.read()).decode("utf-8").splitlines()
-    reader = csv.DictReader(content)
-    inserted = 0
-    errors: list[dict] = []
-
-    for index, row in enumerate(reader, start=2):
-        name = (row.get("name") or "").strip()
-        if not name:
-            errors.append({"row": index, "error": "missing_name"})
-            continue
-        try:
-            license_type = _normalize_enum(row.get("license_type"), IT_LICENSE_TYPE_VALUES, "license_type")
-            billing_cycle = _normalize_enum(row.get("billing_cycle"), IT_BILLING_CYCLE_VALUES, "billing_cycle")
-        except Exception as exc:
-            errors.append({"row": index, "error": str(exc)})
-            continue
-
-        vendor_id = None
-        vendor_name = (row.get("vendor_name") or "").strip()
-        vendor_id_raw = (row.get("vendor_id") or "").strip()
-        if vendor_id_raw:
-            try:
-                vendor_id = int(vendor_id_raw)
-            except ValueError:
-                errors.append({"row": index, "error": "invalid_vendor_id"})
-                continue
-        elif vendor_name:
-            existing_vendor = (
-                await session.execute(select(ITVendor).where(ITVendor.name == vendor_name))
-            ).scalars().one_or_none()
-            if existing_vendor:
-                vendor_id = existing_vendor.vendor_id
-            else:
-                vendor = ITVendor(name=vendor_name, is_active=True)
-                session.add(vendor)
-                await session.flush()
-                vendor_id = vendor.vendor_id
-
-        try:
-            total_seats = int(row.get("total_seats") or 1)
-        except ValueError:
-            errors.append({"row": index, "error": "invalid_total_seats"})
-            continue
-
-        async with session.begin_nested():
-            try:
-                license_entry = ITLicense(
-                    vendor_id=vendor_id,
-                    name=name,
-                    sku=(row.get("sku") or "").strip() or None,
-                    license_type=license_type or "SUBSCRIPTION",
-                    total_seats=total_seats,
-                    contract_start=_parse_date(row.get("contract_start")),
-                    contract_end=_parse_date(row.get("contract_end")),
-                    renewal_date=_parse_date(row.get("renewal_date")),
-                    cost_amount=(float(row.get("cost_amount")) if row.get("cost_amount") else None),
-                    cost_currency=(row.get("cost_currency") or "").strip() or None,
-                    billing_cycle=billing_cycle,
-                    registered_email=(row.get("registered_email") or "").strip() or None,
-                    notes=(row.get("notes") or "").strip() or None,
-                    is_active=True,
-                )
-                session.add(license_entry)
-                await session.flush()
-                inserted += 1
-            except (SQLAlchemyError, ValueError) as exc:
-                errors.append({"row": index, "error": str(exc.__class__.__name__)})
-
-    await write_audit_log(
-        session,
-        actor=user,
-        action="IT_LICENSE_IMPORT",
-        entity_type="it_license",
-        entity_id="bulk",
-        before=None,
-        after={"inserted": inserted, "errors": len(errors)},
-        context=get_request_context(request),
-    )
-    await session.commit()
-    return {"inserted": inserted, "errors": errors}
-
-
-@router.post("/admin/assignments/import", response_model=dict)
-async def import_assignments(
-    request: Request,
-    file: UploadFile = File(...),
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_it_lead()),
-):
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="csv_required")
-
-    content = (await file.read()).decode("utf-8").splitlines()
-    reader = csv.DictReader(content)
-    inserted = 0
-    errors: list[dict] = []
-
-    for index, row in enumerate(reader, start=2):
-        license_id_raw = (row.get("license_id") or "").strip()
-        license_name = (row.get("license_name") or "").strip()
-        license_id = None
-        if license_id_raw:
-            try:
-                license_id = int(license_id_raw)
-            except ValueError:
-                errors.append({"row": index, "error": "invalid_license_id"})
-                continue
-        elif license_name:
-            license_entry = (
-                await session.execute(select(ITLicense).where(ITLicense.name == license_name))
-            ).scalars().one_or_none()
-            if not license_entry:
-                errors.append({"row": index, "error": "license_not_found"})
-                continue
-            license_id = license_entry.license_id
-        else:
-            errors.append({"row": index, "error": "missing_license"})
-            continue
-
-        license_entry = (
-            await session.execute(select(ITLicense).where(ITLicense.license_id == license_id))
-        ).scalars().one_or_none()
-        if not license_entry:
-            errors.append({"row": index, "error": "license_not_found"})
-            continue
-
-        try:
-            status_value = _normalize_enum(row.get("status") or "ACTIVE", IT_LICENSE_ASSIGNMENT_VALUES, "status")
-            assigned_at = _parse_datetime(row.get("assigned_at"))
-            unassigned_at = _parse_datetime(row.get("unassigned_at"))
-        except Exception as exc:
-            errors.append({"row": index, "error": str(exc)})
-            continue
-
-        active_count = (
-            await session.execute(
-                select(func.count(ITLicenseAssignment.assignment_id))
-                .where(ITLicenseAssignment.license_id == license_id)
-                .where(ITLicenseAssignment.status == "ACTIVE")
-            )
-        ).scalar() or 0
-        if status_value == "ACTIVE" and active_count >= license_entry.total_seats:
-            errors.append({"row": index, "error": "seats_exhausted"})
-            continue
-
-        async with session.begin_nested():
-            try:
-                assignment = ITLicenseAssignment(
-                    license_id=license_id,
-                    asset_id=int(row.get("asset_id")) if row.get("asset_id") else None,
-                    assigned_person_id=(row.get("assigned_person_id") or "").strip() or None,
-                    assigned_email=(row.get("assigned_email") or "").strip() or None,
-                    assigned_name=(row.get("assigned_name") or "").strip() or None,
-                    assigned_at=assigned_at,
-                    unassigned_at=unassigned_at,
-                    status=status_value or "ACTIVE",
-                    notes=(row.get("notes") or "").strip() or None,
-                )
-                if not assignment.asset_id and not assignment.assigned_person_id and not assignment.assigned_email:
-                    errors.append({"row": index, "error": "assignment_target_required"})
-                    continue
-                session.add(assignment)
-                await session.flush()
-                inserted += 1
-            except (SQLAlchemyError, ValueError) as exc:
-                errors.append({"row": index, "error": str(exc.__class__.__name__)})
-
-    await write_audit_log(
-        session,
-        actor=user,
-        action="IT_ASSIGNMENT_IMPORT",
-        entity_type="it_license_assignment",
-        entity_id="bulk",
-        before=None,
-        after={"inserted": inserted, "errors": len(errors)},
-        context=get_request_context(request),
-    )
-    await session.commit()
-    return {"inserted": inserted, "errors": errors}
+    return VendorOut.model_validate(vendor)
 
 
 @router.get("/admin/licenses", response_model=list[LicenseOut])
@@ -1442,26 +1278,34 @@ async def list_licenses(
     session: AsyncSession = Depends(get_session),
     user: UserContext = Depends(require_it_lead()),
 ):
-    active_assignments = (
-        select(
-            ITLicenseAssignment.license_id,
-            func.count(ITLicenseAssignment.assignment_id).label("assigned_seats"),
-        )
-        .where(ITLicenseAssignment.status == "ACTIVE")
-        .group_by(ITLicenseAssignment.license_id)
-        .subquery()
+    result = await session.execute(select(ITLicense).order_by(ITLicense.updated_at.desc(), ITLicense.license_id.desc()))
+    return result.scalars().all()
+
+
+@router.post("/admin/licenses", response_model=LicenseOut, status_code=status.HTTP_201_CREATED)
+async def create_license(
+    payload: LicenseCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: UserContext = Depends(require_it_lead()),
+):
+    now = datetime.utcnow()
+    license_obj = ITLicense(**payload.model_dump(), created_at=now, updated_at=now)
+    session.add(license_obj)
+    await session.flush()
+
+    await write_audit_log(
+        session,
+        actor=user,
+        action="IT_LICENSE_CREATE",
+        entity_type="it_license",
+        entity_id=str(license_obj.license_id),
+        before=None,
+        after=payload.model_dump(),
+        context=get_request_context(request),
     )
-    result = await session.execute(
-        select(ITLicense, func.coalesce(active_assignments.c.assigned_seats, 0))
-        .outerjoin(active_assignments, ITLicense.license_id == active_assignments.c.license_id)
-        .order_by(ITLicense.updated_at.desc())
-    )
-    items: list[LicenseOut] = []
-    for license_entry, assigned_seats in result.all():
-        data = LicenseOut.model_validate(license_entry)
-        data.assigned_seats = int(assigned_seats or 0)
-        items.append(data)
-    return items
+    await session.commit()
+    return LicenseOut.model_validate(license_obj)
 
 
 @router.patch("/admin/licenses/{license_id}", response_model=LicenseOut)
@@ -1472,352 +1316,207 @@ async def update_license(
     session: AsyncSession = Depends(get_session),
     user: UserContext = Depends(require_it_lead()),
 ):
-    license_entry = (await session.execute(select(ITLicense).where(ITLicense.license_id == license_id))).scalars().one_or_none()
-    if not license_entry:
+    license_obj = (await session.execute(select(ITLicense).where(ITLicense.license_id == license_id))).scalars().one_or_none()
+    if not license_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="license_not_found")
 
-    before = {"name": license_entry.name, "is_active": license_entry.is_active}
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(license_entry, key, value)
+    before = {"name": license_obj.name, "total_seats": license_obj.total_seats, "is_active": license_obj.is_active}
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(license_obj, key, value)
+    license_obj.updated_at = datetime.utcnow()
+    session.add(license_obj)
 
-    session.add(license_entry)
     await write_audit_log(
         session,
         actor=user,
         action="IT_LICENSE_UPDATE",
         entity_type="it_license",
-        entity_id=str(license_entry.license_id),
+        entity_id=str(license_obj.license_id),
         before=before,
-        after=payload.model_dump(exclude_unset=True),
+        after=data,
         context=get_request_context(request),
     )
     await session.commit()
-    return LicenseOut.model_validate(license_entry)
+    return LicenseOut.model_validate(license_obj)
 
 
-@router.delete("/admin/licenses/{license_id}", response_model=LicenseOut)
-async def deactivate_license(
-    license_id: int,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_it_lead()),
-):
-    license_entry = (await session.execute(select(ITLicense).where(ITLicense.license_id == license_id))).scalars().one_or_none()
-    if not license_entry:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="license_not_found")
-
-    before = {"is_active": license_entry.is_active}
-    license_entry.is_active = False
-    session.add(license_entry)
-
-    await write_audit_log(
-        session,
-        actor=user,
-        action="IT_LICENSE_DEACTIVATE",
-        entity_type="it_license",
-        entity_id=str(license_entry.license_id),
-        before=before,
-        after={"is_active": license_entry.is_active},
-        context=get_request_context(request),
-    )
-    await session.commit()
-    return LicenseOut.model_validate(license_entry)
-
-
-@router.post("/admin/licenses/{license_id}/assignments", response_model=LicenseAssignmentOut)
-async def create_license_assignment(
-    license_id: int,
-    payload: LicenseAssignmentCreate,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_it_lead()),
-):
-    license_entry = (await session.execute(select(ITLicense).where(ITLicense.license_id == license_id))).scalars().one_or_none()
-    if not license_entry:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="license_not_found")
-
-    if not payload.asset_id and not payload.assigned_person_id and not payload.assigned_email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="assignment_target_required")
-
-    active_count = (
-        await session.execute(
-            select(func.count(ITLicenseAssignment.assignment_id))
-            .where(ITLicenseAssignment.license_id == license_id)
-            .where(ITLicenseAssignment.status == "ACTIVE")
-        )
-    ).scalar() or 0
-    if active_count >= license_entry.total_seats:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="seats_exhausted")
-
-    data = payload.model_dump(exclude={"license_id"})
-    if not data.get("assigned_at"):
-        data["assigned_at"] = datetime.utcnow()
-    assignment = ITLicenseAssignment(**data, license_id=license_id)
-    session.add(assignment)
-    await session.flush()
-
-    await write_audit_log(
-        session,
-        actor=user,
-        action="IT_LICENSE_ASSIGNMENT_CREATE",
-        entity_type="it_license_assignment",
-        entity_id=str(assignment.assignment_id),
-        before=None,
-        after={"license_id": license_id, "status": assignment.status},
-        context=get_request_context(request),
-    )
-    await session.commit()
-    return LicenseAssignmentOut.model_validate(assignment)
-
-
-@router.get("/admin/licenses/{license_id}/assignments", response_model=list[LicenseAssignmentOut])
+@router.get("/admin/license-assignments", response_model=list[LicenseAssignmentOut])
 async def list_license_assignments(
     license_id: int,
     session: AsyncSession = Depends(get_session),
     user: UserContext = Depends(require_it_lead()),
 ):
     result = await session.execute(
-        select(ITLicenseAssignment).where(ITLicenseAssignment.license_id == license_id).order_by(ITLicenseAssignment.created_at.desc())
+        select(ITLicenseAssignment)
+        .where(ITLicenseAssignment.license_id == license_id)
+        .order_by(ITLicenseAssignment.assigned_at.desc(), ITLicenseAssignment.assignment_id.desc())
     )
     return result.scalars().all()
 
 
-@router.patch("/admin/assignments/{assignment_id}", response_model=LicenseAssignmentOut)
-async def update_license_assignment(
-    assignment_id: int,
-    payload: LicenseAssignmentUpdate,
+@router.post("/admin/license-assignments", response_model=LicenseAssignmentOut, status_code=status.HTTP_201_CREATED)
+async def create_license_assignment(
+    payload: LicenseAssignmentCreate,
     request: Request,
     session: AsyncSession = Depends(get_session),
     user: UserContext = Depends(require_it_lead()),
 ):
-    assignment = (
-        await session.execute(select(ITLicenseAssignment).where(ITLicenseAssignment.assignment_id == assignment_id))
-    ).scalars().one_or_none()
-    if not assignment:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="assignment_not_found")
+    license_obj = (await session.execute(select(ITLicense).where(ITLicense.license_id == payload.license_id))).scalars().one_or_none()
+    if not license_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="license_not_found")
 
-    before = {"status": assignment.status}
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(assignment, key, value)
-
+    assignment = ITLicenseAssignment(
+        license_id=payload.license_id,
+        asset_id=payload.asset_id,
+        assignee_person_id=payload.assignee_person_id,
+        assignee_email=(payload.assignee_email or "").strip() or None,
+        assignee_name=(payload.assignee_name or "").strip() or None,
+        status=(payload.status or "ASSIGNED").strip(),
+        notes=(payload.notes or "").strip() or None,
+        assigned_at=datetime.utcnow(),
+        created_at=datetime.utcnow(),
+    )
     session.add(assignment)
+    await session.flush()
+
     await write_audit_log(
         session,
         actor=user,
-        action="IT_LICENSE_ASSIGNMENT_UPDATE",
+        action="IT_LICENSE_ASSIGN",
         entity_type="it_license_assignment",
         entity_id=str(assignment.assignment_id),
-        before=before,
-        after=payload.model_dump(exclude_unset=True),
+        before=None,
+        after=payload.model_dump(),
         context=get_request_context(request),
     )
     await session.commit()
     return LicenseAssignmentOut.model_validate(assignment)
 
 
-@router.post("/admin/credentials", response_model=CredentialOut)
-async def create_credential(
-    payload: CredentialCreate,
+@router.post("/admin/license-assignments/import", response_model=dict)
+async def import_license_assignments_csv(
     request: Request,
+    upload: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_admin()),
+    user: UserContext = Depends(require_it_lead()),
 ):
-    key = _require_encryption_key()
-    cipher, nonce = encrypt_secret(payload.password, key)
-    credential = ITCredential(
-        label=payload.label,
-        username=payload.username,
-        password_cipher=cipher,
-        password_nonce=nonce,
-        notes=payload.notes,
-        is_active=payload.is_active,
-        last_rotated_at=datetime.utcnow(),
-    )
-    session.add(credential)
-    await session.flush()
+    def _parse_date(raw: str | None) -> datetime | None:
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.strip())
+        except Exception:
+            return None
 
-    await write_audit_log(
-        session,
-        actor=user,
-        action="IT_CREDENTIAL_CREATE",
-        entity_type="it_credential",
-        entity_id=str(credential.credential_id),
-        before=None,
-        after={"label": credential.label, "username": credential.username},
-        context=get_request_context(request),
-    )
-    await session.commit()
-    return CredentialOut.model_validate(credential)
+    raw = await upload.read()
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    created = 0
+    for row in reader:
+        raw_license_id = (row.get("license_id") or "").strip()
+        if not raw_license_id:
+            continue
+        try:
+            license_id = int(raw_license_id)
+        except Exception:
+            continue
+        exists = (await session.execute(select(ITLicense).where(ITLicense.license_id == license_id))).scalars().one_or_none()
+        if not exists:
+            continue
 
-
-@router.get("/admin/credentials", response_model=list[CredentialOut])
-async def list_credentials(
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_admin()),
-):
-    result = await session.execute(select(ITCredential).order_by(ITCredential.updated_at.desc()))
-    return result.scalars().all()
-
-
-@router.patch("/admin/credentials/{credential_id}", response_model=CredentialOut)
-async def update_credential(
-    credential_id: int,
-    payload: CredentialUpdate,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_admin()),
-):
-    credential = (
-        await session.execute(select(ITCredential).where(ITCredential.credential_id == credential_id))
-    ).scalars().one_or_none()
-    if not credential:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="credential_not_found")
-
-    before = {"label": credential.label, "username": credential.username, "is_active": credential.is_active}
-    data = payload.model_dump(exclude_unset=True)
-    if "password" in data and data["password"]:
-        key = _require_encryption_key()
-        cipher, nonce = encrypt_secret(data["password"], key)
-        credential.password_cipher = cipher
-        credential.password_nonce = nonce
-        credential.last_rotated_at = datetime.utcnow()
-        data.pop("password", None)
-    for key, value in data.items():
-        setattr(credential, key, value)
-
-    session.add(credential)
-    await write_audit_log(
-        session,
-        actor=user,
-        action="IT_CREDENTIAL_UPDATE",
-        entity_type="it_credential",
-        entity_id=str(credential.credential_id),
-        before=before,
-        after=data,
-        context=get_request_context(request),
-    )
-    await session.commit()
-    return CredentialOut.model_validate(credential)
-
-
-@router.get("/admin/credentials/{credential_id}/reveal", response_model=dict)
-async def reveal_credential(
-    credential_id: int,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_admin()),
-):
-    credential = (
-        await session.execute(select(ITCredential).where(ITCredential.credential_id == credential_id))
-    ).scalars().one_or_none()
-    if not credential:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="credential_not_found")
-
-    key = _require_encryption_key()
-    password = decrypt_secret(credential.password_cipher, credential.password_nonce, key)
-
-    await write_audit_log(
-        session,
-        actor=user,
-        action="IT_CREDENTIAL_REVEAL",
-        entity_type="it_credential",
-        entity_id=str(credential.credential_id),
-        before=None,
-        after={"label": credential.label},
-        context=get_request_context(request),
-    )
-    await session.commit()
-
-    return {"password": password}
-
-
-@router.post("/admin/licenses/{license_id}/credentials/{credential_id}", response_model=dict)
-async def link_license_credential(
-    license_id: int,
-    credential_id: int,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_admin()),
-):
-    license_entry = (await session.execute(select(ITLicense).where(ITLicense.license_id == license_id))).scalars().one_or_none()
-    if not license_entry:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="license_not_found")
-    credential = (
-        await session.execute(select(ITCredential).where(ITCredential.credential_id == credential_id))
-    ).scalars().one_or_none()
-    if not credential:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="credential_not_found")
-
-    existing = (
-        await session.execute(
-            select(ITLicenseCredential).where(
-                ITLicenseCredential.license_id == license_id,
-                ITLicenseCredential.credential_id == credential_id,
-            )
+        assignment = ITLicenseAssignment(
+            license_id=license_id,
+            asset_id=int(raw_asset_id) if (raw_asset_id := (row.get("asset_id") or "").strip()) else None,
+            assignee_person_id=(row.get("assignee_person_id") or "").strip() or None,
+            assignee_email=(row.get("assignee_email") or "").strip() or None,
+            assignee_name=(row.get("assignee_name") or "").strip() or None,
+            status=(row.get("status") or "ASSIGNED").strip(),
+            notes=(row.get("notes") or "").strip() or None,
+            assigned_at=datetime.utcnow(),
+            unassigned_at=_parse_date(row.get("unassigned_at")),
+            created_at=_parse_date(row.get("created_at")) or datetime.utcnow(),
         )
-    ).scalars().one_or_none()
-    if existing:
-        return {"linked": True}
+        session.add(assignment)
+        created += 1
 
-    session.add(ITLicenseCredential(license_id=license_id, credential_id=credential_id))
     await write_audit_log(
         session,
         actor=user,
-        action="IT_LICENSE_CREDENTIAL_LINK",
-        entity_type="it_license_credential",
-        entity_id=f"{license_id}:{credential_id}",
+        action="IT_LICENSE_ASSIGN_IMPORT",
+        entity_type="it_license_assignment",
+        entity_id="bulk",
         before=None,
-        after={"license_id": license_id, "credential_id": credential_id},
+        after={"created": created, "filename": upload.filename},
         context=get_request_context(request),
     )
     await session.commit()
-    return {"linked": True}
+    return {"created": created}
 
 
-@router.delete("/admin/licenses/{license_id}/credentials/{credential_id}", response_model=dict)
-async def unlink_license_credential(
-    license_id: int,
-    credential_id: int,
+@router.post("/admin/licenses/import", response_model=dict)
+async def import_licenses_csv(
     request: Request,
+    upload: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_admin()),
+    user: UserContext = Depends(require_it_lead()),
 ):
-    link = (
-        await session.execute(
-            select(ITLicenseCredential).where(
-                ITLicenseCredential.license_id == license_id,
-                ITLicenseCredential.credential_id == credential_id,
-            )
-        )
-    ).scalars().one_or_none()
-    if not link:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="credential_link_not_found")
+    def _parse_date(raw: str | None) -> datetime | None:
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.strip())
+        except Exception:
+            return None
 
-    await session.delete(link)
+    raw = await upload.read()
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    created = 0
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        vendor_name = (row.get("vendor") or "").strip() or None
+        vendor_id = None
+        if vendor_name:
+            existing = (await session.execute(select(ITVendor).where(ITVendor.name == vendor_name))).scalars().one_or_none()
+            if not existing:
+                existing = ITVendor(name=vendor_name, is_active=True, created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+                session.add(existing)
+                await session.flush()
+            vendor_id = existing.vendor_id
+
+        license_obj = ITLicense(
+            vendor_id=vendor_id,
+            name=name,
+            sku=(row.get("sku") or "").strip() or None,
+            license_type=(row.get("license_type") or "SUBSCRIPTION").strip(),
+            billing_cycle=(row.get("billing_cycle") or "ANNUAL").strip(),
+            total_seats=int((row.get("total_seats") or row.get("seats_total") or "1").strip() or 1),
+            contract_start=_parse_date(row.get("contract_start")),
+            contract_end=_parse_date(row.get("contract_end")),
+            renewal_date=_parse_date(row.get("renewal_date")),
+            registered_email=(row.get("registered_email") or "").strip() or None,
+            cost_currency=(row.get("cost_currency") or row.get("currency") or "INR").strip() or "INR",
+            cost_amount=int((row.get("cost_amount") or "0").strip() or 0) or None,
+            notes=(row.get("notes") or "").strip() or None,
+            is_active=True,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        session.add(license_obj)
+        created += 1
+
     await write_audit_log(
         session,
         actor=user,
-        action="IT_LICENSE_CREDENTIAL_UNLINK",
-        entity_type="it_license_credential",
-        entity_id=f"{license_id}:{credential_id}",
-        before={"license_id": license_id, "credential_id": credential_id},
-        after=None,
+        action="IT_LICENSE_IMPORT",
+        entity_type="it_license",
+        entity_id="bulk",
+        before=None,
+        after={"created": created, "filename": upload.filename},
         context=get_request_context(request),
     )
     await session.commit()
-    return {"linked": False}
-
-
-@router.get("/admin/licenses/{license_id}/credentials", response_model=list[CredentialOut])
-async def list_license_credentials(
-    license_id: int,
-    session: AsyncSession = Depends(get_session),
-    user: UserContext = Depends(require_admin()),
-):
-    result = await session.execute(
-        select(ITCredential)
-        .join(ITLicenseCredential, ITCredential.credential_id == ITLicenseCredential.credential_id)
-        .where(ITLicenseCredential.license_id == license_id)
-        .order_by(ITCredential.label.asc())
-    )
-    return result.scalars().all()
+    return {"created": created}

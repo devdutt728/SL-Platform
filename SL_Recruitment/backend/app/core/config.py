@@ -27,10 +27,15 @@ class Settings(BaseSettings):
     drive_sprint_assets_folder_id: str = ""
     enable_gmail: bool = False
     enable_calendar: bool = False
-    gmail_sender_email: str = ""
+    gmail_sender_email: str = "hr@studiolotus.in"
     gmail_sender_name: str = "SL Recruitment"
     calendar_id: str = "primary"
     calendar_timezone: str = "Asia/Kolkata"
+    public_app_origin: str = ""
+    public_app_base_path: str = "/recruitment"
+    public_link_ttl_hours: int = 168
+    public_link_signing_key: str = ""
+    public_link_skip_signature: bool = False
     caf_reminder_days: int = 3
     feedback_reminder_hours: int = 24
     feedback_escalation_hours: int = 48
