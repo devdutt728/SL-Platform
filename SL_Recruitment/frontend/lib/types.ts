@@ -335,3 +335,31 @@ export type JoiningDocsPublicContext = {
   required_doc_types: string[];
   docs: JoiningDocPublic[];
 };
+
+export type ReportColumn = {
+  key: string;
+  label: string;
+};
+
+export type ReportMeta = {
+  report_id: string;
+  label: string;
+  description: string;
+  columns: ReportColumn[];
+  default_columns: string[];
+  filters: {
+    date_field?: string | null;
+    opening_id?: boolean;
+    status?: boolean;
+    is_active?: boolean;
+  };
+};
+
+export type ReportPreview = {
+  report_id: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total: number;
+  limit: number;
+  offset: number;
+};

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import deps
 from app.core.auth import require_roles
 from app.core.roles import Role
+from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, validate_upload
 from app.models.candidate import RecCandidate
 from app.models.candidate_offer import RecCandidateOffer
 from app.models.joining_doc import RecCandidateJoiningDoc
@@ -51,12 +52,6 @@ def _normalize_doc_type(raw: str | None) -> str:
     return value
 
 
-def _clean_name(name: str | None) -> str:
-    if not name:
-        return "file"
-    return name.replace("/", "_").replace("\\", "_")
-
-
 async def _update_joining_docs_status(session: AsyncSession, *, candidate: RecCandidate) -> str:
     rows = (
         await session.execute(
@@ -90,6 +85,7 @@ async def _upload_joining_doc(
             detail="Drive folder missing; please retry later.",
         )
 
+    safe_name = validate_upload(upload, allowed_extensions=DOC_EXTENSIONS, allowed_mime_types=DOC_MIME_TYPES)
     data = await upload.read()
     max_bytes = 10 * 1024 * 1024
     if len(data) > max_bytes:
@@ -98,7 +94,7 @@ async def _upload_joining_doc(
             detail="File too large. Max allowed is 10MB.",
         )
 
-    filename = f"{candidate.candidate_code}-joining-{doc_type}-{_clean_name(upload.filename)}"
+    filename = f"{candidate.candidate_code}-joining-{doc_type}-{safe_name}"
     try:
         file_id, file_url = await anyio.to_thread.run_sync(
             lambda: upload_joining_doc(
@@ -128,7 +124,7 @@ async def _upload_joining_doc(
         doc_type=doc_type,
         file_id=file_id,
         file_url=file_url,
-        file_name=upload.filename or filename,
+        file_name=safe_name,
         content_type=upload.content_type,
         uploaded_by=uploaded_by,
         uploaded_by_person_id_platform=uploaded_by_person_id_platform,

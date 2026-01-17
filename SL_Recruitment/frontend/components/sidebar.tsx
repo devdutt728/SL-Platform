@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-import { Home, Users, Briefcase, LayoutDashboard, CalendarClock, FileSignature, FolderOpen } from "lucide-react";
+import { Home, Users, Briefcase, LayoutDashboard, CalendarClock, FileSignature, FolderOpen, BarChart3 } from "lucide-react";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -12,6 +12,7 @@ const navItems = [
   { href: "/sprint-templates", label: "Sprint Templates", icon: FolderOpen },
   { href: "/interviewer", label: "Interviewer", icon: CalendarClock },
   { href: "/offers", label: "Offers", icon: FileSignature },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/", label: "Home", icon: Home },
 ];
 

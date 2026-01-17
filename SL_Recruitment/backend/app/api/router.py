@@ -10,6 +10,7 @@ from app.api.routes import openings
 from app.api.routes import offers
 from app.api.routes import platform_people
 from app.api.routes import public_apply
+from app.api.routes import reports
 from app.api.routes import sprints
 
 api_router = APIRouter()
@@ -26,5 +27,6 @@ api_router.include_router(interviews.router)
 api_router.include_router(interviews.public_router)
 api_router.include_router(joining_docs.router)
 api_router.include_router(joining_docs.public_router)
+api_router.include_router(reports.router)
 api_router.include_router(sprints.router)
 api_router.include_router(sprints.public_router)

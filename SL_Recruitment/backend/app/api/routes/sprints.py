@@ -18,6 +18,7 @@ from app.api import deps
 from app.api.routes.candidates import transition_stage
 from app.core.auth import require_roles
 from app.core.roles import Role
+from app.core.uploads import SPRINT_EXTENSIONS, SPRINT_MIME_TYPES, normalize_submission_url, validate_upload
 from app.models.candidate import RecCandidate
 from app.models.candidate_sprint_attachment import RecCandidateSprintAttachment
 from app.models.stage import RecCandidateStage
@@ -366,12 +367,13 @@ async def upload_sprint_template_attachment_route(
     if not template or not template.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint template not found")
 
+    safe_name = validate_upload(upload, allowed_extensions=SPRINT_EXTENSIONS, allowed_mime_types=SPRINT_MIME_TYPES)
     data = await upload.read()
     if len(data) > MAX_SPRINT_ATTACHMENT_BYTES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Attachment too large (max 25MB).")
 
     sha256 = hashlib.sha256(data).hexdigest()
-    file_name = upload.filename or "attachment"
+    file_name = safe_name
     drive_file_id, _ = await anyio.to_thread.run_sync(
         lambda: upload_sprint_template_attachment(
             sprint_template_id,
@@ -729,18 +731,23 @@ async def submit_public_sprint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid sprint token")
     sprint, template, candidate, opening = row
 
-    cleaned_url = (submission_url or "").strip() or None
+    cleaned_url = normalize_submission_url(submission_url)
     if submission_file is None and not cleaned_url:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide a file or a submission link")
 
     uploaded_url = None
     if submission_file is not None:
+        safe_name = validate_upload(
+            submission_file,
+            allowed_extensions=SPRINT_EXTENSIONS,
+            allowed_mime_types=SPRINT_MIME_TYPES,
+        )
         data = await submission_file.read()
         if len(data) > 15 * 1024 * 1024:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sprint file too large (max 15MB).")
         if not candidate.drive_folder_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Candidate drive folder missing")
-        filename = f"{candidate.candidate_code or candidate.candidate_id}-sprint-{submission_file.filename}"
+        filename = f"{candidate.candidate_code or candidate.candidate_id}-sprint-{safe_name}"
         _, uploaded_url = await anyio.to_thread.run_sync(
             lambda: upload_sprint_doc(
                 candidate.drive_folder_id,

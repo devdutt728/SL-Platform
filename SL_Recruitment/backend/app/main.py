@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 
 from app.api.router import api_router
+from app.api.routes import reports
 from app.core.config import settings
 from app.jobs.scheduler import start_scheduler
 from app.middleware.logging import RequestLoggingMiddleware
@@ -28,6 +29,7 @@ async def health_check():
 
 
 app.include_router(api_router)
+app.include_router(reports.router)
 
 
 @app.on_event("startup")

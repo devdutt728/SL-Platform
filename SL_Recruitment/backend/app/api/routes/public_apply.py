@@ -23,6 +23,7 @@ from app.services.events import log_event
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
 from app.schemas.screening import ScreeningUpsertIn
+from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, SPRINT_EXTENSIONS, SPRINT_MIME_TYPES, validate_upload
 
 router = APIRouter(prefix="/apply", tags=["apply"])
 
@@ -587,12 +588,15 @@ async def apply_for_opening(
             detail="Unable to create candidate folder in Drive. Please retry later.",
         )
 
-    def _clean_name(name: str | None) -> str:
-        if not name:
-            return "file"
-        return name.replace("/", "_").replace("\\", "_")
-
-    async def _upload(kind: str, upload: UploadFile, max_bytes: int) -> str | None:
+    async def _upload(
+        kind: str,
+        upload: UploadFile,
+        max_bytes: int,
+        *,
+        allowed_extensions: set[str],
+        allowed_mime_types: set[str],
+    ) -> str | None:
+        safe_name = validate_upload(upload, allowed_extensions=allowed_extensions, allowed_mime_types=allowed_mime_types)
         data = await upload.read()
         if len(data) > max_bytes:
             raise HTTPException(
@@ -606,7 +610,7 @@ async def apply_for_opening(
                 detail="Drive folder missing; please retry later.",
             )
 
-        filename = f"{candidate.candidate_code}-{kind}-{_clean_name(upload.filename)}"
+        filename = f"{candidate.candidate_code}-{kind}-{safe_name}"
         try:
             _, file_url = await anyio.to_thread.run_sync(
                 lambda: upload_application_doc(
@@ -652,9 +656,21 @@ async def apply_for_opening(
     cv_url: str | None = None
     portfolio_url: str | None = None
     if cv_file:
-        cv_url = await _upload("cv", cv_file, max_bytes=2 * 1024 * 1024)
+        cv_url = await _upload(
+            "cv",
+            cv_file,
+            max_bytes=2 * 1024 * 1024,
+            allowed_extensions=DOC_EXTENSIONS,
+            allowed_mime_types=DOC_MIME_TYPES,
+        )
     if portfolio_file:
-        portfolio_url = await _upload("portfolio", portfolio_file, max_bytes=10 * 1024 * 1024)
+        portfolio_url = await _upload(
+            "portfolio",
+            portfolio_file,
+            max_bytes=10 * 1024 * 1024,
+            allowed_extensions=SPRINT_EXTENSIONS,
+            allowed_mime_types=SPRINT_MIME_TYPES,
+        )
 
     if cv_url:
         candidate.cv_url = cv_url
