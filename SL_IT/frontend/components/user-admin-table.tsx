@@ -49,7 +49,7 @@ export function UserAdminTable() {
   const [loading, setLoading] = useState(true);
   const [confirm, setConfirm] = useState<{
     userId: string;
-    roleId?: number;
+    roleIds?: number[];
     status?: string;
   } | null>(null);
 
@@ -74,7 +74,7 @@ export function UserAdminTable() {
     email: "",
     first_name: "",
     last_name: "",
-    role_id: "",
+    role_ids: [] as string[],
     status: "Working",
   });
 
@@ -105,7 +105,7 @@ export function UserAdminTable() {
     return () => clearTimeout(handle);
   }, [search]);
 
-  const requestChange = (userId: string, updates: { roleId?: number; status?: string }) => {
+  const requestChange = (userId: string, updates: { roleIds?: number[]; status?: string }) => {
     setConfirm({ userId, ...updates });
   };
 
@@ -113,7 +113,7 @@ export function UserAdminTable() {
     if (!confirm) return;
     await apiFetch(`/admin/users/${confirm.userId}`, {
       method: "PATCH",
-      body: JSON.stringify({ role_id: confirm.roleId, status: confirm.status }),
+      body: JSON.stringify({ role_ids: confirm.roleIds, status: confirm.status }),
     });
     setConfirm(null);
     loadUsers(search.trim() || undefined);
@@ -130,13 +130,15 @@ export function UserAdminTable() {
   const roleOptions = useMemo(() => {
     const options = [...roles];
     users.forEach((user) => {
-      if (user.role_id && !options.some((role) => role.role_id === user.role_id)) {
-        options.push({
-          role_id: user.role_id,
-          role_code: user.role_code || undefined,
-          role_name: user.role_name || undefined,
-        });
-      }
+      (user.role_ids || (user.role_id ? [user.role_id] : [])).forEach((roleId) => {
+        if (roleId && !options.some((role) => role.role_id === roleId)) {
+          options.push({
+            role_id: roleId,
+            role_code: undefined,
+            role_name: undefined,
+          });
+        }
+      });
     });
     return options;
   }, [roles, users]);
@@ -145,11 +147,18 @@ export function UserAdminTable() {
     const term = search.trim().toLowerCase();
     return users.filter((user) => {
       if (term) {
-        const haystack = `${user.full_name || ""} ${user.email || ""} ${user.role_name || ""} ${user.role_code || ""}`.toLowerCase();
+        const roleText = (user.role_names && user.role_names.length
+          ? user.role_names.join(" ")
+          : user.role_name || user.role_code || ""
+        ).toLowerCase();
+        const haystack = `${user.full_name || ""} ${user.email || ""} ${roleText}`.toLowerCase();
         if (!haystack.includes(term)) return false;
       }
       if (statusFilter !== "ALL" && (user.status || "") !== statusFilter) return false;
-      if (roleFilter !== "ALL" && String(user.role_id || "") !== roleFilter) return false;
+      if (roleFilter !== "ALL") {
+        const roleIds = user.role_ids && user.role_ids.length ? user.role_ids : user.role_id ? [user.role_id] : [];
+        if (!roleIds.some((roleId) => String(roleId) === roleFilter)) return false;
+      }
       if (activeOnly && !isActiveStatus(user.status)) return false;
       if (relievedOnly && !isRelievedStatus(user.status, user.is_deleted)) return false;
       if (activeOnly && relievedOnly) return false;
@@ -168,7 +177,9 @@ export function UserAdminTable() {
       user.person_id,
       user.full_name || "",
       user.email || "",
-      user.role_name || user.role_code || "",
+      user.role_names && user.role_names.length
+        ? user.role_names.join("; ")
+        : user.role_name || user.role_code || "",
       user.status || "",
     ]);
     const content = [
@@ -182,7 +193,7 @@ export function UserAdminTable() {
     downloadText(
       "user-directory-sample.csv",
       [
-        "person_id,person_code,email,first_name,last_name,role_id,status",
+        "person_id,person_code,email,first_name,last_name,role_ids,status",
         "EMP-001,SL-EMP-001,alex@studiolotus.in,Alex,Ray,2,Working",
       ].join("\n")
     );
@@ -226,11 +237,11 @@ export function UserAdminTable() {
       email: newUser.email.trim() || null,
       first_name: newUser.first_name.trim(),
       last_name: newUser.last_name.trim() || null,
-      role_id: newUser.role_id ? Number(newUser.role_id) : null,
+      role_ids: newUser.role_ids.length ? newUser.role_ids.map((value) => Number(value)) : [],
       status: newUser.status.trim() || null,
     };
-    if (!payload.person_id || !payload.person_code || !payload.first_name || !payload.role_id) {
-      setCreateError("Person ID, person code, first name, and role are required.");
+    if (!payload.person_id || !payload.person_code || !payload.first_name || payload.role_ids.length === 0) {
+      setCreateError("Person ID, person code, first name, and at least one role are required.");
       return;
     }
     setCreateBusy(true);
@@ -248,7 +259,7 @@ export function UserAdminTable() {
         email: "",
         first_name: "",
         last_name: "",
-        role_id: "",
+        role_ids: [],
         status: "Working",
       });
       loadUsers(search.trim() || undefined);
@@ -348,7 +359,7 @@ export function UserAdminTable() {
 
         <div className="mt-6 grid grid-cols-6 px-4 text-xs uppercase text-steel">
           <div className="col-span-2">User</div>
-          <div>Role</div>
+          <div>Roles</div>
           <div>Status</div>
           <div className="col-span-2">Actions</div>
         </div>
@@ -360,13 +371,16 @@ export function UserAdminTable() {
         {!loading && filteredUsers.map((user) => {
           const statusList = Array.from(new Set(["Working", "Active", "Inactive", "Relieved", user.status || ""])).filter(Boolean);
           const availableRoles = [...roleOptions];
-          if (user.role_id && !availableRoles.some((role) => role.role_id === user.role_id)) {
-            availableRoles.push({
-              role_id: user.role_id,
-              role_code: user.role_code || undefined,
-              role_name: user.role_name || undefined,
-            });
-          }
+          const selectedRoleIds = user.role_ids && user.role_ids.length ? user.role_ids : user.role_id ? [user.role_id] : [];
+          selectedRoleIds.forEach((roleId) => {
+            if (roleId && !availableRoles.some((role) => role.role_id === roleId)) {
+              availableRoles.push({
+                role_id: roleId,
+                role_code: user.role_code || undefined,
+                role_name: user.role_name || undefined,
+              });
+            }
+          });
           return (
             <div
               key={user.person_id}
@@ -378,13 +392,14 @@ export function UserAdminTable() {
               </div>
               <div>
                 <select
-                  className="rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
-                  value={user.role_id ?? ""}
-                  onChange={(event) => requestChange(user.person_id, { roleId: Number(event.target.value) })}
+                  multiple
+                  className="h-24 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
+                  value={selectedRoleIds.map((value) => String(value))}
+                  onChange={(event) => {
+                    const values = Array.from(event.target.selectedOptions).map((option) => Number(option.value));
+                    requestChange(user.person_id, { roleIds: values });
+                  }}
                 >
-                  <option value="" disabled>
-                    Select role
-                  </option>
                   {availableRoles.map((role) => (
                     <option key={role.role_id} value={role.role_id}>
                       {role.role_name || role.role_code || `Role ${role.role_id}`}
@@ -491,11 +506,16 @@ export function UserAdminTable() {
             onChange={(event) => setNewUser((prev) => ({ ...prev, last_name: event.target.value }))}
           />
           <select
-            className="rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
-            value={newUser.role_id}
-            onChange={(event) => setNewUser((prev) => ({ ...prev, role_id: event.target.value }))}
+            className="h-24 rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            multiple
+            value={newUser.role_ids}
+            onChange={(event) =>
+              setNewUser((prev) => ({
+                ...prev,
+                role_ids: Array.from(event.target.selectedOptions).map((option) => option.value),
+              }))
+            }
           >
-            <option value="">Select role</option>
             {roleOptions.map((role) => (
               <option key={role.role_id} value={role.role_id}>
                 {role.role_name || role.role_code || `Role ${role.role_id}`}

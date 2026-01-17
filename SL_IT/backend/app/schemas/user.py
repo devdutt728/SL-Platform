@@ -16,6 +16,8 @@ class UserContext(BaseModel):
     platform_role_id: Optional[int] = None
     platform_role_code: Optional[str] = None
     platform_role_name: Optional[str] = None
+    platform_role_ids: Optional[List[int]] = None
+    platform_role_codes: Optional[List[str]] = None
 
 
 class PlatformUserListItem(BaseModel):
@@ -25,6 +27,9 @@ class PlatformUserListItem(BaseModel):
     role_id: int | None
     role_code: str | None
     role_name: str | None
+    role_ids: list[int] | None = None
+    role_codes: list[str] | None = None
+    role_names: list[str] | None = None
     status: str | None
     is_deleted: int | None
 
@@ -37,6 +42,7 @@ class PlatformRoleOut(BaseModel):
 
 class PlatformUserUpdate(BaseModel):
     role_id: int | None = None
+    role_ids: list[int] | None = None
     status: str | None = None
 
 
@@ -47,4 +53,5 @@ class PlatformUserCreate(BaseModel):
     first_name: str
     last_name: str | None = None
     role_id: int | None = None
+    role_ids: list[int] | None = None
     status: str | None = None

@@ -155,6 +155,7 @@ export type Screening = {
   expected_ctc_annual?: number | null;
   salary_band_fit?: string | null;
   willing_to_relocate?: boolean | null;
+  two_year_commitment?: boolean | null;
   notice_period_days?: number | null;
   expected_joining_date?: string | null;
   gender_identity?: string | null;

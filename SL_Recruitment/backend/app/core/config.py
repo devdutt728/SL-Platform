@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     drive_sprint_assets_folder_id: str = ""
     enable_gmail: bool = False
     enable_calendar: bool = False
-    gmail_sender_email: str = ""
+    gmail_sender_email: str = "hr@studiolotus.in"
     gmail_sender_name: str = "SL Recruitment"
     calendar_id: str = "primary"
     calendar_timezone: str = "Asia/Kolkata"

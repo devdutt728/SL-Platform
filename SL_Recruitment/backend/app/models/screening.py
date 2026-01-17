@@ -20,6 +20,7 @@ class RecCandidateScreening(Base):
     salary_band_fit: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     willing_to_relocate: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    two_year_commitment: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     notice_period_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     expected_joining_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 

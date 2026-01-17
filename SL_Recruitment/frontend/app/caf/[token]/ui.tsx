@@ -25,6 +25,7 @@ export function CafForm({ token, prefill }: CafFormProps) {
       current_ctc_annual: numberOrNull(formData.get("current_ctc_annual")),
       expected_ctc_annual: numberOrNull(formData.get("expected_ctc_annual")),
       willing_to_relocate: boolOrNull(formData.get("willing_to_relocate")),
+      two_year_commitment: boolOrNull(formData.get("two_year_commitment")),
       notice_period_days: numberOrNull(formData.get("notice_period_days")),
       expected_joining_date: stringOrNull(formData.get("expected_joining_date")),
       reason_for_job_change: stringOrNull(formData.get("reason_for_job_change")),
@@ -148,6 +149,17 @@ export function CafForm({ token, prefill }: CafFormProps) {
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Willing to relocate?">
             <select name="willing_to_relocate" className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2">
+              <option value="">Select</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+            </select>
+          </Field>
+          <Field label="Commit to a 2-year tenure with our organisation?">
+            <select
+              name="two_year_commitment"
+              required
+              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+            >
               <option value="">Select</option>
               <option value="yes">Yes</option>
               <option value="no">No</option>

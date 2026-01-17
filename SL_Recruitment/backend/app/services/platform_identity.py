@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.platform_person import DimPerson
+from app.models.platform_person import DimPerson, DimPersonRole
 from app.models.platform_role import DimRole
 
 
@@ -18,8 +18,27 @@ class PlatformIdentity:
     role_id: int | None
     role_code: str | None
     role_name: str | None
+    role_ids: list[int]
+    role_codes: list[str]
+    role_names: list[str]
     status: str | None
     is_deleted: int | None
+
+
+def _pick_primary_role(role_ids: list[int]) -> int | None:
+    if not role_ids:
+        return None
+    if 2 in role_ids:
+        return 2
+    return sorted(role_ids)[0]
+
+
+def _role_row_value(row, key: str, index: int):
+    if hasattr(row, key):
+        return getattr(row, key)
+    if isinstance(row, (tuple, list)) and len(row) > index:
+        return row[index]
+    return None
 
 
 async def resolve_identity_by_email(session: AsyncSession, email: str) -> Optional[PlatformIdentity]:
@@ -49,6 +68,41 @@ async def resolve_identity_by_email(session: AsyncSession, email: str) -> Option
     if not row:
         return None
 
+    role_rows = (
+        await session.execute(
+            select(DimRole.role_id, DimRole.role_code, DimRole.role_name)
+            .select_from(DimPersonRole)
+            .join(DimRole, DimRole.role_id == DimPersonRole.role_id)
+            .where(DimPersonRole.person_id == row.person_id)
+            .order_by(DimRole.role_id.asc())
+        )
+    ).all()
+    if not role_rows and row.role_id is not None:
+        role_rows = [(row.role_id, row.role_code, row.role_name)]
+
+    role_ids = []
+    role_codes = []
+    role_names = []
+    for r in role_rows:
+        role_id = _role_row_value(r, "role_id", 0)
+        role_code = _role_row_value(r, "role_code", 1)
+        role_name = _role_row_value(r, "role_name", 2)
+        if role_id is not None:
+            role_ids.append(int(role_id))
+        if role_code:
+            role_codes.append(str(role_code))
+        if role_name:
+            role_names.append(str(role_name))
+    primary_role_id = _pick_primary_role(role_ids) or row.role_id
+    primary_role_code = None
+    primary_role_name = None
+    if primary_role_id is not None:
+        for r in role_rows:
+            if _role_row_value(r, "role_id", 0) == primary_role_id:
+                primary_role_code = _role_row_value(r, "role_code", 1)
+                primary_role_name = _role_row_value(r, "role_name", 2)
+                break
+
     first_name = row.first_name or ""
     last_name = row.last_name or ""
     full_name = (row.display_name or row.full_name or f"{first_name} {last_name}").strip() or email_norm
@@ -57,9 +111,12 @@ async def resolve_identity_by_email(session: AsyncSession, email: str) -> Option
         person_id=row.person_id,
         email=row.email,
         full_name=full_name,
-        role_id=row.role_id,
-        role_code=row.role_code,
-        role_name=row.role_name,
+        role_id=primary_role_id,
+        role_code=primary_role_code,
+        role_name=primary_role_name,
+        role_ids=role_ids,
+        role_codes=role_codes,
+        role_names=role_names,
         status=row.status,
         is_deleted=row.is_deleted,
     )

@@ -16,6 +16,9 @@ export type PlatformUser = {
   role_id?: number | null;
   role_code?: string | null;
   role_name?: string | null;
+  role_ids?: number[] | null;
+  role_codes?: string[] | null;
+  role_names?: string[] | null;
   status?: string | null;
   is_deleted?: number | null;
 };

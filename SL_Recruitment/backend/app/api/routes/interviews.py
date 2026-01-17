@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse
-from sqlalchemy import func, select, or_
+from sqlalchemy import delete, func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
@@ -392,6 +392,18 @@ def _assert_interviewer_access(user: UserContext, interview: RecCandidateIntervi
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
 
 
+def _active_interview_filter():
+    cancelled_values = ("cancelled", "canceled")
+    decision_normalized = func.lower(func.coalesce(RecCandidateInterview.decision, ""))
+    notes_normalized = func.lower(func.coalesce(RecCandidateInterview.notes_internal, ""))
+    cancelled_marker = or_(
+        decision_normalized.in_(cancelled_values),
+        notes_normalized.like("%cancelled%"),
+        notes_normalized.like("%canceled%"),
+    )
+    return ~cancelled_marker
+
+
 @router.post("/candidates/{candidate_id}/interviews", response_model=InterviewOut, status_code=status.HTTP_201_CREATED)
 async def create_interview(
     candidate_id: int,
@@ -407,21 +419,16 @@ async def create_interview(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
 
-    is_superadmin = _is_superadmin(user)
     existing_query = select(RecCandidateInterview).where(
         RecCandidateInterview.candidate_id == candidate_id,
         RecCandidateInterview.round_type == payload.round_type,
     )
-    if is_superadmin:
-        existing_query = existing_query.where(
-            or_(
-                RecCandidateInterview.decision.is_(None),
-                RecCandidateInterview.decision != "cancelled",
-            )
-        )
+    existing_query = existing_query.where(_active_interview_filter())
     existing = (await session.execute(existing_query)).scalars().first()
     if existing:
+        is_superadmin = _is_superadmin(user)
         detail = "Interview already scheduled. Only Superadmin can schedule again." if not is_superadmin else "Interview already scheduled."
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
@@ -505,6 +512,8 @@ async def create_interview(
     start_local = start_at.replace(tzinfo=timezone.utc).astimezone(IST)
     start_str = start_local.strftime("%d %b %Y, %I:%M %p %Z")
     meeting_link = interview.meeting_link or payload.meeting_link or ""
+    candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
+    interviewer_name = (interviewer_meta or {}).get("name") or (interviewer_email.split("@")[0] if interviewer_email else "there")
 
     await send_email(
         session,
@@ -530,10 +539,12 @@ async def create_interview(
             session,
             candidate_id=candidate_id,
             to_emails=[interviewer_email],
-            subject="Interview scheduled",
-            template_name="interview_scheduled",
+            subject=f"Interview scheduled for {(opening.title if opening else 'Role')} - {candidate.full_name}",
+            template_name="interview_scheduled_interviewer",
             context={
+                "interviewer_name": interviewer_name,
                 "candidate_name": candidate.full_name,
+                "candidate_code": candidate_code,
                 "round_type": payload.round_type,
                 "opening_title": opening.title if opening else "",
                 "scheduled_start": start_str,
@@ -579,20 +590,14 @@ async def propose_interview_slots(
     if not interviewer_email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Interviewer email is required")
 
-    is_superadmin = _is_superadmin(user)
     existing_query = select(RecCandidateInterview).where(
         RecCandidateInterview.candidate_id == candidate_id,
         RecCandidateInterview.round_type == payload.round_type,
     )
-    if is_superadmin:
-        existing_query = existing_query.where(
-            or_(
-                RecCandidateInterview.decision.is_(None),
-                RecCandidateInterview.decision != "cancelled",
-            )
-        )
+    existing_query = existing_query.where(_active_interview_filter())
     existing = (await session.execute(existing_query)).scalars().first()
     if existing:
+        is_superadmin = _is_superadmin(user)
         detail = "Interview already scheduled. Only Superadmin can schedule again." if not is_superadmin else "Interview already scheduled."
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
@@ -657,14 +662,16 @@ async def propose_interview_slots(
         for item in slot_links
     )
 
+    candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
     await send_email(
         session,
         candidate_id=candidate_id,
         to_emails=[candidate.email],
-        subject="Select your interview slot",
+        subject=f"Interview slot selection - {candidate.full_name} ({candidate_code})",
         template_name="interview_slot_options",
         context={
             "candidate_name": candidate.full_name,
+            "candidate_code": candidate_code,
             "round_type": payload.round_type,
             "opening_title": opening.title if opening else "",
             "slots_table": slot_rows,
@@ -820,6 +827,7 @@ async def preview_interview_slot_email(
         "interview_slot_options",
         {
             "candidate_name": candidate.full_name,
+            "candidate_code": candidate_code,
             "round_type": round_type,
             "opening_title": opening.title if opening else "",
             "slots_table": slot_rows,
@@ -990,10 +998,7 @@ async def select_interview_slot(
                 select(RecCandidateInterview).where(
                     RecCandidateInterview.candidate_id == slot.candidate_id,
                     RecCandidateInterview.round_type == slot.round_type,
-                    or_(
-                        RecCandidateInterview.decision.is_(None),
-                        RecCandidateInterview.decision != "cancelled",
-                    ),
+                    _active_interview_filter(),
                 )
             )
         )
@@ -1096,6 +1101,11 @@ async def select_interview_slot(
 
     start_str = _format_slot_label(slot.slot_start_at, tz)
     meeting_link = interview.meeting_link or ""
+    candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
+    interviewer_meta = (await _fetch_platform_people({slot.interviewer_person_id_platform or ""})).get(
+        _clean_platform_person_id(slot.interviewer_person_id_platform) or "", {}
+    )
+    interviewer_name = (interviewer_meta or {}).get("name") or (interviewer_email.split("@")[0] if interviewer_email else "there")
 
     await send_email(
         session,
@@ -1121,10 +1131,12 @@ async def select_interview_slot(
             session,
             candidate_id=slot.candidate_id,
             to_emails=[interviewer_email],
-            subject="Interview scheduled",
-            template_name="interview_scheduled",
+            subject=f"Interview scheduled for {(opening.title if opening else 'Role')} - {candidate.full_name}",
+            template_name="interview_scheduled_interviewer",
             context={
+                "interviewer_name": interviewer_name,
                 "candidate_name": candidate.full_name,
+                "candidate_code": candidate_code,
                 "round_type": slot.round_type,
                 "opening_title": opening.title if opening else "",
                 "scheduled_start": start_str,
@@ -1167,9 +1179,13 @@ async def cancel_interview(
             )
         except Exception:
             pass
-    interview.decision = "cancelled"
-    interview.notes_internal = (interview.notes_internal or "") + "\nCancelled by Superadmin."
-    interview.updated_at = datetime.utcnow()
+    await session.execute(
+        delete(RecCandidateInterviewSlot).where(
+            RecCandidateInterviewSlot.candidate_id == interview.candidate_id,
+            RecCandidateInterviewSlot.round_type == interview.round_type,
+        )
+    )
+    await session.delete(interview)
     await session.commit()
     return HTMLResponse("<h2>Interview cancelled</h2>", status_code=200)
 
@@ -1253,6 +1269,8 @@ async def reschedule_interview(
     tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
     start_str = _format_slot_label(start_at, tz)
     meeting_link = interview.meeting_link or ""
+    candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
+    interviewer_name = (interviewer_meta or {}).get("name") or (interviewer_email.split("@")[0] if interviewer_email else "there")
 
     if candidate and candidate.email:
         await send_email(
@@ -1278,10 +1296,12 @@ async def reschedule_interview(
             session,
             candidate_id=candidate.candidate_id if candidate else 0,
             to_emails=[interviewer_email],
-            subject="Interview rescheduled",
-            template_name="interview_scheduled",
+            subject=f"Interview rescheduled for {(opening.title if opening else 'Role')} - {candidate.full_name if candidate else 'Candidate'}",
+            template_name="interview_scheduled_interviewer",
             context={
+                "interviewer_name": interviewer_name,
                 "candidate_name": candidate.full_name if candidate else "Candidate",
+                "candidate_code": candidate_code,
                 "round_type": interview.round_type,
                 "opening_title": opening.title if opening else "",
                 "scheduled_start": start_str,

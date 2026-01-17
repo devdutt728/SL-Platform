@@ -14,6 +14,7 @@ class ScreeningUpsertIn(BaseModel):
     expected_ctc_annual: Optional[float] = None
 
     willing_to_relocate: Optional[bool] = None
+    two_year_commitment: Optional[bool] = None
     notice_period_days: Optional[int] = None
     expected_joining_date: Optional[date] = None
 
@@ -40,6 +41,7 @@ class ScreeningOut(BaseModel):
     salary_band_fit: Optional[str] = None
 
     willing_to_relocate: Optional[bool] = None
+    two_year_commitment: Optional[bool] = None
     notice_period_days: Optional[int] = None
     expected_joining_date: Optional[date] = None
 

@@ -263,16 +263,31 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
                 className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
               />
             </Field>
-            <Field dense label="Willing to Relocate Delhi?">
-              <select
-                name="willing_to_relocate"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
-              >
-                <option value="">Select</option>
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-                              </select>
-            </Field>
+            <div className="md:col-span-2">
+              <Field dense label="Willing to Relocate Delhi?">
+                <select
+                  name="willing_to_relocate"
+                  className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                >
+                  <option value="">Select</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </Field>
+            </div>
+            <div className="md:col-span-2">
+              <Field dense label="Commit to a 2-year tenure with our organisation?">
+                <select
+                  name="two_year_commitment"
+                  required
+                  className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                >
+                  <option value="">Select</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </Field>
+            </div>
             <Field dense label="Notice period (days)">
               <input
                 name="notice_period_days"

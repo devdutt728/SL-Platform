@@ -122,6 +122,10 @@ export default async function CandidateCafPage({ params }: { params: { id: strin
               {labelValue("Notice (days)", screening.notice_period_days != null ? String(screening.notice_period_days) : "-")}
               {labelValue("Expected CTC", screening.expected_ctc_annual != null ? String(screening.expected_ctc_annual) : "-")}
               {labelValue("Relocate", screening.willing_to_relocate == null ? "-" : screening.willing_to_relocate ? "Yes" : "No")}
+              {labelValue(
+                "2-year commitment",
+                screening.two_year_commitment == null ? "-" : screening.two_year_commitment ? "Yes" : "No"
+              )}
               {labelValue("Joining date", screening.expected_joining_date ? String(screening.expected_joining_date) : "-")}
               {labelValue("Job change", screening.reason_for_job_change ? String(screening.reason_for_job_change) : "-")}
             </div>

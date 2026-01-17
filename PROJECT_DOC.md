@@ -208,6 +208,53 @@ Purpose: End-to-end recruitment workflow (openings, candidates, CAF, interviews,
 - `app/core/roles.py`: Role definitions (e.g., `HR_ADMIN`, `HIRING_MANAGER`, `INTERVIEWER`, `VIEWER`, etc.).
 - `app/services/platform_identity`: Platform lookups used by candidate creation, interview scheduling, etc.
 
+#### Access matrix (backend guards)
+
+Superadmin is checked via `platform_role_id == 2` (not a Role enum).
+
+- **Openings**
+  - List/view/by-code: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`, `INTERVIEWER`, `VIEWER`
+  - Create: `HR_ADMIN`, `HR_EXEC`
+  - Request (inactive): `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`
+  - Update: `HR_ADMIN`, `HR_EXEC` (only Superadmin can edit fields or activate; HR can only deactivate)
+  - Delete: Superadmin only
+- **Candidates**
+  - Create: `HR_ADMIN`, `HR_EXEC`
+  - List/view/full/docs/screening read/events/stages/offers list: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`, `INTERVIEWER`, `VIEWER`
+  - Update + CAF link: `HR_ADMIN`, `HR_EXEC`
+  - Screening write (admin): Superadmin only
+  - Delete/Drive cleanup/Convert to employee: Superadmin only
+  - Stage transitions: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`, `INTERVIEWER` (skip requires Superadmin)
+- **Interviews**
+  - Schedule + propose slots: `HR_ADMIN`, `HR_EXEC`
+  - Slot preview + debug: `HR_ADMIN`, `HR_EXEC`
+  - Email previews: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`
+  - List/get: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`, `INTERVIEWER`, `VIEWER`
+  - Update feedback: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`, `INTERVIEWER` (interviewer access checks apply)
+  - Cancel/reschedule: Superadmin only
+- **Sprints**
+  - List templates/attachments: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`, `INTERVIEWER`, `VIEWER`
+  - Create/update template + delete template attachment: `HR_ADMIN`
+  - Upload template attachments: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`
+  - Assign sprint: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`
+  - List candidate sprints/get sprint: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`, `INTERVIEWER`, `VIEWER`
+  - List all sprints + update sprint: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`, `INTERVIEWER`
+- **Offers**
+  - List/get/preview/email-preview: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`, `INTERVIEWER`, `VIEWER`
+  - Create/update/send: `HR_ADMIN`, `HR_EXEC`
+  - Approve/reject: `HR_ADMIN`
+  - Delete offer: Superadmin only
+  - Admin decision (override): Superadmin only
+- **Joining docs**
+  - List: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`, `INTERVIEWER`, `VIEWER`
+  - Upload (internal): `HR_ADMIN`, `HR_EXEC`
+- **Dashboard/events**
+  - Metrics + events + stream: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`, `INTERVIEWER`, `VIEWER`
+- **Platform people search**
+  - Search: `HR_ADMIN`, `HR_EXEC`, `HIRING_MANAGER`
+- **Public/token endpoints**
+  - CAF, public apply, interview slot select, offer public view/decision, joining docs public upload: token-based, no role required.
+
 #### `app/api/routes` summary
 
 - `auth`: `/rec/auth/me` returns the signed-in user context; uses the same guard as the recruitment UI.

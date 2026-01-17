@@ -12,21 +12,31 @@ export async function GET(request: Request) {
   const origin = process.env.PUBLIC_APP_ORIGIN || getRequestOrigin(request.url);
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const nextPath = basePath ? `${basePath}/dashboard` : "/dashboard";
+  const errorPath = basePath ? `${basePath}/auth/error` : "/auth/error";
+  const redirectError = (code: string, status: number, detail?: string) => {
+    const errorUrl = new URL(errorPath, origin);
+    errorUrl.searchParams.set("code", code);
+    errorUrl.searchParams.set("status", String(status));
+    if (detail) errorUrl.searchParams.set("detail", detail.slice(0, 500));
+    return NextResponse.redirect(errorUrl);
+  };
   try {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     const error = url.searchParams.get("error");
 
-    if (error) return new NextResponse(`Google OAuth error: ${error}`, { status: 400 });
-    if (!code) return new NextResponse("Missing code", { status: 400 });
+    if (error) return redirectError("google_oauth_error", 400, error);
+    if (!code) return redirectError("missing_code", 400, "Missing OAuth code.");
 
     const expectedStateCookie = cookies().get("slr_oauth_state")?.value;
     const memory = state ? getOAuthState(state) : null;
     const stateOk = !!state && ((expectedStateCookie && expectedStateCookie === state) || !!memory);
-    if (!stateOk) return new NextResponse("Invalid state", { status: 400 });
+    if (!stateOk) return redirectError("invalid_state", 400, "Invalid OAuth state.");
 
     const { clientId, clientSecret, tokenUri, redirectUris } = readGoogleOAuthSecrets();
-    if (!clientId || !clientSecret) return new NextResponse("Missing Google OAuth client credentials", { status: 500 });
+    if (!clientId || !clientSecret) {
+      return redirectError("missing_google_oauth_client", 500, "Missing Google OAuth client credentials.");
+    }
 
     const defaultRedirectUri = `${origin}${basePath}/api/auth/callback/google`;
     const redirectUri =
@@ -51,30 +61,18 @@ export async function GET(request: Request) {
 
     const tokenText = await tokenRes.text();
     if (!tokenRes.ok) {
-      return NextResponse.json(
-        {
-          error: "token_exchange_failed",
-          status: tokenRes.status,
-          redirectUri,
-          tokenUri,
-          body: tokenText,
-        },
-        { status: 401 }
-      );
+      return redirectError("token_exchange_failed", tokenRes.status, tokenText);
     }
 
     let tokenJson: any = {};
     try {
       tokenJson = JSON.parse(tokenText);
     } catch {
-      return NextResponse.json(
-        { error: "token_exchange_invalid_json", redirectUri, tokenUri, body: tokenText },
-        { status: 401 }
-      );
+      return redirectError("token_exchange_invalid_json", 401, "Invalid token response.");
     }
 
     const idToken = tokenJson.id_token as string | undefined;
-    if (!idToken) return NextResponse.json({ error: "missing_id_token", tokenJson }, { status: 401 });
+    if (!idToken) return redirectError("missing_id_token", 401, "Missing id_token.");
 
     const meRes = await fetch(backendUrl("/auth/me"), {
       headers: { authorization: `Bearer ${idToken}` },
@@ -83,10 +81,16 @@ export async function GET(request: Request) {
 
     const meText = await meRes.text();
     if (!meRes.ok) {
-      return NextResponse.json(
-        { error: "backend_auth_failed", status: meRes.status, body: meText },
-        { status: 401 }
-      );
+      let detail = meText;
+      try {
+        const parsed = JSON.parse(meText);
+        if (parsed && typeof parsed.detail === "string") {
+          detail = parsed.detail;
+        }
+      } catch {
+        // keep raw detail
+      }
+      return redirectError("backend_auth_failed", meRes.status, detail);
     }
 
     const returnToOrigin = memory?.returnToOrigin || origin;
@@ -131,9 +135,6 @@ export async function GET(request: Request) {
     clearOAuthCookies(response);
     return response;
   } catch (e: any) {
-    return NextResponse.json(
-      { error: "callback_exception", message: e?.message || String(e), stack: e?.stack },
-      { status: 500 }
-    );
+    return redirectError("callback_exception", 500, e?.message || String(e));
   }
 }

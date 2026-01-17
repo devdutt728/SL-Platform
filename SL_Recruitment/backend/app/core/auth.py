@@ -53,7 +53,7 @@ async def get_current_user(request: Request) -> UserContext:
         if identity.status and identity.status.lower() != "working":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not active")
 
-        roles = _map_platform_role_to_app_roles(identity.role_id)
+        roles = _map_platform_roles_to_app_roles(identity.role_ids, identity.role_codes)
         if Role.VIEWER in roles and len(roles) == 1:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
         return UserContext(
@@ -65,6 +65,8 @@ async def get_current_user(request: Request) -> UserContext:
             platform_role_id=identity.role_id,
             platform_role_code=identity.role_code,
             platform_role_name=identity.role_name,
+            platform_role_ids=identity.role_ids,
+            platform_role_codes=identity.role_codes,
         )
 
     if settings.auth_mode == "google":
@@ -142,14 +144,27 @@ def _verify_google_id_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
 
 
-def _map_platform_role_to_app_roles(role_id: int | None) -> list[Role]:
-    # As per your rule:
-    # - role_id=2 => Superadmin
-    # - role_id=5 => HR
-    if role_id == 2:
-        return [Role.HR_ADMIN]
-    if role_id == 5:
-        return [Role.HR_EXEC]
+def _map_platform_roles_to_app_roles(role_ids: list[int], role_codes: list[str]) -> list[Role]:
+    roles: set[Role] = set()
+
+    normalized_codes = {code.strip().lower() for code in role_codes if code}
+    if 2 in role_ids or "s_admin" in normalized_codes or "superadmin" in normalized_codes:
+        roles.add(Role.HR_ADMIN)
+    if 5 in role_ids or "hr" in normalized_codes or "hr_exec" in normalized_codes:
+        roles.add(Role.HR_EXEC)
+    if "hr_admin" in normalized_codes:
+        roles.add(Role.HR_ADMIN)
+    if "hiring_manager" in normalized_codes:
+        roles.add(Role.HIRING_MANAGER)
+    if "interviewer" in normalized_codes:
+        roles.add(Role.INTERVIEWER)
+    if "approver" in normalized_codes:
+        roles.add(Role.APPROVER)
+    if "viewer" in normalized_codes or "employee" in normalized_codes or "user" in normalized_codes:
+        roles.add(Role.VIEWER)
+
+    if roles:
+        return sorted(roles, key=lambda r: r.value)
     return [Role.VIEWER]
 
 

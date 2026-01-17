@@ -227,6 +227,21 @@ function joiningDocLabel(value: string) {
   return joiningDocOptions.find((doc) => doc.value === value)?.label || value.replace(/_/g, " ");
 }
 
+async function readError(res: Response) {
+  const raw = await res.text();
+  if (!raw) return `Request failed (${res.status})`;
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown; message?: unknown };
+    if (parsed && typeof parsed === "object") {
+      if (typeof parsed.detail === "string") return parsed.detail;
+      if (typeof parsed.message === "string") return parsed.message;
+    }
+  } catch {
+    // Fall back to raw text.
+  }
+  return raw;
+}
+
 async function fetchInterviews(candidateId: string) {
   const res = await fetch(`/api/rec/interviews?candidate_id=${encodeURIComponent(candidateId)}`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
@@ -353,7 +368,7 @@ async function createInterview(candidateId: string, payload: Record<string, unkn
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await readError(res));
   return (await res.json()) as Interview;
 }
 
