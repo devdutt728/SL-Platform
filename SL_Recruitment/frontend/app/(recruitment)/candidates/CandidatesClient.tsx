@@ -138,7 +138,7 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
   const [initialized, setInitialized] = useState(false);
 
   const tableGrid =
-    "grid grid-cols-[minmax(220px,2.6fr)_minmax(220px,2.6fr)_minmax(160px,1.5fr)_minmax(220px,2fr)_minmax(70px,0.7fr)_minmax(120px,1fr)]";
+    "grid grid-cols-[minmax(200px,2.4fr)_minmax(140px,1.2fr)_minmax(170px,1.5fr)_minmax(200px,1.9fr)_minmax(80px,0.7fr)_minmax(80px,0.7fr)_minmax(95px,0.8fr)]";
 
   const [selectedStages, setSelectedStages] = useState<string[]>([]);
   const [openingId, setOpeningId] = useState("");
@@ -423,7 +423,7 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
       <div className="overflow-x-auto overflow-y-hidden rounded-2xl border border-slate-200 bg-white/60">
         <div
           className={clsx(
-            "min-w-[1040px] gap-2 border-b border-slate-200 px-3 py-2 text-xs uppercase tracking-wide text-slate-500",
+            "gap-2 border-b border-slate-200 px-3 py-2 text-xs uppercase tracking-wide text-slate-500",
             tableGrid
           )}
         >
@@ -431,7 +431,8 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
           <span>Opening</span>
           <span>Stage</span>
           <span>CAF / Screening</span>
-          <span className="text-center">Age</span>
+          <span className="text-center">Applied age</span>
+          <span className="text-center">Stage age</span>
           <span>Status</span>
         </div>
 
@@ -456,12 +457,24 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
                 isLow ||
                 cafPendingTooLong;
 
+            const appliedAgeRaw = Number.isFinite(c.applied_ageing_days) ? c.applied_ageing_days : 0;
+            const appliedAge =
+              appliedAgeRaw > 0
+                ? appliedAgeRaw
+                : c.created_at
+                  ? Math.max(
+                      0,
+                      Math.floor(
+                        (new Date().getTime() - new Date(c.created_at).getTime()) / (24 * 60 * 60 * 1000)
+                      )
+                    )
+                  : 0;
             return (
               <Link
                 key={c.candidate_id}
                 href={`/candidates/${c.candidate_id}`}
                 className={clsx(
-                  "min-w-[1040px] gap-2 px-3 py-3 transition hover:bg-white/70",
+                  "gap-2 px-3 py-3 transition hover:bg-white/70",
                   tableGrid,
                   isHighAge || isHigh ? "bg-rose-500/10" : attention ? "bg-amber-500/5" : ""
                 )}
@@ -471,12 +484,12 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
                   <p className="text-xs text-slate-600">{c.candidate_code}</p>
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-800">{c.opening_title || "—"}</p>
+                  <p className="truncate text-sm font-medium text-slate-800">{c.opening_title || "-"}</p>
                   <p className="text-xs text-slate-600">{c.opening_id ? `ID: ${c.opening_id}` : ""}</p>
                 </div>
                 <div className="min-w-0">
                   <span className={clsx("inline-flex rounded-full px-2 py-1 text-xs font-semibold", stageClass)}>
-                    {stageLabel(c.current_stage) || "—"}
+                    {stageLabel(c.current_stage) || "-"}
                   </span>
                 </div>
                 <div className="flex flex-nowrap items-center gap-2 whitespace-nowrap">
@@ -488,6 +501,7 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
                     </span>
                   ) : null}
                 </div>
+                <div className="whitespace-nowrap text-center text-sm text-slate-800">{appliedAge}d</div>
                 <div className="whitespace-nowrap text-center text-sm text-slate-800">{c.ageing_days}d</div>
                 <div className="whitespace-nowrap">
                   <span className={clsx("rounded-full px-2 py-1 text-xs font-semibold", chipTone(c.status === "rejected" || c.status === "declined" ? "red" : c.status === "hired" ? "green" : "neutral"))}>

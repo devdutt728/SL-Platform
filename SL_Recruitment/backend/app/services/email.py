@@ -80,6 +80,10 @@ def _with_signature(html: str) -> str:
   </div>
 </div>
 """.strip()
+    lower = html.lower()
+    if "</body>" in lower:
+        idx = lower.rfind("</body>")
+        return f"{html[:idx]}\n{signature_html}\n{html[idx:]}"
     return f"{html}\n{signature_html}"
 
 

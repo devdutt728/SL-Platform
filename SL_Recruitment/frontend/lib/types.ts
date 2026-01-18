@@ -7,6 +7,8 @@ export type CandidateListItem = {
   current_stage?: string | null;
   status: string;
   ageing_days: number;
+  applied_ageing_days: number;
+  created_at?: string | null;
   caf_sent_at?: string | null;
   caf_submitted_at?: string | null;
   needs_hr_review?: boolean;

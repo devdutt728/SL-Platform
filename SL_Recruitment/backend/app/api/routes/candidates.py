@@ -303,6 +303,7 @@ async def list_candidates(
             RecCandidate.full_name,
             RecCandidate.status,
             RecCandidate.opening_id.label("opening_id"),
+            RecCandidate.created_at.label("created_at"),
             RecCandidate.caf_sent_at.label("caf_sent_at"),
             RecCandidate.caf_submitted_at.label("caf_submitted_at"),
             RecCandidate.needs_hr_review.label("needs_hr_review"),
@@ -310,6 +311,7 @@ async def list_candidates(
             RecCandidateScreening.screening_result.label("screening_result"),
             current_stage_subq.c.stage_name.label("current_stage"),
             func.coalesce(func.datediff(func.curdate(), current_stage_subq.c.started_at), 0).label("ageing_days"),
+            func.coalesce(func.datediff(func.curdate(), RecCandidate.created_at), 0).label("applied_ageing_days"),
         )
         .select_from(RecCandidate)
         .outerjoin(RecOpening, RecOpening.opening_id == RecCandidate.opening_id)
@@ -346,6 +348,8 @@ async def list_candidates(
             current_stage=row.current_stage,
             status=row.status,
             ageing_days=int(row.ageing_days or 0),
+            applied_ageing_days=int(row.applied_ageing_days or 0),
+            created_at=row.created_at,
             caf_sent_at=row.caf_sent_at,
             caf_submitted_at=row.caf_submitted_at,
             needs_hr_review=bool(row.needs_hr_review),
