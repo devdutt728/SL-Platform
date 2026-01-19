@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.paths import resolve_repo_path
+
 
 class Settings(BaseSettings):
     app_name: str = "SL Recruitment"
@@ -44,7 +46,11 @@ class Settings(BaseSettings):
     offer_followup_days: int = 5
     stale_stage_days: int = 5
 
-    model_config = SettingsConfigDict(env_prefix="SL_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="SL_",
+        env_file=str(resolve_repo_path("backend/.env")),
+        extra="ignore",
+    )
 
 
 settings = Settings()

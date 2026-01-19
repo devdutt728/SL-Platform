@@ -44,6 +44,14 @@ router = APIRouter(prefix="/rec/offers", tags=["offers"])
 public_router = APIRouter(prefix="/offer", tags=["offers-public"])
 
 
+async def _ensure_public_token(session: AsyncSession, offer: RecCandidateOffer) -> None:
+    if offer.public_token:
+        return
+    offer.public_token = uuid4().hex
+    offer.updated_at = datetime.utcnow()
+    await session.flush()
+
+
 def _extract_drive_file_id(raw_url: str | None) -> str | None:
     if not raw_url:
         return None
@@ -122,8 +130,12 @@ async def list_offers(
         query = query.where(RecCandidateOffer.offer_status.in_(status_filter))
     rows = (await session.execute(query)).all()
     out: list[OfferOut] = []
+    updated = False
     for row in rows:
         offer = row[0]
+        if not offer.public_token:
+            await _ensure_public_token(session, offer)
+            updated = True
         out.append(
             OfferOut(
                 **_offer_base_payload(offer),
@@ -134,6 +146,8 @@ async def list_offers(
                 letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
             )
         )
+    if updated:
+        await session.commit()
     return out
 
 
@@ -160,6 +174,9 @@ async def get_offer(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
     offer = row[0]
+    if not offer.public_token:
+        await _ensure_public_token(session, offer)
+        await session.commit()
     return OfferOut(
         **_offer_base_payload(offer),
         candidate_name=row[1],
@@ -395,6 +412,13 @@ async def list_candidate_offers(
             .order_by(RecCandidateOffer.created_at.desc(), RecCandidateOffer.candidate_offer_id.desc())
         )
     ).scalars().all()
+    updated = False
+    for row in rows:
+        if not row.public_token:
+            await _ensure_public_token(session, row)
+            updated = True
+    if updated:
+        await session.commit()
     return [
         OfferOut(
             **_offer_base_payload(row),

@@ -1,27 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import { CalendarCheck2, ExternalLink, Loader2, UserRound } from "lucide-react";
-import { CandidateSprint, Interview } from "@/lib/types";
+import Link from "next/link";
+import { CandidateSprint, Interview, L2Assessment } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
 
 type Props = {
   initialUpcoming: Interview[];
-  initialPending: Interview[];
+  initialPast: Interview[];
   useMeFilter: boolean;
-};
-
-type FeedbackForm = {
-  rating_overall: string;
-  rating_technical: string;
-  rating_culture_fit: string;
-  rating_communication: string;
-  decision: string;
-  strengths: string;
-  concerns: string;
-  notes_internal: string;
 };
 
 type SprintReviewForm = {
@@ -30,8 +19,6 @@ type SprintReviewForm = {
   comments_internal: string;
   comments_for_candidate: string;
 };
-
-const ratingOptions = ["", "1", "2", "3", "4", "5"];
 
 function formatDateTime(raw?: string | null) {
   if (!raw) return "";
@@ -78,29 +65,6 @@ function stageLabel(raw?: string | null) {
   return key.replace(/_/g, " ");
 }
 
-function parseInternalNotes(raw?: string | null) {
-  const empty = { strengths: "", concerns: "" };
-  if (!raw) return { ...empty, other: "" };
-  const strengthMatch = raw.match(/Strengths:\\s*([\\s\\S]*?)(?:\\n\\nConcerns:|$)/i);
-  const concernsMatch = raw.match(/Concerns:\\s*([\\s\\S]*?)(?:\\n\\nNotes:|$)/i);
-  const notesMatch = raw.match(/Notes:\\s*([\\s\\S]*)/i);
-  const strengths = strengthMatch?.[1]?.trim() || "";
-  const concerns = concernsMatch?.[1]?.trim() || "";
-  const other = notesMatch?.[1]?.trim() || (strengths || concerns ? "" : raw.trim());
-  return { strengths, concerns, other };
-}
-
-function buildInternalNotes(form: FeedbackForm) {
-  const chunks = [
-    `Strengths:\\n${form.strengths || "-"}`,
-    `Concerns:\\n${form.concerns || "-"}`,
-  ];
-  if (form.notes_internal) {
-    chunks.push(`Notes:\\n${form.notes_internal}`);
-  }
-  return chunks.join("\\n\\n").trim();
-}
-
 async function fetchInterviews(params: Record<string, string>) {
   const url = new URL("/api/rec/interviews", window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
@@ -109,14 +73,11 @@ async function fetchInterviews(params: Record<string, string>) {
   return (await res.json()) as Interview[];
 }
 
-async function submitFeedback(interviewId: number, payload: Record<string, unknown>) {
-  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+async function fetchAssessment(interviewId: number) {
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/l2-assessment`, { cache: "no-store" });
+  if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
-  return (await res.json()) as Interview;
+  return (await res.json()) as L2Assessment;
 }
 
 async function fetchSprints(params: Record<string, string>) {
@@ -173,20 +134,13 @@ function InterviewCard({ interview, onSelect }: { interview: Interview; onSelect
   );
 }
 
-export function InterviewerClient({ initialUpcoming, initialPending, useMeFilter }: Props) {
+export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }: Props) {
   const [upcoming, setUpcoming] = useState<Interview[]>(initialUpcoming);
-  const [pending, setPending] = useState<Interview[]>(initialPending);
+  const [past, setPast] = useState<Interview[]>(initialPast);
   const [active, setActive] = useState<Interview | null>(null);
-  const [form, setForm] = useState<FeedbackForm>({
-    rating_overall: "",
-    rating_technical: "",
-    rating_culture_fit: "",
-    rating_communication: "",
-    decision: "",
-    strengths: "",
-    concerns: "",
-    notes_internal: "",
-  });
+  const [assessment, setAssessment] = useState<L2Assessment | null>(null);
+  const [assessmentBusy, setAssessmentBusy] = useState(false);
+  const [assessmentError, setAssessmentError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sprints, setSprints] = useState<CandidateSprint[]>([]);
@@ -206,20 +160,19 @@ export function InterviewerClient({ initialUpcoming, initialPending, useMeFilter
     return active.candidate_name || `Candidate ${active.candidate_id}`;
   }, [active]);
 
-  function openFeedback(interview: Interview) {
-    const parsed = parseInternalNotes(interview.notes_internal);
+  async function openAssessment(interview: Interview) {
     setActive(interview);
-    setForm({
-      rating_overall: interview.rating_overall ? String(interview.rating_overall) : "",
-      rating_technical: interview.rating_technical ? String(interview.rating_technical) : "",
-      rating_culture_fit: interview.rating_culture_fit ? String(interview.rating_culture_fit) : "",
-      rating_communication: interview.rating_communication ? String(interview.rating_communication) : "",
-      decision: interview.decision || "",
-      strengths: parsed.strengths,
-      concerns: parsed.concerns,
-      notes_internal: parsed.other,
-    });
-    setError(null);
+    setAssessment(null);
+    setAssessmentError(null);
+    setAssessmentBusy(true);
+    try {
+      const data = await fetchAssessment(interview.candidate_interview_id);
+      setAssessment(data);
+    } catch (e: any) {
+      setAssessmentError(e?.message || "Could not load GL assessment.");
+    } finally {
+      setAssessmentBusy(false);
+    }
   }
 
   async function refresh() {
@@ -228,10 +181,10 @@ export function InterviewerClient({ initialUpcoming, initialPending, useMeFilter
     try {
       const [nextUpcoming, nextPending] = await Promise.all([
         fetchInterviews({ ...(useMeFilter ? { interviewer: "me" } : {}), upcoming: "true" }),
-        fetchInterviews({ ...(useMeFilter ? { interviewer: "me" } : {}), pending_feedback: "true" }),
+        fetchInterviews({ ...(useMeFilter ? { interviewer: "me" } : {}), upcoming: "false" }),
       ]);
       setUpcoming(nextUpcoming);
-      setPending(nextPending);
+      setPast(nextPending);
     } catch (e: any) {
       setError(e?.message || "Could not refresh interviews.");
     } finally {
@@ -240,8 +193,7 @@ export function InterviewerClient({ initialUpcoming, initialPending, useMeFilter
   }
 
   const upcomingView = useMemo(() => upcoming.filter((item) => !isCancelled(item)), [upcoming]);
-  const pendingView = useMemo(() => pending.filter((item) => !isCancelled(item)), [pending]);
-  const pendingCount = pendingView.length;
+  const pastView = useMemo(() => past.filter((item) => !isCancelled(item)), [past]);
 
   async function refreshSprints() {
     setSprintsBusy(true);
@@ -326,28 +278,14 @@ export function InterviewerClient({ initialUpcoming, initialPending, useMeFilter
     };
   }, []);
 
-  async function handleSubmit() {
-    if (!active) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const payload: Record<string, unknown> = {
-        feedback_submitted: true,
-        decision: form.decision || undefined,
-        rating_overall: form.rating_overall ? Number(form.rating_overall) : undefined,
-        rating_technical: form.rating_technical ? Number(form.rating_technical) : undefined,
-        rating_culture_fit: form.rating_culture_fit ? Number(form.rating_culture_fit) : undefined,
-        rating_communication: form.rating_communication ? Number(form.rating_communication) : undefined,
-        notes_internal: buildInternalNotes(form),
-      };
-      await submitFeedback(active.candidate_interview_id, payload);
-      await refresh();
-      setActive(null);
-    } catch (e: any) {
-      setError(e?.message || "Feedback submission failed.");
-    } finally {
-      setBusy(false);
+  function assessmentValue(path: string[]) {
+    if (!assessment?.data || typeof assessment.data !== "object") return "";
+    let cursor: any = assessment.data;
+    for (const key of path) {
+      if (!cursor || typeof cursor !== "object") return "";
+      cursor = cursor[key];
     }
+    return cursor ? String(cursor) : "";
   }
 
   return (
@@ -374,35 +312,30 @@ export function InterviewerClient({ initialUpcoming, initialPending, useMeFilter
                 No interviews scheduled yet.
               </div>
             ) : (
-              upcomingView.map((slot) => <InterviewCard key={slot.candidate_interview_id} interview={slot} onSelect={openFeedback} />)
+              upcomingView.map((slot) => <InterviewCard key={slot.candidate_interview_id} interview={slot} onSelect={openAssessment} />)
             )}
           </div>
         </div>
 
-        <div className="section-card border-amber-400/50">
+        <div className="section-card border-slate-200">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold">Pending feedback</p>
-            <span className="rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-600">{pendingCount}</span>
+            <p className="text-sm font-semibold">Past interviews</p>
+            <span className="text-xs text-slate-600">Last interviews</span>
           </div>
           <div className="mt-3 space-y-2">
-            {pendingView.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-amber-200 bg-amber-500/5 p-4 text-sm text-amber-700">
-                All feedback is up to date.
+            {pastView.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white/30 p-4 text-sm text-slate-600">
+                No past interviews yet.
               </div>
             ) : (
-              pendingView.map((item) => (
+              pastView.map((item) => (
                 <button
                   key={item.candidate_interview_id}
                   type="button"
                   className="w-full rounded-2xl border border-white/60 bg-white/40 px-3 py-2 text-left hover:bg-white/70"
-                  onClick={() => openFeedback(item)}
+                  onClick={() => void openAssessment(item)}
                 >
                   <div className="flex items-center gap-2">
-                    {stageLabel(item.stage_name) ? (
-                      <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("amber"))}>
-                        {stageLabel(item.stage_name)}
-                      </span>
-                    ) : null}
                     <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
                     <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
                   </div>
@@ -462,7 +395,7 @@ export function InterviewerClient({ initialUpcoming, initialPending, useMeFilter
           <div className="w-full max-w-2xl rounded-3xl border border-white/20 bg-white/95 p-5 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-tight text-slate-500">Feedback</p>
+                <p className="text-xs uppercase tracking-tight text-slate-500">GL feedback</p>
                 <h2 className="text-xl font-semibold">{activeCandidateLabel}</h2>
                 <p className="text-xs text-slate-600">
                   {active.round_type} - {formatDateTime(active.scheduled_start_at)} - {active.location || "Location TBD"}
@@ -477,128 +410,70 @@ export function InterviewerClient({ initialUpcoming, initialPending, useMeFilter
               </button>
             </div>
 
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <label className="space-y-1 text-xs text-slate-600">
-                Overall rating
-                <select
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                  value={form.rating_overall}
-                  onChange={(e) => setForm((prev) => ({ ...prev, rating_overall: e.target.value }))}
-                >
-                  {ratingOptions.map((opt) => (
-                    <option key={opt} value={opt}>{opt || "Select"}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="space-y-1 text-xs text-slate-600">
-                Technical rating
-                <select
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                  value={form.rating_technical}
-                  onChange={(e) => setForm((prev) => ({ ...prev, rating_technical: e.target.value }))}
-                >
-                  {ratingOptions.map((opt) => (
-                    <option key={opt} value={opt}>{opt || "Select"}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="space-y-1 text-xs text-slate-600">
-                Culture fit rating
-                <select
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                  value={form.rating_culture_fit}
-                  onChange={(e) => setForm((prev) => ({ ...prev, rating_culture_fit: e.target.value }))}
-                >
-                  {ratingOptions.map((opt) => (
-                    <option key={opt} value={opt}>{opt || "Select"}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="space-y-1 text-xs text-slate-600">
-                Communication rating
-                <select
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                  value={form.rating_communication}
-                  onChange={(e) => setForm((prev) => ({ ...prev, rating_communication: e.target.value }))}
-                >
-                  {ratingOptions.map((opt) => (
-                    <option key={opt} value={opt}>{opt || "Select"}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="mt-4">
-              <p className="text-xs uppercase tracking-tight text-slate-500">Decision</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {[
-                  { value: "advance", label: "Advance" },
-                  { value: "reject", label: "Reject" },
-                  { value: "keep_warm", label: "Keep warm" },
-                ].map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={clsx(
-                      "rounded-full px-4 py-2 text-xs font-semibold",
-                      form.decision === option.value ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"
-                    )}
-                    onClick={() => setForm((prev) => ({ ...prev, decision: option.value }))}
-                  >
-                    {option.label}
-                  </button>
-                ))}
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs text-slate-500">
+                Assessment status: {assessment?.status || "Not started"}
               </div>
+              {assessment ? (
+                <a
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                  href={`/api/rec/interviews/${encodeURIComponent(String(active.candidate_interview_id))}/l2-assessment/pdf`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Download PDF
+                </a>
+              ) : null}
             </div>
 
-            <div className="mt-4 grid gap-3">
-              <label className="space-y-1 text-xs text-slate-600">
-                Strengths
-                <textarea
-                  className="h-20 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                  value={form.strengths}
-                  onChange={(e) => setForm((prev) => ({ ...prev, strengths: e.target.value }))}
-                />
-              </label>
-              <label className="space-y-1 text-xs text-slate-600">
-                Concerns
-                <textarea
-                  className="h-20 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                  value={form.concerns}
-                  onChange={(e) => setForm((prev) => ({ ...prev, concerns: e.target.value }))}
-                />
-              </label>
-              <label className="space-y-1 text-xs text-slate-600">
-                Notes
-                <textarea
-                  className="h-20 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                  value={form.notes_internal}
-                  onChange={(e) => setForm((prev) => ({ ...prev, notes_internal: e.target.value }))}
-                />
-              </label>
-            </div>
+            {assessmentBusy ? (
+              <div className="mt-4 text-sm text-slate-600">Loading GL assessment...</div>
+            ) : assessmentError ? (
+              <div className="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">
+                {assessmentError}
+              </div>
+            ) : !assessment ? (
+              <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white/60 p-4 text-sm text-slate-600">
+                No GL assessment has been submitted yet.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4 text-sm text-slate-700">
+                <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
+                  <p className="text-xs uppercase tracking-tight text-slate-500">HR screening (Pre L2)</p>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <div><span className="text-xs text-slate-500">Candidate Name</span><p className="font-semibold">{assessmentValue(["pre_interview", "candidate_name"]) || "-"}</p></div>
+                    <div><span className="text-xs text-slate-500">Team Lead</span><p className="font-semibold">{assessmentValue(["pre_interview", "team_lead"]) || "-"}</p></div>
+                    <div><span className="text-xs text-slate-500">Preferred DOJ</span><p className="font-semibold">{assessmentValue(["pre_interview", "preferred_joining_date"]) || "-"}</p></div>
+                    <div><span className="text-xs text-slate-500">2-year commitment</span><p className="font-semibold">{assessmentValue(["pre_interview", "two_year_commitment"]) || "-"}</p></div>
+                    <div><span className="text-xs text-slate-500">On-site / Timings</span><p className="font-semibold">{assessmentValue(["pre_interview", "on_site_timings"]) || "-"}</p></div>
+                    <div><span className="text-xs text-slate-500">Relocation support</span><p className="font-semibold">{assessmentValue(["pre_interview", "family_support"]) || "-"}</p></div>
+                    <div className="md:col-span-2"><span className="text-xs text-slate-500">Other questions</span><p className="font-semibold">{assessmentValue(["pre_interview", "other_questions"]) || "-"}</p></div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
+                  <p className="text-xs uppercase tracking-tight text-slate-500">Section 7 summary</p>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <div><span className="text-xs text-slate-500">Open to feedback</span><p className="font-semibold">{assessmentValue(["section7", "assess_open_feedback"]) || "-"}</p></div>
+                    <div><span className="text-xs text-slate-500">Coachable</span><p className="font-semibold">{assessmentValue(["section7", "assess_coachable"]) || "-"}</p></div>
+                    <div><span className="text-xs text-slate-500">Good to hire</span><p className="font-semibold">{assessmentValue(["section7", "assess_good_to_hire"]) || "-"}</p></div>
+                    <div className="md:col-span-2"><span className="text-xs text-slate-500">L1 focus notes</span><p className="font-semibold">{assessmentValue(["section7", "l1_focus_notes"]) || "-"}</p></div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-xs text-slate-500">
                 <UserRound className="h-3.5 w-3.5" />
                 {active.interviewer_name || "You"}
               </div>
-              <div className="flex gap-2">
-                <Link
-                  href={`/candidates/${encodeURIComponent(String(active.candidate_id))}`}
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
-                >
-                  View candidate
-                </Link>
-                <button
-                  type="button"
-                  className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
-                  onClick={() => void handleSubmit()}
-                  disabled={busy}
-                >
-                  {busy ? "Saving..." : "Submit feedback"}
-                </button>
-              </div>
+              <Link
+                href={`/candidates/${encodeURIComponent(String(active.candidate_id))}`}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
+              >
+                View candidate
+              </Link>
             </div>
           </div>
         </div>

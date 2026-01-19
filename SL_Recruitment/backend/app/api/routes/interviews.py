@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from fastapi.responses import HTMLResponse
 from sqlalchemy import delete, func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from app.api import deps
 from app.api.routes.candidates import transition_stage
@@ -16,6 +17,7 @@ from app.core.roles import Role
 from app.core.paths import resolve_repo_path
 from app.db.platform_session import PlatformSessionLocal
 from app.models.candidate import RecCandidate
+from app.models.event import RecCandidateEvent
 from app.models.interview import RecCandidateInterview
 from app.models.interview_slot import RecCandidateInterviewSlot
 from app.models.opening import RecOpening
@@ -81,6 +83,15 @@ def _round_to_transition(round_type: str, decision: str) -> str | None:
     if "l1" in round_norm:
         return "l1_feedback"
     return None
+
+
+def _round_to_feedback_stage(round_type: str) -> str:
+    round_norm = _normalize_round(round_type)
+    if "l2" in round_norm:
+        return "l2_feedback"
+    if "l1" in round_norm:
+        return "l1_feedback"
+    return "l2_feedback"
 
 
 def _is_superadmin(user: UserContext) -> bool:
@@ -403,6 +414,10 @@ def _active_interview_filter():
         notes_normalized.like("%canceled%"),
     )
     return ~cancelled_marker
+
+
+class InterviewStatusPayload(BaseModel):
+    status: str
 
 
 @router.post("/candidates/{candidate_id}/interviews", response_model=InterviewOut, status_code=status.HTTP_201_CREATED)
@@ -1484,3 +1499,69 @@ async def update_interview(
         _clean_platform_person_id(interview.interviewer_person_id_platform) or "", {}
     )
     return _build_interview_out(interview, candidate=candidate, opening=opening, interviewer_meta=interviewer_meta)
+
+
+@router.post("/interviews/{candidate_interview_id}/status")
+async def mark_interview_status(
+    candidate_interview_id: int,
+    payload: InterviewStatusPayload,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD])),
+):
+    interview = await session.get(RecCandidateInterview, candidate_interview_id)
+    if not interview:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
+    _assert_interviewer_access(user, interview)
+
+    status_value = (payload.status or "").strip().lower()
+    if status_value not in {"taken", "not_taken"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Status must be 'taken' or 'not_taken'")
+
+    already_marked = (
+        await session.execute(
+            select(func.count())
+            .select_from(RecCandidateEvent)
+            .where(
+                RecCandidateEvent.candidate_id == interview.candidate_id,
+                RecCandidateEvent.action_type == "interview_status_marked",
+                RecCandidateEvent.related_entity_type == "interview",
+                RecCandidateEvent.related_entity_id == candidate_interview_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if already_marked and not _is_superadmin(user):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview status already set")
+
+    await log_event(
+        session,
+        candidate_id=interview.candidate_id,
+        action_type="interview_status_marked",
+        performed_by_person_id_platform=_platform_person_id_int(user),
+        related_entity_type="interview",
+        related_entity_id=candidate_interview_id,
+        meta_json={
+            "status": status_value,
+            "round_type": interview.round_type,
+            "performed_by_email": user.email,
+        },
+    )
+
+    if status_value == "taken":
+        to_stage = _round_to_feedback_stage(interview.round_type or "")
+        candidate = await session.get(RecCandidate, interview.candidate_id)
+        if not candidate:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+        current_stage = await _get_current_stage_name(session, candidate_id=interview.candidate_id)
+        if current_stage != to_stage:
+            await transition_stage(
+                interview.candidate_id,
+                StageTransitionRequest(to_stage=to_stage, decision="taken", note="interview_taken"),
+                session,
+                user,
+            )
+        else:
+            await session.commit()
+    else:
+        await session.commit()
+
+    return {"candidate_interview_id": candidate_interview_id, "status": status_value}

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
 import { CalendarCheck2, FileDown, Loader2, UserRound } from "lucide-react";
-import type { CandidateDetail, Interview, L2Assessment } from "@/lib/types";
+import type { CandidateDetail, Interview, L2Assessment, Screening } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
 
 type Props = {
@@ -238,6 +238,46 @@ async function fetchAssessment(interviewId: number) {
   return (await res.json()) as L2Assessment;
 }
 
+async function fetchScreening(candidateId: number) {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(String(candidateId))}/screening`, { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as Screening;
+}
+
+function yesNo(value?: boolean | null) {
+  if (value === true) return "YES";
+  if (value === false) return "NO";
+  return "";
+}
+
+function dateValue(value?: string | null) {
+  if (!value) return "";
+  return value;
+}
+
+function applyCafPrefill(base: L2Data, candidate: CandidateDetail | null, interview: Interview | null, screening: Screening | null) {
+  const next = typeof structuredClone === "function" ? structuredClone(base) : JSON.parse(JSON.stringify(base));
+  if (!next.pre_interview || typeof next.pre_interview !== "object") {
+    next.pre_interview = {};
+  }
+  const pre = next.pre_interview as Record<string, string>;
+  const setIfEmpty = (key: string, value: string | null | undefined) => {
+    const current = (pre[key] || "").trim();
+    if (!current && value) pre[key] = value;
+  };
+
+  setIfEmpty("candidate_name", candidate?.name || "");
+  setIfEmpty("team_lead", interview?.interviewer_name || "");
+  if (screening) {
+    setIfEmpty("preferred_joining_date", dateValue(screening.expected_joining_date));
+    setIfEmpty("two_year_commitment", yesNo(screening.two_year_commitment));
+    setIfEmpty("family_support", yesNo(screening.willing_to_relocate));
+    setIfEmpty("other_questions", screening.questions_from_candidate || screening.relocation_notes || "");
+  }
+  return next;
+}
+
 async function saveAssessment(interviewId: number, data: L2Data) {
   const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/l2-assessment`, {
     method: "PUT",
@@ -256,6 +296,16 @@ async function submitAssessment(interviewId: number, data: L2Data) {
   });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as L2Assessment;
+}
+
+async function markInterview(interviewId: number, status: "taken" | "not_taken") {
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/status`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return await res.json();
 }
 
 function updateNested<T extends Record<string, any>>(obj: T, path: string[], value: string) {
@@ -284,6 +334,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
   const [data, setData] = useState<L2Data>(() => cloneDefault());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const searchParams = useSearchParams();
 
@@ -314,10 +365,17 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
         fetchCandidate(interview.candidate_id),
         fetchAssessment(interview.candidate_interview_id),
       ]);
+      let screening: Screening | null = null;
+      try {
+        screening = await fetchScreening(interview.candidate_id);
+      } catch {
+        screening = null;
+      }
       setCandidate(candidateDetail);
       const merged = { ...cloneDefault(), ...(assessmentResp.data || {}) } as L2Data;
+      const hydrated = applyCafPrefill(merged, candidateDetail, interview, screening);
       setAssessment(assessmentResp);
-      setData(merged);
+      setData(hydrated);
     } catch (e: any) {
       setError(e?.message || "Could not load assessment.");
     }
@@ -372,6 +430,36 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
 
   const locked = assessment?.locked ?? false;
   const isSubmitted = assessment?.status === "submitted";
+  const currentStageKey = (candidate?.current_stage || "").trim().toLowerCase();
+
+  async function markInterviewStatus(status: "taken" | "not_taken") {
+    if (!active || !candidate) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await markInterview(active.candidate_interview_id, status);
+      await refreshList();
+      const candidateDetail = await fetchCandidate(active.candidate_id);
+      setCandidate(candidateDetail);
+      setNotice(
+        status === "taken"
+          ? "Interview marked as taken. Stage updated."
+          : "Interview marked as not taken. Stage unchanged."
+      );
+      window.setTimeout(() => setNotice(null), 2500);
+    } catch (e: any) {
+      const message = e?.message || "Could not update interview status.";
+      if (message.toLowerCase().includes("already")) {
+        setNotice("Interview status already set. Only Superadmin can change it.");
+        window.setTimeout(() => setNotice(null), 2500);
+      } else {
+        setError(message);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function renderField(field: FieldConfig) {
     const value = field.path.reduce((acc, key) => (acc && typeof acc === "object" ? acc[key] : ""), data) as string;
@@ -441,6 +529,11 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
       {error ? (
         <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">
           {error}
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
+          {notice}
         </div>
       ) : null}
 
@@ -519,6 +612,22 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                       <FileDown className="h-3.5 w-3.5" /> PDF
                     </a>
                   ) : null}
+                  <button
+                    type="button"
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                    onClick={() => void markInterviewStatus("taken")}
+                    disabled={busy}
+                  >
+                    Mark interview taken
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                    onClick={() => void markInterviewStatus("not_taken")}
+                    disabled={busy}
+                  >
+                    Mark not taken
+                  </button>
                 </div>
               </div>
 
