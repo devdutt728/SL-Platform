@@ -288,7 +288,7 @@ async def list_candidates(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
     current_stage_subq = (
         select(RecCandidateStage.candidate_id, RecCandidateStage.stage_name, RecCandidateStage.started_at)
@@ -363,7 +363,7 @@ async def list_candidates(
 async def get_candidate(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
@@ -407,7 +407,7 @@ async def download_candidate_application_document(
     candidate_id: int,
     kind: str,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
     normalized = (kind or "").strip().lower()
     if normalized not in {"cv", "portfolio"}:
@@ -432,7 +432,7 @@ async def download_candidate_application_document(
 async def get_candidate_full(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
     candidate = await get_candidate(candidate_id, session, user)  # type: ignore[arg-type]
 
@@ -458,7 +458,7 @@ async def get_candidate_full(
 async def get_candidate_screening(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
@@ -628,7 +628,7 @@ async def cleanup_candidate_folders(
 async def list_candidate_events(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
@@ -673,7 +673,7 @@ async def list_candidate_events(
 async def list_candidate_offers(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
     rows = (
         await session.execute(
@@ -708,7 +708,7 @@ async def create_candidate_offer(
 async def list_candidate_stages(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
@@ -729,7 +729,7 @@ async def transition_stage(
     candidate_id: int,
     payload: StageTransitionRequest,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD])),
 ):
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:

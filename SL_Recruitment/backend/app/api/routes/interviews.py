@@ -13,6 +13,7 @@ from app.api.routes.candidates import transition_stage
 from app.core.auth import require_roles, require_superadmin
 from app.core.config import settings
 from app.core.roles import Role
+from app.core.paths import resolve_repo_path
 from app.db.platform_session import PlatformSessionLocal
 from app.models.candidate import RecCandidate
 from app.models.interview import RecCandidateInterview
@@ -383,7 +384,7 @@ def _build_interview_out(
 def _assert_interviewer_access(user: UserContext, interview: RecCandidateInterview) -> None:
     if Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles or Role.HIRING_MANAGER in user.roles:
         return
-    if Role.INTERVIEWER in user.roles:
+    if Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles:
         if user.person_id_platform and interview.interviewer_person_id_platform:
             if _clean_platform_person_id(user.person_id_platform) == _clean_platform_person_id(interview.interviewer_person_id_platform):
                 return
@@ -910,6 +911,26 @@ async def debug_interview_slot_lookup(
     }
 
 
+@router.get("/email/debug")
+async def debug_email_settings(
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    credentials_path = settings.google_application_credentials or ""
+    resolved_path = str(resolve_repo_path(credentials_path)) if credentials_path else ""
+    return {
+        "settings": {
+            "enable_gmail": settings.enable_gmail,
+            "gmail_sender_email": settings.gmail_sender_email,
+            "gmail_sender_name": settings.gmail_sender_name,
+            "google_application_credentials": settings.google_application_credentials,
+        },
+        "credentials": {
+            "resolved_path": resolved_path,
+            "file_exists": bool(resolved_path) and resolve_repo_path(credentials_path).exists(),
+        },
+    }
+
+
 @public_router.get("/slots/{token}", response_class=HTMLResponse)
 async def select_interview_slot(
     token: str,
@@ -1325,7 +1346,7 @@ async def list_interviews(
     upcoming: bool | None = Query(default=None),
     pending_feedback: bool | None = Query(default=None),
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
     query = (
         select(RecCandidateInterview, RecCandidate, RecOpening)
@@ -1340,6 +1361,13 @@ async def list_interviews(
         else:
             if settings.environment == "production":
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user has no platform person id")
+    elif (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and not (
+        Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles or Role.HIRING_MANAGER in user.roles
+    ):
+        if user.person_id_platform:
+            interviewer_filter = user.person_id_platform
+        elif settings.environment == "production":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user has no platform person id")
 
     if interviewer_filter:
         query = query.where(RecCandidateInterview.interviewer_person_id_platform == _clean_platform_person_id(interviewer_filter))
@@ -1375,7 +1403,7 @@ async def list_interviews(
 async def get_interview(
     candidate_interview_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
     row = (
         await session.execute(
@@ -1400,7 +1428,7 @@ async def update_interview(
     candidate_interview_id: int,
     payload: InterviewUpdate,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD])),
 ):
     interview = await session.get(RecCandidateInterview, candidate_interview_id)
     if not interview:

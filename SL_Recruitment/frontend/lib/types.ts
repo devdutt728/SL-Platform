@@ -83,6 +83,19 @@ export type Interview = {
   opening_title?: string | null;
 };
 
+export type L2Assessment = {
+  candidate_interview_assessment_id?: number | null;
+  candidate_interview_id: number;
+  candidate_id: number;
+  interviewer_person_id_platform?: string | null;
+  status: string;
+  data: Record<string, unknown>;
+  submitted_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  locked: boolean;
+};
+
 export type CafPrefill = {
   candidate_id: number;
   candidate_code: string;

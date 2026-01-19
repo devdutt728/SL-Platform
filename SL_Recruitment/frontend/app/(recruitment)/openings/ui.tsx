@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { OpeningDetail, OpeningListItem, PlatformPersonSuggestion } from "@/lib/types";
+import { redirectToLogin } from "@/lib/auth-client";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -53,6 +54,10 @@ export function OpeningsClient({ initialOpenings }: Props) {
     (async () => {
       try {
         const res = await fetch(`${basePath}/api/auth/me`, { cache: "no-store" });
+        if (res.status === 401) {
+          redirectToLogin();
+          return;
+        }
         if (!res.ok) return;
         const me = (await res.json()) as { roles?: string[]; platform_role_id?: number | null };
         if (cancelled) return;
@@ -643,7 +648,10 @@ async function formatApiError(res: Response): Promise<string> {
   const raw = (await res.text()).trim();
   const detail = extractDetail(raw);
   if (res.status === 409) return detail || "Cannot delete opening because it has dependent records.";
-  if (res.status === 401) return detail || "Unauthorized. Sign in at /login and try again.";
+  if (res.status === 401) {
+    redirectToLogin();
+    return detail || "Session expired. Redirecting to login.";
+  }
   if (res.status === 403) return detail || "Forbidden. Your account may not have permission to create openings.";
   return detail || raw || `Request failed (${res.status})`;
 }

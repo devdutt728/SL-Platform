@@ -158,6 +158,8 @@ def _map_platform_roles_to_app_roles(role_ids: list[int], role_codes: list[str])
         roles.add(Role.HIRING_MANAGER)
     if "interviewer" in normalized_codes:
         roles.add(Role.INTERVIEWER)
+    if "gl" in normalized_codes or "group_lead" in normalized_codes or "group-lead" in normalized_codes:
+        roles.add(Role.GROUP_LEAD)
     if "approver" in normalized_codes:
         roles.add(Role.APPROVER)
     if "viewer" in normalized_codes or "employee" in normalized_codes or "user" in normalized_codes:

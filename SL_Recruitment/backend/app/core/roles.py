@@ -6,6 +6,7 @@ class Role(str, Enum):
     HR_ADMIN = "hr_admin"
     HR_EXEC = "hr_exec"
     INTERVIEWER = "interviewer"
+    GROUP_LEAD = "gl"
     HIRING_MANAGER = "hiring_manager"
     APPROVER = "approver"
     VIEWER = "viewer"
@@ -16,6 +17,7 @@ ROLE_HIERARCHY = {
     Role.HR_EXEC: {Role.HR_EXEC, Role.INTERVIEWER, Role.HIRING_MANAGER, Role.APPROVER, Role.VIEWER},
     Role.HIRING_MANAGER: {Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER},
     Role.INTERVIEWER: {Role.INTERVIEWER, Role.VIEWER},
+    Role.GROUP_LEAD: {Role.GROUP_LEAD, Role.INTERVIEWER, Role.VIEWER},
     Role.APPROVER: {Role.APPROVER, Role.VIEWER},
     Role.VIEWER: {Role.VIEWER},
 }

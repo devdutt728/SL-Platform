@@ -7,6 +7,7 @@ import { clsx } from "clsx";
 import { CandidateListItem, OpeningListItem } from "@/lib/types";
 import { AlertTriangle, CheckCircle2, Filter, XCircle } from "lucide-react";
 import { parseDateUtc } from "@/lib/datetime";
+import { redirectToLogin } from "@/lib/auth-client";
 
 type Props = {
   initialCandidates: CandidateListItem[];
@@ -126,6 +127,10 @@ async function fetchCandidates(params: {
   }
 
   const res = await fetch(url.toString(), { cache: "no-store" });
+  if (res.status === 401) {
+    redirectToLogin();
+    return [];
+  }
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateListItem[];
 }

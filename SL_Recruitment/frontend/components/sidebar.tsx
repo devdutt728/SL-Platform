@@ -11,6 +11,7 @@ const navItems = [
   { href: "/openings", label: "Openings", icon: Briefcase },
   { href: "/sprint-templates", label: "Sprint Templates", icon: FolderOpen },
   { href: "/interviewer", label: "Interviewer", icon: CalendarClock },
+  { href: "/gl-portal", label: "GL Portal", icon: CalendarClock },
   { href: "/offers", label: "Offers", icon: FileSignature },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/", label: "Home", icon: Home },
