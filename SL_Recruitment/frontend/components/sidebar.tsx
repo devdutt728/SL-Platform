@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-import { Home, Users, Briefcase, LayoutDashboard, CalendarClock, FileSignature, FolderOpen, BarChart3 } from "lucide-react";
+import { Home, Users, Briefcase, LayoutDashboard, CalendarClock, FileSignature, FolderOpen, BarChart3, Shield } from "lucide-react";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -19,9 +20,29 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [isSuperadmin, setIsSuperadmin] = useState(false);
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
   const normalizedPath = basePath && pathname.startsWith(basePath) ? pathname.slice(basePath.length) || "/" : pathname;
   const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!res.ok) return;
+        const me = (await res.json()) as { platform_role_id?: number | null; platform_role_code?: string | null };
+        if (cancelled) return;
+        const superadmin = (me.platform_role_id ?? null) === 2 || (me.platform_role_code ?? "").trim() === "2";
+        setIsSuperadmin(superadmin);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <aside className="glass-panel fixed bottom-4 left-4 top-4 z-20 w-56 overflow-hidden rounded-2xl p-4">
@@ -50,6 +71,20 @@ export function Sidebar() {
             </Link>
           );
         })}
+        {isSuperadmin ? (
+          <Link
+            href="/superadmin"
+            className={clsx(
+              "flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-700 transition",
+              normalizedPath.startsWith("/superadmin")
+                ? "bg-white/60 text-slate-900 shadow-md ring-1 ring-white/70"
+                : "hover:bg-white/40 hover:text-slate-900"
+            )}
+          >
+            <Shield className="h-4 w-4" />
+            <span>SuperAdmin</span>
+          </Link>
+        ) : null}
       </nav>
     </aside>
   );

@@ -160,6 +160,12 @@ export type PlatformPersonSuggestion = {
   role_code?: string | null;
 };
 
+export type PlatformRole = {
+  role_id: number;
+  role_code: string;
+  role_name?: string | null;
+};
+
 export type Screening = {
   candidate_id: number;
   current_city?: string | null;

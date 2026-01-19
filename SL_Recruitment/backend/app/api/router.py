@@ -10,6 +10,7 @@ from app.api.routes import joining_docs
 from app.api.routes import openings
 from app.api.routes import offers
 from app.api.routes import platform_people
+from app.api.routes import platform_roles
 from app.api.routes import public_apply
 from app.api.routes import reports
 from app.api.routes import sprints
@@ -22,6 +23,7 @@ api_router.include_router(openings.router)
 api_router.include_router(offers.router)
 api_router.include_router(offers.public_router)
 api_router.include_router(platform_people.router)
+api_router.include_router(platform_roles.router)
 api_router.include_router(public_apply.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(interviews.router)

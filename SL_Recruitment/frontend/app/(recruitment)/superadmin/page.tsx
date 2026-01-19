@@ -1,0 +1,25 @@
+import { cookies } from "next/headers";
+import { internalUrl } from "@/lib/internal";
+import { notFound } from "next/navigation";
+import { SuperAdminRolesClient } from "./SuperAdminRolesClient";
+
+type Me = {
+  platform_role_id?: number | null;
+  platform_role_code?: string | null;
+};
+
+export default async function SuperAdminPage() {
+  const cookieHeader = cookies().toString();
+  const meRes = await fetch(internalUrl("/api/auth/me"), {
+    cache: "no-store",
+    headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+  });
+  const me = (meRes.ok ? ((await meRes.json()) as Me) : null) || null;
+  const isSuperadmin = (me?.platform_role_id ?? null) === 2 || (me?.platform_role_code ?? "").trim() === "2";
+
+  if (!isSuperadmin) {
+    notFound();
+  }
+
+  return <SuperAdminRolesClient />;
+}
