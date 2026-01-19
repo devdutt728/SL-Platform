@@ -40,51 +40,7 @@ def render_template(name: str, context: dict[str, Any]) -> str:
     path = _template_path(name)
     raw = path.read_text(encoding="utf-8")
     html = raw.format_map({k: ("" if v is None else v) for k, v in context.items()})
-    return _with_signature(html)
-
-
-def _with_signature(html: str) -> str:
-    signature_html = """
-<div style="margin-top:18px; font-family:Arial,sans-serif; font-size:13px; color:#475569;">
-  Regards,<br />SL HR Team
-</div>
-<div style="margin-top:12px; font-family:arial,sans-serif;">
-  <div style="color:rgb(34,34,34);">
-    <span style="text-align:justify;font-family:georgia,palatino,serif;font-size:large;color:rgb(126,124,123);">studio</span>
-    <span style="text-align:justify;font-family:georgia,palatino,serif;font-size:large;color:rgb(241,92,55);">lotus</span>
-  </div>
-  <div style="text-align:justify;">
-    <span style="color:rgb(241,92,55);font-family:arial,sans-serif;font-size:x-small;">creating meaning </span>
-    <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;font-size:x-small;">| </span>
-    <span style="color:rgb(241,92,55);font-family:arial,sans-serif;font-size:x-small;">celebrating context</span>
-  </div>
-  <div style="color:rgb(34,34,34);font-size:x-small;font-family:arial,sans-serif;">
-    World's 100 Best Architecture Firms, Archello
-    <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;"> | </span>
-    WAF
-    <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;"> | </span>
-    TIME Magazine
-    <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;"> | </span>
-    Prix Versailles
-    <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;"> | </span>
-    Dezeen Awards
-  </div>
-  <div style="font-size:x-small;font-family:arial,sans-serif;">
-    <a href="https://studiolotus.in/" style="color:rgb(17,85,204);" target="_blank" rel="noopener">Website</a>
-    <span> | </span>
-    <a href="https://www.instagram.com/studio_lotus/" style="color:rgb(17,85,204);" target="_blank" rel="noopener">Instagram</a>
-    <span> | </span>
-    <a href="https://www.linkedin.com/company/studiolotus/" style="color:rgb(17,85,204);" target="_blank" rel="noopener">LinkedIn</a>
-    <span> | </span>
-    <a href="https://www.facebook.com/studiolotus.in/" style="color:rgb(17,85,204);" target="_blank" rel="noopener">Facebook</a>
-  </div>
-</div>
-""".strip()
-    lower = html.lower()
-    if "</body>" in lower:
-        idx = lower.rfind("</body>")
-        return f"{html[:idx]}\n{signature_html}\n{html[idx:]}"
-    return f"{html}\n{signature_html}"
+    return html
 
 
 async def send_email(

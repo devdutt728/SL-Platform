@@ -6,7 +6,7 @@
     <style>
       @page {{
         size: A4;
-        margin: 2.2cm 2cm 2.6cm 2cm;
+        margin: 2.5cm 2.34cm 2cm 2cm;
         @top-right {{ content: element(letter-header); }}
         @bottom-center {{ content: element(letter-footer); }}
       }}
@@ -14,7 +14,7 @@
       body {{
         font-family: Calibri, Arial, sans-serif;
         font-size: 11pt;
-        line-height: 1.45;
+        line-height: 1.15;
         color: #000;
       }}
       .header {{
@@ -22,7 +22,7 @@
         height: 1.1cm;
         text-align: right;
       }}
-      .header img {{ height: 0.5cm; }}
+      .header img {{ height: 0.6cm; width: auto; }}
       .footer {{
         position: running(letter-footer);
         font-size: 8pt;
@@ -31,26 +31,30 @@
         text-transform: uppercase;
       }}
       .title {{ font-weight: 700; margin: 0 0 6px 0; }}
-      .meta-row {{ width: 100%; margin-bottom: 12px; }}
+      .meta-row {{ width: 100%; margin-bottom: 18px; }}
       .meta-row td {{ vertical-align: top; padding: 0; }}
       .right {{ text-align: right; }}
-      .section {{ margin-bottom: 10px; }}
+      .section {{ margin-bottom: 18px; }}
       .label {{ font-weight: 700; }}
-      .inline-table {{ width: 100%; border-collapse: collapse; margin: 8px 0 12px; }}
+      .meta-label {{ font-weight: 400; }}
+      .meta-strong {{ font-weight: 700; }}
+      .emphasis {{ font-weight: 700; }}
+      .blank-line {{ height: 0.45cm; }}
+      .inline-table {{ width: 100%; border-collapse: collapse; margin: 12px 0 18px; }}
       .inline-table td {{ padding: 2px 4px; }}
-      .salary-table {{ width: 100%; border-collapse: collapse; margin: 6px 0 6px; }}
-      .salary-table th {{ text-align: left; font-weight: 700; padding: 6px 8px; }}
-      .salary-table td {{ padding: 6px 8px; }}
-      .salary-table th,
-      .salary-table td {{ border: 1px solid #000; }}
-      .note {{ font-size: 10pt; }}
+      .salary-lines {{ width: 100%; border-collapse: collapse; margin: 12px 0 18px; }}
+      .salary-lines td {{ padding: 2px 0; }}
+      .salary-lines .label-cell {{ width: 55%; font-weight: 700; }}
+      .salary-lines .value-cell {{ width: 45%; padding-left: 16px; }}
+      .note {{ font-size: 10pt; margin-top: 16px; }}
       .page-break {{ page-break-before: always; }}
-      .terms-title {{ font-weight: 700; margin-top: 10px; }}
+      .terms-title {{ font-weight: 700; margin-top: 18px; margin-bottom: 12px; }}
       .subhead {{ font-weight: 700; }}
-      .notice-table {{ width: 100%; border-collapse: collapse; margin: 6px 0 12px; }}
+      .notice-table {{ width: 100%; border-collapse: collapse; margin: 10px 0 16px; }}
       .notice-table th,
       .notice-table td {{ border: 1px solid #000; padding: 6px 8px; vertical-align: top; }}
-      .signature {{ margin-top: 20px; }}
+      .notice-table-wrap {{ page-break-before: always; }}
+      .signature {{ margin-top: 26px; }}
       .indent {{ margin-left: 24px; }}
       @media screen {{
         body {{ background: #f3f4f6; }}
@@ -58,7 +62,7 @@
           background: #fff;
           margin: 20px auto;
           max-width: 210mm;
-          padding: 2.2cm 2cm 2.6cm 2cm;
+          padding: 2.5cm 2.34cm 2cm 2cm;
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
         }}
       }}
@@ -77,11 +81,11 @@
     <table class="meta-row">
       <tr>
         <td>
-          <div>To,</div>
-          <div>{candidate_name}</div>
-          <div>{candidate_address}</div>
+          <div class="meta-strong">To,</div>
+          <div class="meta-strong">{candidate_name}</div>
+          <div class="meta-strong">{candidate_address}</div>
         </td>
-        <td class="right">{letter_date}</td>
+        <td class="right"><span class="meta-strong">{letter_date}</span></td>
       </tr>
     </table>
 
@@ -95,31 +99,31 @@
 
     <table class="inline-table">
       <tr>
-        <td class="label" style="width: 20%">Designation:</td>
-        <td style="width: 30%">{designation_title}</td>
-        <td class="label" style="width: 15%">Unit:</td>
-        <td style="width: 35%">{unit_name}</td>
+        <td class="meta-label" style="width: 20%">Designation:</td>
+        <td style="width: 30%"><span class="emphasis">{designation_title}</span></td>
+        <td class="meta-label" style="width: 15%">Unit:</td>
+        <td style="width: 35%"><span class="emphasis">{unit_name}</span></td>
       </tr>
       <tr>
-        <td class="label">Reporting to:</td>
-        <td>{reporting_to}</td>
+        <td class="meta-label">Reporting to:</td>
+        <td><span class="emphasis">{reporting_to}</span></td>
         <td></td>
         <td></td>
       </tr>
     </table>
 
     <div class="section">
-      The terms and conditions of your employment are provided in the annexure attached. You shall be joining Studio Lotus on {joining_date} at our office at {joining_address}. Your annual emoluments are as follows:
+      The terms and conditions of your employment are provided in the annexure attached. You shall be joining Studio Lotus on <span class="emphasis">{joining_date}</span> at our office at {joining_address}. Your annual emoluments are as follows:
     </div>
 
-    <table class="salary-table">
+    <table class="salary-lines">
       <tr>
-        <th>Gross Salary Monthly</th>
-        <th>Joining Bonus Monthly**</th>
+        <td class="label-cell">Gross Salary Monthly</td>
+        <td class="value-cell"><span class="emphasis">Rs. {gross_salary_monthly}/-</span></td>
       </tr>
       <tr>
-        <td>Rs. {gross_salary_monthly}/-</td>
-        <td>Rs. {joining_bonus_monthly}/-</td>
+        <td class="label-cell">Joining Bonus Monthly**</td>
+        <td class="value-cell"><span class="emphasis">Rs. {joining_bonus_monthly}/-</span></td>
       </tr>
     </table>
 
@@ -171,20 +175,22 @@
       For termination of the Employment agreement, a notice period will be mandatory for the different levels as follows:
     </div>
 
-    <table class="notice-table">
-      <tr>
-        <th>Band / Level</th>
-        <th>Duration of Notice Period</th>
-      </tr>
-      <tr>
-        <td>Senior Associate<br>Associate Architect/ Designer<br>Project Architect/Designer</td>
-        <td>2 months</td>
-      </tr>
-      <tr>
-        <td>Sr. Architect/ Designer<br>Architect/ Designer<br>Trainee</td>
-        <td>1 month</td>
-      </tr>
-    </table>
+    <div class="notice-table-wrap">
+      <table class="notice-table">
+        <tr>
+          <th>Band / Level</th>
+          <th>Duration of Notice Period</th>
+        </tr>
+        <tr>
+          <td>Senior Associate<br>Associate Architect/ Designer<br>Project Architect/Designer</td>
+          <td>2 months</td>
+        </tr>
+        <tr>
+          <td>Sr. Architect/ Designer<br>Architect/ Designer<br>Trainee</td>
+          <td>1 month</td>
+        </tr>
+      </table>
+    </div>
 
     <div class="section">
       Your last day of attendance as per above guideline, will also be the full and final settlement date. You are expected to exhibit the same level of performance standards as laid down by the Firm for your role during notice period failing which the firm may terminate your service with immediate effect. The Firm may also immediately terminate your services without any compensation or notice thereof, if you are found with dissatisfactory/ below expected performance after 2 notices (written or verbal) or through one cycle of poor appraisal, or if found in immaterial/ material breach of your responsibilities which breach either (i) is incapable of remedy; or (ii) if capable of remedy, has not been remedied by you for at least 5 days after receipt of notice from the Firm.
@@ -203,6 +209,8 @@
       <div class="subhead">Confidentiality:</div>
       You shall not at any time during your employment and thereafter without the prior written consent of the Firm, disclose, divulge, email out or make public any of the secrets regarding accounts, costs data or any other accounts figures, transactions, processes, records, formulae, designs, sketches, drawings, documentation, details, specifications, technical and patent information and know-how, Hardware or Software, as well as methods of procedures of production or dealings of the Firm, which may have become known to you during the course of your duties herein, whether you are in the Firm's employment or not.
     </div>
+
+    <div class="page-break"></div>
 
     <div class="section">
       In the event of your making any discovery of the above information, you shall immediately disclose the same to the Firm. The proprietary rights in such improvement invention or discovery shall vest with the Firm. You shall be bound to join with the Firm to apply for Letters of Patent for the said inventions, improvements or discovery and you shall at the cost of the Firm, do everything necessary to vest the same in the Firm.
@@ -239,7 +247,11 @@
     <div class="section">
       <div class="subhead">Miscellaneous:</div>
       You will be required to work for the Firm or for an Associate or Subsidiary of the Firm on secondment or transfer either full time or part-time in any part of India or overseas as directed by the Management.
-      <br>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div class="section">
       You will be governed by the Policies &amp; Rules laid down by the Firm from time to time. You will be required to abide by the administrative instructions and rules and regulations stipulated in the employee handbook as in force for the effective and smooth working of the Firm. Actual working hours, timings, working condition, leaves details and other employment policies like IT Policy, travel, transfers, reimbursements, deputation and or sexual harassment, etc will be informed to you through the employee handbook upon your joining the Firm, all updates and new policies in the handbook will be intimated to you from time to time.
       <br>
       You shall devote your whole time and full attention exclusively to your employment with the Firm and shall discharge your duties to the best of your abilities. You further undertake that, during the term of your employment, you shall not engage yourself, directly or indirectly, with or without remuneration in any other employment, service or calling of any nature without written permission from the Firm.
@@ -261,6 +273,8 @@
       <div class="subhead">Notices:</div>
       Notices may be given by you to the Company at its registered office address. Notices may be given by the Company to you at the address intimated by you in the official records. Any deficiency in the receipt of the notice served upon shall be deemed to confirm that notice has adequately been served upon and receipt thereof has been acknowledged.
     </div>
+
+    <div class="page-break"></div>
 
     <div class="section">
       <div class="subhead">Governing Law/Jurisdiction</div>
@@ -285,16 +299,22 @@
     </div>
 
     <div class="signature">
-      <div>On behalf of</div>
-      <div>Studio Lotus</div>
+      <div>On behalf of <span class="subhead">Studio Lotus</span></div>
+      <div class="blank-line"></div>
+      <div class="blank-line"></div>
+      <div class="blank-line"></div>
       <div class="subhead">{signatory_name}</div>
-      <div>{signatory_title}</div>
+      <div class="subhead">{signatory_title}</div>
+      <div class="blank-line"></div>
     </div>
 
       <div class="signature">
-        <div class="subhead">I have read and understood and accept the terms and conditions mentioned above and hereby append my signatures as token of acceptance.</div>
+        <div>I have read and understood and accept the terms and conditions mentioned above and hereby append my signatures as token of acceptance.</div>
         <div>______________________________</div>
-        <div>{candidate_name}</div>
+        <div class="blank-line"></div>
+        <div class="blank-line"></div>
+        <div class="subhead">{candidate_name}</div>
+        <div class="blank-line"></div>
         <div>Date: _____________________</div>
       </div>
     </div>
