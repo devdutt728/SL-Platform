@@ -8,7 +8,12 @@
 	@recApi path /api/rec*
 	handle @recApi {
 		uri replace /api/rec /recruitment/api/rec
-		reverse_proxy localhost:3002
+		reverse_proxy localhost:3002 {
+			header_up X-Original-Host {hostport}
+			header_up X-Original-Proto {scheme}
+			header_up X-Forwarded-Host {hostport}
+			header_up X-Forwarded-Proto {scheme}
+		}
 	}
 
 	@authApiRec {
@@ -17,7 +22,12 @@
 	}
 	handle @authApiRec {
 		uri replace /api/auth /recruitment/api/auth
-		reverse_proxy localhost:3002
+		reverse_proxy localhost:3002 {
+			header_up X-Original-Host {hostport}
+			header_up X-Original-Proto {scheme}
+			header_up X-Forwarded-Host {hostport}
+			header_up X-Forwarded-Proto {scheme}
+		}
 	}
 
 	@authApiIt {
@@ -26,18 +36,106 @@
 	}
 	handle @authApiIt {
 		uri replace /api/auth /it/api/auth
-		reverse_proxy localhost:3001
+		reverse_proxy localhost:3001 {
+			header_up X-Original-Host {hostport}
+			header_up X-Original-Proto {scheme}
+			header_up X-Forwarded-Host {hostport}
+			header_up X-Forwarded-Proto {scheme}
+		}
 	}
 
 	handle /it* {
-		reverse_proxy localhost:3001
+		reverse_proxy localhost:3001 {
+			header_up X-Original-Host {hostport}
+			header_up X-Original-Proto {scheme}
+			header_up X-Forwarded-Host {hostport}
+			header_up X-Forwarded-Proto {scheme}
+		}
 	}
 
 	handle /recruitment* {
-		reverse_proxy localhost:3002
+		reverse_proxy localhost:3002 {
+			header_up X-Original-Host {hostport}
+			header_up X-Original-Proto {scheme}
+			header_up X-Forwarded-Host {hostport}
+			header_up X-Forwarded-Proto {scheme}
+		}
 	}
 
 	handle {
-		reverse_proxy localhost:3003
+		reverse_proxy localhost:3003 {
+			header_up X-Original-Host {hostport}
+			header_up X-Original-Proto {scheme}
+			header_up X-Forwarded-Host {hostport}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+}
+
+:3005 {
+	@recApi path /api/rec*
+	handle @recApi {
+		uri replace /api/rec /recruitment/api/rec
+		reverse_proxy localhost:3002 {
+			header_up X-Original-Host {env.TUNNEL_HOST}
+			header_up X-Original-Proto https
+			header_up X-Forwarded-Host {env.TUNNEL_HOST}
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	@authApiRec {
+		path /api/auth*
+		header_regexp Cookie slr_token=
+	}
+	handle @authApiRec {
+		uri replace /api/auth /recruitment/api/auth
+		reverse_proxy localhost:3002 {
+			header_up X-Original-Host {env.TUNNEL_HOST}
+			header_up X-Original-Proto https
+			header_up X-Forwarded-Host {env.TUNNEL_HOST}
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	@authApiIt {
+		path /api/auth*
+		header_regexp Cookie slp_token=
+	}
+	handle @authApiIt {
+		uri replace /api/auth /it/api/auth
+		reverse_proxy localhost:3001 {
+			header_up X-Original-Host {env.TUNNEL_HOST}
+			header_up X-Original-Proto https
+			header_up X-Forwarded-Host {env.TUNNEL_HOST}
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	handle /it* {
+		reverse_proxy localhost:3001 {
+			header_up X-Original-Host {env.TUNNEL_HOST}
+			header_up X-Original-Proto https
+			header_up X-Forwarded-Host {env.TUNNEL_HOST}
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	handle /recruitment* {
+		reverse_proxy localhost:3002 {
+			header_up X-Original-Host {env.TUNNEL_HOST}
+			header_up X-Original-Proto https
+			header_up X-Forwarded-Host {env.TUNNEL_HOST}
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	handle {
+		reverse_proxy localhost:3003 {
+			header_up X-Original-Host {env.TUNNEL_HOST}
+			header_up X-Original-Proto https
+			header_up X-Forwarded-Host {env.TUNNEL_HOST}
+			header_up X-Forwarded-Proto https
+		}
 	}
 }

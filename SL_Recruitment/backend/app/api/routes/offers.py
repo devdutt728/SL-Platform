@@ -105,6 +105,7 @@ def _offer_base_payload(offer: RecCandidateOffer) -> dict:
     data.pop("candidate_code", None)
     data.pop("opening_title", None)
     data.pop("letter_overrides", None)
+    data.pop("pdf_download_url", None)
     return data
 
 

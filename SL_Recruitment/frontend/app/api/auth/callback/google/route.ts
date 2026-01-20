@@ -7,6 +7,22 @@ import { deleteOAuthState, getOAuthState, putFinalizeToken } from "@/lib/oauth-m
 
 export const runtime = "nodejs";
 
+function originsMatch(a: string, b: string) {
+  try {
+    const aUrl = new URL(a);
+    const bUrl = new URL(b);
+    if (aUrl.hostname !== bUrl.hostname) return false;
+    if (!aUrl.port || !bUrl.port) return true;
+    return aUrl.port === bUrl.port;
+  } catch {
+    return a === b;
+  }
+}
+
+function isGoogleHost(host: string) {
+  return host === "accounts.google.com" || host.endsWith(".google.com") || host.endsWith(".googleusercontent.com");
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const origin = process.env.PUBLIC_APP_ORIGIN || getRequestOrigin(request.url);
@@ -93,7 +109,13 @@ export async function GET(request: Request) {
       return redirectError("backend_auth_failed", meRes.status, detail);
     }
 
-    const returnToOrigin = memory?.returnToOrigin || origin;
+    let returnToOrigin = memory?.returnToOrigin || origin;
+    try {
+      const returnUrl = new URL(returnToOrigin);
+      if (isGoogleHost(returnUrl.hostname)) returnToOrigin = origin;
+    } catch {
+      returnToOrigin = origin;
+    }
     if (state) deleteOAuthState(state);
 
     const clearOAuthCookies = (response: NextResponse) => {
@@ -113,12 +135,13 @@ export async function GET(request: Request) {
       });
     };
 
-    if (returnToOrigin === origin) {
-      const response = NextResponse.redirect(new URL(nextPath, origin));
+    if (originsMatch(returnToOrigin, origin)) {
+      const targetOrigin = returnToOrigin || origin;
+      const response = NextResponse.redirect(new URL(nextPath, targetOrigin));
       response.cookies.set("slr_token", idToken, {
         httpOnly: true,
         sameSite: "lax",
-        secure: origin.startsWith("https://"),
+        secure: targetOrigin.startsWith("https://"),
         path: "/",
       });
       clearOAuthCookies(response);
