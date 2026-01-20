@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { internalUrl } from "@/lib/internal";
+import { notFound } from "next/navigation";
 import { Interview } from "@/lib/types";
 import { GLPortalClient } from "./GLPortalClient";
 
@@ -31,15 +32,7 @@ export default async function GLPortalPage() {
   const roles = (me?.roles || []).map((role) => String(role).toLowerCase());
   const isAllowed = roles.some((role) => ["gl", "interviewer", "hr_admin", "hr_exec"].includes(role));
 
-  if (!isAllowed) {
-    return (
-      <main className="content-pad">
-        <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">
-          Access restricted. Please contact HR if you need access.
-        </div>
-      </main>
-    );
-  }
+  if (!isAllowed) notFound();
 
   const useMeFilter = (roles.includes("interviewer") || roles.includes("gl")) && !roles.includes("hr_admin") && !roles.includes("hr_exec");
   const interviews = await fetchInterviews({ ...(useMeFilter ? { interviewer: "me" } : {}) });

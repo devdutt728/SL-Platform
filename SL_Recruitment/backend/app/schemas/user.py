@@ -16,3 +16,4 @@ class UserContext(BaseModel):
     platform_role_name: Optional[str] = None
     platform_role_ids: Optional[List[int]] = None
     platform_role_codes: Optional[List[str]] = None
+    platform_role_names: Optional[List[str]] = None

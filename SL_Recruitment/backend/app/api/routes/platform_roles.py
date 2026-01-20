@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_superadmin
 from app.db.platform_session import get_platform_session
-from app.models.platform_person import DimPerson
+from app.models.platform_person import DimPerson, DimPersonRole
 from app.models.platform_role import DimRole
 from app.schemas.platform_roles import (
     PlatformRoleAssignIn,
@@ -115,10 +115,24 @@ async def assign_role(
     person = await session.get(DimPerson, person_id)
     if not person:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
-    if payload.role_id is not None:
-        role = await session.get(DimRole, payload.role_id)
-        if not role:
+    role_ids = sorted({int(role_id) for role_id in payload.role_ids if role_id is not None})
+    if role_ids:
+        found_roles = (
+            await session.execute(select(DimRole.role_id).where(DimRole.role_id.in_(role_ids)))
+        ).scalars().all()
+        found_set = {int(role_id) for role_id in found_roles}
+        missing = [role_id for role_id in role_ids if role_id not in found_set]
+        if missing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
-    person.role_id = payload.role_id
+
+    await session.execute(delete(DimPersonRole).where(DimPersonRole.person_id == person_id))
+    if role_ids:
+        session.add_all(
+            [DimPersonRole(person_id=person_id, role_id=role_id) for role_id in role_ids]
+        )
+
+    person.role_id = role_ids[0] if role_ids else None
+    if 2 in role_ids:
+        person.role_id = 2
     await session.commit()
-    return {"person_id": person_id, "role_id": payload.role_id}
+    return {"person_id": person_id, "role_ids": role_ids}

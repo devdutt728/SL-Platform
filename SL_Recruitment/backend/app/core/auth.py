@@ -67,6 +67,7 @@ async def get_current_user(request: Request) -> UserContext:
             platform_role_name=identity.role_name,
             platform_role_ids=identity.role_ids,
             platform_role_codes=identity.role_codes,
+            platform_role_names=identity.role_names,
         )
 
     if settings.auth_mode == "google":

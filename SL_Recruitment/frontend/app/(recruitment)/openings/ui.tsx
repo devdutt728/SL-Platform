@@ -205,11 +205,11 @@ export function OpeningsClient({ initialOpenings }: Props) {
 
   async function createOpening(formData: FormData) {
     if (!canCreateOpenings) {
-      setError("Only HR and Superadmin can create openings.");
+      setError("Action not available.");
       return;
     }
     if (!canEditOpenings && updatingOpening) {
-      setError("Only Superadmin can edit existing openings.");
+      setError("Action not available.");
       return;
     }
     setCreating(true);
@@ -261,11 +261,11 @@ export function OpeningsClient({ initialOpenings }: Props) {
 
   async function setOpeningActive(openingId: number, isActive: boolean) {
     if (!canDeactivateOpenings) {
-      setError("Only HR and Superadmin can deactivate openings.");
+      setError("Action not available.");
       return;
     }
     if (!canEditOpenings && isActive) {
-      setError("Only Superadmin can activate openings.");
+      setError("Action not available.");
       return;
     }
     setError(null);
@@ -284,7 +284,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
 
   async function deleteOpening(openingId: number) {
     if (!canDeleteOpenings) {
-      setError("Only Superadmin can delete openings.");
+      setError("Action not available.");
       return;
     }
     if (!window.confirm("Delete this opening? This cannot be undone.")) return;
@@ -335,7 +335,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs uppercase tracking-tight text-slate-500">Roles</p>
-          <h1 className="text-2xl font-semibold">Openings</h1>
+          <h1 className="text-2xl font-semibold">Roles</h1>
           <p className="text-sm text-slate-500">{activeCount} active</p>
         </div>
         <div className="flex items-center gap-2">
@@ -358,7 +358,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-tight text-slate-500">Create opening</p>
-              <p className="text-sm text-slate-500">{canEditOpenings ? "Reuse a code to update an existing role." : "HR can create new roles and deactivate existing ones."}</p>
+              <p className="text-sm text-slate-500">Reuse a code to update an existing role.</p>
             </div>
             <button
               className="rounded-full bg-teal-600 px-4 py-2 text-xs font-semibold text-white shadow-card hover:bg-teal-700 disabled:opacity-60"
@@ -481,11 +481,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
         </div>
           {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
         </form>
-      ) : (
-        <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 text-sm text-slate-700 shadow-sm">
-          Only <span className="font-semibold">HR</span> and <span className="font-semibold">Superadmin</span> can create openings. Only <span className="font-semibold">Superadmin</span> can edit details or delete.
-        </div>
-      )}
+      ) : null}
 
       <div className="relative overflow-x-auto overflow-y-visible rounded-2xl border border-slate-200 bg-white/60">
         <table className="min-w-[980px] w-full table-fixed border-collapse">
@@ -505,7 +501,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
               <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">City</th>
               <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">Requested by</th>
               <th className="whitespace-nowrap border-b border-slate-200 px-2 py-2 text-left font-semibold">Status</th>
-              <th className="whitespace-nowrap border-b border-slate-200 px-2 py-2 text-left font-semibold">Headcount</th>
+              <th className="whitespace-nowrap border-b border-slate-200 px-2 py-2 text-left font-semibold">Openings</th>
               <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2 text-center font-semibold">Actions</th>
             </tr>
           </thead>
@@ -652,7 +648,7 @@ async function formatApiError(res: Response): Promise<string> {
     redirectToLogin();
     return detail || "Session expired. Redirecting to login.";
   }
-  if (res.status === 403) return detail || "Forbidden. Your account may not have permission to create openings.";
+  if (res.status === 403) return detail || "Action not allowed.";
   return detail || raw || `Request failed (${res.status})`;
 }
 

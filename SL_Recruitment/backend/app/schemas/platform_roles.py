@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PlatformRoleOut(BaseModel):
@@ -24,4 +24,4 @@ class PlatformRoleUpdateIn(BaseModel):
 
 
 class PlatformRoleAssignIn(BaseModel):
-    role_id: int | None = None
+    role_ids: list[int] = Field(default_factory=list)

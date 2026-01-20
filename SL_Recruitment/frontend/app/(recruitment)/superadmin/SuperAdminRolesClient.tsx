@@ -11,6 +11,17 @@ type RoleForm = {
   role_name: string;
 };
 
+function formatPersonRoles(person: PlatformPersonSuggestion | null): string {
+  if (!person) return "";
+  const names = (person.role_names || []).filter(Boolean);
+  const codes = (person.role_codes || []).filter(Boolean);
+  if (names.length) return names.join(", ");
+  if (codes.length) return codes.join(", ");
+  if (person.role_name) return person.role_name;
+  if (person.role_code) return person.role_code;
+  return "";
+}
+
 const emptyForm: RoleForm = {
   role_id: "",
   role_code: "",
@@ -32,7 +43,7 @@ export function SuperAdminRolesClient() {
   const [personSelected, setPersonSelected] = useState<PlatformPersonSuggestion | null>(null);
   const [personOpen, setPersonOpen] = useState(false);
   const [personLoading, setPersonLoading] = useState(false);
-  const [assignRoleId, setAssignRoleId] = useState<string>("");
+  const [assignRoleIds, setAssignRoleIds] = useState<number[]>([]);
   const personMenuRef = useRef<HTMLDivElement | null>(null);
 
   async function loadRoles() {
@@ -79,6 +90,12 @@ export function SuperAdminRolesClient() {
       window.clearTimeout(handle);
     };
   }, [personQuery, personOpen]);
+
+  useEffect(() => {
+    if (!personSelected) {
+      setAssignRoleIds([]);
+    }
+  }, [personSelected]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -164,14 +181,14 @@ export function SuperAdminRolesClient() {
       const res = await fetch(`${basePath}/api/platform/roles/assign/${encodeURIComponent(personSelected.person_id)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ role_id: assignRoleId ? Number(assignRoleId) : null }),
+        body: JSON.stringify({ role_ids: assignRoleIds }),
       });
       if (!res.ok) throw new Error(await res.text());
       setNotice("Role assignment updated.");
       window.setTimeout(() => setNotice(null), 2000);
       setPersonSelected(null);
       setPersonQuery("");
-      setAssignRoleId("");
+      setAssignRoleIds([]);
     } catch (e: any) {
       setError(e?.message || "Could not assign role.");
     }
@@ -277,11 +294,16 @@ export function SuperAdminRolesClient() {
                         onClick={() => {
                           setPersonSelected(person);
                           setPersonOptions([]);
+                          setAssignRoleIds((person.role_ids || []).slice());
                         }}
                       >
-                        <span className="truncate">
-                          <span className="font-medium">{person.full_name}</span>{" "}
-                          <span className="text-slate-500">({person.email})</span>
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium">
+                            {person.full_name} <span className="text-slate-500">({person.email})</span>
+                          </span>
+                          {formatPersonRoles(person) ? (
+                            <span className="block truncate text-xs text-slate-400">{formatPersonRoles(person)}</span>
+                          ) : null}
                         </span>
                         <span className="shrink-0 text-xs text-slate-400">{person.person_id}</span>
                       </button>
@@ -290,21 +312,39 @@ export function SuperAdminRolesClient() {
                 ) : null}
               </div>
             </label>
-            <label className="space-y-1 text-xs text-slate-600">
-              Role
-              <select
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                value={assignRoleId}
-                onChange={(e) => setAssignRoleId(e.target.value)}
-              >
-                <option value="">Remove role</option>
-                {roles.map((role) => (
-                  <option key={role.role_id} value={String(role.role_id)}>
-                    {role.role_code} {role.role_name ? `- ${role.role_name}` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {roles.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-xs text-slate-600">Roles</p>
+                <div className="grid gap-2 rounded-2xl border border-slate-200 bg-white/70 p-3 text-xs text-slate-700 sm:grid-cols-2">
+                  {roles.map((role) => {
+                    const checked = assignRoleIds.includes(role.role_id);
+                    return (
+                      <label key={role.role_id} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setAssignRoleIds((prev) => {
+                              if (prev.includes(role.role_id)) {
+                                return prev.filter((id) => id !== role.role_id);
+                              }
+                              return [...prev, role.role_id];
+                            });
+                          }}
+                        />
+                        <span className="truncate">
+                          <span className="font-medium">{role.role_code}</span>
+                          {role.role_name ? ` - ${role.role_name}` : ""}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {personSelected && assignRoleIds.length === 0 ? (
+                  <p className="text-xs text-slate-500">No roles selected.</p>
+                ) : null}
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={() => void assignRole()}

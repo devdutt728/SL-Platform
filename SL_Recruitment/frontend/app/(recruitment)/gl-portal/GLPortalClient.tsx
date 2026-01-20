@@ -451,7 +451,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
     } catch (e: any) {
       const message = e?.message || "Could not update interview status.";
       if (message.toLowerCase().includes("already")) {
-        setNotice("Interview status already set. Only Superadmin can change it.");
+        setNotice("Interview status already set.");
         window.setTimeout(() => setNotice(null), 2500);
       } else {
         setError(message);
@@ -633,7 +633,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
 
               {locked ? (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-2 text-xs text-amber-700">
-                  This assessment is locked after submission. Only Superadmin can edit.
+                  This assessment is locked after submission.
                 </div>
               ) : null}
 

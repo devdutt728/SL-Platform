@@ -476,6 +476,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [interviewsError, setInterviewsError] = useState<string | null>(null);
   const [interviewsNotice, setInterviewsNotice] = useState<string | null>(null);
   const [expandedInterviewId, setExpandedInterviewId] = useState<number | null>(null);
+  const [rescheduleInterviewId, setRescheduleInterviewId] = useState<number | null>(null);
   const [scheduleEmailPreviewOpen, setScheduleEmailPreviewOpen] = useState(false);
   const [scheduleEmailPreviewHtml, setScheduleEmailPreviewHtml] = useState("");
   const [scheduleEmailPreviewBusy, setScheduleEmailPreviewBusy] = useState(false);
@@ -511,9 +512,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const scheduleAllowed = useMemo(() => {
     if (!canSchedule) return false;
     if (canSkip) return true;
+    if (rescheduleInterviewId) return true;
     if (!interviews) return false;
     return interviews.length === 0;
-  }, [canSchedule, canSkip, interviews]);
+  }, [canSchedule, canSkip, interviews, rescheduleInterviewId]);
   const [offerLetterOverrides, setOfferLetterOverrides] = useState<Record<string, string>>({});
   const [draftLetterOverrides, setDraftLetterOverrides] = useState<Record<string, string>>({});
   const [draftOverridesOpen, setDraftOverridesOpen] = useState(false);
@@ -1006,13 +1008,14 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
-  function openSchedule(roundType: string) {
+  function openSchedule(roundType: string, rescheduleId: number | null = null) {
     setScheduleRound(roundType);
     setScheduleStartAt("");
     setScheduleEndAt("");
     setScheduleLocation("");
     setScheduleMeetLink("");
     setScheduleInterviewer(null);
+    setRescheduleInterviewId(rescheduleId);
     setPersonQuery("");
     setPersonResults([]);
     setSlotPreviewDate("");
@@ -1052,6 +1055,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
     setInterviewsBusy(true);
     try {
+      if (rescheduleInterviewId) {
+        await cancelInterview(rescheduleInterviewId);
+      }
       await createInterview(candidateId, {
         round_type: scheduleRound,
         interviewer_person_id_platform: scheduleInterviewer.person_id,
@@ -1062,6 +1068,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       });
       setScheduleOpen(false);
       setSelectedSlot(null);
+      setRescheduleInterviewId(null);
       await refreshInterviews();
     } catch (e: any) {
       setInterviewsError(e?.message || "Could not schedule interview.");
@@ -2102,11 +2109,6 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     </button>
                   </div>
                 ) : null}
-                {!canSkip && canSchedule && interviews && interviews.length > 0 ? (
-                  <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-2 text-xs text-amber-700">
-                    Only Superadmin can schedule another interview after the first one.
-                  </div>
-                ) : null}
                 {interviewsError ? (
                   <div className="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">
                     {interviewsError}
@@ -2150,33 +2152,49 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                               ) : null}
                               {isCancelled(item) ? <Chip className={chipTone("red")}>Cancelled</Chip> : null}
                             </div>
-                            {canCancelInterview && !isCancelled(item) ? (
-                              <div className="mt-3">
-                                <button
-                                  type="button"
-                                  className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                                  onClick={() => {
-                                    if (!window.confirm("Cancel this interview? This will remove it from the interviewer calendar.")) return;
-                                    void (async () => {
-                                      setBusy(true);
+                            {(canSchedule || canCancelInterview) && !isCancelled(item) ? (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {canSchedule ? (
+                                  <button
+                                    type="button"
+                                    className="rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-white"
+                                    onClick={() => {
                                       setInterviewsError(null);
-                                      setInterviewsNotice(null);
-                                      try {
-                                        await cancelInterview(item.candidate_interview_id);
-                                        const next = await fetchInterviews(candidateId);
-                                        setInterviews(next);
-                                        setInterviewsNotice("Interview cancelled.");
-                                      } catch (e: any) {
-                                        setInterviewsError(e?.message || "Could not cancel interview.");
-                                      } finally {
-                                        setBusy(false);
-                                      }
-                                    })();
-                                  }}
-                                  disabled={busy}
-                                >
-                                  Cancel interview
-                                </button>
+                                      openSchedule(item.round_type || "L2", item.candidate_interview_id);
+                                      setInterviewsNotice("Rescheduling interview: pick a new slot to replace the existing one.");
+                                    }}
+                                    disabled={busy}
+                                  >
+                                    Reschedule
+                                  </button>
+                                ) : null}
+                                {canCancelInterview ? (
+                                  <button
+                                    type="button"
+                                    className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                                    onClick={() => {
+                                      if (!window.confirm("Cancel this interview? This will remove it from the interviewer calendar.")) return;
+                                      void (async () => {
+                                        setBusy(true);
+                                        setInterviewsError(null);
+                                        setInterviewsNotice(null);
+                                        try {
+                                          await cancelInterview(item.candidate_interview_id);
+                                          const next = await fetchInterviews(candidateId);
+                                          setInterviews(next);
+                                          setInterviewsNotice("Interview cancelled.");
+                                        } catch (e: any) {
+                                          setInterviewsError(e?.message || "Could not cancel interview.");
+                                        } finally {
+                                          setBusy(false);
+                                        }
+                                      })();
+                                    }}
+                                    disabled={busy}
+                                  >
+                                    Cancel interview
+                                  </button>
+                                ) : null}
                               </div>
                             ) : null}
                           </div>
@@ -2253,13 +2271,18 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
             <div ref={schedulePanelRef} className="rounded-2xl border border-white/60 bg-white/40 p-4 shadow-card">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs uppercase tracking-tight text-slate-500">Schedule interview</p>
+                  <p className="text-xs uppercase tracking-tight text-slate-500">
+                    {rescheduleInterviewId ? "Reschedule interview" : "Schedule interview"}
+                  </p>
                   <h3 className="text-lg font-semibold">Round: {scheduleRound}</h3>
                 </div>
                 <button
                   type="button"
                   className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                  onClick={() => setScheduleOpen(false)}
+                  onClick={() => {
+                    setScheduleOpen(false);
+                    setRescheduleInterviewId(null);
+                  }}
                 >
                   Close
                 </button>
@@ -2451,7 +2474,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                 <button
                   type="button"
                   className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
-                  onClick={() => setScheduleOpen(false)}
+                  onClick={() => {
+                    setScheduleOpen(false);
+                    setRescheduleInterviewId(null);
+                  }}
                 >
                   Cancel
                 </button>
@@ -2477,7 +2503,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     onClick={() => void handleScheduleSubmit()}
                     disabled={interviewsBusy}
                 >
-                  {interviewsBusy ? "Saving..." : "Schedule interview"}
+                  {interviewsBusy ? "Saving..." : rescheduleInterviewId ? "Reschedule interview" : "Schedule interview"}
                 </button>
               </div>
             </div>

@@ -186,15 +186,7 @@ export default function ReportsClient() {
     window.location.href = url.toString();
   }
 
-  if (accessDenied) {
-    return (
-      <main className="content-pad">
-        <div className="rounded-3xl border border-rose-200 bg-white/80 p-6 text-sm text-rose-700 shadow-sm">
-          Access restricted. Reports are available to HR Admin and Superadmin only.
-        </div>
-      </main>
-    );
-  }
+  if (accessDenied) return null;
 
   return (
     <main className="content-pad space-y-4">
@@ -473,7 +465,7 @@ async function formatApiError(res: Response): Promise<string> {
     redirectToLogin();
     return detail || "Session expired. Redirecting to login.";
   }
-  if (res.status === 403) return detail || "Forbidden. You may not have permission for this action.";
+  if (res.status === 403) return detail || "Action not allowed.";
   return detail || raw || `Request failed (${res.status})`;
 }
 

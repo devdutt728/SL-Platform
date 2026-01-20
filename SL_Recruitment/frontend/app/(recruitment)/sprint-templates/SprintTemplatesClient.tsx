@@ -196,7 +196,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
 
   async function saveTemplate() {
     if (!isSuperadmin) {
-      setError("Only Superadmin can manage sprint templates.");
+      setError("Action not available.");
       return;
     }
     if (!form.name.trim()) {
@@ -241,7 +241,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
 
   async function uploadAttachment() {
     if (!isSuperadmin) {
-      setUploadError("Only Superadmin can upload attachments.");
+      setUploadError("Action not available.");
       return;
     }
     if (!attachmentTemplateId) {
@@ -282,7 +282,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
 
   async function removeAttachment(attachmentId: number) {
     if (!isSuperadmin) {
-      setUploadError("Only Superadmin can remove attachments.");
+      setUploadError("Action not available.");
       return;
     }
     if (!attachmentTemplateId) {
@@ -624,11 +624,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
             )}
           </div>
         </div>
-      ) : (
-        <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 text-sm text-slate-700 shadow-sm">
-          Only <span className="font-semibold">Superadmin</span> can manage sprint templates and attachments. HR can preview once roles are loaded.
-        </div>
-      )}
+      ) : null}
     </main>
   );
 }
@@ -655,7 +651,7 @@ async function formatApiError(res: Response): Promise<string> {
     redirectToLogin();
     return detail || "Session expired. Redirecting to login.";
   }
-  if (res.status === 403) return detail || "Forbidden. You may not have permission for this action.";
+  if (res.status === 403) return detail || "Action not allowed.";
   return detail || raw || `Request failed (${res.status})`;
 }
 

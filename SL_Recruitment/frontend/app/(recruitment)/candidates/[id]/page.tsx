@@ -42,7 +42,12 @@ export default async function CandidateDetailPage({ params }: { params: { id: st
     (me?.platform_role_id ?? null) === 5 ||
     ["2", "5"].includes((me?.platform_role_code ?? "").trim());
   const canSkip = (me?.platform_role_id ?? null) === 2 || (me?.platform_role_code ?? "").trim() === "2";
-  const canCancelInterview = canSkip;
+  const canCancelInterview =
+    canSkip ||
+    roles.includes("hr_admin") ||
+    roles.includes("hr_exec") ||
+    (me?.platform_role_id ?? null) === 5 ||
+    ["5"].includes((me?.platform_role_code ?? "").trim());
   const canUploadJoiningDocs =
     roles.includes("hr_admin") ||
     roles.includes("hr_exec") ||

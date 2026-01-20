@@ -158,6 +158,9 @@ export type PlatformPersonSuggestion = {
   email: string;
   role_name?: string | null;
   role_code?: string | null;
+  role_ids?: number[] | null;
+  role_codes?: string[] | null;
+  role_names?: string[] | null;
 };
 
 export type PlatformRole = {

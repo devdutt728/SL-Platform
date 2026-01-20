@@ -23,8 +23,10 @@ export function LoginPanel({ clientId }: { clientId: string }) {
           className="h-full w-full object-contain"
         />
       </div>
-      <h1 className="text-2xl font-semibold">Recruitment OS</h1>
-      <p className="mt-2 text-sm text-[var(--text-secondary)]">Sign in with your Studio Lotus Google account.</p>
+      <h1 className="text-center text-2xl font-semibold">Recruitment OS</h1>
+      <p className="mt-2 text-center text-sm text-[var(--text-secondary)]">
+        Sign in with your Studio Lotus Google account.
+      </p>
 
       <div className="mt-6 flex justify-center">
         <a

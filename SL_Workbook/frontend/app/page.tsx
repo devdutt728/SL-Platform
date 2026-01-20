@@ -40,7 +40,7 @@ export default function Home() {
           </div>
         </div>
         <h1 className="mt-8 text-4xl font-semibold text-slate-900 sm:text-5xl">
-          Orchestrate every workspace from one console.
+          Coordinate every workspace from one console.
         </h1>
         <p className="mt-4 max-w-2xl text-base text-steel">
           Choose a module to continue. Each app has its own sign-in and workspace, wired to the same platform identity.

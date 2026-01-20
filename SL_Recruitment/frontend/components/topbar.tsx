@@ -10,6 +10,8 @@ type Me = {
   roles: string[];
   platform_role_code?: string | null;
   platform_role_name?: string | null;
+  platform_role_codes?: string[] | null;
+  platform_role_names?: string[] | null;
 };
 
 const roleLabel: Record<string, string> = {
@@ -33,9 +35,16 @@ export function Topbar() {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const primaryRole = useMemo(() => {
-    if (!me?.roles?.length) return null;
-    return me.roles[0];
+  const displayRoles = useMemo(() => {
+    if (!me) return [];
+    const names = (me.platform_role_names || []).filter(Boolean);
+    if (names.length) return names;
+    const combined = new Set<string>();
+    (me.roles || []).forEach((role) => combined.add(role));
+    (me.platform_role_codes || []).forEach((role) => combined.add(role));
+    if (me.platform_role_code) combined.add(me.platform_role_code);
+    const labels = Array.from(combined).map((role) => roleLabel[role] || role).filter(Boolean);
+    return labels.length ? labels : [me.platform_role_name || "Viewer"];
   }, [me]);
 
   useEffect(() => {
@@ -87,9 +96,7 @@ export function Topbar() {
               </div>
               <div className="leading-tight">
                 <p className="text-xs tracking-tight text-slate-500">{firstName(me)}</p>
-                <p className="text-sm text-slate-800">
-                  {me.platform_role_name || roleLabel[primaryRole || ""] || primaryRole || me.platform_role_code || "Viewer"}
-                </p>
+                <p className="text-sm text-slate-800">{displayRoles.join(", ")}</p>
               </div>
               <button
                 onClick={signOut}
