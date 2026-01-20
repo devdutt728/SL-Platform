@@ -163,6 +163,32 @@ export type PlatformPersonSuggestion = {
   role_names?: string[] | null;
 };
 
+export type PlatformPerson = {
+  person_id: string;
+  person_code: string;
+  personal_id?: string | null;
+  first_name: string;
+  last_name?: string | null;
+  email: string;
+  mobile_number?: string | null;
+  role_id?: number | null;
+  grade_id?: number | null;
+  department_id?: number | null;
+  manager_id?: string | null;
+  employment_type?: string | null;
+  join_date?: string | null;
+  exit_date?: string | null;
+  status?: string | null;
+  is_deleted?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  source_system?: string | null;
+  full_name?: string | null;
+  display_name?: string | null;
+  role_name?: string | null;
+  role_code?: string | null;
+};
+
 export type PlatformRole = {
   role_id: number;
   role_code: string;

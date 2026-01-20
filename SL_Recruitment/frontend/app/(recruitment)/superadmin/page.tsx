@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { internalUrl } from "@/lib/internal";
 import { notFound } from "next/navigation";
 import { SuperAdminRolesClient } from "./SuperAdminRolesClient";
+import { SuperAdminPeopleClient } from "./SuperAdminPeopleClient";
 
 type Me = {
   platform_role_id?: number | null;
@@ -21,5 +22,12 @@ export default async function SuperAdminPage() {
     notFound();
   }
 
-  return <SuperAdminRolesClient />;
+  return (
+    <>
+      <SuperAdminRolesClient />
+      <div className="content-pad mt-8">
+        <SuperAdminPeopleClient />
+      </div>
+    </>
+  );
 }

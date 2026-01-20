@@ -19,3 +19,16 @@ export async function GET(request: Request) {
   });
 }
 
+export async function POST(request: Request) {
+  const body = await request.text();
+  const res = await fetch(backendUrl("/platform/people"), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...authHeaderFromCookie() },
+    body,
+  });
+  const data = await res.text();
+  return new NextResponse(data, {
+    status: res.status,
+    headers: { "content-type": res.headers.get("content-type") || "application/json" },
+  });
+}
