@@ -26,19 +26,36 @@ from app.services.platform_identity import active_status_filter
 
 router = APIRouter(prefix="/platform/people", tags=["platform"])
 
+def _is_superadmin_user(user: UserContext) -> bool:
+    if Role.HR_ADMIN in (getattr(user, "roles", None) or []):
+        return True
+    if (getattr(user, "platform_role_id", None) or None) == 2:
+        return True
+    if (getattr(user, "platform_role_code", None) or "").strip() == "2":
+        return True
+    role_ids = getattr(user, "platform_role_ids", None) or []
+    if 2 in role_ids:
+        return True
+    role_codes = getattr(user, "platform_role_codes", None) or []
+    normalized_codes = {str(code).strip().lower() for code in role_codes if code}
+    return "s_admin" in normalized_codes or "superadmin" in normalized_codes
+
 
 @router.get("", response_model=list[PlatformPersonSuggestion])
 async def search_people(
     q: str = Query(default="", max_length=100),
     limit: int = Query(default=10, ge=1, le=25),
+    include_deleted: bool = Query(default=False),
     session: AsyncSession = Depends(get_platform_session),
     _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER])),
 ):
     q_norm = q.strip().lower()
     like = f"%{q_norm}%"
 
-    is_superadmin = (getattr(_user, "platform_role_id", None) or None) == 2
+    is_superadmin = _is_superadmin_user(_user)
     base_filters = [(DimPerson.is_deleted == 0) | (DimPerson.is_deleted.is_(None))]
+    if is_superadmin and include_deleted:
+        base_filters = []
     if not is_superadmin:
         base_filters.append(active_status_filter())
 
@@ -54,6 +71,8 @@ async def search_people(
                     DimPerson.last_name,
                     DimPerson.display_name,
                     DimPerson.full_name,
+                    DimPerson.status,
+                    DimPerson.is_deleted,
                     DimPerson.role_id,
                     DimRole.role_code,
                     DimRole.role_name,
@@ -76,6 +95,8 @@ async def search_people(
                     DimPerson.last_name,
                     DimPerson.display_name,
                     DimPerson.full_name,
+                    DimPerson.status,
+                    DimPerson.is_deleted,
                     DimPerson.role_id,
                     DimRole.role_code,
                     DimRole.role_name,
@@ -152,6 +173,8 @@ async def search_people(
                 person_code=row.person_code,
                 full_name=full_name,
                 email=row.email,
+                status=row.status,
+                is_deleted=row.is_deleted,
                 role_code=row.role_code,
                 role_name=row.role_name,
                 role_ids=role_bucket["role_ids"],

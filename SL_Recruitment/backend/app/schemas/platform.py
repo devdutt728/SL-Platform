@@ -9,6 +9,8 @@ class PlatformPersonSuggestion(BaseModel):
     person_code: str
     full_name: str
     email: EmailStr
+    status: Optional[str] = None
+    is_deleted: Optional[int] = None
     role_name: Optional[str] = None
     role_code: Optional[str] = None
     role_ids: list[int] = Field(default_factory=list)

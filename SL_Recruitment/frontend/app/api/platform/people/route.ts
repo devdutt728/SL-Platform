@@ -6,10 +6,14 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const q = url.searchParams.get("q") || "";
   const limit = url.searchParams.get("limit") || "10";
+  const includeDeleted = url.searchParams.get("include_deleted");
 
   const upstream = new URL(backendUrl("/platform/people"));
   upstream.searchParams.set("q", q);
   upstream.searchParams.set("limit", limit);
+  if (includeDeleted != null) {
+    upstream.searchParams.set("include_deleted", includeDeleted);
+  }
 
   const res = await fetch(upstream.toString(), { cache: "no-store", headers: { ...authHeaderFromCookie() } });
   const data = await res.text();

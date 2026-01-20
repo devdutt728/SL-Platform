@@ -156,6 +156,8 @@ export type PlatformPersonSuggestion = {
   person_code: string;
   full_name: string;
   email: string;
+  status?: string | null;
+  is_deleted?: number | null;
   role_name?: string | null;
   role_code?: string | null;
   role_ids?: number[] | null;
