@@ -27,6 +27,7 @@ from app.schemas.interview import InterviewCreate, InterviewOut, InterviewResche
 from app.schemas.interview_slots import InterviewSlotOut, InterviewSlotPreviewOut, InterviewSlotProposalIn
 from app.schemas.stage import StageTransitionRequest
 from app.schemas.user import UserContext
+from app.services.platform_identity import active_status_filter
 from app.services.calendar import create_calendar_event, delete_calendar_event, query_freebusy, update_calendar_event
 from app.services.calendar import list_calendar_events, list_calendar_list_details, list_visible_calendar_ids, service_account_info
 from app.services.email import render_template, send_email
@@ -312,12 +313,15 @@ async def _render_slot_conflict(
     )
 
 
-async def _fetch_platform_people(ids: set[str]) -> dict[str, dict]:
+async def _fetch_platform_people(ids: set[str], *, include_inactive: bool = False) -> dict[str, dict]:
     ids = {pid for pid in ids if pid}
     if not ids:
         return {}
     try:
         async with PlatformSessionLocal() as platform_session:
+            filters = [DimPerson.person_id.in_(list(ids))]
+            if not include_inactive:
+                filters.append(active_status_filter())
             person_rows = (
                 await platform_session.execute(
                     select(
@@ -328,7 +332,7 @@ async def _fetch_platform_people(ids: set[str]) -> dict[str, dict]:
                         DimPerson.last_name,
                         DimPerson.email,
                         DimPerson.role_id,
-                    ).where(DimPerson.person_id.in_(list(ids)))
+                    ).where(*filters)
                 )
             ).all()
             role_ids = {pr.role_id for pr in person_rows if pr.role_id}
@@ -469,7 +473,7 @@ async def create_interview(
     if candidate.opening_id is not None:
         opening = (await session.execute(select(RecOpening).where(RecOpening.opening_id == candidate.opening_id))).scalars().first()
 
-    interviewer_meta = (await _fetch_platform_people({payload.interviewer_person_id_platform})).get(
+    interviewer_meta = (await _fetch_platform_people({payload.interviewer_person_id_platform}, include_inactive=_is_superadmin(user))).get(
         payload.interviewer_person_id_platform, {}
     )
     interviewer_email = (interviewer_meta or {}).get("email")
@@ -599,7 +603,7 @@ async def propose_interview_slots(
     interviewer_pid = _clean_platform_person_id(payload.interviewer_person_id_platform)
     interviewer_meta = {}
     if not interviewer_email and interviewer_pid:
-        interviewer_meta = (await _fetch_platform_people({interviewer_pid})).get(
+        interviewer_meta = (await _fetch_platform_people({interviewer_pid}, include_inactive=_is_superadmin(user))).get(
             interviewer_pid, {}
         )
         interviewer_email = (interviewer_meta or {}).get("email")
@@ -731,7 +735,7 @@ async def preview_interview_slots(
     interviewer_key = _clean_platform_person_id(interviewer_person_id_platform) if interviewer_person_id_platform else None
     interviewer_meta = {}
     if not email and interviewer_key:
-        interviewer_meta = (await _fetch_platform_people({interviewer_key})).get(
+        interviewer_meta = (await _fetch_platform_people({interviewer_key}, include_inactive=_is_superadmin(_user))).get(
             interviewer_key, {}
         )
         email = (interviewer_meta or {}).get("email")
@@ -1202,7 +1206,7 @@ async def cancel_interview(
     interview = await session.get(RecCandidateInterview, candidate_interview_id)
     if not interview:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
-    interviewer_meta = (await _fetch_platform_people({interview.interviewer_person_id_platform or ""})).get(
+    interviewer_meta = (await _fetch_platform_people({interview.interviewer_person_id_platform or ""}, include_inactive=_is_superadmin(user))).get(
         _clean_platform_person_id(interview.interviewer_person_id_platform) or "", {}
     )
     interviewer_email = (interviewer_meta or {}).get("email")
@@ -1242,7 +1246,7 @@ async def reschedule_interview(
     if end_at <= start_at:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scheduled_end_at must be after scheduled_start_at")
 
-    interviewer_meta = (await _fetch_platform_people({interview.interviewer_person_id_platform or ""})).get(
+    interviewer_meta = (await _fetch_platform_people({interview.interviewer_person_id_platform or ""}, include_inactive=_is_superadmin(user))).get(
         _clean_platform_person_id(interview.interviewer_person_id_platform) or "", {}
     )
     interviewer_email = (interviewer_meta or {}).get("email")
@@ -1405,7 +1409,7 @@ async def list_interviews(
 
     rows = (await session.execute(query)).all()
     interviewer_ids = {row[0].interviewer_person_id_platform or "" for row in rows}
-    interviewer_lookup = await _fetch_platform_people(interviewer_ids)
+    interviewer_lookup = await _fetch_platform_people(interviewer_ids, include_inactive=_is_superadmin(user))
 
     out: list[InterviewOut] = []
     for interview, candidate, opening in rows:
@@ -1432,7 +1436,7 @@ async def get_interview(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
     interview, candidate, opening = row
     _assert_interviewer_access(user, interview)
-    interviewer_meta = (await _fetch_platform_people({interview.interviewer_person_id_platform or ""})).get(
+    interviewer_meta = (await _fetch_platform_people({interview.interviewer_person_id_platform or ""}, include_inactive=_is_superadmin(user))).get(
         _clean_platform_person_id(interview.interviewer_person_id_platform) or "", {}
     )
     return _build_interview_out(interview, candidate=candidate, opening=opening, interviewer_meta=interviewer_meta)
@@ -1495,7 +1499,7 @@ async def update_interview(
     opening = None
     if candidate and candidate.opening_id is not None:
         opening = (await session.execute(select(RecOpening).where(RecOpening.opening_id == candidate.opening_id))).scalars().first()
-    interviewer_meta = (await _fetch_platform_people({interview.interviewer_person_id_platform or ""})).get(
+    interviewer_meta = (await _fetch_platform_people({interview.interviewer_person_id_platform or ""}, include_inactive=_is_superadmin(user))).get(
         _clean_platform_person_id(interview.interviewer_person_id_platform) or "", {}
     )
     return _build_interview_out(interview, candidate=candidate, opening=opening, interviewer_meta=interviewer_meta)

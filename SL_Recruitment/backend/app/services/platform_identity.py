@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.platform_person import DimPerson, DimPersonRole
@@ -41,6 +41,13 @@ def _role_row_value(row, key: str, index: int):
     return None
 
 
+def active_status_filter():
+    return or_(
+        DimPerson.status.is_(None),
+        func.lower(DimPerson.status).in_(["working", "active"]),
+    )
+
+
 async def resolve_identity_by_email(session: AsyncSession, email: str) -> Optional[PlatformIdentity]:
     email_norm = email.strip().lower()
     row = (
@@ -60,7 +67,7 @@ async def resolve_identity_by_email(session: AsyncSession, email: str) -> Option
             )
             .select_from(DimPerson)
             .outerjoin(DimRole, DimRole.role_id == DimPerson.role_id)
-            .where(DimPerson.email == email_norm)
+            .where(DimPerson.email == email_norm, active_status_filter())
             .limit(1)
         )
     ).first()

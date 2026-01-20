@@ -19,6 +19,7 @@ from app.models.sprint_template import RecSprintTemplate
 from app.models.stage import RecCandidateStage
 from app.services.email import send_email
 from app.services.events import log_event
+from app.services.platform_identity import active_status_filter
 
 
 def _caf_link(token: str) -> str:
@@ -92,7 +93,10 @@ async def _interviewer_email(interviewer_person_id_platform: str | None) -> str 
     async with PlatformSessionLocal() as platform_session:
         row = (
             await platform_session.execute(
-                select(DimPerson.email).where(DimPerson.person_id == interviewer_person_id_platform)
+                select(DimPerson.email).where(
+                    DimPerson.person_id == interviewer_person_id_platform,
+                    active_status_filter(),
+                )
             )
         ).first()
         return row[0] if row else None

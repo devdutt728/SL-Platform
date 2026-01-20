@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.roles import Role
 from app.db.platform_session import get_platform_session
 from app.db.session import get_session
 from app.models.platform import DimPerson, DimPersonRole, DimRole
@@ -14,7 +15,7 @@ from app.request_context import get_request_context
 from app.rbac import require_superadmin
 from app.schemas.user import PlatformRoleOut, PlatformUserCreate, PlatformUserListItem, PlatformUserUpdate, UserContext
 from app.services.audit_service import write_audit_log
-from app.services.user_service import prevent_last_superadmin_change
+from app.services.user_service import active_status_filter, prevent_last_superadmin_change
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -57,6 +58,8 @@ async def list_users(
     user: UserContext = Depends(require_superadmin()),
 ):
     stmt = select(DimPerson, DimRole).outerjoin(DimRole, DimRole.role_id == DimPerson.role_id)
+    if Role.SUPERADMIN not in user.roles:
+        stmt = stmt.where(active_status_filter())
     if q:
         like = f"%{q}%"
         role_person_ids = (

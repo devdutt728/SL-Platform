@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.platform import DimPerson, DimPersonRole, DimRole
+from app.services.user_service import active_status_filter
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,7 @@ async def resolve_identity_by_email(session: AsyncSession, email: str) -> Option
             )
             .select_from(DimPerson)
             .outerjoin(DimRole, DimRole.role_id == DimPerson.role_id)
-            .where(DimPerson.email == email_norm)
+            .where(DimPerson.email == email_norm, active_status_filter())
             .limit(1)
         )
     ).first()
@@ -139,7 +140,7 @@ async def resolve_identity_by_person_id(session: AsyncSession, person_id: str) -
             )
             .select_from(DimPerson)
             .outerjoin(DimRole, DimRole.role_id == DimPerson.role_id)
-            .where(DimPerson.person_id == person_id)
+            .where(DimPerson.person_id == person_id, active_status_filter())
             .limit(1)
         )
     ).first()

@@ -24,6 +24,7 @@ from app.models.screening import RecCandidateScreening
 from app.models.stage import RecCandidateStage
 from uuid import uuid4
 from app.services.drive import delete_drive_item
+from app.services.platform_identity import active_status_filter
 
 router = APIRouter(prefix="/rec/openings", tags=["openings"])
 
@@ -65,7 +66,11 @@ async def list_openings(
     person_lookup: dict[str, dict] = {}
     if requested_ids:
         try:
+            include_inactive = (user.platform_role_id or None) == 2
             async with PlatformSessionLocal() as platform_session:
+                person_filters = [DimPerson.person_id.in_(list(requested_ids))]
+                if not include_inactive:
+                    person_filters.append(active_status_filter())
                 person_rows = (
                     await platform_session.execute(
                         select(
@@ -78,7 +83,7 @@ async def list_openings(
                             DimPerson.person_code,
                             DimPerson.mobile_number,
                             DimPerson.role_id,
-                        ).where(DimPerson.person_id.in_(list(requested_ids)))
+                        ).where(*person_filters)
                     )
                 ).all()
                 role_ids = {pr.role_id for pr in person_rows if pr.role_id}
@@ -191,7 +196,11 @@ async def create_opening(
     requested_by_meta: dict[str, str | None] = {}
     if requested_by_id:
         try:
+            include_inactive = (user.platform_role_id or None) == 2
             async with PlatformSessionLocal() as platform_session:
+                person_filters = [DimPerson.person_id == requested_by_id]
+                if not include_inactive:
+                    person_filters.append(active_status_filter())
                 pr = (
                     await platform_session.execute(
                         select(
@@ -204,7 +213,7 @@ async def create_opening(
                             DimPerson.person_code,
                             DimPerson.mobile_number,
                             DimPerson.role_id,
-                        ).where(DimPerson.person_id == requested_by_id)
+                        ).where(*person_filters)
                     )
                 ).first()
                 role_name: str | None = None

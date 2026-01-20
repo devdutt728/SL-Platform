@@ -22,6 +22,7 @@ from app.schemas.platform import (
     PlatformPersonUpdate,
 )
 from app.schemas.user import UserContext
+from app.services.platform_identity import active_status_filter
 
 router = APIRouter(prefix="/platform/people", tags=["platform"])
 
@@ -36,9 +37,10 @@ async def search_people(
     q_norm = q.strip().lower()
     like = f"%{q_norm}%"
 
-    base_filters = [
-        (DimPerson.is_deleted == 0) | (DimPerson.is_deleted.is_(None)),
-    ]
+    is_superadmin = (getattr(_user, "platform_role_id", None) or None) == 2
+    base_filters = [(DimPerson.is_deleted == 0) | (DimPerson.is_deleted.is_(None))]
+    if not is_superadmin:
+        base_filters.append(active_status_filter())
 
     # If query is too short, return a small "default" list for dropdown convenience.
     if len(q_norm) < 2:

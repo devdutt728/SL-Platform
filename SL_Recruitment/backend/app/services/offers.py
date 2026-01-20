@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.core.paths import resolve_repo_path
 from app.services.drive import move_candidate_folder, upload_offer_doc
 from app.services.events import log_event
+from app.services.platform_identity import active_status_filter
 
 
 def _format_date(value) -> str:
@@ -148,7 +149,11 @@ async def _resolve_reporting_to(opening: RecOpening | None) -> str:
         return ""
     try:
         async with PlatformSessionLocal() as platform_session:
-            person = await platform_session.get(DimPerson, person_id)
+            person = (
+                await platform_session.execute(
+                    select(DimPerson).where(DimPerson.person_id == person_id, active_status_filter())
+                )
+            ).scalars().first()
             if not person:
                 return ""
             return person.display_name or person.full_name or person.email or ""

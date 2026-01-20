@@ -22,15 +22,18 @@ def is_active_status(status: str | None) -> bool:
     return status.strip().lower() in {"working", "active"}
 
 
+def active_status_filter():
+    return or_(
+        DimPerson.status.is_(None),
+        func.lower(DimPerson.status).in_(["working", "active"]),
+    )
+
+
 async def is_last_superadmin(session: AsyncSession, person_id: str) -> bool:
     superadmin_role_ids = _superadmin_role_ids()
     if not superadmin_role_ids:
         return False
 
-    active_status = or_(
-        DimPerson.status.is_(None),
-        func.lower(DimPerson.status).in_(["working", "active"]),
-    )
     count_stmt = (
         select(func.count(func.distinct(DimPerson.person_id)))
         .select_from(DimPersonRole)
@@ -38,7 +41,7 @@ async def is_last_superadmin(session: AsyncSession, person_id: str) -> bool:
         .where(
             DimPersonRole.role_id.in_(superadmin_role_ids),
             DimPerson.is_deleted.is_(None) | (DimPerson.is_deleted == 0),
-            active_status,
+            active_status_filter(),
         )
     )
     result = await session.execute(count_stmt)
