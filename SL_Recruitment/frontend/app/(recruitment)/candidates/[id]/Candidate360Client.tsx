@@ -248,8 +248,12 @@ async function fetchInterviews(candidateId: string) {
   return (await res.json()) as Interview[];
 }
 
-async function cancelInterview(interviewId: number) {
-  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/cancel`, { method: "POST" });
+async function cancelInterview(interviewId: number, reason?: string) {
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/cancel`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
   if (!res.ok) throw new Error(await res.text());
 }
 
@@ -509,6 +513,22 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     return note.includes("cancelled by superadmin");
   }
 
+  function interviewStatusValue(item: Interview) {
+    return (item.interview_status || "").toLowerCase();
+  }
+
+  function isNotTaken(item: Interview) {
+    return interviewStatusValue(item) === "not_taken";
+  }
+
+  function interviewStatusValue(item: Interview) {
+    return (item.interview_status || "").toLowerCase();
+  }
+
+  function isNotTaken(item: Interview) {
+    return interviewStatusValue(item) === "not_taken";
+  }
+
   const scheduleAllowed = useMemo(() => {
     if (!canSchedule) return false;
     if (canSkip) return true;
@@ -536,6 +556,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [scheduleLocation, setScheduleLocation] = useState("");
   const [scheduleMeetLink, setScheduleMeetLink] = useState("");
   const [scheduleInterviewer, setScheduleInterviewer] = useState<PlatformPersonSuggestion | null>(null);
+  const [scheduleReason, setScheduleReason] = useState("");
   const [slotInviteBusy, setSlotInviteBusy] = useState(false);
   const [personQuery, setPersonQuery] = useState("");
   const [personResults, setPersonResults] = useState<PlatformPersonSuggestion[]>([]);
@@ -1015,6 +1036,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     setScheduleLocation("");
     setScheduleMeetLink("");
     setScheduleInterviewer(null);
+    setScheduleReason("");
     setRescheduleInterviewId(rescheduleId);
     setPersonQuery("");
     setPersonResults([]);
@@ -1056,7 +1078,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     setInterviewsBusy(true);
     try {
       if (rescheduleInterviewId) {
-        await cancelInterview(rescheduleInterviewId);
+        await cancelInterview(rescheduleInterviewId, scheduleReason);
       }
       await createInterview(candidateId, {
         round_type: scheduleRound,
@@ -2150,6 +2172,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                   Meeting link
                                 </a>
                               ) : null}
+                              {isNotTaken(item) ? <Chip className={chipTone("amber")}>Interview not taken</Chip> : null}
                               {isCancelled(item) ? <Chip className={chipTone("red")}>Cancelled</Chip> : null}
                             </div>
                             {(canSchedule || canCancelInterview) && !isCancelled(item) ? (
@@ -2211,21 +2234,41 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                       ) : interviewPast.length === 0 ? (
                         <p className="text-sm text-slate-600">No completed interviews yet.</p>
                       ) : (
-                        interviewPast.map((item) => (
+                        interviewPast.map((item) => {
+                          const notTaken = isNotTaken(item);
+                          return (
                           <div key={item.candidate_interview_id} className="rounded-2xl border border-white/60 bg-white/50 p-3">
                             <div className="flex items-start justify-between gap-2">
                               <div>
                                 <p className="text-sm font-semibold">{item.round_type}</p>
                                 <p className="text-xs text-slate-600">{formatDateTime(item.scheduled_start_at)}</p>
                               </div>
-                              <Chip className={decisionTone(item.decision)}>
-                                {item.decision === "cancelled" ? "Cancelled" : item.decision || "No decision"}
+                              <Chip className={notTaken ? chipTone("amber") : decisionTone(item.decision)}>
+                                {notTaken ? "Interview not taken" : item.decision === "cancelled" ? "Cancelled" : item.decision || "No decision"}
                               </Chip>
                             </div>
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                               {item.rating_overall ? <Chip className={chipTone("neutral")}>Overall {item.rating_overall}/5</Chip> : null}
-                              {item.feedback_submitted ? <Chip className={chipTone("green")}>Feedback submitted</Chip> : <Chip className={chipTone("amber")}>Feedback pending</Chip>}
+                              {item.feedback_submitted ? (
+                                <Chip className={chipTone("green")}>Feedback submitted</Chip>
+                              ) : notTaken ? null : (
+                                <Chip className={chipTone("amber")}>Feedback pending</Chip>
+                              )}
                             </div>
+                            {notTaken && canSchedule ? (
+                              <button
+                                type="button"
+                                className="mt-3 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-white"
+                                onClick={() => {
+                                  setInterviewsError(null);
+                                  openSchedule(item.round_type || "L2", item.candidate_interview_id);
+                                  setInterviewsNotice("Rescheduling interview: pick a new slot to replace the existing one.");
+                                }}
+                                disabled={busy}
+                              >
+                                Reschedule interview
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               className="mt-3 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
@@ -2258,7 +2301,8 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                               </div>
                             ) : null}
                           </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   </div>
@@ -2463,6 +2507,17 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     placeholder="https://meet.google.com/..."
                   />
                 </label>
+                {rescheduleInterviewId ? (
+                  <label className="space-y-1 text-xs text-slate-600">
+                    Reschedule reason
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={scheduleReason}
+                      onChange={(e) => setScheduleReason(e.target.value)}
+                      placeholder="Reason for reschedule"
+                    />
+                  </label>
+                ) : null}
               </div>
 
               {scheduleEmailPreviewError ? (

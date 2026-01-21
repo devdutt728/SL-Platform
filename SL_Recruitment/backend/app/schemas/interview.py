@@ -30,6 +30,11 @@ class InterviewUpdate(BaseModel):
 class InterviewReschedule(BaseModel):
     scheduled_start_at: datetime
     scheduled_end_at: datetime
+    reason: Optional[str] = None
+
+
+class InterviewCancel(BaseModel):
+    reason: Optional[str] = None
 
 
 class InterviewOut(BaseModel):
@@ -37,6 +42,7 @@ class InterviewOut(BaseModel):
     candidate_id: int
     stage_name: Optional[str] = None
     round_type: str
+    interview_status: Optional[str] = None
     interviewer_person_id_platform: Optional[str] = None
     interviewer_name: Optional[str] = None
     interviewer_email: Optional[str] = None

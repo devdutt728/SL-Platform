@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta, timezone
+import json
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -23,7 +24,7 @@ from app.models.interview_slot import RecCandidateInterviewSlot
 from app.models.opening import RecOpening
 from app.models.platform_person import DimPerson
 from app.models.platform_role import DimRole
-from app.schemas.interview import InterviewCreate, InterviewOut, InterviewReschedule, InterviewUpdate
+from app.schemas.interview import InterviewCancel, InterviewCreate, InterviewOut, InterviewReschedule, InterviewUpdate
 from app.schemas.interview_slots import InterviewSlotOut, InterviewSlotPreviewOut, InterviewSlotProposalIn
 from app.schemas.stage import StageTransitionRequest
 from app.schemas.user import UserContext
@@ -364,12 +365,14 @@ def _build_interview_out(
     candidate: RecCandidate | None = None,
     opening: RecOpening | None = None,
     interviewer_meta: dict | None = None,
+    interview_status: str | None = None,
 ) -> InterviewOut:
     return InterviewOut(
         candidate_interview_id=interview.candidate_interview_id,
         candidate_id=interview.candidate_id,
         stage_name=interview.stage_name,
         round_type=interview.round_type,
+        interview_status=interview_status,
         interviewer_person_id_platform=interview.interviewer_person_id_platform,
         interviewer_name=(interviewer_meta or {}).get("name"),
         interviewer_email=(interviewer_meta or {}).get("email"),
@@ -418,6 +421,47 @@ def _active_interview_filter():
         notes_normalized.like("%canceled%"),
     )
     return ~cancelled_marker
+
+
+async def _load_interview_statuses(
+    session: AsyncSession,
+    *,
+    interview_ids: list[int],
+) -> dict[int, str]:
+    if not interview_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(
+                RecCandidateEvent.related_entity_id,
+                RecCandidateEvent.meta_json,
+                RecCandidateEvent.created_at,
+                RecCandidateEvent.candidate_event_id,
+            )
+            .where(
+                RecCandidateEvent.related_entity_type == "interview",
+                RecCandidateEvent.action_type == "interview_status_marked",
+                RecCandidateEvent.related_entity_id.in_(interview_ids),
+            )
+            .order_by(
+                RecCandidateEvent.related_entity_id.asc(),
+                RecCandidateEvent.created_at.desc(),
+                RecCandidateEvent.candidate_event_id.desc(),
+            )
+        )
+    ).all()
+    latest: dict[int, str] = {}
+    for related_id, meta_json, _created_at, _event_id in rows:
+        if related_id is None or related_id in latest:
+            continue
+        try:
+            meta = json.loads(meta_json) if meta_json else {}
+        except Exception:
+            meta = {}
+        status_value = meta.get("status") if isinstance(meta, dict) else None
+        if isinstance(status_value, str) and status_value.strip():
+            latest[int(related_id)] = status_value.strip()
+    return latest
 
 
 class InterviewStatusPayload(BaseModel):
@@ -1200,12 +1244,15 @@ async def select_interview_slot(
 @router.post("/interviews/{candidate_interview_id}/cancel", response_class=HTMLResponse)
 async def cancel_interview(
     candidate_interview_id: int,
+    payload: InterviewCancel | None = None,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_superadmin()),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
     interview = await session.get(RecCandidateInterview, candidate_interview_id)
     if not interview:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
+    if interview.feedback_submitted:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview feedback already submitted; cannot cancel.")
     interviewer_meta = (await _fetch_platform_people({interview.interviewer_person_id_platform or ""}, include_inactive=_is_superadmin(user))).get(
         _clean_platform_person_id(interview.interviewer_person_id_platform) or "", {}
     )
@@ -1225,6 +1272,68 @@ async def cancel_interview(
             RecCandidateInterviewSlot.round_type == interview.round_type,
         )
     )
+    candidate = await session.get(RecCandidate, interview.candidate_id)
+    opening = await session.get(RecOpening, candidate.opening_id) if candidate and candidate.opening_id else None
+    tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
+    start_str = _format_slot_label(interview.scheduled_start_at, tz)
+    reason = (payload.reason or "").strip() if payload else ""
+    reason_value = reason or "Not specified"
+
+    await log_event(
+        session,
+        candidate_id=interview.candidate_id,
+        action_type="interview_cancelled",
+        performed_by_person_id_platform=_platform_person_id_int(user),
+        related_entity_type="interview",
+        related_entity_id=interview.candidate_interview_id,
+        meta_json={
+            "round_type": interview.round_type,
+            "scheduled_start_at": interview.scheduled_start_at.isoformat(),
+            "scheduled_end_at": interview.scheduled_end_at.isoformat(),
+            "reason": reason_value,
+        },
+    )
+
+    if candidate and candidate.email:
+        await send_email(
+            session,
+            candidate_id=candidate.candidate_id,
+            to_emails=[candidate.email],
+            subject="Interview cancelled",
+            template_name="interview_cancelled",
+            context={
+                "candidate_name": candidate.full_name,
+                "round_type": interview.round_type,
+                "opening_title": opening.title if opening else "",
+                "scheduled_start": start_str,
+                "reason": reason_value,
+            },
+            email_type="interview_cancelled",
+            related_entity_type="interview",
+            related_entity_id=interview.candidate_interview_id,
+            meta_extra={"interview_id": interview.candidate_interview_id},
+        )
+    if interviewer_email:
+        await send_email(
+            session,
+            candidate_id=interview.candidate_id,
+            to_emails=[interviewer_email],
+            subject=f"Interview cancelled for {(opening.title if opening else 'Role')} - {candidate.full_name if candidate else 'Candidate'}",
+            template_name="interview_cancelled_interviewer",
+            context={
+                "interviewer_name": (interviewer_meta or {}).get("name") or (interviewer_email.split("@")[0] if interviewer_email else "there"),
+                "candidate_name": candidate.full_name if candidate else "Candidate",
+                "candidate_code": candidate.candidate_code if candidate else "",
+                "round_type": interview.round_type,
+                "opening_title": opening.title if opening else "",
+                "scheduled_start": start_str,
+                "reason": reason_value,
+            },
+            email_type="interview_cancelled",
+            related_entity_type="interview",
+            related_entity_id=interview.candidate_interview_id,
+            meta_extra={"interview_id": interview.candidate_interview_id, "recipient": "interviewer"},
+        )
     await session.delete(interview)
     await session.commit()
     return HTMLResponse("<h2>Interview cancelled</h2>", status_code=200)
@@ -1235,11 +1344,13 @@ async def reschedule_interview(
     candidate_interview_id: int,
     payload: InterviewReschedule,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_superadmin()),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
     interview = await session.get(RecCandidateInterview, candidate_interview_id)
     if not interview:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
+    if interview.feedback_submitted:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview feedback already submitted; cannot reschedule.")
 
     start_at = _normalize_to_utc(payload.scheduled_start_at)
     end_at = _normalize_to_utc(payload.scheduled_end_at)
@@ -1312,6 +1423,23 @@ async def reschedule_interview(
     candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
     interviewer_name = (interviewer_meta or {}).get("name") or (interviewer_email.split("@")[0] if interviewer_email else "there")
 
+    reason_value = (payload.reason or "").strip() or "Not specified"
+
+    await log_event(
+        session,
+        candidate_id=interview.candidate_id,
+        action_type="interview_rescheduled",
+        performed_by_person_id_platform=_platform_person_id_int(user),
+        related_entity_type="interview",
+        related_entity_id=interview.candidate_interview_id,
+        meta_json={
+            "round_type": interview.round_type,
+            "scheduled_start_at": start_at.isoformat(),
+            "scheduled_end_at": end_at.isoformat(),
+            "reason": reason_value,
+        },
+    )
+
     if candidate and candidate.email:
         await send_email(
             session,
@@ -1325,6 +1453,7 @@ async def reschedule_interview(
                 "opening_title": opening.title if opening else "",
                 "scheduled_start": start_str,
                 "meeting_link": meeting_link,
+                "reason": reason_value,
             },
             email_type="interview_rescheduled",
             related_entity_type="interview",
@@ -1346,6 +1475,7 @@ async def reschedule_interview(
                 "opening_title": opening.title if opening else "",
                 "scheduled_start": start_str,
                 "meeting_link": meeting_link,
+                "reason": reason_value,
             },
             email_type="interview_rescheduled",
             related_entity_type="interview",
@@ -1354,7 +1484,14 @@ async def reschedule_interview(
         )
 
     await session.commit()
-    return _build_interview_out(interview, candidate=candidate, opening=opening, interviewer_meta=interviewer_meta)
+    status_lookup = await _load_interview_statuses(session, interview_ids=[interview.candidate_interview_id])
+    return _build_interview_out(
+        interview,
+        candidate=candidate,
+        opening=opening,
+        interviewer_meta=interviewer_meta,
+        interview_status=status_lookup.get(interview.candidate_interview_id),
+    )
 
 
 @router.get("/interviews", response_model=list[InterviewOut])
@@ -1411,10 +1548,20 @@ async def list_interviews(
     interviewer_ids = {row[0].interviewer_person_id_platform or "" for row in rows}
     interviewer_lookup = await _fetch_platform_people(interviewer_ids, include_inactive=_is_superadmin(user))
 
+    interview_ids = [row[0].candidate_interview_id for row in rows]
+    status_lookup = await _load_interview_statuses(session, interview_ids=interview_ids)
     out: list[InterviewOut] = []
     for interview, candidate, opening in rows:
         meta = interviewer_lookup.get(_clean_platform_person_id(interview.interviewer_person_id_platform) or "", {})
-        out.append(_build_interview_out(interview, candidate=candidate, opening=opening, interviewer_meta=meta))
+        out.append(
+            _build_interview_out(
+                interview,
+                candidate=candidate,
+                opening=opening,
+                interviewer_meta=meta,
+                interview_status=status_lookup.get(interview.candidate_interview_id),
+            )
+        )
     return out
 
 
@@ -1439,7 +1586,14 @@ async def get_interview(
     interviewer_meta = (await _fetch_platform_people({interview.interviewer_person_id_platform or ""}, include_inactive=_is_superadmin(user))).get(
         _clean_platform_person_id(interview.interviewer_person_id_platform) or "", {}
     )
-    return _build_interview_out(interview, candidate=candidate, opening=opening, interviewer_meta=interviewer_meta)
+    status_lookup = await _load_interview_statuses(session, interview_ids=[candidate_interview_id])
+    return _build_interview_out(
+        interview,
+        candidate=candidate,
+        opening=opening,
+        interviewer_meta=interviewer_meta,
+        interview_status=status_lookup.get(candidate_interview_id),
+    )
 
 
 @router.patch("/interviews/{candidate_interview_id}", response_model=InterviewOut)
@@ -1502,7 +1656,14 @@ async def update_interview(
     interviewer_meta = (await _fetch_platform_people({interview.interviewer_person_id_platform or ""}, include_inactive=_is_superadmin(user))).get(
         _clean_platform_person_id(interview.interviewer_person_id_platform) or "", {}
     )
-    return _build_interview_out(interview, candidate=candidate, opening=opening, interviewer_meta=interviewer_meta)
+    status_lookup = await _load_interview_statuses(session, interview_ids=[candidate_interview_id])
+    return _build_interview_out(
+        interview,
+        candidate=candidate,
+        opening=opening,
+        interviewer_meta=interviewer_meta,
+        interview_status=status_lookup.get(candidate_interview_id),
+    )
 
 
 @router.post("/interviews/{candidate_interview_id}/status")

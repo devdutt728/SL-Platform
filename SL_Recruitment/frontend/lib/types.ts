@@ -58,6 +58,7 @@ export type Interview = {
   candidate_id: number;
   stage_name?: string | null;
   round_type: string;
+  interview_status?: string | null;
   interviewer_person_id_platform?: string | null;
   interviewer_name?: string | null;
   interviewer_email?: string | null;
