@@ -14,7 +14,7 @@ type CandidateDetail = {
 function renderTemplate(template: string, vars: Record<string, string>) {
   let html = template;
   for (const [key, value] of Object.entries(vars)) {
-    html = html.replaceAll(`{${key}}`, value);
+    html = html.split(`{${key}}`).join(value);
   }
   return html;
 }

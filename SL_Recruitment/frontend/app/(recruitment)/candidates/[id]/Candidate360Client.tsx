@@ -521,14 +521,6 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     return interviewStatusValue(item) === "not_taken";
   }
 
-  function interviewStatusValue(item: Interview) {
-    return (item.interview_status || "").toLowerCase();
-  }
-
-  function isNotTaken(item: Interview) {
-    return interviewStatusValue(item) === "not_taken";
-  }
-
   const scheduleAllowed = useMemo(() => {
     if (!canSchedule) return false;
     if (canSkip) return true;
@@ -2290,12 +2282,12 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                     <p className="mt-1 text-xs text-slate-700">{item.notes_for_candidate}</p>
                                   </div>
                                 ) : null}
-                                {item.round_type.toLowerCase().includes("l2") ? (
+                                {item.round_type.toLowerCase().includes("l1") || item.round_type.toLowerCase().includes("l2") ? (
                                   <a
                                     className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
                                     href={`/gl-portal?interview=${encodeURIComponent(String(item.candidate_interview_id))}`}
                                   >
-                                    Open L2 assessment
+                                    {item.round_type.toLowerCase().includes("l1") ? "Open L1 assessment" : "Open L2 assessment"}
                                   </a>
                                 ) : null}
                               </div>

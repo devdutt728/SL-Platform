@@ -12,12 +12,14 @@ type Props = {
   useMeFilter: boolean;
 };
 
+type AssessmentMode = "l1" | "l2";
+type L1Data = Record<string, any>;
 type L2Data = Record<string, any>;
 
 const yesNoOptions = ["", "YES", "NO"];
 const ratingOptions = ["", "1", "2", "3", "4", "5"];
 
-const DEFAULT_DATA: L2Data = {
+const DEFAULT_L2_DATA: L2Data = {
   pre_interview: {
     candidate_name: "",
     team_lead: "",
@@ -100,7 +102,7 @@ type FieldConfig = {
   type: "text" | "textarea" | "yesno" | "rating";
 };
 
-const SECTION_FIELDS: { title: string; fields: FieldConfig[] }[] = [
+const L2_SECTION_FIELDS: { title: string; fields: FieldConfig[] }[] = [
   {
     title: "HR Screening (Pre L2)",
     fields: [
@@ -197,8 +199,103 @@ const SECTION_FIELDS: { title: string; fields: FieldConfig[] }[] = [
   },
 ];
 
-function cloneDefault() {
-  return typeof structuredClone === "function" ? structuredClone(DEFAULT_DATA) : JSON.parse(JSON.stringify(DEFAULT_DATA));
+const DEFAULT_L1_DATA: L1Data = {
+  section1: {
+    role_clarity: "",
+    six_month_priorities: "",
+    notes: "",
+  },
+  section2: {
+    big_picture: "",
+    notes: "",
+  },
+  section3: {
+    authentic: "",
+    manager_expectations: "",
+    lotus_meet_expectations: "",
+    notes: "",
+  },
+  section4: {
+    high_potential: "",
+    manager_notes: "",
+  },
+  section5: {
+    good_to_hire: "",
+    decision_comments: "",
+  },
+  section6: {
+    closing_comments: "",
+  },
+};
+
+const L1_SECTION_FIELDS: { title: string; fields: FieldConfig[] }[] = [
+  {
+    title: "Section 1: Role Clarity",
+    fields: [
+      { label: "Is the candidate clear on the role being offered'", path: ["section1", "role_clarity"], type: "yesno" },
+      { label: "Is the candidate clear on the first 6 months' role priorities'", path: ["section1", "six_month_priorities"], type: "yesno" },
+      { label: "Any other observations / notes?", path: ["section1", "notes"], type: "textarea" },
+    ],
+  },
+  {
+    title: "Section 2: Assess Big Picture Thinking",
+    fields: [
+      { label: "Does the candidate have big-picture thinking? Can the candidate answer 'Why' and think clearly?", path: ["section2", "big_picture"], type: "yesno" },
+      { label: "Any other observations / notes?", path: ["section2", "notes"], type: "textarea" },
+    ],
+  },
+  {
+    title: "Section 3: Check Candidate's Culture Expectations",
+    fields: [
+      { label: "Does the candidate sound Authentic?", path: ["section3", "authentic"], type: "yesno" },
+      { label: "Is the candidate able to share specific expectations of the to-be reporting manager?", path: ["section3", "manager_expectations"], type: "yesno" },
+      { label: "Can Studio Lotus meet the candidate's expectations?", path: ["section3", "lotus_meet_expectations"], type: "yesno" },
+      { label: "Any other observations / notes?", path: ["section3", "notes"], type: "textarea" },
+    ],
+  },
+  {
+    title: "High Potential Check",
+    fields: [
+      { label: "Does the candidate have a high potential?", path: ["section4", "high_potential"], type: "yesno" },
+      { label: "Hiring manager notes", path: ["section4", "manager_notes"], type: "textarea" },
+    ],
+  },
+  {
+    title: "Hiring Manager's Decision",
+    fields: [
+      { label: "Is the candidate good to Hire?", path: ["section5", "good_to_hire"], type: "yesno" },
+      { label: "Comments", path: ["section5", "decision_comments"], type: "textarea" },
+    ],
+  },
+  {
+    title: "Section 4: Before Closing out the interview",
+    fields: [
+      { label: "Feedback / Comments on Section 4", path: ["section6", "closing_comments"], type: "textarea" },
+    ],
+  },
+];
+
+const L1_AREAS = [
+  "Check for Clarity of the Role being offered.",
+  "Getting to know the candidate's key strengths & big picture thinking.",
+  "Checking 'Why' or big picture thinking.",
+  "Check for Culture Expectations and whether Studio Lotus can meet them?",
+];
+
+const HIGH_POTENTIAL_REFERENCE = [
+  "Such candidates are comfortable in being themselves. They interact and express themselves freely.",
+  "They are able to share their strengths, learning needs clearly i.e., they know themselves well.",
+  "They are able to share their reasons for job change openly, be it because of their manager, the kind of work they wish to do or organisation level challenges they are experiencing.",
+  "They seem to have a thoughtful criterion on what kind of organisation will be right for them to join next, and wait for it.",
+  "They also evaluate the hiring organisation by asking questions for clarity on their role, culture preferences and future aspirations fitment.",
+  "Mostly they are clear, upfront and specific in answering.",
+  "They tend to seek feedback towards the end of the interview to gauge their positives and areas for improvement.",
+  "They appreciate a detailed interaction to check the fitment. As they see, the hiring organisation is trying to understand them as a person.",
+];
+
+function cloneDefault(mode: AssessmentMode) {
+  const base = mode === "l1" ? DEFAULT_L1_DATA : DEFAULT_L2_DATA;
+  return typeof structuredClone === "function" ? structuredClone(base) : JSON.parse(JSON.stringify(base));
 }
 
 function formatDateTime(raw?: string | null) {
@@ -218,6 +315,11 @@ function interviewLabel(interview: Interview) {
   return `${interview.round_type} - ${formatDateTime(interview.scheduled_start_at)}`;
 }
 
+function assessmentModeForInterview(interview: Interview | null): AssessmentMode {
+  if (!interview) return "l2";
+  return interview.round_type.toLowerCase().includes("l1") ? "l1" : "l2";
+}
+
 async function fetchInterviews(params: Record<string, string>) {
   const url = new URL("/api/rec/interviews", window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
@@ -232,8 +334,9 @@ async function fetchCandidate(candidateId: number) {
   return (await res.json()) as CandidateDetail;
 }
 
-async function fetchAssessment(interviewId: number) {
-  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/l2-assessment`, { cache: "no-store" });
+async function fetchAssessment(interviewId: number, mode: AssessmentMode) {
+  const slug = mode === "l1" ? "l1-assessment" : "l2-assessment";
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/${slug}`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as L2Assessment;
 }
@@ -278,8 +381,9 @@ function applyCafPrefill(base: L2Data, candidate: CandidateDetail | null, interv
   return next;
 }
 
-async function saveAssessment(interviewId: number, data: L2Data) {
-  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/l2-assessment`, {
+async function saveAssessment(interviewId: number, data: Record<string, any>, mode: AssessmentMode) {
+  const slug = mode === "l1" ? "l1-assessment" : "l2-assessment";
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/${slug}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ data }),
@@ -288,8 +392,9 @@ async function saveAssessment(interviewId: number, data: L2Data) {
   return (await res.json()) as L2Assessment;
 }
 
-async function submitAssessment(interviewId: number, data: L2Data) {
-  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/l2-assessment/submit`, {
+async function submitAssessment(interviewId: number, data: Record<string, any>, mode: AssessmentMode) {
+  const slug = mode === "l1" ? "l1-assessment" : "l2-assessment";
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/${slug}/submit`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ data }),
@@ -331,7 +436,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
   const [active, setActive] = useState<Interview | null>(null);
   const [candidate, setCandidate] = useState<CandidateDetail | null>(null);
   const [assessment, setAssessment] = useState<L2Assessment | null>(null);
-  const [data, setData] = useState<L2Data>(() => cloneDefault());
+  const [data, setData] = useState<Record<string, any>>(() => cloneDefault("l2"));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -339,6 +444,9 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
   const searchParams = useSearchParams();
 
   const l2Interviews = useMemo(() => interviews.filter((item) => item.round_type.toLowerCase().includes("l2")), [interviews]);
+  const l1Interviews = useMemo(() => interviews.filter((item) => item.round_type.toLowerCase().includes("l1")), [interviews]);
+  const [activeTab, setActiveTab] = useState<AssessmentMode>("l2");
+  const visibleInterviews = activeTab === "l1" ? l1Interviews : l2Interviews;
   const currentStage = candidate?.current_stage ? candidate.current_stage.replace(/_/g, " ") : "";
 
   async function refreshList() {
@@ -359,11 +467,12 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
     setError(null);
     setCandidate(null);
     setAssessment(null);
-    setData(cloneDefault());
+    const mode = assessmentModeForInterview(interview);
+    setData(cloneDefault(mode));
     try {
       const [candidateDetail, assessmentResp] = await Promise.all([
         fetchCandidate(interview.candidate_id),
-        fetchAssessment(interview.candidate_interview_id),
+        fetchAssessment(interview.candidate_interview_id, mode),
       ]);
       let screening: Screening | null = null;
       try {
@@ -372,8 +481,8 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
         screening = null;
       }
       setCandidate(candidateDetail);
-      const merged = { ...cloneDefault(), ...(assessmentResp.data || {}) } as L2Data;
-      const hydrated = applyCafPrefill(merged, candidateDetail, interview, screening);
+      const merged = { ...cloneDefault(mode), ...(assessmentResp.data || {}) } as Record<string, any>;
+      const hydrated = mode === "l2" ? applyCafPrefill(merged as L2Data, candidateDetail, interview, screening) : merged;
       setAssessment(assessmentResp);
       setData(hydrated);
     } catch (e: any) {
@@ -386,7 +495,8 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const updated = await saveAssessment(active.candidate_interview_id, data);
+      const mode = assessmentModeForInterview(active);
+      const updated = await saveAssessment(active.candidate_interview_id, data, mode);
       setAssessment(updated);
       setPreviewOpen(false);
       await refreshList();
@@ -402,7 +512,8 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const updated = await submitAssessment(active.candidate_interview_id, data);
+      const mode = assessmentModeForInterview(active);
+      const updated = await submitAssessment(active.candidate_interview_id, data, mode);
       setAssessment(updated);
       setPreviewOpen(false);
       await refreshList();
@@ -417,20 +528,24 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
     if (active) return;
     const targetId = searchParams?.get("interview");
     if (targetId) {
-      const match = l2Interviews.find((item) => String(item.candidate_interview_id) === targetId);
+      const match = interviews.find((item) => String(item.candidate_interview_id) === targetId);
       if (match) {
+        setActiveTab(match.round_type.toLowerCase().includes("l1") ? "l1" : "l2");
         void selectInterview(match);
         return;
       }
     }
-    if (l2Interviews.length > 0) {
-      void selectInterview(l2Interviews[0]);
+    if (visibleInterviews.length > 0) {
+      void selectInterview(visibleInterviews[0]);
     }
-  }, [l2Interviews, searchParams, active]);
+  }, [interviews, visibleInterviews, searchParams, active]);
 
   const locked = assessment?.locked ?? false;
   const isSubmitted = assessment?.status === "submitted";
   const currentStageKey = (candidate?.current_stage || "").trim().toLowerCase();
+  const activeMode = active ? assessmentModeForInterview(active) : activeTab;
+  const pdfSlug = activeMode === "l1" ? "l1-assessment" : "l2-assessment";
+  const sections = activeMode === "l1" ? L1_SECTION_FIELDS : L2_SECTION_FIELDS;
 
   async function markInterviewStatus(status: "taken" | "not_taken") {
     if (!active || !candidate) return;
@@ -462,9 +577,14 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
   }
 
   function renderField(field: FieldConfig) {
-    const value = field.path.reduce((acc, key) => (acc && typeof acc === "object" ? acc[key] : ""), data) as string;
+    const rawValue = field.path.reduce(
+      (acc, key) => (acc && typeof acc === "object" ? (acc as Record<string, any>)[key] : ""),
+      data
+    );
+    const value = typeof rawValue === "string" ? rawValue : "";
     const commonProps = {
-      className: "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 disabled:bg-slate-100",
+      className:
+        "w-full rounded-2xl border border-slate-200/80 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6)] focus:outline-none focus:ring-2 focus:ring-slate-900/20 disabled:bg-slate-100",
       disabled: locked,
     };
     if (field.type === "yesno") {
@@ -519,10 +639,10 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
   return (
     <main className="content-pad space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-tight text-slate-500">GL / Interviewer</p>
-          <h1 className="text-2xl font-semibold text-slate-900">L2 Assessment Portal</h1>
-        </div>
+      <div>
+        <p className="text-xs uppercase tracking-tight text-slate-500">GL / Interviewer</p>
+        <h1 className="text-2xl font-semibold text-slate-900">Assessment Portal</h1>
+      </div>
         {busy ? <Loader2 className="h-4 w-4 animate-spin text-slate-500" /> : null}
       </div>
 
@@ -540,7 +660,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
       <section className="grid gap-4 lg:grid-cols-[1fr_2fr]">
         <div className="section-card">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold">Assigned L2 interviews</p>
+            <p className="text-sm font-semibold">Assigned interviews</p>
             <button
               type="button"
               className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
@@ -550,13 +670,35 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
               Refresh
             </button>
           </div>
+          <div className="mt-3 inline-flex rounded-full border border-slate-200 bg-white/70 p-1 text-xs font-semibold text-slate-700">
+            <button
+              type="button"
+              className={clsx(
+                "rounded-full px-3 py-1.5",
+                activeTab === "l1" ? "bg-slate-900 text-white" : "text-slate-600"
+              )}
+              onClick={() => setActiveTab("l1")}
+            >
+              L1
+            </button>
+            <button
+              type="button"
+              className={clsx(
+                "rounded-full px-3 py-1.5",
+                activeTab === "l2" ? "bg-slate-900 text-white" : "text-slate-600"
+              )}
+              onClick={() => setActiveTab("l2")}
+            >
+              L2
+            </button>
+          </div>
           <div className="mt-3 space-y-2">
-            {l2Interviews.length === 0 ? (
+            {visibleInterviews.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/30 p-4 text-sm text-slate-600">
-                No L2 interviews assigned yet.
+                No interviews assigned yet.
               </div>
             ) : (
-              l2Interviews.map((item) => (
+              visibleInterviews.map((item) => (
                 <button
                   key={item.candidate_interview_id}
                   type="button"
@@ -578,7 +720,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
           </div>
         </div>
 
-        <div className="section-card space-y-4">
+        <div className="section-card space-y-4 border-slate-200/70 bg-white/70 shadow-[0_25px_60px_rgba(15,23,42,0.12)]">
           {active ? (
             <>
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -605,7 +747,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                   {assessment ? (
                     <a
                       className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                      href={`/api/rec/interviews/${encodeURIComponent(String(active.candidate_interview_id))}/l2-assessment/pdf`}
+                      href={`/api/rec/interviews/${encodeURIComponent(String(active.candidate_interview_id))}/${pdfSlug}/pdf`}
                       target="_blank"
                       rel="noreferrer"
                     >
@@ -638,24 +780,60 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
               ) : null}
 
               {previewOpen ? (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-700">
+                <div className="rounded-2xl border border-slate-200/70 bg-white/80 p-4 text-sm text-slate-700">
                   <p className="text-xs uppercase tracking-tight text-slate-500">Preview</p>
-                  <p className="mt-2"><span className="font-semibold">Candidate:</span> {data.pre_interview?.candidate_name || active.candidate_name}</p>
-                  <p><span className="font-semibold">Team Lead:</span> {data.pre_interview?.team_lead || "-"}</p>
-                  <p><span className="font-semibold">Preferred DOJ:</span> {data.pre_interview?.preferred_joining_date || "-"}</p>
-                  <p><span className="font-semibold">Good to hire:</span> {data.section7?.assess_good_to_hire || "-"}</p>
+                  {activeMode === "l1" ? (
+                    <>
+                      <p className="mt-2"><span className="font-semibold">Candidate:</span> {active.candidate_name}</p>
+                      <p><span className="font-semibold">Role clarity:</span> {data.section1?.role_clarity || "-"}</p>
+                      <p><span className="font-semibold">Big picture thinking:</span> {data.section2?.big_picture || "-"}</p>
+                      <p><span className="font-semibold">High potential:</span> {data.section4?.high_potential || "-"}</p>
+                      <p><span className="font-semibold">Good to hire:</span> {data.section5?.good_to_hire || "-"}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-2"><span className="font-semibold">Candidate:</span> {data.pre_interview?.candidate_name || active.candidate_name}</p>
+                      <p><span className="font-semibold">Team Lead:</span> {data.pre_interview?.team_lead || "-"}</p>
+                      <p><span className="font-semibold">Preferred DOJ:</span> {data.pre_interview?.preferred_joining_date || "-"}</p>
+                      <p><span className="font-semibold">Good to hire:</span> {data.section7?.assess_good_to_hire || "-"}</p>
+                    </>
+                  )}
                 </div>
               ) : null}
 
               <div className="space-y-6">
-                {SECTION_FIELDS.map((section) => (
-                  <section key={section.title} className="rounded-2xl border border-slate-200 bg-white/70 p-4">
+                {activeMode === "l1" ? (
+                  <section className="rounded-3xl border border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-slate-100 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
+                    <p className="text-xs uppercase tracking-tight text-slate-500">Areas to assess on</p>
+                    <ul className="mt-3 space-y-1 text-sm text-slate-700">
+                      {L1_AREAS.map((item) => (
+                        <li key={item} className="flex items-start gap-2">
+                          <span className="mt-1 h-1.5 w-1.5 rounded-full bg-slate-900/70" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+
+                {sections.map((section) => (
+                  <section
+                    key={section.title}
+                    className="rounded-3xl border border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-slate-100 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)]"
+                  >
                     <div className="flex flex-wrap items-end justify-between gap-2">
                       <div>
                         <p className="text-xs uppercase tracking-tight text-slate-500">Section</p>
                         <h3 className="text-lg font-semibold text-slate-900">{section.title}</h3>
                       </div>
                     </div>
+                    {activeMode === "l1" && section.title === "Section 4: Before Closing out the interview" ? (
+                      <ol className="mt-3 space-y-1 text-sm text-slate-700">
+                        <li>Ask the candidate to rate their experience of this interaction/interview. Engage with the candidate to ensure that they feel heard and valued.</li>
+                        <li>Closure of interview: Ask the candidate if they have any questions/doubts that remain unanswered or anything that they would like you to address.</li>
+                        <li>Ask the candidate for Feedback on the interview process and their experience of interviewing with Studio Lotus.</li>
+                      </ol>
+                    ) : null}
                     <div className="mt-4 grid gap-3 md:grid-cols-2">
                       {section.fields.map((field) => (
                         <label
@@ -667,6 +845,16 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                         </label>
                       ))}
                     </div>
+                    {activeMode === "l1" && section.title === "High Potential Check" ? (
+                      <div className="mt-4 rounded-2xl border border-slate-200/70 bg-white/70 p-3 text-sm text-slate-700">
+                        <p className="text-xs uppercase tracking-tight text-slate-500">Characteristics of a High Potential Candidate (Reference)</p>
+                        <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-slate-600">
+                          {HIGH_POTENTIAL_REFERENCE.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ol>
+                      </div>
+                    ) : null}
                   </section>
                 ))}
               </div>
@@ -698,7 +886,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
             </>
           ) : (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-white/30 p-4 text-sm text-slate-600">
-              Select an interview to view the L2 assessment.
+              Select an interview to view the assessment.
             </div>
           )}
         </div>

@@ -65,6 +65,11 @@ function stageLabel(raw?: string | null) {
   return key.replace(/_/g, " ");
 }
 
+function assessmentModeForInterview(interview: Interview | null) {
+  if (!interview) return "l2";
+  return interview.round_type.toLowerCase().includes("l1") ? "l1" : "l2";
+}
+
 async function fetchInterviews(params: Record<string, string>) {
   const url = new URL("/api/rec/interviews", window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
@@ -73,8 +78,9 @@ async function fetchInterviews(params: Record<string, string>) {
   return (await res.json()) as Interview[];
 }
 
-async function fetchAssessment(interviewId: number) {
-  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/l2-assessment`, { cache: "no-store" });
+async function fetchAssessment(interviewId: number, mode: "l1" | "l2") {
+  const slug = mode === "l1" ? "l1-assessment" : "l2-assessment";
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/${slug}`, { cache: "no-store" });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as L2Assessment;
@@ -166,7 +172,8 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
     setAssessmentError(null);
     setAssessmentBusy(true);
     try {
-      const data = await fetchAssessment(interview.candidate_interview_id);
+      const mode = assessmentModeForInterview(interview);
+      const data = await fetchAssessment(interview.candidate_interview_id, mode);
       setAssessment(data);
     } catch (e: any) {
       setAssessmentError(e?.message || "Could not load GL assessment.");
@@ -395,7 +402,7 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
           <div className="w-full max-w-2xl rounded-3xl border border-white/20 bg-white/95 p-5 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-tight text-slate-500">GL feedback</p>
+                <p className="text-xs uppercase tracking-tight text-slate-500">Assessment summary</p>
                 <h2 className="text-xl font-semibold">{activeCandidateLabel}</h2>
                 <p className="text-xs text-slate-600">
                   {active.round_type} - {formatDateTime(active.scheduled_start_at)} - {active.location || "Location TBD"}
@@ -414,52 +421,77 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
               <div className="text-xs text-slate-500">
                 Assessment status: {assessment?.status || "Not started"}
               </div>
-              {assessment ? (
-                <a
-                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                  href={`/api/rec/interviews/${encodeURIComponent(String(active.candidate_interview_id))}/l2-assessment/pdf`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Download PDF
-                </a>
-              ) : null}
+              {(() => {
+                const activeMode = assessmentModeForInterview(active);
+                const pdfSlug = activeMode === "l1" ? "l1-assessment" : "l2-assessment";
+                return assessment ? (
+                  <a
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                    href={`/api/rec/interviews/${encodeURIComponent(String(active.candidate_interview_id))}/${pdfSlug}/pdf`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Download PDF
+                  </a>
+                ) : null;
+              })()}
             </div>
 
             {assessmentBusy ? (
-              <div className="mt-4 text-sm text-slate-600">Loading GL assessment...</div>
+              <div className="mt-4 text-sm text-slate-600">Loading assessment...</div>
             ) : assessmentError ? (
               <div className="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">
                 {assessmentError}
               </div>
             ) : !assessment ? (
               <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white/60 p-4 text-sm text-slate-600">
-                No GL assessment has been submitted yet.
+                No assessment has been submitted yet.
               </div>
             ) : (
               <div className="mt-4 space-y-4 text-sm text-slate-700">
-                <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
-                  <p className="text-xs uppercase tracking-tight text-slate-500">HR screening (Pre L2)</p>
-                  <div className="mt-3 grid gap-2 md:grid-cols-2">
-                    <div><span className="text-xs text-slate-500">Candidate Name</span><p className="font-semibold">{assessmentValue(["pre_interview", "candidate_name"]) || "-"}</p></div>
-                    <div><span className="text-xs text-slate-500">Team Lead</span><p className="font-semibold">{assessmentValue(["pre_interview", "team_lead"]) || "-"}</p></div>
-                    <div><span className="text-xs text-slate-500">Preferred DOJ</span><p className="font-semibold">{assessmentValue(["pre_interview", "preferred_joining_date"]) || "-"}</p></div>
-                    <div><span className="text-xs text-slate-500">2-year commitment</span><p className="font-semibold">{assessmentValue(["pre_interview", "two_year_commitment"]) || "-"}</p></div>
-                    <div><span className="text-xs text-slate-500">On-site / Timings</span><p className="font-semibold">{assessmentValue(["pre_interview", "on_site_timings"]) || "-"}</p></div>
-                    <div><span className="text-xs text-slate-500">Relocation support</span><p className="font-semibold">{assessmentValue(["pre_interview", "family_support"]) || "-"}</p></div>
-                    <div className="md:col-span-2"><span className="text-xs text-slate-500">Other questions</span><p className="font-semibold">{assessmentValue(["pre_interview", "other_questions"]) || "-"}</p></div>
+                {assessmentModeForInterview(active) === "l1" ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
+                    <p className="text-xs uppercase tracking-tight text-slate-500">L1 assessment summary</p>
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      <div><span className="text-xs text-slate-500">Role clarity</span><p className="font-semibold">{assessmentValue(["section1", "role_clarity"]) || "-"}</p></div>
+                      <div><span className="text-xs text-slate-500">6-month priorities</span><p className="font-semibold">{assessmentValue(["section1", "six_month_priorities"]) || "-"}</p></div>
+                      <div><span className="text-xs text-slate-500">Big picture thinking</span><p className="font-semibold">{assessmentValue(["section2", "big_picture"]) || "-"}</p></div>
+                      <div><span className="text-xs text-slate-500">Authentic</span><p className="font-semibold">{assessmentValue(["section3", "authentic"]) || "-"}</p></div>
+                      <div><span className="text-xs text-slate-500">Manager expectations</span><p className="font-semibold">{assessmentValue(["section3", "manager_expectations"]) || "-"}</p></div>
+                      <div><span className="text-xs text-slate-500">Lotus meets expectations</span><p className="font-semibold">{assessmentValue(["section3", "lotus_meet_expectations"]) || "-"}</p></div>
+                      <div><span className="text-xs text-slate-500">High potential</span><p className="font-semibold">{assessmentValue(["section4", "high_potential"]) || "-"}</p></div>
+                      <div><span className="text-xs text-slate-500">High potential notes</span><p className="font-semibold">{assessmentValue(["section4", "manager_notes"]) || "-"}</p></div>
+                      <div><span className="text-xs text-slate-500">Good to hire</span><p className="font-semibold">{assessmentValue(["section5", "good_to_hire"]) || "-"}</p></div>
+                      <div><span className="text-xs text-slate-500">Decision comments</span><p className="font-semibold">{assessmentValue(["section5", "decision_comments"]) || "-"}</p></div>
+                      <div className="md:col-span-2"><span className="text-xs text-slate-500">Closing comments</span><p className="font-semibold">{assessmentValue(["section6", "closing_comments"]) || "-"}</p></div>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
+                      <p className="text-xs uppercase tracking-tight text-slate-500">HR screening (Pre L2)</p>
+                      <div className="mt-3 grid gap-2 md:grid-cols-2">
+                        <div><span className="text-xs text-slate-500">Candidate Name</span><p className="font-semibold">{assessmentValue(["pre_interview", "candidate_name"]) || "-"}</p></div>
+                        <div><span className="text-xs text-slate-500">Team Lead</span><p className="font-semibold">{assessmentValue(["pre_interview", "team_lead"]) || "-"}</p></div>
+                        <div><span className="text-xs text-slate-500">Preferred DOJ</span><p className="font-semibold">{assessmentValue(["pre_interview", "preferred_joining_date"]) || "-"}</p></div>
+                        <div><span className="text-xs text-slate-500">2-year commitment</span><p className="font-semibold">{assessmentValue(["pre_interview", "two_year_commitment"]) || "-"}</p></div>
+                        <div><span className="text-xs text-slate-500">On-site / Timings</span><p className="font-semibold">{assessmentValue(["pre_interview", "on_site_timings"]) || "-"}</p></div>
+                        <div><span className="text-xs text-slate-500">Relocation support</span><p className="font-semibold">{assessmentValue(["pre_interview", "family_support"]) || "-"}</p></div>
+                        <div className="md:col-span-2"><span className="text-xs text-slate-500">Other questions</span><p className="font-semibold">{assessmentValue(["pre_interview", "other_questions"]) || "-"}</p></div>
+                      </div>
+                    </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
-                  <p className="text-xs uppercase tracking-tight text-slate-500">Section 7 summary</p>
-                  <div className="mt-3 grid gap-2 md:grid-cols-2">
-                    <div><span className="text-xs text-slate-500">Open to feedback</span><p className="font-semibold">{assessmentValue(["section7", "assess_open_feedback"]) || "-"}</p></div>
-                    <div><span className="text-xs text-slate-500">Coachable</span><p className="font-semibold">{assessmentValue(["section7", "assess_coachable"]) || "-"}</p></div>
-                    <div><span className="text-xs text-slate-500">Good to hire</span><p className="font-semibold">{assessmentValue(["section7", "assess_good_to_hire"]) || "-"}</p></div>
-                    <div className="md:col-span-2"><span className="text-xs text-slate-500">L1 focus notes</span><p className="font-semibold">{assessmentValue(["section7", "l1_focus_notes"]) || "-"}</p></div>
-                  </div>
-                </div>
+                    <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
+                      <p className="text-xs uppercase tracking-tight text-slate-500">Section 7 summary</p>
+                      <div className="mt-3 grid gap-2 md:grid-cols-2">
+                        <div><span className="text-xs text-slate-500">Open to feedback</span><p className="font-semibold">{assessmentValue(["section7", "assess_open_feedback"]) || "-"}</p></div>
+                        <div><span className="text-xs text-slate-500">Coachable</span><p className="font-semibold">{assessmentValue(["section7", "assess_coachable"]) || "-"}</p></div>
+                        <div><span className="text-xs text-slate-500">Good to hire</span><p className="font-semibold">{assessmentValue(["section7", "assess_good_to_hire"]) || "-"}</p></div>
+                        <div className="md:col-span-2"><span className="text-xs text-slate-500">L1 focus notes</span><p className="font-semibold">{assessmentValue(["section7", "l1_focus_notes"]) || "-"}</p></div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -468,12 +500,20 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
                 <UserRound className="h-3.5 w-3.5" />
                 {active.interviewer_name || "You"}
               </div>
-              <Link
-                href={`/candidates/${encodeURIComponent(String(active.candidate_id))}`}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
-              >
-                View candidate
-              </Link>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={`/gl-portal?interview=${encodeURIComponent(String(active.candidate_interview_id))}`}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
+                >
+                  Open assessment portal
+                </Link>
+                <Link
+                  href={`/candidates/${encodeURIComponent(String(active.candidate_id))}`}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
+                >
+                  View candidate
+                </Link>
+              </div>
             </div>
           </div>
         </div>

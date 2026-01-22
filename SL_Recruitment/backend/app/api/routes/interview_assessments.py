@@ -54,6 +54,10 @@ def _is_superadmin(user: UserContext) -> bool:
     return (user.platform_role_id or None) == 2 or (Role.HR_ADMIN in user.roles and user.platform_role_id is None)
 
 
+def _round_matches(interview: RecCandidateInterview, target: str) -> bool:
+    return target in (interview.round_type or "").lower()
+
+
 def _build_out(
     assessment: RecCandidateInterviewAssessment | None,
     *,
@@ -112,7 +116,7 @@ async def save_l2_assessment(
     _assert_assessment_access(user, interview)
     if (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="HR roles cannot edit assessments")
-    if "l2" not in (interview.round_type or "").lower() and not _is_superadmin(user):
+    if not _round_matches(interview, "l2") and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L2 assessments are only for L2 interviews")
     assessment = (
         await session.execute(
@@ -159,7 +163,7 @@ async def submit_l2_assessment(
     _assert_assessment_access(user, interview)
     if (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="HR roles cannot submit assessments")
-    if "l2" not in (interview.round_type or "").lower() and not _is_superadmin(user):
+    if not _round_matches(interview, "l2") and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L2 assessments are only for L2 interviews")
     assessment = (
         await session.execute(
@@ -272,6 +276,200 @@ async def download_l2_assessment_pdf(
         content=pdf,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/interviews/{candidate_interview_id}/l1-assessment", response_model=L2AssessmentOut)
+async def get_l1_assessment(
+    candidate_interview_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.INTERVIEWER, Role.GROUP_LEAD])),
+):
+    interview = await _get_interview(session, candidate_interview_id)
+    _assert_assessment_access(user, interview)
+    assessment = (
+        await session.execute(
+            select(RecCandidateInterviewAssessment).where(
+                RecCandidateInterviewAssessment.candidate_interview_id == candidate_interview_id
+            )
+        )
+    ).scalar_one_or_none()
+    readonly = (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user)
+    locked = bool((assessment and assessment.status == "submitted" and not _is_superadmin(user)) or readonly)
+    return _build_out(assessment, interview=interview, locked=locked)
+
+
+@router.put("/interviews/{candidate_interview_id}/l1-assessment", response_model=L2AssessmentOut)
+async def save_l1_assessment(
+    candidate_interview_id: int,
+    payload: L2AssessmentPayload,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.INTERVIEWER, Role.GROUP_LEAD])),
+):
+    interview = await _get_interview(session, candidate_interview_id)
+    _assert_assessment_access(user, interview)
+    if (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="HR roles cannot edit assessments")
+    if not _round_matches(interview, "l1") and not _is_superadmin(user):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L1 assessments are only for L1 interviews")
+    assessment = (
+        await session.execute(
+            select(RecCandidateInterviewAssessment).where(
+                RecCandidateInterviewAssessment.candidate_interview_id == candidate_interview_id
+            )
+        )
+    ).scalar_one_or_none()
+
+    if assessment and assessment.status == "submitted" and not _is_superadmin(user):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Assessment is locked")
+
+    if not assessment:
+        assessment = RecCandidateInterviewAssessment(
+            candidate_interview_id=candidate_interview_id,
+            candidate_id=interview.candidate_id,
+            interviewer_person_id_platform=_clean_platform_person_id(interview.interviewer_person_id_platform),
+            status="draft",
+            data_json=json.dumps(payload.data),
+            created_by_person_id_platform=_clean_platform_person_id(user.person_id_platform),
+            updated_by_person_id_platform=_clean_platform_person_id(user.person_id_platform),
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        session.add(assessment)
+    else:
+        assessment.data_json = json.dumps(payload.data)
+        assessment.updated_by_person_id_platform = _clean_platform_person_id(user.person_id_platform)
+        assessment.updated_at = datetime.utcnow()
+
+    await session.commit()
+    locked = bool(assessment.status == "submitted" and not _is_superadmin(user))
+    return _build_out(assessment, interview=interview, locked=locked)
+
+
+@router.post("/interviews/{candidate_interview_id}/l1-assessment/submit", response_model=L2AssessmentOut)
+async def submit_l1_assessment(
+    candidate_interview_id: int,
+    payload: L2AssessmentPayload,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.INTERVIEWER, Role.GROUP_LEAD])),
+):
+    interview = await _get_interview(session, candidate_interview_id)
+    _assert_assessment_access(user, interview)
+    if (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="HR roles cannot submit assessments")
+    if not _round_matches(interview, "l1") and not _is_superadmin(user):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L1 assessments are only for L1 interviews")
+    assessment = (
+        await session.execute(
+            select(RecCandidateInterviewAssessment).where(
+                RecCandidateInterviewAssessment.candidate_interview_id == candidate_interview_id
+            )
+        )
+    ).scalar_one_or_none()
+
+    if assessment and assessment.status == "submitted" and not _is_superadmin(user):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Assessment already submitted")
+
+    now = datetime.utcnow()
+    if not assessment:
+        assessment = RecCandidateInterviewAssessment(
+            candidate_interview_id=candidate_interview_id,
+            candidate_id=interview.candidate_id,
+            interviewer_person_id_platform=_clean_platform_person_id(interview.interviewer_person_id_platform),
+            status="submitted",
+            data_json=json.dumps(payload.data),
+            created_by_person_id_platform=_clean_platform_person_id(user.person_id_platform),
+            updated_by_person_id_platform=_clean_platform_person_id(user.person_id_platform),
+            submitted_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(assessment)
+    else:
+        assessment.status = "submitted"
+        assessment.data_json = json.dumps(payload.data)
+        assessment.updated_by_person_id_platform = _clean_platform_person_id(user.person_id_platform)
+        assessment.submitted_at = now
+        assessment.updated_at = now
+
+    interview.feedback_submitted = True
+    interview.updated_at = now
+
+    performed_by = None
+    if user.person_id_platform:
+        try:
+            performed_by = int(user.person_id_platform)
+        except Exception:
+            performed_by = None
+
+    await log_event(
+        session,
+        candidate_id=interview.candidate_id,
+        action_type="l1_assessment_submitted",
+        performed_by_person_id_platform=performed_by,
+        related_entity_type="interview",
+        related_entity_id=interview.candidate_interview_id,
+        meta_json={"candidate_interview_id": candidate_interview_id},
+    )
+
+    await session.commit()
+    locked = bool(assessment.status == "submitted" and not _is_superadmin(user))
+    return _build_out(assessment, interview=interview, locked=locked)
+
+
+@router.delete("/interviews/{candidate_interview_id}/l1-assessment", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_l1_assessment(
+    candidate_interview_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    _user: UserContext = Depends(require_superadmin()),
+):
+    assessment = (
+        await session.execute(
+            select(RecCandidateInterviewAssessment).where(
+                RecCandidateInterviewAssessment.candidate_interview_id == candidate_interview_id
+            )
+        )
+    ).scalar_one_or_none()
+    if not assessment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found")
+    await session.delete(assessment)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/interviews/{candidate_interview_id}/l1-assessment/pdf")
+async def download_l1_assessment_pdf(
+    candidate_interview_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.INTERVIEWER, Role.GROUP_LEAD])),
+):
+    interview = await _get_interview(session, candidate_interview_id)
+    _assert_assessment_access(user, interview)
+    assessment = (
+        await session.execute(
+            select(RecCandidateInterviewAssessment).where(
+                RecCandidateInterviewAssessment.candidate_interview_id == candidate_interview_id
+            )
+        )
+    ).scalar_one_or_none()
+    if not assessment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found")
+
+    candidate = await session.get(RecCandidate, interview.candidate_id)
+    data = _safe_load_json(assessment.data_json)
+
+    html = _render_l1_assessment_html(
+        candidate_name=candidate.full_name if candidate else "",
+        candidate_code=candidate.candidate_code if candidate else "",
+        round_type=interview.round_type,
+        data=data,
+    )
+    pdf = _render_pdf_bytes(html)
+    filename = f"{(candidate.candidate_code if candidate else 'candidate')}-l1-assessment.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
 
 
@@ -454,6 +652,133 @@ def _render_l2_assessment_html(*, candidate_name: str, candidate_code: str, roun
       </table>
       <p class="label">Anything specific for L1 to assess</p>
       <p>{_val(["section7", "l1_focus_notes"])}</p>
+    </div>
+  </body>
+</html>"""
+
+
+def _render_l1_assessment_html(*, candidate_name: str, candidate_code: str, round_type: str, data: dict) -> str:
+    def _val(path: list[str], default: str = "") -> str:
+        cursor = data
+        for key in path:
+            if not isinstance(cursor, dict):
+                return default
+            cursor = cursor.get(key)
+        return "" if cursor is None else str(cursor)
+
+    def _yes_no(value: str) -> str:
+        if value is None:
+            return "-"
+        return str(value).strip().upper() or "-"
+
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>L1 Assessment</title>
+    <style>
+      @page {{ size: A4; margin: 2cm 2cm 2.4cm; }}
+      body {{ font-family: Calibri, Arial, sans-serif; font-size: 11pt; color: #111827; }}
+      h1 {{ font-size: 16pt; margin: 0 0 8px; }}
+      h2 {{ font-size: 12pt; margin: 18px 0 6px; }}
+      p {{ margin: 0 0 8px; line-height: 1.4; }}
+      table {{ width: 100%; border-collapse: collapse; margin: 8px 0 12px; }}
+      th, td {{ border: 1px solid #111; padding: 6px 8px; vertical-align: top; text-align: left; }}
+      .muted {{ color: #475569; }}
+      .section {{ margin-top: 12px; }}
+      .label {{ font-weight: 700; }}
+      ul {{ margin: 6px 0 12px 18px; }}
+    </style>
+  </head>
+  <body>
+    <h1>3rd Interview: L1 Assessment Form</h1>
+    <p class="muted">{candidate_name} ({candidate_code}) - {round_type}</p>
+
+    <div class="section">
+      <p class="label">Areas to assess on:</p>
+      <ul>
+        <li>Check for Clarity of the Role being offered.</li>
+        <li>Getting to know the candidate’s key strengths &amp; big picture thinking.</li>
+        <li>Checking ‘Why?’ or Big Picture Thinking.</li>
+        <li>Check for Culture Expectations and whether Studio Lotus can meet them?</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h2>Section 1: Role Clarity</h2>
+      <table>
+        <tr><th>Hiring manager to assess on</th><th>Yes / No</th></tr>
+        <tr><td>Is the candidate clear on the role being offered?</td><td>{_yes_no(_val(["section1", "role_clarity"]))}</td></tr>
+        <tr><td>Is the candidate clear on the first 6 months' role priorities?</td><td>{_yes_no(_val(["section1", "six_month_priorities"]))}</td></tr>
+      </table>
+      <p class="label">Any other observations / notes?</p>
+      <p>{_val(["section1", "notes"])}</p>
+    </div>
+
+    <div class="section">
+      <h2>Section 2: Assess Big Picture Thinking</h2>
+      <table>
+        <tr><th>Hiring manager to assess on</th><th>Yes / No</th></tr>
+        <tr><td>Does the candidate have a big picture thinking? Is the candidate able to answer ‘Why?’ and think clearly?</td><td>{_yes_no(_val(["section2", "big_picture"]))}</td></tr>
+      </table>
+      <p class="label">Any other observations / notes?</p>
+      <p>{_val(["section2", "notes"])}</p>
+    </div>
+
+    <div class="section">
+      <h2>Section 3: Check Candidate’s Culture Expectations</h2>
+      <table>
+        <tr><th>Hiring manager to assess on</th><th>Yes / No</th></tr>
+        <tr><td>Does the candidate sound Authentic?</td><td>{_yes_no(_val(["section3", "authentic"]))}</td></tr>
+        <tr><td>Is the candidate able to share specific expectations of the to-be reporting manager?</td><td>{_yes_no(_val(["section3", "manager_expectations"]))}</td></tr>
+        <tr><td>Can Studio Lotus meet the candidate’s expectations?</td><td>{_yes_no(_val(["section3", "lotus_meet_expectations"]))}</td></tr>
+      </table>
+      <p class="label">Any other observations / notes?</p>
+      <p>{_val(["section3", "notes"])}</p>
+    </div>
+
+    <div class="section">
+      <h2>High Potential Check</h2>
+      <table>
+        <tr><th>Hiring manager to assess on</th><th>Yes / No</th></tr>
+        <tr><td>Does the candidate have a high potential?</td><td>{_yes_no(_val(["section4", "high_potential"]))}</td></tr>
+      </table>
+      <p class="label">Hiring manager notes:</p>
+      <p>{_val(["section4", "manager_notes"])}</p>
+      <p class="label">Characteristics of a High Potential Candidate for reference.</p>
+      <ol>
+        <li>Such candidates are comfortable in being themselves. They interact and express themselves freely.</li>
+        <li>They are able to share their strengths, learning needs clearly i.e., they know themselves well.</li>
+        <li>They are able to share their reasons for job change openly, be it because of their manager, the kind of work they wish to do or organisation level challenges they are experiencing.</li>
+        <li>They seem to have a thoughtful criterion on what kind of organisation will be right for them to join next, and wait for it.</li>
+        <li>They also evaluate the hiring organisation by asking questions for clarity on their role, culture preferences and future aspirations fitment.</li>
+        <li>Mostly they are clear, upfront and specific in answering.</li>
+        <li>They tend to seek feedback towards the end of the interview to gauge their positives and areas for improvement.</li>
+        <li>They appreciate a detailed interaction to check the fitment. As they see, the hiring organisation is trying to understand them as a person.</li>
+      </ol>
+    </div>
+
+    <div class="section">
+      <h2>Hiring Manager’s Decision</h2>
+      <table>
+        <tr><th>Hiring manager’s decision</th><th>Yes / No</th><th>Comments</th></tr>
+        <tr>
+          <td>Is the candidate good to Hire?</td>
+          <td>{_yes_no(_val(["section5", "good_to_hire"]))}</td>
+          <td>{_val(["section5", "decision_comments"])}</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2>Section 4: Before Closing out the interview</h2>
+      <ol>
+        <li>Ask the candidate to rate their experience of this interaction/interview. Engage with the candidate to ensure that they feel heard and valued.</li>
+        <li>Closure of interview: Ask the candidate if they have any questions/doubts that remain unanswered or anything that they would like you to address.</li>
+        <li>Ask the candidate for Feedback on the interview process and their experience of interviewing with Studio Lotus.</li>
+      </ol>
+      <p class="label">Feedback / Comments on Section 4:</p>
+      <p>{_val(["section6", "closing_comments"])}</p>
     </div>
   </body>
 </html>"""
