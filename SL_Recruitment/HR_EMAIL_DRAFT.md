@@ -1,4 +1,4 @@
-Subject: Recruitment App ? Full HR Workflow, Stages, and Step-by-Step Guide
+Subject: Recruitment App - Full HR Workflow, Stages, and Step-by-Step Guide
 
 Hi [HR Team Name],
 
@@ -10,6 +10,7 @@ A. What the system is
 - Every action is logged in a timeline for audit and reporting.
 
 B. Who does what (roles)
+- Superadmin: role management and stage overrides.
 - HR Admin: full control (openings, candidates, interviews, offers, approvals, joining docs, reporting).
 - HR Exec: day-to-day HR actions (candidate handling, interviews, offers) with some restrictions.
 - Hiring Manager: view and participate in interviews/sprints.
@@ -39,28 +40,28 @@ C. End-to-end HR process (step-by-step)
    - System runs screening rules and marks the result:
      - Green: auto-advance to shortlist stage.
      - Red: auto-reject.
-     - Amber: mark ?needs HR review? and stay in screening.
-   - HR can manually review and override if needed (Superadmin for direct override).
+     - Amber: mark "needs HR review" and stay in screening.
+   - HR can review and override if needed (Superadmin for direct override).
 
 4) HR review and stage movement
    - HR reviews CV, portfolio, and CAF data in Candidate 360.
-   - HR can manually move candidate to any next stage.
+   - HR can manually move a candidate to the next stage.
    - Every stage change is logged in the timeline.
 
-5) Sprint (optional take?home task)
+5) Sprint (optional take-home task)
    - HR assigns a sprint to the candidate.
-   - Candidate receives email with a sprint link.
+   - Candidate receives email with a sprint link and attachments.
    - Candidate submits a file or URL (stored in Drive).
    - HR reviews and chooses:
-     - Advance ? stage moves to l1_shortlist.
-     - Reject ? stage moves to rejected.
+     - Advance -> stage moves to l1_shortlist.
+     - Reject -> stage moves to rejected.
    - Reminder and overdue emails are sent automatically.
 
 6) Interviews (L1/L2)
-   - HR schedules interviews from Candidate 360.
-   - System creates calendar events (if configured) and emails candidate + interviewer.
-   - Candidate can also choose slots from a scheduling link.
-   - After the interview, interviewer submits feedback.
+   - HR schedules interviews from Candidate 360 OR sends a slot-selection link.
+   - Candidate selects a slot from available options.
+   - Calendar invites and emails are sent if enabled.
+   - Interviewer submits feedback using the L1/L2 assessment forms.
    - System sets feedback stage (l1_feedback or l2_feedback) and logs events.
    - HR moves the candidate forward or rejects based on feedback.
 
@@ -69,18 +70,19 @@ C. End-to-end HR process (step-by-step)
    - Offer is submitted for approval and approved.
    - Offer is sent to candidate with a public link + PDF.
    - Candidate accepts or declines:
-     - Accept ? stage moves to joining_documents.
-     - Decline ? stage moves to declined and candidate is marked not hired.
-   - Follow-up emails are sent if the candidate doesn?t respond.
+     - Accept -> stage moves to joining_documents.
+     - Decline -> stage moves to declined.
+   - Follow-up emails are sent if the candidate does not respond.
 
 8) Joining documents
    - After offer acceptance, candidate uploads documents via public link.
-   - HR can upload documents on the candidate?s behalf.
-   - Status becomes ?complete? once all required docs are present.
+   - HR can upload documents on the candidate's behalf.
+   - Required types include PAN, Aadhaar, marksheets, experience letters, and salary slips.
+   - Status becomes "complete" once all required docs are present.
 
 9) Conversion to employee
    - Once joining docs are complete, HR converts candidate to employee.
-   - System creates a platform person record, marks candidate as hired, and moves their Drive folder to ?Appointed.?
+   - System creates a platform person record, marks candidate as hired, and moves their Drive folder to "Appointed."
 
 D. Stage flow (what HR will see in the app)
 The system uses stage names with a pending/completed status. Common stages in use:
@@ -96,24 +98,26 @@ The system uses stage names with a pending/completed status. Common stages in us
 - hired / rejected / declined
 
 Typical happy path:
-enquiry ? hr_screening ? l2_shortlist ? sprint ? l1_shortlist ? l1_feedback ? l2_feedback ? offer ? joining_documents ? hired
+enquiry -> hr_screening -> l2_shortlist -> sprint -> l1_shortlist -> l1_feedback -> l2_feedback -> joining_documents -> hired
 
 E. Automated emails
 - CAF link + CAF reminders
-- Sprint assignment + sprint reminders/overdue
-- Interview scheduled + feedback reminders
+- Sprint assignment + reminders + overdue
+- Interview slot options + interview scheduled/rescheduled/cancelled
+- Interview feedback reminders
 - Offer sent + offer follow-up
 
 F. File storage (Drive)
 - Each candidate has a Drive folder.
-- CV, portfolio, sprint submissions, offer PDF, and joining docs are stored there.
-- Folder moves to ?Appointed? or ?Not Appointed? based on final outcome.
+- CV, sprint submissions, offer PDF, and joining docs are stored there.
+- Sprint templates and assets live in a shared sprint assets folder.
+- Folder moves to "Appointed" or "Not Appointed" based on final outcome.
 
 G. Reporting and audit
 - All actions are logged in a candidate timeline and the activity page.
 - Reports page provides downloadable summaries.
 
-If you want this converted into a one?page HR training sheet or slides, I can prepare that too.
+If you want this converted into a one-page HR training sheet or slides, I can prepare that too.
 
 Regards,
 [Your Name]
