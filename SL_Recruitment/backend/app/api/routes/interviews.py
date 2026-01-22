@@ -20,6 +20,7 @@ from app.db.platform_session import PlatformSessionLocal
 from app.models.candidate import RecCandidate
 from app.models.event import RecCandidateEvent
 from app.models.interview import RecCandidateInterview
+from app.models.interview_assessment import RecCandidateInterviewAssessment
 from app.models.interview_slot import RecCandidateInterviewSlot
 from app.models.opening import RecOpening
 from app.models.platform_person import DimPerson
@@ -1694,7 +1695,7 @@ async def mark_interview_status(
             )
         )
     ).scalar_one_or_none()
-    if already_marked and not _is_superadmin(user):
+    if already_marked:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview status already set")
 
     await log_event(
@@ -1727,6 +1728,12 @@ async def mark_interview_status(
         else:
             await session.commit()
     else:
+        await session.execute(
+            delete(RecCandidateInterviewAssessment).where(
+                RecCandidateInterviewAssessment.candidate_interview_id == candidate_interview_id,
+                RecCandidateInterviewAssessment.status == "draft",
+            )
+        )
         await session.commit()
 
     return {"candidate_interview_id": candidate_interview_id, "status": status_value}

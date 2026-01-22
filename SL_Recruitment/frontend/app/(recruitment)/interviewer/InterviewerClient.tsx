@@ -4,13 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import { CalendarCheck2, ExternalLink, Loader2, UserRound } from "lucide-react";
 import Link from "next/link";
-import { CandidateSprint, Interview, L2Assessment } from "@/lib/types";
+import { useRouter } from "next/navigation";
+import { CandidateSprint, Interview, L2Assessment, PlatformPersonSuggestion } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
 
 type Props = {
   initialUpcoming: Interview[];
   initialPast: Interview[];
   useMeFilter: boolean;
+  canAssignReviewer: boolean;
 };
 
 type SprintReviewForm = {
@@ -70,12 +72,28 @@ function assessmentModeForInterview(interview: Interview | null) {
   return interview.round_type.toLowerCase().includes("l1") ? "l1" : "l2";
 }
 
+function interviewStatusLabel(raw?: string | null) {
+  const value = (raw || "").toLowerCase();
+  if (value === "taken") return "Interview taken";
+  if (value === "not_taken") return "Interview not taken";
+  return "";
+}
+
 async function fetchInterviews(params: Record<string, string>) {
   const url = new URL("/api/rec/interviews", window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   const res = await fetch(url.toString(), { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as Interview[];
+}
+
+async function cancelInterview(interviewId: number, reason?: string) {
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/cancel`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 async function fetchAssessment(interviewId: number, mode: "l1" | "l2") {
@@ -94,6 +112,15 @@ async function fetchSprints(params: Record<string, string>) {
   return (await res.json()) as CandidateSprint[];
 }
 
+async function fetchPeople(query: string) {
+  const url = new URL("/api/platform/people", window.location.origin);
+  url.searchParams.set("q", query);
+  url.searchParams.set("limit", "8");
+  const res = await fetch(url.toString(), { cache: "no-store" });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as PlatformPersonSuggestion[];
+}
+
 async function submitSprintReview(sprintId: number, payload: Record<string, unknown>) {
   const res = await fetch(`/api/rec/sprints/${encodeURIComponent(String(sprintId))}`, {
     method: "PATCH",
@@ -104,20 +131,46 @@ async function submitSprintReview(sprintId: number, payload: Record<string, unkn
   return (await res.json()) as CandidateSprint;
 }
 
-function InterviewCard({ interview, onSelect }: { interview: Interview; onSelect: (item: Interview) => void }) {
+async function assignSprintReviewer(sprintId: number, reviewerPersonId: string | null) {
+  const res = await fetch(`/api/rec/sprints/${encodeURIComponent(String(sprintId))}/assign-reviewer`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reviewer_person_id_platform: reviewerPersonId }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as CandidateSprint;
+}
+
+function InterviewCard({
+  interview,
+  onSelect,
+  onCancel,
+  onReschedule,
+}: {
+  interview: Interview;
+  onSelect: (item: Interview) => void;
+  onCancel?: (item: Interview) => void;
+  onReschedule?: (item: Interview) => void;
+}) {
   const label = interview.round_type || "Interview";
   const candidate = interview.candidate_name || `Candidate ${interview.candidate_id}`;
   const role = interview.opening_title || "Opening";
   const feedbackStage = stageLabel(interview.stage_name);
+  const interviewer = interview.interviewer_name || "Interviewer";
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       className="flex w-full flex-col gap-2 rounded-2xl border border-white/60 bg-white/40 p-3 text-left transition hover:bg-white/70"
       onClick={() => onSelect(interview)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") onSelect(interview);
+      }}
     >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-slate-900">{candidate}</p>
+          <p className="text-xs text-slate-600">Interviewer: {interviewer}</p>
           <p className="text-xs text-slate-600">{role}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -136,11 +189,40 @@ function InterviewCard({ interview, onSelect }: { interview: Interview; onSelect
           </span>
         ) : null}
       </div>
-    </button>
+      {onCancel || onReschedule ? (
+        <div className="flex flex-wrap gap-2">
+          {onReschedule ? (
+            <button
+              type="button"
+              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+              onClick={(event) => {
+                event.stopPropagation();
+                onReschedule(interview);
+              }}
+            >
+              Reschedule
+            </button>
+          ) : null}
+          {onCancel ? (
+            <button
+              type="button"
+              className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700"
+              onClick={(event) => {
+                event.stopPropagation();
+                onCancel(interview);
+              }}
+            >
+              Cancel
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
-export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }: Props) {
+export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter, canAssignReviewer }: Props) {
+  const router = useRouter();
   const [upcoming, setUpcoming] = useState<Interview[]>(initialUpcoming);
   const [past, setPast] = useState<Interview[]>(initialPast);
   const [active, setActive] = useState<Interview | null>(null);
@@ -159,6 +241,38 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
     comments_internal: "",
     comments_for_candidate: "",
   });
+  const [assignSprint, setAssignSprint] = useState<CandidateSprint | null>(null);
+  const [assignQuery, setAssignQuery] = useState("");
+  const [assignResults, setAssignResults] = useState<PlatformPersonSuggestion[]>([]);
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [sprintStatusFilter, setSprintStatusFilter] = useState("all");
+  const [sprintReviewerFilter, setSprintReviewerFilter] = useState("all");
+  const [sprintOverdueOnly, setSprintOverdueOnly] = useState(false);
+  const [pastShowAll, setPastShowAll] = useState(false);
+  const [pastRoundFilter, setPastRoundFilter] = useState("all");
+  const [pastStatusFilter, setPastStatusFilter] = useState("all");
+
+  async function handleCancel(interview: Interview) {
+    const confirmResult = window.confirm("Cancel this interview?");
+    if (!confirmResult) return;
+    const reason = window.prompt("Reason for cancellation (optional):", "") || undefined;
+    setBusy(true);
+    setError(null);
+    try {
+      await cancelInterview(interview.candidate_interview_id, reason);
+      await refresh();
+    } catch (e: any) {
+      setError(e?.message || "Could not cancel interview.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleReschedule(interview: Interview) {
+    const round = interview.round_type || "L2";
+    router.push(`/candidates/${encodeURIComponent(String(interview.candidate_id))}?reschedule_interview_id=${encodeURIComponent(String(interview.candidate_interview_id))}&round=${encodeURIComponent(round)}`);
+  }
 
 
   const activeCandidateLabel = useMemo(() => {
@@ -200,13 +314,75 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
   }
 
   const upcomingView = useMemo(() => upcoming.filter((item) => !isCancelled(item)), [upcoming]);
-  const pastView = useMemo(() => past.filter((item) => !isCancelled(item)), [past]);
+  const pastView = useMemo(() => {
+    const items = past.filter((item) => !isCancelled(item));
+    return items.sort((a, b) => {
+      const aDate = parseDateUtc(a.scheduled_start_at);
+      const bDate = parseDateUtc(b.scheduled_start_at);
+      const aTime = aDate ? aDate.getTime() : 0;
+      const bTime = bDate ? bDate.getTime() : 0;
+      return bTime - aTime;
+    });
+  }, [past]);
+  const pendingSprintCount = sprints.length;
+  const reviewerOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    sprints.forEach((sprint) => {
+      if (sprint.reviewed_by_person_id_platform) {
+        const label = sprint.reviewed_by_name || sprint.reviewed_by_email || sprint.reviewed_by_person_id_platform;
+        map.set(sprint.reviewed_by_person_id_platform, label);
+      }
+    });
+    return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
+  }, [sprints]);
+  const filteredSprints = useMemo(() => {
+    return sprints.filter((sprint) => {
+      if (sprintStatusFilter !== "all" && sprint.status !== sprintStatusFilter) return false;
+      if (sprintReviewerFilter === "unassigned") {
+        if (sprint.reviewed_by_person_id_platform) return false;
+      } else if (sprintReviewerFilter !== "all") {
+        if (sprint.reviewed_by_person_id_platform !== sprintReviewerFilter) return false;
+      }
+      if (sprintOverdueOnly) {
+        if (!sprint.due_at) return false;
+        const due = parseDateUtc(sprint.due_at);
+        if (!due || Number.isNaN(due.getTime())) return false;
+        if (due.getTime() > Date.now()) return false;
+      }
+      return true;
+    });
+  }, [sprints, sprintStatusFilter, sprintReviewerFilter, sprintOverdueOnly]);
+
+  const filteredPast = useMemo(() => {
+    return pastView.filter((item) => {
+      if (pastRoundFilter !== "all") {
+        const round = item.round_type.toLowerCase();
+        if (!round.includes(pastRoundFilter)) return false;
+      }
+      if (pastStatusFilter !== "all") {
+        const status = (item.interview_status || "").toLowerCase();
+        if (status !== pastStatusFilter) return false;
+      }
+      return true;
+    });
+  }, [pastView, pastRoundFilter, pastStatusFilter]);
+
+  const visiblePast = useMemo(() => {
+    if (pastShowAll) return filteredPast;
+    return filteredPast.slice(0, 3);
+  }, [filteredPast, pastShowAll]);
+  const pastTaken = useMemo(() => visiblePast.filter((item) => (item.interview_status || "").toLowerCase() === "taken"), [visiblePast]);
+  const pastNotTaken = useMemo(() => visiblePast.filter((item) => (item.interview_status || "").toLowerCase() === "not_taken"), [visiblePast]);
+  const pastOther = useMemo(
+    () => visiblePast.filter((item) => !["taken", "not_taken"].includes((item.interview_status || "").toLowerCase())),
+    [visiblePast]
+  );
 
   async function refreshSprints() {
     setSprintsBusy(true);
     setSprintsError(null);
     try {
-      const pendingSprints = await fetchSprints({ reviewer: "me", status: "submitted" });
+      const pendingSprints = await fetchSprints({ ...(useMeFilter ? { reviewer: "me" } : {}), status: "submitted" });
       setSprints(pendingSprints);
     } catch (e: any) {
       setSprintsError(e?.message || "Could not load sprint reviews.");
@@ -244,6 +420,22 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
       setSprintsError(e?.message || "Sprint review failed.");
     } finally {
       setSprintsBusy(false);
+    }
+  }
+
+  async function handleAssignReviewer(sprint: CandidateSprint, person: PlatformPersonSuggestion | null) {
+    setAssignBusy(true);
+    setAssignError(null);
+    try {
+      const updated = await assignSprintReviewer(sprint.candidate_sprint_id, person ? person.person_id : null);
+      setSprints((prev) => prev.map((item) => (item.candidate_sprint_id === updated.candidate_sprint_id ? updated : item)));
+      setAssignSprint(null);
+      setAssignQuery("");
+      setAssignResults([]);
+    } catch (e: any) {
+      setAssignError(e?.message || "Could not assign reviewer.");
+    } finally {
+      setAssignBusy(false);
     }
   }
 
@@ -285,6 +477,27 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
     };
   }, []);
 
+  useEffect(() => {
+    if (!assignSprint) return;
+    if (!assignQuery.trim()) {
+      setAssignResults([]);
+      return;
+    }
+    let active = true;
+    const handle = window.setTimeout(async () => {
+      try {
+        const results = await fetchPeople(assignQuery.trim());
+        if (active) setAssignResults(results);
+      } catch {
+        if (active) setAssignResults([]);
+      }
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(handle);
+    };
+  }, [assignQuery, assignSprint]);
+
   function assessmentValue(path: string[]) {
     if (!assessment?.data || typeof assessment.data !== "object") return "";
     let cursor: any = assessment.data;
@@ -319,7 +532,15 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
                 No interviews scheduled yet.
               </div>
             ) : (
-              upcomingView.map((slot) => <InterviewCard key={slot.candidate_interview_id} interview={slot} onSelect={openAssessment} />)
+              upcomingView.map((slot) => (
+                <InterviewCard
+                  key={slot.candidate_interview_id}
+                  interview={slot}
+                  onSelect={openAssessment}
+                  onCancel={handleCancel}
+                  onReschedule={handleReschedule}
+                />
+              ))
             )}
           </div>
         </div>
@@ -329,27 +550,180 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
             <p className="text-sm font-semibold">Past interviews</p>
             <span className="text-xs text-slate-600">Last interviews</span>
           </div>
+          <div className="mt-3 flex flex-wrap gap-3 rounded-2xl border border-white/60 bg-white/40 p-3">
+            <label className="text-xs font-semibold text-slate-600">
+              Round
+              <select
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                value={pastRoundFilter}
+                onChange={(event) => setPastRoundFilter(event.target.value)}
+              >
+                <option value="all">All</option>
+                <option value="l1">L1</option>
+                <option value="l2">L2</option>
+              </select>
+            </label>
+            <label className="text-xs font-semibold text-slate-600">
+              Status
+              <select
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                value={pastStatusFilter}
+                onChange={(event) => setPastStatusFilter(event.target.value)}
+              >
+                <option value="all">All</option>
+                <option value="taken">Taken</option>
+                <option value="not_taken">Not taken</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300"
+                checked={pastShowAll}
+                onChange={(event) => setPastShowAll(event.target.checked)}
+              />
+              Show all
+            </label>
+          </div>
           <div className="mt-3 space-y-2">
-            {pastView.length === 0 ? (
+            {visiblePast.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/30 p-4 text-sm text-slate-600">
                 No past interviews yet.
               </div>
             ) : (
-              pastView.map((item) => (
-                <button
-                  key={item.candidate_interview_id}
-                  type="button"
-                  className="w-full rounded-2xl border border-white/60 bg-white/40 px-3 py-2 text-left hover:bg-white/70"
-                  onClick={() => void openAssessment(item)}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
-                    <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
+              <>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Interview taken</p>
+                  <div className="mt-2 space-y-2">
+                    {pastTaken.length === 0 ? (
+                      <p className="text-sm text-slate-600">No interviews marked as taken.</p>
+                    ) : (
+                      pastTaken.map((item) => (
+                        <button
+                          key={item.candidate_interview_id}
+                          type="button"
+                          className="w-full rounded-2xl border border-white/60 bg-white/40 px-3 py-2 text-left hover:bg-white/70"
+                          onClick={() => void openAssessment(item)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
+                            <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
+                            <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("green"))}>Interview taken</span>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-600">
+                            {item.opening_title || "Opening"} - {formatDateTime(item.scheduled_start_at)}
+                          </p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                            <span>{item.location || "Location TBD"}</span>
+                            {item.meeting_link ? (
+                              <a
+                                className="text-slate-800 underline decoration-dotted underline-offset-2"
+                                href={item.meeting_link}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Meeting link
+                              </a>
+                            ) : null}
+                          </div>
+                        </button>
+                      ))
+                    )}
                   </div>
-                  <p className="mt-1 text-xs text-slate-600">{item.opening_title || "Opening"} - {formatDateTime(item.scheduled_start_at)}</p>
-                </button>
-              ))
+                </div>
+
+                <div className="mt-4">
+                  <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Interview not taken</p>
+                  <div className="mt-2 space-y-2">
+                    {pastNotTaken.length === 0 ? (
+                      <p className="text-sm text-slate-600">No interviews marked as not taken.</p>
+                    ) : (
+                      pastNotTaken.map((item) => (
+                        <button
+                          key={item.candidate_interview_id}
+                          type="button"
+                          className="w-full rounded-2xl border border-white/60 bg-white/40 px-3 py-2 text-left hover:bg-white/70"
+                          onClick={() => void openAssessment(item)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
+                            <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
+                            <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("amber"))}>Interview not taken</span>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-600">
+                            {item.opening_title || "Opening"} - {formatDateTime(item.scheduled_start_at)}
+                          </p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                            <span>{item.location || "Location TBD"}</span>
+                            {item.meeting_link ? (
+                              <a
+                                className="text-slate-800 underline decoration-dotted underline-offset-2"
+                                href={item.meeting_link}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Meeting link
+                              </a>
+                            ) : null}
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {pastOther.length > 0 ? (
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Other past interviews</p>
+                    <div className="mt-2 space-y-2">
+                      {pastOther.map((item) => (
+                        <button
+                          key={item.candidate_interview_id}
+                          type="button"
+                          className="w-full rounded-2xl border border-white/60 bg-white/40 px-3 py-2 text-left hover:bg-white/70"
+                          onClick={() => void openAssessment(item)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
+                            <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
+                            {interviewStatusLabel(item.interview_status) ? (
+                              <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("neutral"))}>
+                                {interviewStatusLabel(item.interview_status)}
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-xs text-slate-600">
+                            {item.opening_title || "Opening"} - {formatDateTime(item.scheduled_start_at)}
+                          </p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                            <span>{item.location || "Location TBD"}</span>
+                            {item.meeting_link ? (
+                              <a
+                                className="text-slate-800 underline decoration-dotted underline-offset-2"
+                                href={item.meeting_link}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Meeting link
+                              </a>
+                            ) : null}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </>
             )}
+            {!pastShowAll && filteredPast.length > 3 ? (
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                onClick={() => setPastShowAll(true)}
+              >
+                View all ({filteredPast.length})
+              </button>
+            ) : null}
           </div>
         </div>
       </section>
@@ -358,20 +732,63 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold">Pending sprint reviews</p>
-            <p className="text-xs text-slate-600">Submitted sprints awaiting decision.</p>
+            <p className="text-xs text-slate-600">Submitted sprints awaiting decision. {pendingSprintCount} pending.</p>
           </div>
           {sprintsBusy ? <Loader2 className="h-4 w-4 animate-spin text-slate-500" /> : null}
         </div>
 
         {sprintsError ? <div className="mt-3 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">{sprintsError}</div> : null}
 
+        <div className="mt-3 flex flex-wrap gap-3 rounded-2xl border border-white/60 bg-white/40 p-3">
+          <label className="text-xs font-semibold text-slate-600">
+            Status
+            <select
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+              value={sprintStatusFilter}
+              onChange={(event) => setSprintStatusFilter(event.target.value)}
+            >
+              <option value="all">All</option>
+              <option value="submitted">Submitted</option>
+              <option value="under_review">Under review</option>
+              <option value="completed">Completed</option>
+              <option value="assigned">Assigned</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </label>
+          <label className="text-xs font-semibold text-slate-600">
+            Reviewer
+            <select
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+              value={sprintReviewerFilter}
+              onChange={(event) => setSprintReviewerFilter(event.target.value)}
+            >
+              <option value="all">All</option>
+              <option value="unassigned">Unassigned</option>
+              {reviewerOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-300"
+              checked={sprintOverdueOnly}
+              onChange={(event) => setSprintOverdueOnly(event.target.checked)}
+            />
+            Overdue only
+          </label>
+        </div>
+
         <div className="mt-3 space-y-2">
-          {sprints.length === 0 ? (
+          {filteredSprints.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-white/30 p-4 text-sm text-slate-600">
               No sprint submissions waiting for review.
             </div>
           ) : (
-            sprints.map((sprint) => (
+            filteredSprints.map((sprint) => (
               <button
                 key={sprint.candidate_sprint_id}
                 type="button"
@@ -382,6 +799,9 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
                   <div>
                     <p className="text-sm font-semibold text-slate-900">{sprint.candidate_name || `Candidate ${sprint.candidate_id}`}</p>
                     <p className="text-xs text-slate-600">{sprint.opening_title || "Opening"} - {sprint.template_name || "Sprint"}</p>
+                    <p className="text-xs text-slate-600">
+                      Reviewer: {sprint.reviewed_by_name || sprint.reviewed_by_email || "Unassigned"}
+                    </p>
                   </div>
                   <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("amber"))}>
                     {sprint.status.replace("_", " ")}
@@ -391,6 +811,35 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
                   {sprint.submitted_at ? <span>Submitted {formatDateTime(sprint.submitted_at)}</span> : null}
                   {sprint.due_at ? <span>Due {formatDateTime(sprint.due_at)}</span> : null}
                 </div>
+                {canAssignReviewer ? (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setAssignSprint(sprint);
+                        setAssignQuery("");
+                        setAssignResults([]);
+                        setAssignError(null);
+                      }}
+                    >
+                      {sprint.reviewed_by_person_id_platform ? "Change reviewer" : "Assign reviewer"}
+                    </button>
+                    {sprint.reviewed_by_person_id_platform ? (
+                      <button
+                        type="button"
+                        className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleAssignReviewer(sprint, null);
+                        }}
+                      >
+                        Unassign
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </button>
             ))
           )}
@@ -607,6 +1056,66 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter }:
               >
                 {sprintsBusy ? "Saving..." : "Submit review"}
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {assignSprint ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <div className="w-full max-w-lg rounded-3xl border border-white/20 bg-white/95 p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-tight text-slate-500">Assign reviewer</p>
+                <h2 className="text-lg font-semibold">{assignSprint.candidate_name || `Candidate ${assignSprint.candidate_id}`}</h2>
+                <p className="text-xs text-slate-600">{assignSprint.template_name || "Sprint"}</p>
+              </div>
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                onClick={() => setAssignSprint(null)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <label className="block">
+                <span className="text-xs font-semibold text-slate-600">Search reviewer</span>
+                <input
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/20"
+                  value={assignQuery}
+                  onChange={(event) => setAssignQuery(event.target.value)}
+                  placeholder="Type name or email"
+                  disabled={assignBusy}
+                />
+              </label>
+
+              {assignError ? (
+                <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">
+                  {assignError}
+                </div>
+              ) : null}
+
+              <div className="space-y-2">
+                {assignResults.length === 0 && assignQuery.trim() ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-4 text-sm text-slate-600">
+                    No matches found.
+                  </div>
+                ) : null}
+                {assignResults.map((person) => (
+                  <button
+                    key={person.person_id}
+                    type="button"
+                    className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() => void handleAssignReviewer(assignSprint, person)}
+                    disabled={assignBusy}
+                  >
+                    <span className="font-semibold text-slate-900">{person.full_name || person.email}</span>
+                    <span className="text-xs text-slate-500">{person.email}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>

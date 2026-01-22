@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { CandidateFull, CandidateOffer, CandidateStage, CandidateSprint, Interview, JoiningDoc, PlatformPersonSuggestion, Screening, SprintTemplate } from "@/lib/types";
 import { clsx } from "clsx";
 import { CheckCircle2, Copy, ExternalLink, FileText, Layers, Mail, Phone, XCircle } from "lucide-react";
@@ -471,6 +472,7 @@ function cleanLetterOverrides(raw: Record<string, string>) {
 }
 
 export function Candidate360Client({ candidateId, initial, canDelete, canSchedule, canSkip, canCancelInterview, canUploadJoiningDocs }: Props) {
+  const searchParams = useSearchParams();
   const [data, setData] = useState<CandidateFull>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -560,6 +562,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [slotPreviewBusy, setSlotPreviewBusy] = useState(false);
   const [slotPreviewError, setSlotPreviewError] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<SlotPreview | null>(null);
+  const [autoRescheduleOpened, setAutoRescheduleOpened] = useState(false);
   const schedulePanelRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const screeningRef = useRef<HTMLDivElement | null>(null);
@@ -595,6 +598,17 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       setOfferTemplateCode(suggestion);
     }
   }, [candidate.opening_title]);
+
+  useEffect(() => {
+    if (!searchParams || autoRescheduleOpened) return;
+    const rescheduleId = searchParams.get("reschedule_interview_id");
+    if (!rescheduleId) return;
+    const parsedId = Number(rescheduleId);
+    if (!Number.isFinite(parsedId)) return;
+    const round = searchParams.get("round") || "L2";
+    setAutoRescheduleOpened(true);
+    openSchedule(round, parsedId);
+  }, [searchParams, autoRescheduleOpened]);
 
   const cafState = useMemo(() => {
     const generated = !!candidate.caf_sent_at || !!cafLink?.caf_token;
@@ -1521,6 +1535,18 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       .filter((item) => isCancelled(item) || getTs(item.scheduled_start_at) < now.getTime())
       .sort((a, b) => getTs(b.scheduled_start_at) - getTs(a.scheduled_start_at));
   }, [interviews]);
+  const interviewTaken = useMemo(
+    () => interviewPast.filter((item) => interviewStatusValue(item) === "taken"),
+    [interviewPast]
+  );
+  const interviewNotTaken = useMemo(
+    () => interviewPast.filter((item) => interviewStatusValue(item) === "not_taken"),
+    [interviewPast]
+  );
+  const interviewPastOther = useMemo(
+    () => interviewPast.filter((item) => !["taken", "not_taken"].includes(interviewStatusValue(item))),
+    [interviewPast]
+  );
   const latestOffer = candidateOffers && candidateOffers.length > 0 ? candidateOffers[0] : null;
   const stageProgressSteps = useMemo(() => {
     const hasStage = (key: string) => data.stages.some((stage) => normalizeStage(stage.stage_name) === key);
@@ -2226,75 +2252,161 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                       ) : interviewPast.length === 0 ? (
                         <p className="text-sm text-slate-600">No completed interviews yet.</p>
                       ) : (
-                        interviewPast.map((item) => {
-                          const notTaken = isNotTaken(item);
-                          return (
-                          <div key={item.candidate_interview_id} className="rounded-2xl border border-white/60 bg-white/50 p-3">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <p className="text-sm font-semibold">{item.round_type}</p>
-                                <p className="text-xs text-slate-600">{formatDateTime(item.scheduled_start_at)}</p>
-                              </div>
-                              <Chip className={notTaken ? chipTone("amber") : decisionTone(item.decision)}>
-                                {notTaken ? "Interview not taken" : item.decision === "cancelled" ? "Cancelled" : item.decision || "No decision"}
-                              </Chip>
-                            </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                              {item.rating_overall ? <Chip className={chipTone("neutral")}>Overall {item.rating_overall}/5</Chip> : null}
-                              {item.feedback_submitted ? (
-                                <Chip className={chipTone("green")}>Feedback submitted</Chip>
-                              ) : notTaken ? null : (
-                                <Chip className={chipTone("amber")}>Feedback pending</Chip>
+                        <>
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Interview taken</p>
+                            <div className="mt-2 space-y-2">
+                              {interviewTaken.length === 0 ? (
+                                <p className="text-sm text-slate-600">No interviews marked as taken.</p>
+                              ) : (
+                                interviewTaken.map((item) => (
+                                  <div key={item.candidate_interview_id} className="rounded-2xl border border-white/60 bg-white/50 p-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div>
+                                        <p className="text-sm font-semibold">{item.round_type}</p>
+                                        <p className="text-xs text-slate-600">{item.interviewer_name || item.interviewer_person_id_platform || "Interviewer"}</p>
+                                      </div>
+                                      <Chip className={chipTone("green")}>Interview taken</Chip>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                                      <span>{formatDateTime(item.scheduled_start_at)}</span>
+                                      <span>{item.location || "Location TBD"}</span>
+                                      {item.meeting_link ? (
+                                        <a
+                                          className="text-slate-800 underline decoration-dotted underline-offset-2"
+                                          href={item.meeting_link}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          Meeting link
+                                        </a>
+                                      ) : null}
+                                      {item.rating_overall ? <Chip className={chipTone("neutral")}>Overall {item.rating_overall}/5</Chip> : null}
+                                      {item.feedback_submitted ? (
+                                        <Chip className={chipTone("green")}>Feedback submitted</Chip>
+                                      ) : (
+                                        <Chip className={chipTone("amber")}>Feedback pending</Chip>
+                                      )}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="mt-3 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
+                                      onClick={() => setExpandedInterviewId((prev) => (prev === item.candidate_interview_id ? null : item.candidate_interview_id))}
+                                    >
+                                      {expandedInterviewId === item.candidate_interview_id ? "Hide details" : "View details"}
+                                    </button>
+                                    {expandedInterviewId === item.candidate_interview_id ? (
+                                      <div className="mt-3 space-y-2 text-xs text-slate-700">
+                                        {item.notes_internal ? (
+                                          <div className="rounded-xl border border-white/60 bg-white/70 p-3">
+                                            <p className="text-[10px] uppercase tracking-tight text-slate-500">Internal notes</p>
+                                            <pre className="mt-1 whitespace-pre-wrap text-xs text-slate-700">{item.notes_internal}</pre>
+                                          </div>
+                                        ) : null}
+                                        {item.notes_for_candidate ? (
+                                          <div className="rounded-xl border border-white/60 bg-white/70 p-3">
+                                            <p className="text-[10px] uppercase tracking-tight text-slate-500">Notes for candidate</p>
+                                            <p className="mt-1 text-xs text-slate-700">{item.notes_for_candidate}</p>
+                                          </div>
+                                        ) : null}
+                                        {item.round_type.toLowerCase().includes("l1") || item.round_type.toLowerCase().includes("l2") ? (
+                                          <a
+                                            className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
+                                            href={`/gl-portal?interview=${encodeURIComponent(String(item.candidate_interview_id))}`}
+                                          >
+                                            {item.round_type.toLowerCase().includes("l1") ? "Open L1 assessment" : "Open L2 assessment"}
+                                          </a>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ))
                               )}
                             </div>
-                            {notTaken && canSchedule ? (
-                              <button
-                                type="button"
-                                className="mt-3 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-white"
-                                onClick={() => {
-                                  setInterviewsError(null);
-                                  openSchedule(item.round_type || "L2", item.candidate_interview_id);
-                                  setInterviewsNotice("Rescheduling interview: pick a new slot to replace the existing one.");
-                                }}
-                                disabled={busy}
-                              >
-                                Reschedule interview
-                              </button>
-                            ) : null}
-                            <button
-                              type="button"
-                              className="mt-3 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
-                              onClick={() => setExpandedInterviewId((prev) => (prev === item.candidate_interview_id ? null : item.candidate_interview_id))}
-                            >
-                              {expandedInterviewId === item.candidate_interview_id ? "Hide details" : "View details"}
-                            </button>
-                            {expandedInterviewId === item.candidate_interview_id ? (
-                              <div className="mt-3 space-y-2 text-xs text-slate-700">
-                                {item.notes_internal ? (
-                                  <div className="rounded-xl border border-white/60 bg-white/70 p-3">
-                                    <p className="text-[10px] uppercase tracking-tight text-slate-500">Internal notes</p>
-                                    <pre className="mt-1 whitespace-pre-wrap text-xs text-slate-700">{item.notes_internal}</pre>
-                                  </div>
-                                ) : null}
-                                {item.notes_for_candidate ? (
-                                  <div className="rounded-xl border border-white/60 bg-white/70 p-3">
-                                    <p className="text-[10px] uppercase tracking-tight text-slate-500">Notes for candidate</p>
-                                    <p className="mt-1 text-xs text-slate-700">{item.notes_for_candidate}</p>
-                                  </div>
-                                ) : null}
-                                {item.round_type.toLowerCase().includes("l1") || item.round_type.toLowerCase().includes("l2") ? (
-                                  <a
-                                    className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
-                                    href={`/gl-portal?interview=${encodeURIComponent(String(item.candidate_interview_id))}`}
-                                  >
-                                    {item.round_type.toLowerCase().includes("l1") ? "Open L1 assessment" : "Open L2 assessment"}
-                                  </a>
-                                ) : null}
-                              </div>
-                            ) : null}
                           </div>
-                          );
-                        })
+
+                          <div className="mt-4">
+                            <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Interview not taken</p>
+                            <div className="mt-2 space-y-2">
+                              {interviewNotTaken.length === 0 ? (
+                                <p className="text-sm text-slate-600">No interviews marked as not taken.</p>
+                              ) : (
+                                interviewNotTaken.map((item) => (
+                                  <div key={item.candidate_interview_id} className="rounded-2xl border border-white/60 bg-white/50 p-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div>
+                                        <p className="text-sm font-semibold">{item.round_type}</p>
+                                        <p className="text-xs text-slate-600">{item.interviewer_name || item.interviewer_person_id_platform || "Interviewer"}</p>
+                                      </div>
+                                      <Chip className={chipTone("amber")}>Interview not taken</Chip>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                                      <span>{formatDateTime(item.scheduled_start_at)}</span>
+                                      <span>{item.location || "Location TBD"}</span>
+                                      {item.meeting_link ? (
+                                        <a
+                                          className="text-slate-800 underline decoration-dotted underline-offset-2"
+                                          href={item.meeting_link}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          Meeting link
+                                        </a>
+                                      ) : null}
+                                    </div>
+                                    {canSchedule ? (
+                                      <button
+                                        type="button"
+                                        className="mt-3 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-white"
+                                        onClick={() => {
+                                          setInterviewsError(null);
+                                          openSchedule(item.round_type || "L2", item.candidate_interview_id);
+                                          setInterviewsNotice("Rescheduling interview: pick a new slot to replace the existing one.");
+                                        }}
+                                        disabled={busy}
+                                      >
+                                        Reschedule interview
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+
+                          {interviewPastOther.length > 0 ? (
+                            <div className="mt-4">
+                              <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Other past interviews</p>
+                              <div className="mt-2 space-y-2">
+                                {interviewPastOther.map((item) => (
+                                  <div key={item.candidate_interview_id} className="rounded-2xl border border-white/60 bg-white/50 p-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div>
+                                        <p className="text-sm font-semibold">{item.round_type}</p>
+                                        <p className="text-xs text-slate-600">{item.interviewer_name || item.interviewer_person_id_platform || "Interviewer"}</p>
+                                      </div>
+                                      <Chip className={decisionTone(item.decision)}>{item.decision || "No decision"}</Chip>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                                      <span>{formatDateTime(item.scheduled_start_at)}</span>
+                                      <span>{item.location || "Location TBD"}</span>
+                                      {item.meeting_link ? (
+                                        <a
+                                          className="text-slate-800 underline decoration-dotted underline-offset-2"
+                                          href={item.meeting_link}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          Meeting link
+                                        </a>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                        </>
                       )}
                     </div>
                   </div>

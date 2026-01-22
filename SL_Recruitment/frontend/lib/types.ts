@@ -290,6 +290,8 @@ export type CandidateSprint = {
   submission_url?: string | null;
   submitted_at?: string | null;
   reviewed_by_person_id_platform?: string | null;
+  reviewed_by_name?: string | null;
+  reviewed_by_email?: string | null;
   reviewed_at?: string | null;
   score_overall?: number | null;
   comments_internal?: string | null;

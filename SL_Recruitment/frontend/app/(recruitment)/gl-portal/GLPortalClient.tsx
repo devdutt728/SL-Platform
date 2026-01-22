@@ -448,6 +448,18 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
   const [activeTab, setActiveTab] = useState<AssessmentMode>("l2");
   const visibleInterviews = activeTab === "l1" ? l1Interviews : l2Interviews;
   const currentStage = candidate?.current_stage ? candidate.current_stage.replace(/_/g, " ") : "";
+  const takenInterviews = useMemo(
+    () => visibleInterviews.filter((item) => (item.interview_status || "").toLowerCase() === "taken"),
+    [visibleInterviews]
+  );
+  const notTakenInterviews = useMemo(
+    () => visibleInterviews.filter((item) => (item.interview_status || "").toLowerCase() === "not_taken"),
+    [visibleInterviews]
+  );
+  const otherInterviews = useMemo(
+    () => visibleInterviews.filter((item) => !["taken", "not_taken"].includes((item.interview_status || "").toLowerCase())),
+    [visibleInterviews]
+  );
 
   async function refreshList() {
     setBusy(true);
@@ -546,6 +558,8 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
   const activeMode = active ? assessmentModeForInterview(active) : activeTab;
   const pdfSlug = activeMode === "l1" ? "l1-assessment" : "l2-assessment";
   const sections = activeMode === "l1" ? L1_SECTION_FIELDS : L2_SECTION_FIELDS;
+  const activeInterviewStatus = (active?.interview_status || "").toLowerCase();
+  const isInterviewNotTaken = activeInterviewStatus === "not_taken";
 
   async function markInterviewStatus(status: "taken" | "not_taken") {
     if (!active || !candidate) return;
@@ -698,24 +712,128 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                 No interviews assigned yet.
               </div>
             ) : (
-              visibleInterviews.map((item) => (
-                <button
-                  key={item.candidate_interview_id}
-                  type="button"
-                  className={clsx(
-                    "flex w-full flex-col gap-1 rounded-2xl border border-white/60 bg-white/40 p-3 text-left transition hover:bg-white/70",
-                    active?.candidate_interview_id === item.candidate_interview_id && "bg-white/80 ring-1 ring-slate-200"
-                  )}
-                  onClick={() => void selectInterview(item)}
-                >
-                  <p className="text-sm font-semibold text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
-                  <p className="text-xs text-slate-600">{item.opening_title || "Opening"}</p>
-                  <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
-                    <CalendarCheck2 className="h-3.5 w-3.5" />
-                    {interviewLabel(item)}
+              <>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Interview taken</p>
+                  <div className="mt-2 space-y-2">
+                    {takenInterviews.length === 0 ? (
+                      <p className="text-xs text-slate-600">No interviews marked as taken.</p>
+                    ) : (
+                      takenInterviews.map((item) => (
+                        <button
+                          key={item.candidate_interview_id}
+                          type="button"
+                          className={clsx(
+                            "flex w-full flex-col gap-1 rounded-2xl border border-white/60 bg-white/40 p-3 text-left transition hover:bg-white/70",
+                            active?.candidate_interview_id === item.candidate_interview_id && "bg-white/80 ring-1 ring-slate-200"
+                          )}
+                          onClick={() => void selectInterview(item)}
+                        >
+                          <p className="text-sm font-semibold text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
+                          <p className="text-xs text-slate-600">{item.opening_title || "Opening"}</p>
+                          <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
+                            <CalendarCheck2 className="h-3.5 w-3.5" />
+                            {interviewLabel(item)}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                            <span>{item.location || "Location TBD"}</span>
+                            {item.meeting_link ? (
+                              <a
+                                className="text-slate-800 underline decoration-dotted underline-offset-2"
+                                href={item.meeting_link}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Meeting link
+                              </a>
+                            ) : null}
+                          </div>
+                        </button>
+                      ))
+                    )}
                   </div>
-                </button>
-              ))
+                </div>
+
+                <div className="mt-4">
+                  <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Interview not taken</p>
+                  <div className="mt-2 space-y-2">
+                    {notTakenInterviews.length === 0 ? (
+                      <p className="text-xs text-slate-600">No interviews marked as not taken.</p>
+                    ) : (
+                      notTakenInterviews.map((item) => (
+                        <button
+                          key={item.candidate_interview_id}
+                          type="button"
+                          className={clsx(
+                            "flex w-full flex-col gap-1 rounded-2xl border border-white/60 bg-white/40 p-3 text-left transition hover:bg-white/70",
+                            active?.candidate_interview_id === item.candidate_interview_id && "bg-white/80 ring-1 ring-slate-200"
+                          )}
+                          onClick={() => void selectInterview(item)}
+                        >
+                          <p className="text-sm font-semibold text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
+                          <p className="text-xs text-slate-600">{item.opening_title || "Opening"}</p>
+                          <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
+                            <CalendarCheck2 className="h-3.5 w-3.5" />
+                            {interviewLabel(item)}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                            <span>{item.location || "Location TBD"}</span>
+                            {item.meeting_link ? (
+                              <a
+                                className="text-slate-800 underline decoration-dotted underline-offset-2"
+                                href={item.meeting_link}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Meeting link
+                              </a>
+                            ) : null}
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {otherInterviews.length > 0 ? (
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Other interviews</p>
+                    <div className="mt-2 space-y-2">
+                      {otherInterviews.map((item) => (
+                        <button
+                          key={item.candidate_interview_id}
+                          type="button"
+                          className={clsx(
+                            "flex w-full flex-col gap-1 rounded-2xl border border-white/60 bg-white/40 p-3 text-left transition hover:bg-white/70",
+                            active?.candidate_interview_id === item.candidate_interview_id && "bg-white/80 ring-1 ring-slate-200"
+                          )}
+                          onClick={() => void selectInterview(item)}
+                        >
+                          <p className="text-sm font-semibold text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
+                          <p className="text-xs text-slate-600">{item.opening_title || "Opening"}</p>
+                          <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
+                            <CalendarCheck2 className="h-3.5 w-3.5" />
+                            {interviewLabel(item)}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                            <span>{item.location || "Location TBD"}</span>
+                            {item.meeting_link ? (
+                              <a
+                                className="text-slate-800 underline decoration-dotted underline-offset-2"
+                                href={item.meeting_link}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Meeting link
+                              </a>
+                            ) : null}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </>
             )}
           </div>
         </div>
@@ -779,7 +897,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                 </div>
               ) : null}
 
-              {previewOpen ? (
+              {previewOpen && !isInterviewNotTaken ? (
                 <div className="rounded-2xl border border-slate-200/70 bg-white/80 p-4 text-sm text-slate-700">
                   <p className="text-xs uppercase tracking-tight text-slate-500">Preview</p>
                   {activeMode === "l1" ? (
@@ -802,6 +920,11 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
               ) : null}
 
               <div className="space-y-6">
+                {isInterviewNotTaken ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-700">
+                    Interview marked as not taken. Assessment is unavailable.
+                  </div>
+                ) : null}
                 {activeMode === "l1" ? (
                   <section className="rounded-3xl border border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-slate-100 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
                     <p className="text-xs uppercase tracking-tight text-slate-500">Areas to assess on</p>
@@ -816,7 +939,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                   </section>
                 ) : null}
 
-                {sections.map((section) => (
+                {!isInterviewNotTaken ? sections.map((section) => (
                   <section
                     key={section.title}
                     className="rounded-3xl border border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-slate-100 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)]"
@@ -856,7 +979,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                       </div>
                     ) : null}
                   </section>
-                ))}
+                )) : null}
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -869,7 +992,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                     type="button"
                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
                     onClick={() => void handleSave()}
-                    disabled={busy || locked}
+                    disabled={busy || locked || isInterviewNotTaken}
                   >
                     Save draft
                   </button>
@@ -877,7 +1000,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                     type="button"
                     className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
                     onClick={() => void handleSubmit()}
-                    disabled={busy || locked}
+                    disabled={busy || locked || isInterviewNotTaken}
                   >
                     {isSubmitted ? "Submitted" : "Submit"}
                   </button>

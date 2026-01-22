@@ -31,11 +31,12 @@ export default async function InterviewerPage() {
   const me = (meRes.ok ? ((await meRes.json()) as Me) : null) || null;
   const roles = (me?.roles || []).map((role) => String(role).toLowerCase());
   const useMeFilter = (roles.includes("interviewer") || roles.includes("gl")) && !roles.includes("hr_admin") && !roles.includes("hr_exec");
+  const canAssignReviewer = roles.includes("hr_admin") || roles.includes("hr_exec");
 
   const [upcoming, past] = await Promise.all([
     fetchInterviews({ ...(useMeFilter ? { interviewer: "me" } : {}), upcoming: "true" }),
     fetchInterviews({ ...(useMeFilter ? { interviewer: "me" } : {}), upcoming: "false" }),
   ]);
 
-  return <InterviewerClient initialUpcoming={upcoming} initialPast={past} useMeFilter={useMeFilter} />;
+  return <InterviewerClient initialUpcoming={upcoming} initialPast={past} useMeFilter={useMeFilter} canAssignReviewer={canAssignReviewer} />;
 }

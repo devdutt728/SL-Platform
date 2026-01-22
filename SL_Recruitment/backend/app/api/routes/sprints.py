@@ -27,12 +27,15 @@ from app.models.opening import RecOpening
 from app.models.sprint_attachment import RecSprintAttachment
 from app.models.sprint_template import RecSprintTemplate
 from app.models.sprint_template_attachment import RecSprintTemplateAttachment
-from app.schemas.sprint import CandidateSprintOut, SprintAssignIn, SprintPublicOut, SprintUpdateIn
+from app.db.platform_session import PlatformSessionLocal
+from app.models.platform_person import DimPerson
+from app.schemas.sprint import CandidateSprintOut, SprintAssignIn, SprintPublicOut, SprintUpdateIn, SprintReviewerAssignIn
 from app.schemas.sprint_attachment import SprintAttachmentPublicOut, SprintTemplateAttachmentOut
 from app.schemas.stage import StageTransitionRequest
 from app.schemas.sprint_template import SprintTemplateCreateIn, SprintTemplateListItem, SprintTemplateUpdateIn
 from app.schemas.user import UserContext
 import anyio
+from app.services.platform_identity import active_status_filter
 from app.services.drive import (
     copy_sprint_attachment_to_candidate,
     download_drive_file,
@@ -53,6 +56,36 @@ def _normalize_person_id(raw: str | None) -> str | None:
         return None
     val = raw.strip()
     return val or None
+
+
+async def _fetch_platform_people(ids: set[str]) -> dict[str, dict]:
+    ids = {pid for pid in ids if pid}
+    if not ids:
+        return {}
+    try:
+        async with PlatformSessionLocal() as platform_session:
+            person_rows = (
+                await platform_session.execute(
+                    select(
+                        DimPerson.person_id,
+                        DimPerson.display_name,
+                        DimPerson.full_name,
+                        DimPerson.first_name,
+                        DimPerson.last_name,
+                        DimPerson.email,
+                    ).where(DimPerson.person_id.in_(list(ids)), active_status_filter())
+                )
+            ).all()
+            out: dict[str, dict] = {}
+            for pr in person_rows:
+                full_name = (pr.display_name or pr.full_name or f"{(pr.first_name or '').strip()} {(pr.last_name or '').strip()}").strip()
+                out[_normalize_person_id(pr.person_id) or pr.person_id] = {
+                    "name": full_name or pr.email or pr.person_id,
+                    "email": pr.email,
+                }
+            return out
+    except Exception:
+        return {}
 
 
 def _normalize_template_code(raw: str | None) -> str | None:
@@ -137,6 +170,7 @@ async def _build_candidate_sprint(
     template: RecSprintTemplate | None,
     candidate: RecCandidate | None = None,
     opening: RecOpening | None = None,
+    reviewer_meta: dict | None = None,
 ) -> CandidateSprintOut:
     return CandidateSprintOut(
         candidate_sprint_id=sprint.candidate_sprint_id,
@@ -149,6 +183,8 @@ async def _build_candidate_sprint(
         submission_url=sprint.submission_url,
         submitted_at=sprint.submitted_at,
         reviewed_by_person_id_platform=sprint.reviewed_by_person_id_platform,
+        reviewed_by_name=(reviewer_meta or {}).get("name"),
+        reviewed_by_email=(reviewer_meta or {}).get("email"),
         reviewed_at=sprint.reviewed_at,
         score_overall=float(sprint.score_overall) if sprint.score_overall is not None else None,
         comments_internal=sprint.comments_internal,
@@ -563,7 +599,18 @@ async def list_candidate_sprints(
     if candidate.opening_id is not None:
         opening = (await session.execute(select(RecOpening).where(RecOpening.opening_id == candidate.opening_id))).scalars().first()
 
-    return [await _build_candidate_sprint(sprint, template, candidate, opening) for sprint, template in rows]
+    reviewer_ids = {_normalize_person_id(sprint.reviewed_by_person_id_platform) or "" for sprint, _ in rows}
+    reviewer_meta = await _fetch_platform_people(reviewer_ids)
+    return [
+        await _build_candidate_sprint(
+            sprint,
+            template,
+            candidate,
+            opening,
+            reviewer_meta=reviewer_meta.get(_normalize_person_id(sprint.reviewed_by_person_id_platform) or "", {}),
+        )
+        for sprint, template in rows
+    ]
 
 
 @router.get("/sprints/{candidate_sprint_id}", response_model=CandidateSprintOut)
@@ -584,7 +631,14 @@ async def get_sprint(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint not found")
     sprint, template, candidate, opening = row
-    return await _build_candidate_sprint(sprint, template, candidate, opening)
+    reviewer_meta = await _fetch_platform_people({_normalize_person_id(sprint.reviewed_by_person_id_platform) or ""})
+    return await _build_candidate_sprint(
+        sprint,
+        template,
+        candidate,
+        opening,
+        reviewer_meta=reviewer_meta.get(_normalize_person_id(sprint.reviewed_by_person_id_platform) or "", {}),
+    )
 
 
 @router.get("/sprints", response_model=list[CandidateSprintOut])
@@ -607,7 +661,18 @@ async def list_sprints(
         query = query.where(RecCandidateSprint.reviewed_by_person_id_platform == _normalize_person_id(user.person_id_platform))
 
     rows = (await session.execute(query)).all()
-    return [await _build_candidate_sprint(sprint, template, candidate, opening) for sprint, template, candidate, opening in rows]
+    reviewer_ids = {_normalize_person_id(sprint.reviewed_by_person_id_platform) or "" for sprint, _, _, _ in rows}
+    reviewer_meta = await _fetch_platform_people(reviewer_ids)
+    return [
+        await _build_candidate_sprint(
+            sprint,
+            template,
+            candidate,
+            opening,
+            reviewer_meta=reviewer_meta.get(_normalize_person_id(sprint.reviewed_by_person_id_platform) or "", {}),
+        )
+        for sprint, template, candidate, opening in rows
+    ]
 
 
 @router.patch("/sprints/{candidate_sprint_id}", response_model=CandidateSprintOut)
@@ -674,7 +739,62 @@ async def update_sprint(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint not found")
     sprint, template, candidate, opening = row
-    return await _build_candidate_sprint(sprint, template, candidate, opening)
+    reviewer_meta = await _fetch_platform_people({_normalize_person_id(sprint.reviewed_by_person_id_platform) or ""})
+    return await _build_candidate_sprint(
+        sprint,
+        template,
+        candidate,
+        opening,
+        reviewer_meta=reviewer_meta.get(_normalize_person_id(sprint.reviewed_by_person_id_platform) or "", {}),
+    )
+
+
+@router.patch("/sprints/{candidate_sprint_id}/assign-reviewer", response_model=CandidateSprintOut)
+async def assign_sprint_reviewer(
+    candidate_sprint_id: int,
+    payload: SprintReviewerAssignIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    sprint = await session.get(RecCandidateSprint, candidate_sprint_id)
+    if not sprint:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint not found")
+
+    reviewer_id = _normalize_person_id(payload.reviewer_person_id_platform)
+    sprint.reviewed_by_person_id_platform = reviewer_id
+    sprint.updated_at = datetime.utcnow()
+
+    await log_event(
+        session,
+        candidate_id=sprint.candidate_id,
+        action_type="sprint_reviewer_assigned",
+        performed_by_person_id_platform=int(user.person_id_platform) if (user.person_id_platform or "").isdigit() else None,
+        related_entity_type="sprint",
+        related_entity_id=sprint.candidate_sprint_id,
+        meta_json={"reviewer_person_id_platform": reviewer_id},
+    )
+    await session.commit()
+
+    row = (
+        await session.execute(
+            select(RecCandidateSprint, RecSprintTemplate, RecCandidate, RecOpening)
+            .join(RecSprintTemplate, RecSprintTemplate.sprint_template_id == RecCandidateSprint.sprint_template_id)
+            .join(RecCandidate, RecCandidate.candidate_id == RecCandidateSprint.candidate_id)
+            .outerjoin(RecOpening, RecOpening.opening_id == RecCandidate.opening_id)
+            .where(RecCandidateSprint.candidate_sprint_id == candidate_sprint_id)
+        )
+    ).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint not found")
+    sprint, template, candidate, opening = row
+    reviewer_meta = await _fetch_platform_people({_normalize_person_id(sprint.reviewed_by_person_id_platform) or ""})
+    return await _build_candidate_sprint(
+        sprint,
+        template,
+        candidate,
+        opening,
+        reviewer_meta=reviewer_meta.get(_normalize_person_id(sprint.reviewed_by_person_id_platform) or "", {}),
+    )
 
 
 @public_router.get("/{token}", response_model=SprintPublicOut)

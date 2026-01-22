@@ -21,6 +21,10 @@ class SprintUpdateIn(BaseModel):
     decision: Optional[SprintDecision] = None
 
 
+class SprintReviewerAssignIn(BaseModel):
+    reviewer_person_id_platform: Optional[str] = None
+
+
 class CandidateSprintOut(BaseModel):
     candidate_sprint_id: int
     candidate_id: int
@@ -32,6 +36,8 @@ class CandidateSprintOut(BaseModel):
     submission_url: Optional[str] = None
     submitted_at: Optional[datetime] = None
     reviewed_by_person_id_platform: Optional[str] = None
+    reviewed_by_name: Optional[str] = None
+    reviewed_by_email: Optional[str] = None
     reviewed_at: Optional[datetime] = None
     score_overall: Optional[float] = None
     comments_internal: Optional[str] = None
