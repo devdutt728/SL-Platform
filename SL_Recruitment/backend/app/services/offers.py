@@ -57,8 +57,6 @@ def _logo_data_uri() -> str:
 def _public_origin() -> str:
     if settings.public_app_origin:
         return settings.public_app_origin.rstrip("/")
-    if settings.environment != "production":
-        return "http://localhost:3000"
     return ""
 
 def _public_base_path() -> str:

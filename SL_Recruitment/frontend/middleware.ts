@@ -43,12 +43,14 @@ export function middleware(request: NextRequest) {
     normalizedPath === "/login" ||
     normalizedPath.startsWith("/apply") ||
     normalizedPath.startsWith("/caf") ||
+    normalizedPath.startsWith("/assessment") ||
     normalizedPath.startsWith("/offer") ||
     normalizedPath.startsWith("/schedule") ||
     normalizedPath.startsWith("/sprint") ||
     normalizedPath.startsWith("/api/auth") ||
     normalizedPath.startsWith("/api/apply") ||
     normalizedPath.startsWith("/api/caf") ||
+    normalizedPath.startsWith("/api/assessment") ||
     normalizedPath.startsWith("/api/sprint") ||
     normalizedPath.startsWith("/api/offer")
   ) {

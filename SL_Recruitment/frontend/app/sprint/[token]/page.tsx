@@ -147,7 +147,12 @@ export default async function SprintPage({ params }: { params: { token: string }
         ) : null}
       </div>
 
-      <SprintPublicClient token={params.token} defaultSubmissionUrl={sprint.submission_url} initialStatus={sprint.status} />
+      <SprintPublicClient
+        token={params.token}
+        defaultSubmissionUrl={sprint.submission_url}
+        initialStatus={sprint.status}
+        dueAt={sprint.due_at}
+      />
     </main>
   );
 }

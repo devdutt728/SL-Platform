@@ -13,6 +13,8 @@ async function isValidUserToken(token: string) {
 async function isValidCandidateToken(token: string) {
   const sprintRes = await fetch(internalUrl(`/api/sprint/${encodeURIComponent(token)}`), { cache: "no-store" });
   if (sprintRes.ok) return true;
+  const assessmentRes = await fetch(internalUrl(`/api/assessment/${encodeURIComponent(token)}`), { cache: "no-store" });
+  if (assessmentRes.ok) return true;
   const cafRes = await fetch(internalUrl(`/api/caf/${encodeURIComponent(token)}`), { cache: "no-store" });
   if (cafRes.ok) return true;
   const offerRes = await fetch(internalUrl(`/api/offer/${encodeURIComponent(token)}`), { cache: "no-store" });

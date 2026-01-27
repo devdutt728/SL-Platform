@@ -43,6 +43,7 @@ from app.services.drive import (
     upload_sprint_template_attachment,
 )
 from app.services.email import send_email
+from app.services.public_links import build_public_link
 from app.services.events import log_event
 
 router = APIRouter(prefix="/rec", tags=["sprints"])
@@ -102,6 +103,11 @@ def _default_template_code(name: str) -> str:
     base = (initials or "SPR").upper()[:6]
     digest = hashlib.sha1(name.strip().encode("utf-8")).hexdigest()[:4].upper()
     return f"{base}-{digest}"
+
+
+def _assert_public_sprint_active(sprint: RecCandidateSprint) -> None:
+    if sprint.due_at and datetime.utcnow() > sprint.due_at:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Sprint link expired")
 
 
 async def _generate_unique_template_code(session: AsyncSession, name: str) -> str:
@@ -456,7 +462,7 @@ async def assign_sprint(
     candidate_id: int,
     payload: SprintAssignIn,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.SUPERADMIN])),
 ):
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
@@ -465,6 +471,8 @@ async def assign_sprint(
     template = await session.get(RecSprintTemplate, payload.sprint_template_id)
     if not template or not template.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint template not found")
+    if payload.due_at is None and not template.expected_duration_days:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sprint due date is required")
 
     now = datetime.utcnow()
     due_at = _compute_due_at(now, template, payload.due_at)
@@ -494,6 +502,9 @@ async def assign_sprint(
             )
         )
     ).all()
+    attachment_names = [attachment.file_name for _, attachment in template_attachments if attachment.file_name]
+    attachment_list_html = "".join(f"<li>{name}</li>" for name in attachment_names)
+    attachment_summary = attachment_list_html or "<li>No attachments</li>"
     for template_link, attachment in template_attachments:
         copied_drive_id = await anyio.to_thread.run_sync(
             lambda: copy_sprint_attachment_to_candidate(
@@ -548,8 +559,9 @@ async def assign_sprint(
                 "candidate_name": candidate.full_name,
                 "sprint_name": template.name,
                 "due_at": due_at.isoformat() if due_at else "",
-                "sprint_link": f"/sprint/{public_token}",
+                "sprint_link": build_public_link(f"/sprint/{public_token}"),
                 "opening_title": opening.title if opening else "",
+                "attachment_list": attachment_summary,
             },
             email_type="sprint_assigned",
             related_entity_type="sprint",
@@ -814,6 +826,8 @@ async def get_public_sprint(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid sprint token")
     sprint, template, candidate, opening = row
+    _assert_public_sprint_active(sprint)
+    _assert_public_sprint_active(sprint)
     attachments = await _load_public_attachments(session, candidate_sprint_id=sprint.candidate_sprint_id, token=token)
     return SprintPublicOut(
         candidate_id=candidate.candidate_id,
@@ -925,7 +939,8 @@ async def download_public_sprint_attachment(
     ).first()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    attachment, _, _ = row
+    attachment, _, sprint = row
+    _assert_public_sprint_active(sprint)
 
     data, content_type, file_name = await anyio.to_thread.run_sync(lambda: download_drive_file(attachment.drive_file_id))
     headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}

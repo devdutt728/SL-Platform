@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.routes import auth
 from app.api.routes import caf
 from app.api.routes import candidates
+from app.api.routes import candidate_assessment
 from app.api.routes import dashboard
 from app.api.routes import interviews
 from app.api.routes import interview_assessments
@@ -18,6 +19,7 @@ from app.api.routes import sprints
 api_router = APIRouter()
 api_router.include_router(auth.router)
 api_router.include_router(candidates.router)
+api_router.include_router(candidate_assessment.router)
 api_router.include_router(caf.router)
 api_router.include_router(openings.router)
 api_router.include_router(offers.router)

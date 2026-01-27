@@ -6,18 +6,41 @@ type Props = {
   token: string;
   defaultSubmissionUrl?: string | null;
   initialStatus?: string | null;
+  dueAt?: string | null;
 };
 
-export function SprintPublicClient({ token, defaultSubmissionUrl, initialStatus }: Props) {
+async function readError(res: Response) {
+  const raw = await res.text();
+  if (!raw) return `Request failed (${res.status})`;
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown; message?: unknown };
+    if (parsed && typeof parsed === "object") {
+      if (typeof parsed.detail === "string") return parsed.detail;
+      if (typeof parsed.message === "string") return parsed.message;
+    }
+  } catch {
+    // Fall back to raw text.
+  }
+  return raw;
+}
+
+export function SprintPublicClient({ token, defaultSubmissionUrl, initialStatus, dueAt }: Props) {
   const [submissionUrl, setSubmissionUrl] = useState(defaultSubmissionUrl || "");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const dueDate = dueAt ? new Date(dueAt) : null;
+  const dueTimestamp = dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.getTime() : null;
+  const isExpired = dueTimestamp !== null && Date.now() > dueTimestamp;
 
   async function handleSubmit() {
     setError(null);
     setSuccess(false);
+    if (isExpired) {
+      setError("This sprint link has expired. Please contact the hiring team.");
+      return;
+    }
     if (!file && !submissionUrl.trim()) {
       setError("Please add a file or a submission link.");
       return;
@@ -28,7 +51,7 @@ export function SprintPublicClient({ token, defaultSubmissionUrl, initialStatus 
       if (submissionUrl.trim()) form.append("submission_url", submissionUrl.trim());
       if (file) form.append("submission_file", file);
       const res = await fetch(`/api/sprint/${encodeURIComponent(token)}`, { method: "POST", body: form });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await readError(res));
       setSuccess(true);
     } catch (e: any) {
       setError(e?.message || "Submission failed.");
@@ -45,6 +68,7 @@ export function SprintPublicClient({ token, defaultSubmissionUrl, initialStatus 
         {initialStatus === "submitted" ? (
           <p className="mt-2 text-xs font-semibold text-amber-600">Submission received. You can resubmit if needed.</p>
         ) : null}
+        {isExpired ? <p className="mt-2 text-xs font-semibold text-rose-600">This sprint link has expired.</p> : null}
       </div>
 
       {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</div> : null}
@@ -73,7 +97,7 @@ export function SprintPublicClient({ token, defaultSubmissionUrl, initialStatus 
         type="button"
         className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-lg"
         onClick={() => void handleSubmit()}
-        disabled={busy}
+        disabled={busy || isExpired}
       >
         {busy ? "Submitting..." : "Submit sprint"}
       </button>

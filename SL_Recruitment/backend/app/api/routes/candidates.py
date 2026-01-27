@@ -16,6 +16,7 @@ from app.core.auth import require_roles, require_superadmin
 from app.core.config import settings
 from app.core.roles import Role
 from app.models.candidate import RecCandidate
+from app.models.candidate_assessment import RecCandidateAssessment
 from app.models.candidate_offer import RecCandidateOffer
 from app.models.event import RecCandidateEvent
 from app.models.opening import RecOpening
@@ -25,13 +26,15 @@ from app.schemas.candidate import CandidateCreate, CandidateDetailOut, Candidate
 from app.schemas.event import CandidateEventOut
 from app.schemas.offer import OfferCreateIn, OfferOut
 from app.schemas.candidate_full import CandidateFullOut
+from app.schemas.candidate_assessment import CandidateAssessmentOut
 from app.schemas.screening import ScreeningOut, ScreeningUpsertIn
 from app.schemas.stage import CandidateStageOut, StageTransitionRequest
 from app.schemas.user import UserContext
 from app.services.drive import create_candidate_folder, delete_candidate_folder, delete_all_candidate_folders
 from app.services.email import send_email
 from app.services.events import log_event
-from app.services.offers import convert_candidate_to_employee, create_offer
+from app.services.offers import convert_candidate_to_employee, create_offer, offer_pdf_signed_url
+from app.services.public_links import build_public_link, build_public_path
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
 
@@ -60,6 +63,38 @@ def _platform_person_id(user: UserContext) -> int | None:
         return int(raw)
     except Exception:
         return None
+
+
+def _decode_letter_overrides(raw: str | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    cleaned: dict[str, str] = {}
+    for key, value in data.items():
+        if not isinstance(key, str) or value is None:
+            continue
+        cleaned[key] = str(value)
+    return cleaned
+
+
+async def _ensure_offer_token(session: AsyncSession, offer: RecCandidateOffer) -> None:
+    if offer.public_token:
+        return
+    offer.public_token = uuid4().hex
+    offer.updated_at = datetime.utcnow()
+    await session.flush()
+
+
+def _offer_out_payload(offer: RecCandidateOffer) -> dict:
+    payload = OfferOut.model_validate(offer).model_dump()
+    payload["pdf_download_url"] = offer_pdf_signed_url(offer.public_token) if offer.public_token else None
+    payload["letter_overrides"] = _decode_letter_overrides(offer.offer_letter_overrides)
+    return payload
 
 
 async def _delete_candidate_with_dependents(session: AsyncSession, candidate: RecCandidate, *, delete_drive: bool = True):
@@ -206,15 +241,49 @@ async def create_candidate(
         meta_json={"caf_token": candidate.caf_token},
     )
 
+    caf_link = build_public_link(f"/caf/{candidate.caf_token}")
     await send_email(
         session,
         candidate_id=candidate.candidate_id,
         to_emails=[candidate.email],
         subject="Complete your Candidate Application Form",
         template_name="caf_link",
-        context={"candidate_name": candidate.full_name, "caf_link": f"/caf/{candidate.caf_token}"},
+        context={"candidate_name": candidate.full_name, "caf_link": caf_link},
         email_type="caf_link",
         meta_extra={"caf_token": candidate.caf_token},
+    )
+
+    assessment = RecCandidateAssessment(
+        candidate_id=candidate.candidate_id,
+        assessment_token=uuid4().hex,
+        assessment_sent_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(assessment)
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type="assessment_link_generated",
+        performed_by_person_id_platform=_platform_person_id(user),
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={"assessment_token": assessment.assessment_token},
+    )
+
+    assessment_link = build_public_link(f"/assessment/{assessment.assessment_token}")
+    await send_email(
+        session,
+        candidate_id=candidate.candidate_id,
+        to_emails=[candidate.email],
+        subject="Complete your Candidate Assessment Form (CAF)",
+        template_name="assessment_link",
+        context={
+            "candidate_name": candidate.full_name,
+            "assessment_link": assessment_link,
+        },
+        email_type="assessment_link",
+        meta_extra={"assessment_token": assessment.assessment_token},
     )
 
     # Drive folder creation
@@ -451,7 +520,21 @@ async def get_candidate_full(
     except SQLAlchemyError:
         screening = None
 
-    return CandidateFullOut(candidate=candidate, stages=stages, events=events, screening=screening)
+    assessment: CandidateAssessmentOut | None = None
+    try:
+        assessment_row = (
+            await session.execute(
+                select(RecCandidateAssessment).where(RecCandidateAssessment.candidate_id == candidate_id)
+            )
+        ).scalars().first()
+        if assessment_row:
+            assessment = CandidateAssessmentOut.model_validate(assessment_row)
+    except OperationalError:
+        assessment = None
+    except SQLAlchemyError:
+        assessment = None
+
+    return CandidateFullOut(candidate=candidate, stages=stages, events=events, screening=screening, assessment=assessment)
 
 
 @router.get("/{candidate_id}/screening", response_model=ScreeningOut)
@@ -541,7 +624,65 @@ async def get_candidate_caf_link(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     if not candidate.caf_token:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CAF token not generated")
-    return {"caf_token": candidate.caf_token, "caf_url": f"/caf/{candidate.caf_token}"}
+    return {"caf_token": candidate.caf_token, "caf_url": build_public_path(f"/caf/{candidate.caf_token}")}
+
+
+@router.get("/{candidate_id}/assessment-link")
+async def get_candidate_assessment_link(
+    candidate_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+
+    assessment = (
+        await session.execute(
+            select(RecCandidateAssessment).where(RecCandidateAssessment.candidate_id == candidate_id)
+        )
+    ).scalars().first()
+
+    now = datetime.utcnow()
+    generated = False
+    if not assessment:
+        assessment = RecCandidateAssessment(
+            candidate_id=candidate_id,
+            assessment_token=uuid4().hex,
+            assessment_sent_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(assessment)
+        generated = True
+    elif not assessment.assessment_token:
+        assessment.assessment_token = uuid4().hex
+        assessment.assessment_sent_at = now
+        assessment.updated_at = now
+        generated = True
+    elif assessment.assessment_sent_at is None:
+        assessment.assessment_sent_at = now
+        assessment.updated_at = now
+
+    if not assessment.assessment_token:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Assessment token unavailable")
+
+    if generated:
+        await log_event(
+            session,
+            candidate_id=candidate_id,
+            action_type="assessment_link_generated",
+            performed_by_person_id_platform=_platform_person_id(user),
+            related_entity_type="candidate",
+            related_entity_id=candidate_id,
+            meta_json={"assessment_token": assessment.assessment_token},
+        )
+
+    await session.commit()
+    return {
+        "assessment_token": assessment.assessment_token,
+        "assessment_url": build_public_path(f"/assessment/{assessment.assessment_token}"),
+    }
 
 
 @router.patch("/{candidate_id}", response_model=CandidateDetailOut)
@@ -682,7 +823,10 @@ async def list_candidate_offers(
             .order_by(RecCandidateOffer.created_at.desc(), RecCandidateOffer.candidate_offer_id.desc())
         )
     ).scalars().all()
-    return [OfferOut.model_validate(row) for row in rows]
+    for offer in rows:
+        await _ensure_offer_token(session, offer)
+    await session.commit()
+    return [_offer_out_payload(row) for row in rows]
 
 
 @router.post("/{candidate_id}/offers", response_model=OfferOut, status_code=status.HTTP_201_CREATED)
@@ -701,7 +845,7 @@ async def create_candidate_offer(
     offer = await create_offer(session, candidate=candidate, opening=opening, payload=payload.model_dump(exclude_none=True), user=user)
     await session.commit()
     await session.refresh(offer)
-    return OfferOut.model_validate(offer)
+    return _offer_out_payload(offer)
 
 
 @router.get("/{candidate_id}/stages", response_model=list[CandidateStageOut])

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import deps
 from app.models.apply_idempotency import RecApplyIdempotency
 from app.models.candidate import RecCandidate
+from app.models.candidate_assessment import RecCandidateAssessment
 from app.models.opening import RecOpening
 from app.models.stage import RecCandidateStage
 from app.models.screening import RecCandidateScreening
@@ -22,6 +23,7 @@ from app.services.email import send_email
 from app.services.events import log_event
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
+from app.services.public_links import build_public_link, build_public_path
 from app.schemas.screening import ScreeningUpsertIn
 from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, SPRINT_EXTENSIONS, SPRINT_MIME_TYPES, validate_upload
 
@@ -411,7 +413,7 @@ async def apply_for_opening(
             candidate_id=existing_candidate.candidate_id,
             candidate_code=existing_candidate.candidate_code,
             caf_token=caf_token_existing,
-            caf_url=f"/caf/{caf_token_existing}",
+            caf_url=build_public_path(f"/caf/{caf_token_existing}"),
             screening_result=None,
             already_applied=True,
         ).model_dump()
@@ -466,14 +468,14 @@ async def apply_for_opening(
                 existing_candidate.caf_token = caf_token_existing
                 existing_candidate.caf_sent_at = now
                 existing_candidate.updated_at = now
-            response_payload = PublicApplyOut(
-                candidate_id=existing_candidate.candidate_id,
-                candidate_code=existing_candidate.candidate_code,
-                caf_token=caf_token_existing,
-                caf_url=f"/caf/{caf_token_existing}",
-                screening_result=None,
-                already_applied=True,
-            ).model_dump()
+              response_payload = PublicApplyOut(
+                  candidate_id=existing_candidate.candidate_id,
+                  candidate_code=existing_candidate.candidate_code,
+                  caf_token=caf_token_existing,
+                  caf_url=build_public_path(f"/caf/{caf_token_existing}"),
+                  screening_result=None,
+                  already_applied=True,
+              ).model_dump()
             # Best-effort: persist idempotency completion.
             try:
                 session.add(
@@ -543,15 +545,49 @@ async def apply_for_opening(
         meta_json={"caf_token": caf_token},
     )
 
+    caf_link = build_public_link(f"/caf/{caf_token}")
     await send_email(
         session,
         candidate_id=candidate.candidate_id,
         to_emails=[candidate.email],
         subject="Complete your Candidate Application Form",
         template_name="caf_link",
-        context={"candidate_name": candidate.full_name, "caf_link": f"/caf/{caf_token}"},
+        context={"candidate_name": candidate.full_name, "caf_link": caf_link},
         email_type="caf_link",
         meta_extra={"caf_token": caf_token},
+    )
+
+    assessment = RecCandidateAssessment(
+        candidate_id=candidate.candidate_id,
+        assessment_token=uuid4().hex,
+        assessment_sent_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(assessment)
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type="assessment_link_generated",
+        performed_by_person_id_platform=None,
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={"assessment_token": assessment.assessment_token},
+    )
+
+    assessment_link = build_public_link(f"/assessment/{assessment.assessment_token}")
+    await send_email(
+        session,
+        candidate_id=candidate.candidate_id,
+        to_emails=[candidate.email],
+        subject="Complete your Candidate Assessment Form (CAF)",
+        template_name="assessment_link",
+        context={
+            "candidate_name": candidate.full_name,
+            "assessment_link": assessment_link,
+        },
+        email_type="assessment_link",
+        meta_extra={"assessment_token": assessment.assessment_token},
     )
 
     # Drive folder creation (required)
@@ -750,7 +786,7 @@ async def apply_for_opening(
         candidate_id=candidate.candidate_id,
         candidate_code=candidate.candidate_code,
         caf_token=caf_token,
-        caf_url=f"/caf/{caf_token}",
+        caf_url=build_public_path(f"/caf/{caf_token}"),
         screening_result=decision,
         already_applied=False,
     ).model_dump()

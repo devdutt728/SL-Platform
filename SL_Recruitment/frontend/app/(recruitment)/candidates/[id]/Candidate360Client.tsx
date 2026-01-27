@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { CandidateFull, CandidateOffer, CandidateStage, CandidateSprint, Interview, JoiningDoc, PlatformPersonSuggestion, Screening, SprintTemplate } from "@/lib/types";
+import { CandidateAssessment, CandidateFull, CandidateOffer, CandidateStage, CandidateSprint, Interview, JoiningDoc, PlatformPersonSuggestion, Screening, SprintTemplate, SprintTemplateAttachment } from "@/lib/types";
 import { clsx } from "clsx";
 import { CheckCircle2, Copy, ExternalLink, FileText, Layers, Mail, Phone, XCircle } from "lucide-react";
 import { DeleteCandidateButton } from "./DeleteCandidateButton";
@@ -270,6 +270,14 @@ async function fetchSprintTemplates() {
   return (await res.json()) as SprintTemplate[];
 }
 
+async function fetchSprintTemplateAttachments(templateId: string) {
+  const res = await fetch(`/api/rec/sprint-templates/${encodeURIComponent(templateId)}/attachments`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as SprintTemplateAttachment[];
+}
+
 async function fetchCandidateOffers(candidateId: string) {
   const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/offers`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
@@ -363,12 +371,22 @@ async function assignSprint(candidateId: string, payload: Record<string, unknown
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await readError(res));
   return (await res.json()) as CandidateSprint;
 }
 
 async function createInterview(candidateId: string, payload: Record<string, unknown>) {
   const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/interviews`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as Interview;
+}
+
+async function rescheduleInterview(interviewId: number, payload: Record<string, unknown>) {
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/reschedule`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -385,14 +403,15 @@ async function fetchPeople(query: string) {
   return (await res.json()) as PlatformPersonSuggestion[];
 }
 
-async function fetchSlotPreview(interviewerId: string, startDate: string) {
-  const url = new URL(`${basePath}/api/rec/interview-slots/preview`, window.location.origin);
-  url.searchParams.set("interviewer_email", interviewerId);
-  if (startDate) url.searchParams.set("start_date", startDate);
-  const res = await fetch(url.toString(), { cache: "no-store" });
-  if (!res.ok) throw new Error(await res.text());
-  return (await res.json()) as SlotPreview[];
-}
+  async function fetchSlotPreview(interviewer: PlatformPersonSuggestion, startDate: string) {
+    const url = new URL(`${basePath}/api/rec/interview-slots/preview`, window.location.origin);
+    if (interviewer.email) url.searchParams.set("interviewer_email", interviewer.email);
+    if (interviewer.person_id) url.searchParams.set("interviewer_person_id_platform", interviewer.person_id);
+    if (startDate) url.searchParams.set("start_date", startDate);
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) throw new Error(await res.text());
+    return (await res.json()) as SlotPreview[];
+  }
 
 async function transition(candidateId: string, payload: { to_stage: string; decision?: string; note?: string }) {
   const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/transition`, {
@@ -416,14 +435,38 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function formatMoney(raw?: number | null) {
-  if (raw === null || raw === undefined) return "?";
-  try {
-    return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(raw);
-  } catch {
-    return String(raw);
+  function formatMoney(raw?: number | null) {
+    if (raw === null || raw === undefined) return "?";
+    try {
+      return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(raw);
+    } catch {
+      return String(raw);
+    }
   }
-}
+
+  function formatBytes(raw?: number | null) {
+    if (raw === null || raw === undefined) return "-";
+    if (raw < 1024) return `${raw} B`;
+    const units = ["KB", "MB", "GB"];
+    let size = raw / 1024;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size.toFixed(1)} ${units[unitIndex]}`;
+  }
+
+  function valueOrDash(value?: string | number | null) {
+    if (value === null || value === undefined) return "-";
+    const text = String(value).trim();
+    return text ? text : "-";
+  }
+
+  function yesNo(value?: boolean | null) {
+    if (value == null) return "-";
+    return value ? "Yes" : "No";
+  }
 
 const offerTemplateOptions = [
   { code: "STD_OFFER", label: "Standard offer" },
@@ -490,6 +533,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [candidateSprints, setCandidateSprints] = useState<CandidateSprint[] | null>(null);
   const [sprintsBusy, setSprintsBusy] = useState(false);
   const [sprintsError, setSprintsError] = useState<string | null>(null);
+  const [templatePreview, setTemplatePreview] = useState<SprintTemplate | null>(null);
+  const [templateAttachments, setTemplateAttachments] = useState<SprintTemplateAttachment[]>([]);
+  const [templatePreviewBusy, setTemplatePreviewBusy] = useState(false);
+  const [templatePreviewError, setTemplatePreviewError] = useState<string | null>(null);
   const [candidateOffers, setCandidateOffers] = useState<CandidateOffer[] | null>(null);
   const [offersBusy, setOffersBusy] = useState(false);
   const [offersError, setOffersError] = useState<string | null>(null);
@@ -837,6 +884,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     setSprintsError(null);
     setSelectedTemplateId("");
     setDueAt("");
+    setTemplatePreview(null);
+    setTemplateAttachments([]);
+    setTemplatePreviewError(null);
+    setTemplatePreviewBusy(false);
     if (sprintTemplates.length === 0) {
       try {
         const templates = await fetchSprintTemplates();
@@ -847,19 +898,42 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
-  function handleTemplateSelect(value: string) {
+  async function handleTemplateSelect(value: string) {
     setSelectedTemplateId(value);
-    const chosen = sprintTemplates.find((t) => String(t.sprint_template_id) === value);
+    setTemplatePreviewError(null);
+    setTemplatePreview(null);
+    setTemplateAttachments([]);
+    if (!value) {
+      setDueAt("");
+      return;
+    }
+    const chosen = sprintTemplates.find((t) => String(t.sprint_template_id) === value) || null;
+    setTemplatePreview(chosen);
     if (chosen?.expected_duration_days) {
       const target = new Date(Date.now() + chosen.expected_duration_days * 24 * 60 * 60 * 1000);
       const iso = new Date(target.getTime() - target.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
       setDueAt(iso);
+    } else {
+      setDueAt("");
+    }
+    setTemplatePreviewBusy(true);
+    try {
+      const attachments = await fetchSprintTemplateAttachments(value);
+      setTemplateAttachments(attachments);
+    } catch (e: any) {
+      setTemplatePreviewError(e?.message || "Could not load template attachments.");
+    } finally {
+      setTemplatePreviewBusy(false);
     }
   }
 
   async function handleAssignSprint() {
     if (!selectedTemplateId) {
       setSprintsError("Select a sprint template.");
+      return;
+    }
+    if (!dueAt) {
+      setSprintsError("Select a sprint due date.");
       return;
     }
     setSprintsBusy(true);
@@ -1036,7 +1110,8 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }
 
   function openSchedule(roundType: string, rescheduleId: number | null = null) {
-    setScheduleRound(roundType);
+    const existing = rescheduleId ? interviews?.find((item) => item.candidate_interview_id === rescheduleId) : null;
+    setScheduleRound(existing?.round_type || roundType);
     setScheduleStartAt("");
     setScheduleEndAt("");
     setScheduleLocation("");
@@ -1054,6 +1129,19 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     setScheduleOpen(true);
     setInterviewsError(null);
     setInterviewsNotice(null);
+
+    if (existing) {
+      const suggestion = {
+        person_id: existing.interviewer_person_id_platform || "",
+        person_code: "",
+        full_name: existing.interviewer_name || existing.interviewer_person_id_platform || "Interviewer",
+        email: existing.interviewer_email || "",
+      };
+      setScheduleInterviewer(suggestion);
+      setPersonQuery(suggestion.full_name);
+      const today = new Date().toISOString().slice(0, 10);
+      setSlotPreviewDate(today);
+    }
   }
 
   async function handleScheduleSubmit() {
@@ -1081,27 +1169,36 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       setInterviewsError("End time must be after start time.");
       return;
     }
-    setInterviewsBusy(true);
-    try {
-      if (rescheduleInterviewId) {
-        await cancelInterview(rescheduleInterviewId, scheduleReason);
-      }
-      await createInterview(candidateId, {
-        round_type: scheduleRound,
-        interviewer_person_id_platform: scheduleInterviewer.person_id,
-        scheduled_start_at: startIso,
-        scheduled_end_at: endIso,
-        location: scheduleLocation || undefined,
-        meeting_link: scheduleMeetLink || undefined,
-      });
-      setScheduleOpen(false);
-      setSelectedSlot(null);
-      setRescheduleInterviewId(null);
-      await refreshInterviews();
-    } catch (e: any) {
-      setInterviewsError(e?.message || "Could not schedule interview.");
-    } finally {
-      setInterviewsBusy(false);
+      setInterviewsBusy(true);
+      try {
+        if (rescheduleInterviewId) {
+          await rescheduleInterview(rescheduleInterviewId, {
+            scheduled_start_at: startIso,
+            scheduled_end_at: endIso,
+            reason: scheduleReason || undefined,
+          });
+          setScheduleOpen(false);
+          setSelectedSlot(null);
+          setRescheduleInterviewId(null);
+          await refreshInterviews();
+          return;
+        }
+        await createInterview(candidateId, {
+          round_type: scheduleRound,
+          interviewer_person_id_platform: scheduleInterviewer.person_id,
+          scheduled_start_at: startIso,
+          scheduled_end_at: endIso,
+          location: scheduleLocation || undefined,
+          meeting_link: scheduleMeetLink || undefined,
+        });
+        setScheduleOpen(false);
+        setSelectedSlot(null);
+        setRescheduleInterviewId(null);
+        await refreshInterviews();
+      } catch (e: any) {
+        setInterviewsError(e?.message || "Could not schedule interview.");
+      } finally {
+        setInterviewsBusy(false);
     }
   }
 
@@ -1256,7 +1353,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         setSlotPreviewBusy(false);
         return;
       }
-      fetchSlotPreview(scheduleInterviewer.email, slotPreviewDate)
+      fetchSlotPreview(scheduleInterviewer, slotPreviewDate)
         .then((slots) => {
           if (!ignore) {
             setSlotPreviewSlots(slots);
@@ -1518,6 +1615,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef]);
 
   const screening = data.screening as Screening | null | undefined;
+  const assessment = data.assessment as CandidateAssessment | null | undefined;
   const interviewUpcoming = useMemo(() => {
     if (!interviews) return [] as Interview[];
     const now = new Date();
@@ -1911,11 +2009,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     <p className="text-sm font-semibold">No screening yet</p>
                     <p className="mt-1 text-sm text-slate-600">This candidate has not submitted CAF/screening data.</p>
                   </div>
-                ) : (
-                  <div className="mt-3 rounded-2xl border border-white/60 bg-white/30 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold">CAF screening</p>
-                      <Chip className={screeningTone(screening.screening_result)}>
+                  ) : (
+                    <div className="mt-3 rounded-2xl border border-white/60 bg-white/30 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold">CAF screening</p>
+                        <Chip className={screeningTone(screening.screening_result)}>
                         {screeningLabel(screening.screening_result) || screening.screening_result || "?"}
                       </Chip>
                     </div>
@@ -1949,12 +2047,206 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                         <p className="mt-1 text-sm text-slate-700">{screening.questions_from_candidate || "-"}</p>
                         <p className="mt-2 text-xs text-slate-600">{screening.screening_notes || ""}</p>
                       </div>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+                  )}
+
+                  {!assessment ? (
+                    <div className="mt-4 rounded-2xl border border-white/60 bg-white/30 p-6">
+                      <p className="text-sm font-semibold">CAF assessment form</p>
+                      <p className="mt-1 text-sm text-slate-600">No CAF assessment data submitted yet.</p>
+                    </div>
+                  ) : (
+                    <div className="mt-4 rounded-2xl border border-white/60 bg-white/30 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold">CAF assessment form</p>
+                        <Chip className={assessment.assessment_submitted_at ? chipTone("green") : chipTone("amber")}>
+                          {assessment.assessment_submitted_at ? "Submitted" : "Pending"}
+                        </Chip>
+                      </div>
+
+                      <div className="mt-3 grid gap-2 md:grid-cols-3">
+                        <Metric label="Position" value={valueOrDash(assessment.position_applied_for)} />
+                        <Metric label="Total exp" value={valueOrDash(assessment.total_experience_years)} />
+                        <Metric label="Architecture exp" value={valueOrDash(assessment.architecture_interior_experience_years)} />
+                        <Metric label="Personal email" value={valueOrDash(assessment.personal_email)} />
+                        <Metric label="Contact" value={valueOrDash(assessment.contact_number)} />
+                        <Metric label="Employment status" value={valueOrDash(assessment.current_employment_status)} />
+                        <Metric label="Notice / joining" value={valueOrDash(assessment.notice_period_or_joining_time)} />
+                        <Metric label="Current location" value={valueOrDash(assessment.current_location)} />
+                        <Metric label="Interviewer" value={valueOrDash(assessment.interviewer_name)} />
+                        <Metric label="Submitted" value={assessment.assessment_submitted_at ? formatDateTime(assessment.assessment_submitted_at) : "-"} />
+                      </div>
+
+                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
+                          <p className="text-xs uppercase tracking-tight text-slate-500">Current job</p>
+                          <div className="mt-2 grid gap-2 md:grid-cols-2">
+                            <Metric label="Duration (months)" value={valueOrDash(assessment.current_job_duration_months)} />
+                            <Metric label="Organization" value={valueOrDash(assessment.current_job_org_name)} />
+                          </div>
+                          <p className="mt-2 text-xs text-slate-500">Role and responsibilities</p>
+                          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.current_job_role_responsibilities)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
+                          <p className="text-xs uppercase tracking-tight text-slate-500">Previous job</p>
+                          <div className="mt-2 grid gap-2 md:grid-cols-2">
+                            <Metric label="Duration (months)" value={valueOrDash(assessment.previous_job_duration_months)} />
+                            <Metric label="Organization" value={valueOrDash(assessment.previous_job_org_name)} />
+                          </div>
+                          <p className="mt-2 text-xs text-slate-500">Role and responsibilities</p>
+                          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.previous_job_role_responsibilities)}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
+                          <p className="text-xs uppercase tracking-tight text-slate-500">Education</p>
+                          <div className="mt-2 grid gap-2 md:grid-cols-2">
+                            <Metric label="10th specialization" value={valueOrDash(assessment.education_10th_specialization)} />
+                            <Metric label="10th year" value={valueOrDash(assessment.education_10th_year)} />
+                            <Metric label="10th institution" value={valueOrDash(assessment.education_10th_institution)} />
+                            <Metric label="10th marks" value={valueOrDash(assessment.education_10th_marks)} />
+                            <Metric label="12th specialization" value={valueOrDash(assessment.education_12th_specialization)} />
+                            <Metric label="12th year" value={valueOrDash(assessment.education_12th_year)} />
+                            <Metric label="12th institution" value={valueOrDash(assessment.education_12th_institution)} />
+                            <Metric label="12th marks" value={valueOrDash(assessment.education_12th_marks)} />
+                            <Metric label="Graduation specialization" value={valueOrDash(assessment.education_graduation_specialization)} />
+                            <Metric label="Graduation year" value={valueOrDash(assessment.education_graduation_year)} />
+                            <Metric label="Graduation institution" value={valueOrDash(assessment.education_graduation_institution)} />
+                            <Metric label="Graduation marks" value={valueOrDash(assessment.education_graduation_marks)} />
+                            <Metric label="Post-grad specialization" value={valueOrDash(assessment.education_post_graduation_specialization)} />
+                            <Metric label="Post-grad year" value={valueOrDash(assessment.education_post_graduation_year)} />
+                            <Metric label="Post-grad institution" value={valueOrDash(assessment.education_post_graduation_institution)} />
+                            <Metric label="Post-grad marks" value={valueOrDash(assessment.education_post_graduation_marks)} />
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
+                          <p className="text-xs uppercase tracking-tight text-slate-500">Training / certification</p>
+                          <div className="mt-2 grid gap-2 md:grid-cols-2">
+                            <Metric label="Training 1" value={valueOrDash(assessment.training1_name)} />
+                            <Metric label="Year" value={valueOrDash(assessment.training1_year)} />
+                            <Metric label="Institute" value={valueOrDash(assessment.training1_institute)} />
+                            <Metric label="Training 2" value={valueOrDash(assessment.training2_name)} />
+                            <Metric label="Year" value={valueOrDash(assessment.training2_year)} />
+                            <Metric label="Institute" value={valueOrDash(assessment.training2_institute)} />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-2xl border border-white/60 bg-white/35 p-3">
+                        <p className="text-xs uppercase tracking-tight text-slate-500">Technical proficiency (1 to 10)</p>
+                        <div className="mt-2 grid gap-2 md:grid-cols-3">
+                          <Metric label="AutoCAD" value={valueOrDash(assessment.skill_auto_cad)} />
+                          <Metric label="SketchUp" value={valueOrDash(assessment.skill_sketch_up)} />
+                          <Metric label="Revit" value={valueOrDash(assessment.skill_revit)} />
+                          <Metric label="Photoshop" value={valueOrDash(assessment.skill_photoshop)} />
+                          <Metric label="Illustrator" value={valueOrDash(assessment.skill_illustrator)} />
+                          <Metric label="MS Office" value={valueOrDash(assessment.skill_ms_office)} />
+                          <Metric label="3D Max" value={valueOrDash(assessment.skill_3d_max)} />
+                          <Metric label="InDesign" value={valueOrDash(assessment.skill_indesign)} />
+                          <Metric label="Presentation" value={valueOrDash(assessment.skill_presentation)} />
+                          <Metric label="Rhino" value={valueOrDash(assessment.skill_rhino)} />
+                          <Metric label="BOQs" value={valueOrDash(assessment.skill_boqs)} />
+                          <Metric label="Analytical writing" value={valueOrDash(assessment.skill_analytical_writing)} />
+                          <Metric label="Graphics" value={valueOrDash(assessment.skill_graphics)} />
+                          <Metric label="Drafting" value={valueOrDash(assessment.skill_drafting)} />
+                          <Metric label="Hand sketching" value={valueOrDash(assessment.skill_hand_sketching)} />
+                          <Metric label="Estimation" value={valueOrDash(assessment.skill_estimation)} />
+                          <Metric label="Specifications" value={valueOrDash(assessment.skill_specifications)} />
+                          <Metric label="Enscape" value={valueOrDash(assessment.skill_enscape)} />
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-2xl border border-white/60 bg-white/35 p-3">
+                        <p className="text-xs uppercase tracking-tight text-slate-500">Generic work proficiency (1 to 10)</p>
+                        <div className="mt-2 grid gap-2 md:grid-cols-3">
+                          <Metric label="Execution: action orientation" value={valueOrDash(assessment.proficiency_execution_action_orientation)} />
+                          <Metric label="Execution: self discipline" value={valueOrDash(assessment.proficiency_execution_self_discipline)} />
+                          <Metric label="Execution: independent decision" value={valueOrDash(assessment.proficiency_execution_independent_decision)} />
+                          <Metric label="Process: time management" value={valueOrDash(assessment.proficiency_process_time_management)} />
+                          <Metric label="Process: following processes" value={valueOrDash(assessment.proficiency_process_following_processes)} />
+                          <Metric label="Process: new processes" value={valueOrDash(assessment.proficiency_process_new_processes)} />
+                          <Metric label="Strategic: long term thinking" value={valueOrDash(assessment.proficiency_strategic_long_term_thinking)} />
+                          <Metric label="Strategic: creativity" value={valueOrDash(assessment.proficiency_strategic_ideation_creativity)} />
+                          <Metric label="Strategic: risk taking" value={valueOrDash(assessment.proficiency_strategic_risk_taking)} />
+                          <Metric label="People: collaboration" value={valueOrDash(assessment.proficiency_people_collaboration)} />
+                          <Metric label="People: coaching" value={valueOrDash(assessment.proficiency_people_coaching)} />
+                          <Metric label="People: feedback" value={valueOrDash(assessment.proficiency_people_feedback)} />
+                          <Metric label="People: conflict" value={valueOrDash(assessment.proficiency_people_conflict_resolution)} />
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
+                          <p className="text-xs uppercase tracking-tight text-slate-500">Reasons for ratings</p>
+                          <p className="mt-2 text-xs font-semibold text-slate-600">Execution orientation</p>
+                          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.proficiency_reason_execution)}</p>
+                          <p className="mt-2 text-xs font-semibold text-slate-600">Process orientation</p>
+                          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.proficiency_reason_process)}</p>
+                          <p className="mt-2 text-xs font-semibold text-slate-600">Strategic orientation</p>
+                          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.proficiency_reason_strategic)}</p>
+                          <p className="mt-2 text-xs font-semibold text-slate-600">People orientation</p>
+                          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.proficiency_reason_people)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
+                          <p className="text-xs uppercase tracking-tight text-slate-500">Self awareness</p>
+                          <p className="mt-2 text-xs font-semibold text-slate-600">Strengths</p>
+                          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.self_strengths)}</p>
+                          <p className="mt-2 text-xs font-semibold text-slate-600">Improvement areas</p>
+                          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.self_improvement_areas)}</p>
+                          <p className="mt-2 text-xs font-semibold text-slate-600">Learning needs</p>
+                          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.self_learning_needs)}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-2xl border border-white/60 bg-white/35 p-3">
+                        <p className="text-xs uppercase tracking-tight text-slate-500">Questions</p>
+                        <p className="mt-2 text-xs font-semibold text-slate-600">Why Studio Lotus?</p>
+                        <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.q1_why_studio_lotus)}</p>
+                        <p className="mt-2 text-xs font-semibold text-slate-600">Project scale</p>
+                        <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.q2_project_scale)}</p>
+                        <p className="mt-2 text-xs font-semibold text-slate-600">Role and site experience</p>
+                        <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.q3_role_site_experience)}</p>
+                        <p className="mt-2 text-xs font-semibold text-slate-600">Inspired project</p>
+                        <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.q4_inspired_project)}</p>
+                        <p className="mt-2 text-xs font-semibold text-slate-600">Two year plan</p>
+                        <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{valueOrDash(assessment.q5_two_year_plan)}</p>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
+                          <p className="text-xs uppercase tracking-tight text-slate-500">Reference 1</p>
+                          <div className="mt-2 grid gap-2 md:grid-cols-2">
+                            <Metric label="Name" value={valueOrDash(assessment.reference1_name)} />
+                            <Metric label="Contact" value={valueOrDash(assessment.reference1_contact)} />
+                            <Metric label="Relationship" value={valueOrDash(assessment.reference1_relationship)} />
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
+                          <p className="text-xs uppercase tracking-tight text-slate-500">Reference 2</p>
+                          <div className="mt-2 grid gap-2 md:grid-cols-2">
+                            <Metric label="Name" value={valueOrDash(assessment.reference2_name)} />
+                            <Metric label="Contact" value={valueOrDash(assessment.reference2_contact)} />
+                            <Metric label="Relationship" value={valueOrDash(assessment.reference2_relationship)} />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-2xl border border-white/60 bg-white/35 p-3">
+                        <p className="text-xs uppercase tracking-tight text-slate-500">Declaration</p>
+                        <div className="mt-2 grid gap-2 md:grid-cols-3">
+                          <Metric label="Name" value={valueOrDash(assessment.declaration_name)} />
+                          <Metric label="Signature" value={valueOrDash(assessment.declaration_signature)} />
+                          <Metric label="Date" value={assessment.declaration_date ? formatDate(assessment.declaration_date) : "-"} />
+                          <Metric label="Accepted" value={yesNo(assessment.declaration_accepted)} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
 
           <div ref={interviewsRef} className="section-card">
             <div className="flex items-center justify-between">
@@ -2439,11 +2731,12 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
               <div className="mt-4 grid gap-3">
                 <label className="space-y-1 text-xs text-slate-600">
                   Round type
-                  <select
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                    value={scheduleRound}
-                    onChange={(e) => setScheduleRound(e.target.value)}
-                  >
+                    <select
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={scheduleRound}
+                      disabled={!!rescheduleInterviewId}
+                      onChange={(e) => setScheduleRound(e.target.value)}
+                    >
                     <option value="L2">L2</option>
                     <option value="L1">L1</option>
                     <option value="HR">HR</option>
@@ -2453,15 +2746,16 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                   <label className="space-y-1 text-xs text-slate-600">
                     Interviewer
                     <div className="relative">
-                      <input
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                        value={personQuery}
-                        placeholder={scheduleInterviewer ? scheduleInterviewer.full_name : "Search by name or email"}
-                        onChange={(e) => {
-                          setPersonQuery(e.target.value);
-                          setPersonOpen(true);
-                        }}
-                        onFocus={() => setPersonOpen(true)}
+                        <input
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                          value={personQuery}
+                          placeholder={scheduleInterviewer ? scheduleInterviewer.full_name : "Search by name or email"}
+                          disabled={!!rescheduleInterviewId}
+                          onChange={(e) => {
+                            setPersonQuery(e.target.value);
+                            setPersonOpen(true);
+                          }}
+                          onFocus={() => setPersonOpen(true)}
                         onBlur={() => {
                           window.setTimeout(() => setPersonOpen(false), 120);
                         }}
@@ -2691,7 +2985,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     <select
                       className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
                       value={selectedTemplateId}
-                      onChange={(e) => handleTemplateSelect(e.target.value)}
+                      onChange={(e) => void handleTemplateSelect(e.target.value)}
                     >
                       <option value="">Select template</option>
                       {sprintTemplates.map((template) => (
@@ -2711,7 +3005,67 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                       onChange={(e) => setDueAt(e.target.value)}
                     />
                   </label>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-700">
+                    <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Template preview</p>
+                    {templatePreviewBusy ? (
+                      <p className="mt-2 text-sm text-slate-600">Loading preview...</p>
+                    ) : templatePreview ? (
+                      <div className="mt-2 space-y-2">
+                        <div>
+                          <p className="text-sm font-semibold">{templatePreview.name}</p>
+                          <p className="text-xs text-slate-600">{templatePreview.description || "No description provided."}</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                          {templatePreview.expected_duration_days ? (
+                            <Chip className={chipTone("neutral")}>{templatePreview.expected_duration_days} days expected</Chip>
+                          ) : null}
+                          {templatePreview.instructions_url ? (
+                            <a
+                              className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
+                              href={templatePreview.instructions_url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" /> Open brief
+                            </a>
+                          ) : null}
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Attachments</p>
+                          {templateAttachments.length > 0 ? (
+                            <div className="space-y-1">
+                              {templateAttachments.map((attachment) => (
+                                <div
+                                  key={attachment.sprint_template_attachment_id}
+                                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs"
+                                >
+                                  <span className="truncate">{attachment.file_name}</span>
+                                  <span className="text-slate-500">{formatBytes(attachment.file_size)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-slate-500">No attachments for this template.</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-slate-600">Select a template to preview the brief and attachments.</p>
+                    )}
+                    {templatePreviewError ? (
+                      <div className="mt-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-700">
+                        {templatePreviewError}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
+
+                {sprintsError ? (
+                  <div className="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-700">
+                    {sprintsError}
+                  </div>
+                ) : null}
 
                 <div className="mt-4 flex justify-end gap-2">
                   <button
@@ -2773,6 +3127,16 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                           <Metric label="Status" value={formatRelativeDue(sprint.due_at)} />
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                          {sprint.public_token ? (
+                            <a
+                              className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
+                              href={`${basePath}/sprint/${encodeURIComponent(sprint.public_token)}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" /> Open sprint page
+                            </a>
+                          ) : null}
                           {sprint.instructions_url ? (
                             <a
                               className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"

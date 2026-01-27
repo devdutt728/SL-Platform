@@ -18,16 +18,17 @@ from app.models.platform_person import DimPerson
 from app.models.sprint_template import RecSprintTemplate
 from app.models.stage import RecCandidateStage
 from app.services.email import send_email
+from app.services.public_links import build_public_link
 from app.services.events import log_event
 from app.services.platform_identity import active_status_filter
 
 
 def _caf_link(token: str) -> str:
-    return f"/caf/{token}"
+    return build_public_link(f"/caf/{token}")
 
 
 def _sprint_link(token: str) -> str:
-    return f"/sprint/{token}"
+    return build_public_link(f"/sprint/{token}")
 
 
 def _offer_link(token: str) -> str:
