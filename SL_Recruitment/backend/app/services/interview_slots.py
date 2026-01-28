@@ -13,7 +13,7 @@ from app.services.calendar import list_calendar_events, list_visible_calendar_id
 
 BUSINESS_START = time(10, 0)
 BUSINESS_END = time(18, 30)
-SLOT_MINUTES = 30
+SLOT_MINUTES = 60
 SLOTS_PER_DAY = 2
 DAYS_REQUIRED = 3
 MAX_BUSINESS_DAYS_SCAN = 12

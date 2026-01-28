@@ -468,14 +468,14 @@ async def apply_for_opening(
                 existing_candidate.caf_token = caf_token_existing
                 existing_candidate.caf_sent_at = now
                 existing_candidate.updated_at = now
-              response_payload = PublicApplyOut(
-                  candidate_id=existing_candidate.candidate_id,
-                  candidate_code=existing_candidate.candidate_code,
-                  caf_token=caf_token_existing,
-                  caf_url=build_public_path(f"/caf/{caf_token_existing}"),
-                  screening_result=None,
-                  already_applied=True,
-              ).model_dump()
+                response_payload = PublicApplyOut(
+                    candidate_id=existing_candidate.candidate_id,
+                    candidate_code=existing_candidate.candidate_code,
+                    caf_token=caf_token_existing,
+                    caf_url=build_public_path(f"/caf/{caf_token_existing}"),
+                    screening_result=None,
+                    already_applied=True,
+                ).model_dump()
             # Best-effort: persist idempotency completion.
             try:
                 session.add(

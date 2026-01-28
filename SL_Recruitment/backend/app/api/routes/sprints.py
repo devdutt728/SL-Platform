@@ -462,7 +462,7 @@ async def assign_sprint(
     candidate_id: int,
     payload: SprintAssignIn,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.SUPERADMIN])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:

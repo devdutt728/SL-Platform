@@ -3,6 +3,7 @@ from datetime import datetime
 import anyio
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
@@ -155,13 +156,18 @@ async def list_joining_docs(
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
 
-    docs = (
-        await session.execute(
-            select(RecCandidateJoiningDoc)
-            .where(RecCandidateJoiningDoc.candidate_id == candidate_id)
-            .order_by(RecCandidateJoiningDoc.created_at.desc(), RecCandidateJoiningDoc.joining_doc_id.desc())
-        )
-    ).scalars().all()
+    try:
+        docs = (
+            await session.execute(
+                select(RecCandidateJoiningDoc)
+                .where(RecCandidateJoiningDoc.candidate_id == candidate_id)
+                .order_by(RecCandidateJoiningDoc.created_at.desc(), RecCandidateJoiningDoc.joining_doc_id.desc())
+            )
+        ).scalars().all()
+    except SQLAlchemyError as exc:
+        if "doesn't exist" in str(exc).lower():
+            return []
+        raise
     return [JoiningDocOut.model_validate(doc) for doc in docs]
 
 
@@ -214,13 +220,19 @@ async def get_public_joining_docs(
             await session.execute(select(RecOpening.title).where(RecOpening.opening_id == offer.opening_id))
         ).scalar_one_or_none()
 
-    docs = (
-        await session.execute(
-            select(RecCandidateJoiningDoc)
-            .where(RecCandidateJoiningDoc.candidate_id == candidate.candidate_id)
-            .order_by(RecCandidateJoiningDoc.created_at.desc(), RecCandidateJoiningDoc.joining_doc_id.desc())
-        )
-    ).scalars().all()
+    try:
+        docs = (
+            await session.execute(
+                select(RecCandidateJoiningDoc)
+                .where(RecCandidateJoiningDoc.candidate_id == candidate.candidate_id)
+                .order_by(RecCandidateJoiningDoc.created_at.desc(), RecCandidateJoiningDoc.joining_doc_id.desc())
+            )
+        ).scalars().all()
+    except SQLAlchemyError as exc:
+        if "doesn't exist" in str(exc).lower():
+            docs = []
+        else:
+            raise
 
     return JoiningDocsPublicContext(
         candidate_id=candidate.candidate_id,

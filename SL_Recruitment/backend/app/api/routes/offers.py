@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import uuid4
 import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from urllib.parse import urlparse, parse_qs
@@ -37,7 +38,7 @@ from app.services.offers import (
     update_offer_details,
 )
 from app.services.events import log_event
-from app.services.drive import delete_drive_item, move_candidate_folder, upload_offer_doc
+from app.services.drive import delete_drive_item, download_drive_file, move_candidate_folder, upload_offer_doc
 from app.services.email import render_template, send_email
 
 router = APIRouter(prefix="/rec/offers", tags=["offers"])
@@ -519,22 +520,37 @@ async def get_public_offer_pdf(
     ).scalars().first()
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    if offer.offer_status not in {"approved", "sent", "viewed", "accepted"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Offer PDF is available after approval.")
+    file_id = _extract_drive_file_id(offer.pdf_url)
     candidate = await session.get(RecCandidate, offer.candidate_id)
     opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
     sender_name = "Studio Lotus Team"
     reporting_to = await _resolve_reporting_to(opening)
     candidate_address = await _resolve_candidate_address(session, candidate, opening)
     unit_name = opening.title if opening and opening.title else "Studio Lotus"
-    html = render_offer_letter(
-        offer=offer,
-        candidate=candidate,
-        opening=opening,
-        sender_name=sender_name,
-        candidate_address=candidate_address,
-        reporting_to=reporting_to,
-        unit_name=unit_name,
-    )
-    pdf_bytes = _render_offer_pdf_bytes(html)
+    if file_id:
+        try:
+            data, content_type, file_name = download_drive_file(file_id)
+            filename = file_name or f"{candidate.candidate_code if candidate else token}-offer-letter.pdf"
+            disposition = "attachment" if download_flag == "1" else "inline"
+            headers = {"Content-Disposition": f'{disposition}; filename="{filename}"'}
+            return Response(content=data, media_type=content_type or "application/pdf", headers=headers)
+        except Exception:
+            file_id = None
+    try:
+        html = render_offer_letter(
+            offer=offer,
+            candidate=candidate,
+            opening=opening,
+            sender_name=sender_name,
+            candidate_address=candidate_address,
+            reporting_to=reporting_to,
+            unit_name=unit_name,
+        )
+        pdf_bytes = _render_offer_pdf_bytes(html)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Offer PDF generator unavailable")
     filename = f"{candidate.candidate_code if candidate else token}-offer-letter.pdf"
     if candidate and candidate.drive_folder_id:
         _, file_url = upload_offer_doc(
