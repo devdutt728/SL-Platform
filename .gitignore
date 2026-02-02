@@ -1,2 +1,5 @@
 logs/
 %RUN_LOGDIR%/
+SL_Workbook/secrets/Oauth SL_Platform.json
+SL_Workbook/secrets/google-service-account.json
+SL_Workbook/secrets/

@@ -137,7 +137,7 @@ export async function GET(request: Request) {
     if (originsMatch(returnToOrigin, origin)) {
       const targetOrigin = returnToOrigin || origin;
       const response = NextResponse.redirect(new URL(nextPath, targetOrigin));
-      response.cookies.set("slw_token", idToken, {
+      response.cookies.set("slp_token", idToken, {
         httpOnly: true,
         sameSite: "lax",
         secure: targetOrigin.startsWith("https://"),

@@ -21,7 +21,7 @@ export function proxy(request: NextRequest) {
   const authMode = process.env.NEXT_PUBLIC_AUTH_MODE || "dev";
   if (authMode !== "google") return NextResponse.next();
 
-  const token = request.cookies.get("slr_token")?.value;
+  const token = request.cookies.get("slp_token")?.value;
   const { pathname } = request.nextUrl;
   const publicOrigin = normalizeOrigin(process.env.PUBLIC_APP_ORIGIN || "");
   const basePath = request.nextUrl.basePath || process.env.NEXT_PUBLIC_BASE_PATH || "";

@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookieHeader } from "@/lib/cookie-header";
 import { notFound } from "next/navigation";
 import { CandidateFull } from "@/lib/types";
 import { internalUrl } from "@/lib/internal";
@@ -12,16 +12,16 @@ type Me = {
 
 async function fetchCandidateFull(id: string): Promise<CandidateFull | null> {
   const url = await internalUrl(`/api/rec/candidates/${encodeURIComponent(id)}/full`);
-  const cookieHeader = cookies().toString();
-  const res = await fetch(url, { cache: "no-store", headers: cookieHeader ? { cookie: cookieHeader } : undefined });
+  const cookieValue = await cookieHeader();
+  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
   if (!res.ok) return null;
   return (await res.json()) as CandidateFull;
 }
 
 async function fetchMe(): Promise<Me | null> {
   const url = await internalUrl("/api/auth/me");
-  const cookieHeader = cookies().toString();
-  const res = await fetch(url, { cache: "no-store", headers: cookieHeader ? { cookie: cookieHeader } : undefined });
+  const cookieValue = await cookieHeader();
+  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
   if (!res.ok) return null;
   try {
     return (await res.json()) as Me;
@@ -66,3 +66,4 @@ export default async function CandidateDetailPage({ params }: { params: { id: st
     />
   );
 }
+

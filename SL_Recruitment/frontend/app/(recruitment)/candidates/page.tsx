@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookieHeader } from "@/lib/cookie-header";
 import { CandidateListItem } from "@/lib/types";
 import { internalUrl } from "@/lib/internal";
 import { OpeningListItem } from "@/lib/types";
@@ -6,10 +6,10 @@ import { CandidatesClient } from "./CandidatesClient";
 
 async function fetchCandidates() {
   const url = new URL(await internalUrl("/api/rec/candidates"));
-  const cookieHeader = cookies().toString();
+  const cookieValue = await cookieHeader();
   const res = await fetch(url.toString(), {
     cache: "no-store",
-    headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+    headers: cookieValue ? { cookie: cookieValue } : undefined,
   });
   if (!res.ok) {
     console.error("Failed to load candidates", res.status, await res.text());
@@ -20,8 +20,8 @@ async function fetchCandidates() {
 
 async function fetchOpenings() {
   const url = await internalUrl("/api/rec/openings");
-  const cookieHeader = cookies().toString();
-  const res = await fetch(url, { cache: "no-store", headers: cookieHeader ? { cookie: cookieHeader } : undefined });
+  const cookieValue = await cookieHeader();
+  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
   if (!res.ok) return [] as OpeningListItem[];
   try {
     return (await res.json()) as OpeningListItem[];
@@ -36,3 +36,5 @@ export default async function CandidatesPage({
   const [candidates, openings] = await Promise.all([fetchCandidates(), fetchOpenings()]);
   return <CandidatesClient initialCandidates={candidates} openings={openings} />;
 }
+
+

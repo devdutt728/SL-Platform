@@ -15,7 +15,7 @@ export async function GET(request: Request) {
 
   const origin = process.env.PUBLIC_APP_ORIGIN || (await getRequestOrigin(request.url));
   const response = NextResponse.redirect(new URL(nextPath, origin));
-  response.cookies.set("slw_token", idToken, {
+  response.cookies.set("slp_token", idToken, {
     httpOnly: true,
     sameSite: "lax",
     secure: origin.startsWith("https://"),

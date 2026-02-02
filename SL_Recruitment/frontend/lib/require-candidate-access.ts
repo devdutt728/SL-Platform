@@ -25,7 +25,7 @@ export async function requireCandidateAccess(token: string) {
   const authMode = process.env.NEXT_PUBLIC_AUTH_MODE || "dev";
   if (authMode !== "google") return;
 
-  const userToken = (await cookies()).get("slr_token")?.value;
+  const userToken = (await cookies()).get("slp_token")?.value;
   if (userToken && (await isValidUserToken(userToken))) return;
 
   if (!token || !(await isValidCandidateToken(token))) {

@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
 
   const me = await res.json();
   const response = NextResponse.json(me);
-  response.cookies.set("slr_token", credential, {
+  response.cookies.set("slp_token", credential, {
     httpOnly: true,
     sameSite: "lax",
     secure: origin.startsWith("https://"),

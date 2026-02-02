@@ -16,34 +16,6 @@
 		}
 	}
 
-	@authApiRec {
-		path /api/auth*
-		header_regexp Cookie slr_token=
-	}
-	handle @authApiRec {
-		uri replace /api/auth /recruitment/api/auth
-		reverse_proxy localhost:3002 {
-			header_up X-Original-Host {hostport}
-			header_up X-Original-Proto {scheme}
-			header_up X-Forwarded-Host {hostport}
-			header_up X-Forwarded-Proto {scheme}
-		}
-	}
-
-	@authApiIt {
-		path /api/auth*
-		header_regexp Cookie slp_token=
-	}
-	handle @authApiIt {
-		uri replace /api/auth /it/api/auth
-		reverse_proxy localhost:3001 {
-			header_up X-Original-Host {hostport}
-			header_up X-Original-Proto {scheme}
-			header_up X-Forwarded-Host {hostport}
-			header_up X-Forwarded-Proto {scheme}
-		}
-	}
-
 	handle /it* {
 		reverse_proxy localhost:3001 {
 			header_up X-Original-Host {hostport}

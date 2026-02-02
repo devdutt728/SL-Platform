@@ -32,8 +32,14 @@ export default async function PublicApplyIndexPage() {
             href="/"
             className="rounded-full border border-slate-200/70 bg-white/70 px-4 py-2 font-semibold text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
           >
-            Overview
+            Back
           </Link>
+          <a
+            href="/"
+            className="rounded-full border border-slate-200/70 bg-white/70 px-4 py-2 font-semibold text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white"
+          >
+            Public portal
+          </a>
           <Link
             href="/apply"
             className="rounded-full border border-slate-900 bg-slate-900 px-4 py-2 font-semibold text-white shadow-lg shadow-slate-900/20 transition hover:-translate-y-0.5"

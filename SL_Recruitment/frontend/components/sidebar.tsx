@@ -29,7 +29,7 @@ export function Sidebar() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        const res = await fetch(`${basePath}/api/auth/me`, { cache: "no-store" });
         if (!res.ok) return;
         const me = (await res.json()) as { platform_role_id?: number | null; platform_role_code?: string | null };
         if (cancelled) return;

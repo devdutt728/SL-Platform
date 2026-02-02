@@ -54,7 +54,7 @@ export default function AuthErrorPage({ searchParams }: AuthErrorPageProps) {
                     Retry Google sign-in
                   </a>
                   <Link
-                    href={`${basePath}/login`}
+                    href="/login"
                     className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white/80 px-5 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300"
                   >
                     Back to login

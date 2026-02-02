@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookieHeader } from "@/lib/cookie-header";
 import { internalUrl } from "@/lib/internal";
 import { notFound } from "next/navigation";
 import { Interview } from "@/lib/types";
@@ -12,8 +12,8 @@ type Me = {
 async function fetchInterviews(params: Record<string, string>) {
   const url = new URL(await internalUrl("/api/rec/interviews"));
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
-  const cookieHeader = cookies().toString();
-  const res = await fetch(url.toString(), { cache: "no-store", headers: cookieHeader ? { cookie: cookieHeader } : undefined });
+  const cookieValue = await cookieHeader();
+  const res = await fetch(url.toString(), { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
   if (!res.ok) return [] as Interview[];
   try {
     return (await res.json()) as Interview[];
@@ -23,10 +23,10 @@ async function fetchInterviews(params: Record<string, string>) {
 }
 
 export default async function GLPortalPage() {
-  const cookieHeader = cookies().toString();
+  const cookieValue = await cookieHeader();
   const meRes = await fetch(await internalUrl("/api/auth/me"), {
     cache: "no-store",
-    headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+    headers: cookieValue ? { cookie: cookieValue } : undefined,
   });
   const me = (meRes.ok ? ((await meRes.json()) as Me) : null) || null;
   const roles = (me?.roles || []).map((role) => String(role).toLowerCase());
@@ -39,3 +39,5 @@ export default async function GLPortalPage() {
 
   return <GLPortalClient initialInterviews={interviews} useMeFilter={useMeFilter} />;
 }
+
+

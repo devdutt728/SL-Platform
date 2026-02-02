@@ -1,5 +1,5 @@
 import {NextResponse, type NextRequest} from "next/server";
-import { cookies } from "next/headers";
+import { cookieHeader } from "@/lib/cookie-header";
 import { readGoogleOAuthSecrets } from "@/lib/google-oauth";
 import { backendUrl } from "@/lib/backend";
 import { getRequestOrigin } from "@/lib/request-origin";
@@ -139,7 +139,7 @@ export async function GET(request: NextRequest) {
     if (originsMatch(returnToOrigin, origin)) {
       const targetOrigin = returnToOrigin || origin;
       const response = NextResponse.redirect(new URL(nextPath, targetOrigin));
-      response.cookies.set("slr_token", idToken, {
+      response.cookies.set("slp_token", idToken, {
         httpOnly: true,
         sameSite: "lax",
         secure: targetOrigin.startsWith("https://"),

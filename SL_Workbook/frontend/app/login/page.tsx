@@ -1,6 +1,8 @@
 import { readGoogleClientId } from "@/lib/google-oauth";
 import { EmployeeLoginPanel } from "./ui";
 
+export const dynamic = "force-dynamic";
+
 export default function LoginPage() {
   const clientId = readGoogleClientId();
   return (

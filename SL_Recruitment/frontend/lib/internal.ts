@@ -1,4 +1,4 @@
-﻿import { headers } from "next/headers";
+import { headers } from "next/headers";
 
 export async function internalUrl(path: string) {
   const incomingHeaders = await headers();

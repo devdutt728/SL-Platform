@@ -109,7 +109,7 @@ export function Topbar() {
             </div>
           ) : (
             <Link
-              href={`${basePath}/login`}
+              href="/login"
               className="rounded-xl border border-white/60 bg-white/30 px-3 py-2 text-sm font-semibold text-slate-800 backdrop-blur"
             >
               Sign in

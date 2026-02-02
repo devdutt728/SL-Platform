@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 type OAuthSecrets = {
@@ -21,6 +21,16 @@ type OAuthSecrets = {
 export function readGoogleOAuthSecrets() {
   const secretsPath = process.env.GOOGLE_OAUTH_SECRETS_PATH || "secrets/Oauth SL_Platform.json";
   const absolute = join(process.cwd(), "..", secretsPath);
+  if (!existsSync(absolute)) {
+    return {
+      clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
+      clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
+      authUri: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUri: "https://oauth2.googleapis.com/token",
+      redirectUris: process.env.GOOGLE_OAUTH_REDIRECT_URIS?.split(",").map((uri) => uri.trim()).filter(Boolean) || [],
+    };
+  }
+
   const raw = readFileSync(absolute, "utf-8");
   const json = JSON.parse(raw) as OAuthSecrets;
   const cfg = json.web || json.installed || {};

@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookieHeader } from "@/lib/cookie-header";
 import { internalUrl } from "@/lib/internal";
 import { notFound } from "next/navigation";
 import { SuperAdminRolesClient } from "./SuperAdminRolesClient";
@@ -10,10 +10,10 @@ type Me = {
 };
 
 export default async function SuperAdminPage() {
-  const cookieHeader = cookies().toString();
+  const cookieValue = await cookieHeader();
   const meRes = await fetch(await internalUrl("/api/auth/me"), {
     cache: "no-store",
-    headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+    headers: cookieValue ? { cookie: cookieValue } : undefined,
   });
   const me = (meRes.ok ? ((await meRes.json()) as Me) : null) || null;
   const isSuperadmin = (me?.platform_role_id ?? null) === 2 || (me?.platform_role_code ?? "").trim() === "2";
@@ -31,3 +31,5 @@ export default async function SuperAdminPage() {
     </>
   );
 }
+
+
