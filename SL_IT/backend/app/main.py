@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
 from app.middleware.logging import RequestLoggingMiddleware
+from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 from app.routers import admin, auth, it
 
@@ -30,6 +31,12 @@ def create_app() -> FastAPI:
 
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(
+        RateLimitMiddleware,
+        limit=settings.auth_rate_limit_per_min,
+        window_seconds=settings.auth_rate_limit_window_seconds,
+        path_prefixes=("/auth",),
+    )
     allow_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
     if settings.public_app_origin:
         allow_origins.append(settings.public_app_origin.rstrip("/"))

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { LogOut, Sparkles, User } from "lucide-react";
 
 type Me = {
@@ -32,6 +33,7 @@ function firstName(me: Me) {
 
 export function Topbar() {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const pathname = usePathname();
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -70,13 +72,30 @@ export function Topbar() {
     };
   }, []);
 
+  const sectionLabel = useMemo(() => {
+    const normalized = basePath && pathname.startsWith(basePath) ? pathname.slice(basePath.length) || "/" : pathname;
+    const first = normalized.split("/").filter(Boolean)[0] || "dashboard";
+    const map: Record<string, string> = {
+      dashboard: "Dashboard",
+      candidates: "Candidates",
+      openings: "Openings",
+      offers: "Offers",
+      reports: "Reports",
+      "sprint-templates": "Sprint templates",
+      interviewer: "Interviewer",
+      "gl-portal": "GL portal",
+      superadmin: "Superadmin",
+    };
+    return map[first] || "Workspace";
+  }, [pathname, basePath]);
+
   async function signOut() {
     await fetch(`${basePath}/api/auth/logout`, { method: "POST" });
-    window.location.href = `${basePath}/login`;
+    window.location.href = "/";
   }
 
   return (
-    <header className="glass-panel fixed left-4 right-4 top-4 z-20 hidden h-16 overflow-hidden rounded-2xl md:flex md:left-72">
+    <header className="glass-panel fixed left-4 right-4 top-4 z-20 hidden h-16 overflow-visible rounded-2xl md:flex md:left-72">
       <div className="page-shell flex h-full items-center justify-between">
         <div className="flex items-center gap-3">
           <Sparkles className="h-4 w-4 text-emerald-500" />
@@ -84,9 +103,31 @@ export function Topbar() {
           <span className="rounded-full border border-white/60 bg-white/30 px-3 py-1 text-xs font-semibold text-slate-700">
             Beta
           </span>
+          <span className="text-xs font-semibold text-slate-500">
+            / {sectionLabel}
+          </span>
         </div>
 
         <div className="flex items-center gap-3">
+          <details className="relative">
+            <summary className="cursor-pointer list-none rounded-xl border border-white/60 bg-white/30 px-3 py-2 text-xs font-semibold text-slate-800 backdrop-blur">
+              Apps
+            </summary>
+            <div className="absolute right-0 mt-2 w-44 rounded-xl border border-slate-200 bg-white/95 p-2 text-xs font-semibold text-slate-700 shadow-lg">
+              <a href="/" className="block rounded-lg px-2 py-2 hover:bg-slate-50">
+                Public portal
+              </a>
+              <a href="/employee" className="block rounded-lg px-2 py-2 hover:bg-slate-50">
+                Workbook
+              </a>
+              <a href="/recruitment/dashboard" className="block rounded-lg px-2 py-2 hover:bg-slate-50">
+                Recruitment
+              </a>
+              <a href="/it" className="block rounded-lg px-2 py-2 hover:bg-slate-50">
+                IT Helpdesk
+              </a>
+            </div>
+          </details>
           {loading ? (
             <div className="h-10 w-52 animate-pulse rounded-xl bg-white/20" />
           ) : me ? (

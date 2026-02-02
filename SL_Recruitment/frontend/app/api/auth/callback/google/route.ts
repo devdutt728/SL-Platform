@@ -1,5 +1,5 @@
 import {NextResponse, type NextRequest} from "next/server";
-import { cookieHeader } from "@/lib/cookie-header";
+import { cookies } from "next/headers";
 import { readGoogleOAuthSecrets } from "@/lib/google-oauth";
 import { backendUrl } from "@/lib/backend";
 import { getRequestOrigin } from "@/lib/request-origin";

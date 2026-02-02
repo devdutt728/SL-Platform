@@ -7,6 +7,7 @@ from app.api.routes import reports
 from app.core.config import settings
 from app.jobs.scheduler import start_scheduler
 from app.middleware.logging import RequestLoggingMiddleware
+from app.middleware.rate_limit import RateLimitMiddleware
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
@@ -21,6 +22,12 @@ app = FastAPI(
 )
 
 app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(
+    RateLimitMiddleware,
+    limit=settings.auth_rate_limit_per_min,
+    window_seconds=settings.auth_rate_limit_window_seconds,
+    path_prefixes=("/auth",),
+)
 
 
 @app.get("/health")

@@ -122,6 +122,15 @@ export default async function EmployeeConsolePage() {
           </div>
         </div>
         <div className="employee-actions">
+          <details className="employee-menu">
+            <summary className="public-button public-button--ghost">Apps</summary>
+            <div className="employee-menu__panel">
+              <a href="/" className="employee-menu__item">Public portal</a>
+              <a href="/employee" className="employee-menu__item">Workbook</a>
+              <a href="/recruitment/dashboard" className="employee-menu__item">Recruitment</a>
+              <a href="/it" className="employee-menu__item">IT Helpdesk</a>
+            </div>
+          </details>
           <a href="/" className="public-button public-button--ghost">
             Public portal
           </a>

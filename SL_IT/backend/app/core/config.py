@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     platform_database_url: str
 
     auth_mode: Literal["dev", "google"] = "google"
+    auth_rate_limit_per_min: int = 60
+    auth_rate_limit_window_seconds: int = 60
 
     google_client_id: str = ""
     google_client_secret: str = ""

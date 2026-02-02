@@ -1,6 +1,8 @@
 "use client";
 
 import { LogOut, Sparkles, User } from "lucide-react";
+import { useMemo } from "react";
+import { usePathname } from "next/navigation";
 
 import { useUser } from "@/components/user-context";
 
@@ -14,12 +16,26 @@ function firstName(source: string) {
 
 export function Topbar() {
   const { user, loading } = useUser();
+  const pathname = usePathname();
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/it";
   const roleLabel = user?.platform_role_name || user?.platform_role_code || user?.roles?.[0] || "Member";
 
+  const sectionLabel = useMemo(() => {
+    const normalized = basePath && pathname.startsWith(basePath) ? pathname.slice(basePath.length) || "/" : pathname;
+    const first = normalized.split("/").filter(Boolean)[0] || "queue";
+    const map: Record<string, string> = {
+      queue: "Queue",
+      my: "My tickets",
+      new: "Create ticket",
+      ticket: "Ticket",
+      admin: "Admin",
+    };
+    return map[first] || "Workspace";
+  }, [pathname, basePath]);
+
   const handleSignOut = async () => {
     await fetch(`${basePath}/api/auth/logout`, { method: "POST" });
-    window.location.href = `${basePath}/login`;
+    window.location.href = "/";
   };
 
   return (
@@ -31,9 +47,31 @@ export function Topbar() {
           <span className="rounded-full border border-white/60 bg-white/30 px-3 py-1 text-xs font-semibold text-slate-700">
             Internal
           </span>
+          <span className="text-xs font-semibold text-slate-500">
+            / {sectionLabel}
+          </span>
         </div>
 
         <div className="flex items-center gap-3">
+          <details className="relative">
+            <summary className="cursor-pointer list-none rounded-xl border border-white/60 bg-white/30 px-3 py-2 text-xs font-semibold text-slate-800 backdrop-blur">
+              Apps
+            </summary>
+            <div className="absolute right-0 mt-2 w-44 rounded-xl border border-slate-200 bg-white/95 p-2 text-xs font-semibold text-slate-700 shadow-lg">
+              <a href="/" className="block rounded-lg px-2 py-2 hover:bg-slate-50">
+                Public portal
+              </a>
+              <a href="/employee" className="block rounded-lg px-2 py-2 hover:bg-slate-50">
+                Workbook
+              </a>
+              <a href="/recruitment/dashboard" className="block rounded-lg px-2 py-2 hover:bg-slate-50">
+                Recruitment
+              </a>
+              <a href="/it" className="block rounded-lg px-2 py-2 hover:bg-slate-50">
+                IT Helpdesk
+              </a>
+            </div>
+          </details>
           {loading ? (
             <div className="h-10 w-52 animate-pulse rounded-xl bg-white/20" />
           ) : user ? (

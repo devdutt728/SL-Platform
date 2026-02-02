@@ -1,26 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
 import { Home, Users, Briefcase, LayoutDashboard, CalendarClock, FileSignature, FolderOpen, BarChart3, Shield } from "lucide-react";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/candidates", label: "Candidates", icon: Users },
-  { href: "/openings", label: "Openings", icon: Briefcase },
-  { href: "/sprint-templates", label: "Sprint Templates", icon: FolderOpen },
-  { href: "/interviewer", label: "Interviewer", icon: CalendarClock },
-  { href: "/gl-portal", label: "GL Portal", icon: CalendarClock },
-  { href: "/offers", label: "Offers", icon: FileSignature },
-  { href: "/reports", label: "Reports", icon: BarChart3 },
-  { href: "/", label: "Home", icon: Home },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, guard: "all" },
+  { href: "/candidates", label: "Candidates", icon: Users, guard: "all" },
+  { href: "/openings", label: "Openings", icon: Briefcase, guard: "all" },
+  { href: "/sprint-templates", label: "Sprint Templates", icon: FolderOpen, guard: "hr" },
+  { href: "/interviewer", label: "Interviewer", icon: CalendarClock, guard: "interviewer" },
+  { href: "/gl-portal", label: "GL Portal", icon: CalendarClock, guard: "gl" },
+  { href: "/offers", label: "Offers", icon: FileSignature, guard: "offers" },
+  { href: "/reports", label: "Reports", icon: BarChart3, guard: "reports" },
+  { href: "/", label: "Home", icon: Home, guard: "all" },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const [isSuperadmin, setIsSuperadmin] = useState(false);
+  const [roles, setRoles] = useState<string[]>([]);
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
   const normalizedPath = basePath && pathname.startsWith(basePath) ? pathname.slice(basePath.length) || "/" : pathname;
   const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
@@ -31,10 +32,20 @@ export function Sidebar() {
       try {
         const res = await fetch(`${basePath}/api/auth/me`, { cache: "no-store" });
         if (!res.ok) return;
-        const me = (await res.json()) as { platform_role_id?: number | null; platform_role_code?: string | null };
+        const me = (await res.json()) as {
+          platform_role_id?: number | null;
+          platform_role_code?: string | null;
+          roles?: string[];
+          platform_role_codes?: string[] | null;
+        };
         if (cancelled) return;
         const superadmin = (me.platform_role_id ?? null) === 2 || (me.platform_role_code ?? "").trim() === "2";
         setIsSuperadmin(superadmin);
+        const roleSet = new Set<string>();
+        (me.roles || []).forEach((role) => roleSet.add(String(role)));
+        (me.platform_role_codes || []).forEach((role) => roleSet.add(String(role)));
+        if (me.platform_role_code) roleSet.add(String(me.platform_role_code));
+        setRoles(Array.from(roleSet));
       } catch {
         // ignore
       }
@@ -44,6 +55,24 @@ export function Sidebar() {
     };
   }, []);
 
+  const guards = useMemo(() => {
+    const normalized = roles.map((role) => role.toLowerCase());
+    const has = (value: string) => normalized.includes(value);
+    const isHr = has("hr_admin") || has("hr_exec");
+    const isInterviewer = has("interviewer") || isHr;
+    const isGl = has("hiring_manager") || has("gl") || isHr;
+    const canOffers = has("approver") || isHr;
+    const canReports = isHr || has("approver");
+    return {
+      all: true,
+      hr: isHr,
+      interviewer: isInterviewer,
+      gl: isGl,
+      offers: canOffers,
+      reports: canReports,
+    };
+  }, [roles]);
+
   return (
     <aside className="glass-panel fixed bottom-4 left-4 top-4 z-20 w-56 overflow-hidden rounded-2xl p-4">
       <div className="px-2 pb-4">
@@ -52,7 +81,7 @@ export function Sidebar() {
         </div>
       </div>
       <nav className="space-y-1">
-        {navItems.map((item) => {
+        {navItems.filter((item) => guards[item.guard as keyof typeof guards]).map((item) => {
           const active = item.href === "/" ? normalizedPath === "/" : normalizedPath.startsWith(item.href);
           const Icon = item.icon;
           return (
