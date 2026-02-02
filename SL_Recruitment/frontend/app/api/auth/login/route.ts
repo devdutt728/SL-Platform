@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { getRequestOrigin } from "@/lib/request-origin";
 
-export async function POST(request: Request) {
-  const origin = process.env.PUBLIC_APP_ORIGIN || getRequestOrigin(request.url);
+export async function POST(request: NextRequest) {
+  const origin = process.env.PUBLIC_APP_ORIGIN || await getRequestOrigin(request.url);
   const body = (await request.json()) as { credential?: string };
   const credential = body.credential;
   if (!credential) {

@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 
 export async function GET() {
-  const res = await fetch(backendUrl("/platform/roles"), { cache: "no-store", headers: { ...authHeaderFromCookie() } });
+  const res = await fetch(backendUrl("/platform/roles"), { cache: "no-store", headers: { ...await authHeaderFromCookie() } });
   const data = await res.text();
   return new NextResponse(data, {
     status: res.status,
@@ -11,11 +11,11 @@ export async function GET() {
   });
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const body = await request.text();
   const res = await fetch(backendUrl("/platform/roles"), {
     method: "POST",
-    headers: { "content-type": "application/json", ...authHeaderFromCookie() },
+    headers: { "content-type": "application/json", ...await authHeaderFromCookie() },
     body,
   });
   const data = await res.text();

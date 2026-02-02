@@ -3,13 +3,13 @@ import { CafPrefill, Screening } from "@/lib/types";
 import { CafForm } from "./ui";
 
 async function fetchPrefill(token: string) {
-  const res = await fetch(internalUrl(`/api/caf/${token}`), { cache: "no-store" });
+  const res = await fetch(await internalUrl(`/api/caf/${token}`), { cache: "no-store" });
   if (!res.ok) return null;
   return (await res.json()) as CafPrefill;
 }
 
 async function fetchScreening(token: string) {
-  const res = await fetch(internalUrl(`/api/caf/${token}/screening`), { cache: "no-store" });
+  const res = await fetch(await internalUrl(`/api/caf/${token}/screening`), { cache: "no-store" });
   if (!res.ok) return null;
   return (await res.json()) as Screening;
 }

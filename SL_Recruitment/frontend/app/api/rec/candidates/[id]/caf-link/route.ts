@@ -1,11 +1,12 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 
-export async function GET(_request: Request, context: { params: { id: string } }) {
-  const res = await fetch(backendUrl(`/rec/candidates/${context.params.id}/caf-link`), {
+export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
+  const res = await fetch(backendUrl(`/rec/candidates/${params.id}/caf-link`), {
     cache: "no-store",
-    headers: { ...authHeaderFromCookie() },
+    headers: { ...await authHeaderFromCookie() },
   });
   const data = await res.text();
   return new NextResponse(data, {

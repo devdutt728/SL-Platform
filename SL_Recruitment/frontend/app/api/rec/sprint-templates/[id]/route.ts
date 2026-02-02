@@ -1,11 +1,12 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 
-export async function PATCH(request: Request, context: { params: { id: string } }) {
-  const res = await fetch(backendUrl(`/rec/sprint-templates/${encodeURIComponent(context.params.id)}`), {
+export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
+  const res = await fetch(backendUrl(`/rec/sprint-templates/${encodeURIComponent(params.id)}`), {
     method: "PATCH",
-    headers: { "content-type": "application/json", ...authHeaderFromCookie() },
+    headers: { "content-type": "application/json", ...await authHeaderFromCookie() },
     body: await request.text(),
   });
   const data = await res.text();

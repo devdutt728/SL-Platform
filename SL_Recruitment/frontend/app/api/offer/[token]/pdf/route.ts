@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 
-type Params = { params: { token: string } };
+type Params = { params: Promise<{ token: string }> };
 
-export async function GET(request: Request, { params }: Params) {
+export async function GET(request: NextRequest, context: Params) {
+  const params = await context.params;
   const url = new URL(request.url);
   const res = await fetch(backendUrl(`/offer/${encodeURIComponent(params.token)}/pdf${url.search}`), { cache: "no-store" });
   const data = await res.arrayBuffer();

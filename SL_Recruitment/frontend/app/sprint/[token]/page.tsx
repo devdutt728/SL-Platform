@@ -26,7 +26,7 @@ type SprintAttachment = {
 };
 
 async function fetchSprint(token: string) {
-  const res = await fetch(internalUrl(`/api/sprint/${encodeURIComponent(token)}`), { cache: "no-store" });
+  const res = await fetch(await internalUrl(`/api/sprint/${encodeURIComponent(token)}`), { cache: "no-store" });
   if (!res.ok) return null;
   return (await res.json()) as SprintPublic;
 }
@@ -69,6 +69,9 @@ function formatFileSize(bytes?: number | null) {
 
 export default async function SprintPage({ params }: { params: { token: string } }) {
   const sprint = await fetchSprint(params.token);
+  const attachmentBase = sprint
+    ? await internalUrl(`/api/sprint/${encodeURIComponent(params.token)}/attachments`)
+    : "";
 
   if (!sprint) {
     return (
@@ -132,11 +135,7 @@ export default async function SprintPage({ params }: { params: { token: string }
                 <a
                   key={attachment.sprint_attachment_id}
                   className="flex items-center justify-between rounded-xl border border-white/60 bg-white/30 px-3 py-2 text-sm text-slate-800"
-                  href={internalUrl(
-                    `/api/sprint/${encodeURIComponent(params.token)}/attachments/${encodeURIComponent(
-                      String(attachment.sprint_attachment_id)
-                    )}`
-                  )}
+                  href={`${attachmentBase}/${encodeURIComponent(String(attachment.sprint_attachment_id))}`}
                 >
                   <span className="truncate">{attachment.file_name}</span>
                   <span className="text-xs text-slate-500">{formatFileSize(attachment.file_size)}</span>

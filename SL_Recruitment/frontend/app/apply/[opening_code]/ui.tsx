@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useRef, useState } from "react";
 import { Briefcase, CalendarClock, FileText, Sparkles } from "lucide-react";
@@ -136,7 +136,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
               <input
                 name="name"
                 required
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
                 placeholder="Your name"
               />
               </Field>
@@ -145,21 +145,21 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
                 name="email"
                 required
                 type="email"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
                 placeholder="you@email.com"
               />
               </Field>
               <Field dense label="Phone">
               <input
                 name="phone"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
                 placeholder="+91"
               />
               </Field>
               <Field dense label="LinkedIn (optional)">
               <input
                 name="linkedin"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
                 placeholder="https://linkedin.com/in/"
               />
               </Field>
@@ -190,7 +190,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
                 setPortfolioName(value);
                 if (value) setError(null);
               }}
-              icon={<Briefcase className="h-4 w-4 text-violet-600" />}
+              icon={<Briefcase className="h-4 w-4 text-cyan-600" />}
             />
             </div>
 
@@ -204,7 +204,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
                   onChange={(e) => {
                     if (e.target.value.trim()) setError(null);
                   }}
-                  className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[13px] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                  className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[13px] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
                   placeholder="e.g. NDA / work is confidential / still compiling / no portfolio available"
                 />
               </label>
@@ -220,14 +220,14 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
             <Field dense label="Current City">
               <input
                 name="current_city"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
                 placeholder="Delhi"
               />
             </Field>
             <Field dense label="Current Employer (if any)">
               <input
                 name="current_employer"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
                 placeholder="Company name"
               />
             </Field>
@@ -236,7 +236,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
                 name="total_experience_years"
                 type="number"
                 step="0.1"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
               />
             </Field>
             <Field dense label="Relevant experience (years)">
@@ -244,7 +244,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
                 name="relevant_experience_years"
                 type="number"
                 step="0.1"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
               />
             </Field>
             <Field dense label="Current CTC (annual)">
@@ -252,7 +252,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
                 name="current_ctc_annual"
                 type="number"
                 step="0.01"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
               />
             </Field>
             <Field dense label="Expected CTC (annual)">
@@ -260,14 +260,14 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
                 name="expected_ctc_annual"
                 type="number"
                 step="0.01"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
               />
             </Field>
             <div className="md:col-span-2">
               <Field dense label="Willing to Relocate Delhi?">
                 <select
                   name="willing_to_relocate"
-                  className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                  className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
                 >
                   <option value="">Select</option>
                   <option value="yes">Yes</option>
@@ -280,7 +280,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
                 <select
                   name="two_year_commitment"
                   required
-                  className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                  className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
                 >
                   <option value="">Select</option>
                   <option value="yes">Yes</option>
@@ -292,20 +292,20 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
               <input
                 name="notice_period_days"
                 type="number"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
               />
             </Field>
             <Field dense label="Expected joining date">
               <input
                 name="expected_joining_date"
                 type="date"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
               />
             </Field>
             <Field dense label="Relocation notes (optional)">
               <input
                 name="relocation_notes"
-                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+                className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
               />
             </Field>
           </div>
@@ -314,7 +314,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
             <textarea
               name="reason_for_job_change"
               rows={2}
-              className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[13px] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+              className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[13px] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
               placeholder="Briefly share why you are exploring a change"
             />
           </label>
@@ -324,7 +324,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
             <textarea
               name="questions_from_candidate"
               rows={2}
-              className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[13px] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-500/20"
+              className="w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[13px] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20"
               placeholder="Portfolio highlights, preferences, questions..."
             />
           </label>
@@ -338,7 +338,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
         <div className="flex items-center justify-between gap-3">
           <p className="text-[11px] text-slate-600">Basics / Documents / CAF</p>
           <button
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 px-4 py-2 text-[13px] font-semibold text-white shadow-card hover:from-blue-700 hover:to-violet-700 disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 to-blue-800 px-4 py-2 text-[13px] font-semibold text-white shadow-card hover:from-slate-900 hover:to-blue-900 disabled:opacity-60"
             disabled={submitting}
             type="submit"
           >

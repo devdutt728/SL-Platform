@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { getRequestOrigin } from "@/lib/request-origin";
 import { popFinalizeToken } from "@/lib/oauth-memory";
 
@@ -15,7 +15,7 @@ function safeNextPath(raw: string | null) {
   return raw;
 }
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   if (!code) return NextResponse.json({ error: "missing_code" }, { status: 400 });
@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   if (!idToken) return NextResponse.json({ error: "invalid_or_expired_code" }, { status: 400 });
 
   const nextPath = safeNextPath(url.searchParams.get("next"));
-  const origin = process.env.PUBLIC_APP_ORIGIN || getRequestOrigin(request.url);
+  const origin = process.env.PUBLIC_APP_ORIGIN || await getRequestOrigin(request.url);
 
   const response = NextResponse.redirect(new URL(nextPath, origin));
   response.cookies.set("slr_token", idToken, {

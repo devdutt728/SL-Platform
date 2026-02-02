@@ -37,9 +37,9 @@ function normalizeTunnelHost(host: string) {
   return host;
 }
 
-export function getRequestOrigin(requestUrl: string) {
+export async function getRequestOrigin(requestUrl: string) {
   const url = new URL(requestUrl);
-  const hdrs = headers();
+  const hdrs = await headers();
 
   const forwarded = parseForwarded(hdrs.get("forwarded"));
   const forwardedProto = firstHeaderValue(hdrs.get("x-forwarded-proto")) || firstHeaderValue(hdrs.get("x-original-proto"));

@@ -1,10 +1,10 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { popFinalizeToken } from "@/lib/oauth-memory";
 import { getRequestOrigin } from "@/lib/request-origin";
 
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const nextPath = url.searchParams.get("next") || "/";
@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const idToken = popFinalizeToken(code);
   if (!idToken) return new NextResponse("Invalid or expired code", { status: 400 });
 
-  const origin = process.env.PUBLIC_APP_ORIGIN || getRequestOrigin(request.url);
+  const origin = process.env.PUBLIC_APP_ORIGIN || await getRequestOrigin(request.url);
   const response = NextResponse.redirect(new URL(nextPath, origin));
   response.cookies.set("slp_token", idToken, {
     httpOnly: true,

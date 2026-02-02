@@ -3,7 +3,7 @@ import { CandidateAssessmentPrefill } from "@/lib/types";
 import { AssessmentForm } from "./ui";
 
 async function fetchPrefill(token: string) {
-  const res = await fetch(internalUrl(`/api/assessment/${token}`), { cache: "no-store" });
+  const res = await fetch(await internalUrl(`/api/assessment/${token}`), { cache: "no-store" });
   if (!res.ok) return null;
   return (await res.json()) as CandidateAssessmentPrefill;
 }

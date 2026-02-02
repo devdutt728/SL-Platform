@@ -2,10 +2,10 @@ import { internalUrl } from "@/lib/internal";
 import { OpeningApplyPrefill } from "@/lib/types";
 import { ApplyForm } from "./ui";
 import Image from "next/image";
-import { CheckCircle2, ShieldCheck } from "lucide-react";
+import { CheckCircle2, ShieldCheck, Sparkles } from "lucide-react";
 
 async function fetchOpening(openingCode: string) {
-  const res = await fetch(internalUrl(`/api/apply/${openingCode}`), { cache: "no-store" });
+  const res = await fetch(await internalUrl(`/api/apply/${openingCode}`), { cache: "no-store" });
   if (!res.ok) return null;
   return (await res.json()) as OpeningApplyPrefill;
 }
@@ -80,7 +80,7 @@ export default async function ApplyPage({ params }: { params: { opening_code: st
               Secure
             </span>
             <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-white/60 px-3 py-1">
-              <CheckCircle2 className="h-3.5 w-3.5 text-violet-600" />
+              <CheckCircle2 className="h-3.5 w-3.5 text-cyan-600" />
               One form
             </span>
             <span className="rounded-full border border-slate-200/60 bg-white/60 px-3 py-1">
@@ -102,8 +102,11 @@ export default async function ApplyPage({ params }: { params: { opening_code: st
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-slate-200/60 bg-white/60 p-4">
-                <p className="text-[11px] uppercase tracking-wide text-slate-500">Steps</p>
+              <div className="rounded-2xl border border-slate-200/60 bg-white/70 p-4">
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-slate-500">
+                  <Sparkles className="h-4 w-4 text-cyan-600" />
+                  Apply flow
+                </div>
                 <ol className="mt-3 space-y-2 text-[13px] text-slate-700">
                   <li className="flex items-start gap-2">
                     <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[11px] font-semibold text-white">1</span>
@@ -121,7 +124,7 @@ export default async function ApplyPage({ params }: { params: { opening_code: st
               </div>
 
               {opening.opening_description ? (
-                <div className="rounded-2xl border border-slate-200/60 bg-white/60 p-4">
+                <div className="rounded-2xl border border-slate-200/60 bg-white/70 p-4">
                   <p className="text-[11px] uppercase tracking-wide text-slate-500">Role description</p>
                   <p className="mt-3 whitespace-pre-wrap text-[13px] leading-relaxed text-slate-700">{opening.opening_description}</p>
                 </div>

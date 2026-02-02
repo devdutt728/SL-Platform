@@ -1,12 +1,12 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const formData = await request.formData();
   const res = await fetch(backendUrl("/platform/people/bulk"), {
     method: "POST",
-    headers: { ...authHeaderFromCookie() },
+    headers: { ...await authHeaderFromCookie() },
     body: formData,
   });
   const data = await res.text();

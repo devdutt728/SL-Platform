@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { internalUrl } from "@/lib/internal";
 
 async function isValidUserToken(token: string) {
-  const res = await fetch(internalUrl("/api/auth/me"), {
+  const res = await fetch(await internalUrl("/api/auth/me"), {
     cache: "no-store",
     headers: { authorization: `Bearer ${token}` },
   });
@@ -11,13 +11,13 @@ async function isValidUserToken(token: string) {
 }
 
 async function isValidCandidateToken(token: string) {
-  const sprintRes = await fetch(internalUrl(`/api/sprint/${encodeURIComponent(token)}`), { cache: "no-store" });
+  const sprintRes = await fetch(await internalUrl(`/api/sprint/${encodeURIComponent(token)}`), { cache: "no-store" });
   if (sprintRes.ok) return true;
-  const assessmentRes = await fetch(internalUrl(`/api/assessment/${encodeURIComponent(token)}`), { cache: "no-store" });
+  const assessmentRes = await fetch(await internalUrl(`/api/assessment/${encodeURIComponent(token)}`), { cache: "no-store" });
   if (assessmentRes.ok) return true;
-  const cafRes = await fetch(internalUrl(`/api/caf/${encodeURIComponent(token)}`), { cache: "no-store" });
+  const cafRes = await fetch(await internalUrl(`/api/caf/${encodeURIComponent(token)}`), { cache: "no-store" });
   if (cafRes.ok) return true;
-  const offerRes = await fetch(internalUrl(`/api/offer/${encodeURIComponent(token)}`), { cache: "no-store" });
+  const offerRes = await fetch(await internalUrl(`/api/offer/${encodeURIComponent(token)}`), { cache: "no-store" });
   return offerRes.ok;
 }
 
@@ -25,7 +25,7 @@ export async function requireCandidateAccess(token: string) {
   const authMode = process.env.NEXT_PUBLIC_AUTH_MODE || "dev";
   if (authMode !== "google") return;
 
-  const userToken = cookies().get("slr_token")?.value;
+  const userToken = (await cookies()).get("slr_token")?.value;
   if (userToken && (await isValidUserToken(userToken))) return;
 
   if (!token || !(await isValidCandidateToken(token))) {

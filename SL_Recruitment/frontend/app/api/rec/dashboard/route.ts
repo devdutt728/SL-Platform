@@ -1,13 +1,13 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const upstream = new URL(backendUrl("/rec/dashboard"));
   url.searchParams.forEach((value, key) => upstream.searchParams.set(key, value));
 
-  const res = await fetch(upstream.toString(), { cache: "no-store", headers: { ...authHeaderFromCookie() } });
+  const res = await fetch(upstream.toString(), { cache: "no-store", headers: { ...await authHeaderFromCookie() } });
   const data = await res.text();
   return new NextResponse(data, {
     status: res.status,

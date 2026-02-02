@@ -1,10 +1,10 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
-  const headers = authHeader ? { authorization: authHeader } : authHeaderFromCookie();
+  const headers = authHeader ? { authorization: authHeader } : await authHeaderFromCookie();
 
   const res = await fetch(backendUrl("/auth/me"), {
     headers,

@@ -1,11 +1,12 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 
-export async function GET(_request: Request, context: { params: { person_id: string } }) {
-  const res = await fetch(backendUrl(`/platform/people/${context.params.person_id}`), {
+export async function GET(_request: NextRequest, context: { params: Promise<{ person_id: string }> }) {
+  const params = await context.params;
+  const res = await fetch(backendUrl(`/platform/people/${params.person_id}`), {
     cache: "no-store",
-    headers: { ...authHeaderFromCookie() },
+    headers: { ...await authHeaderFromCookie() },
   });
   const data = await res.text();
   return new NextResponse(data, {
@@ -14,11 +15,12 @@ export async function GET(_request: Request, context: { params: { person_id: str
   });
 }
 
-export async function PATCH(request: Request, context: { params: { person_id: string } }) {
+export async function PATCH(request: NextRequest, context: { params: Promise<{ person_id: string }> }) {
+  const params = await context.params;
   const body = await request.text();
-  const res = await fetch(backendUrl(`/platform/people/${context.params.person_id}`), {
+  const res = await fetch(backendUrl(`/platform/people/${params.person_id}`), {
     method: "PATCH",
-    headers: { "content-type": "application/json", ...authHeaderFromCookie() },
+    headers: { "content-type": "application/json", ...await authHeaderFromCookie() },
     body,
   });
   const data = await res.text();
@@ -28,10 +30,11 @@ export async function PATCH(request: Request, context: { params: { person_id: st
   });
 }
 
-export async function DELETE(_request: Request, context: { params: { person_id: string } }) {
-  const res = await fetch(backendUrl(`/platform/people/${context.params.person_id}`), {
+export async function DELETE(_request: NextRequest, context: { params: Promise<{ person_id: string }> }) {
+  const params = await context.params;
+  const res = await fetch(backendUrl(`/platform/people/${params.person_id}`), {
     method: "DELETE",
-    headers: { ...authHeaderFromCookie() },
+    headers: { ...await authHeaderFromCookie() },
   });
   const data = await res.text();
   return new NextResponse(data, {

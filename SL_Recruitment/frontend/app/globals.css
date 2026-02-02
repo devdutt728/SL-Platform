@@ -7,6 +7,8 @@
   --page-gutter: clamp(0.8rem, 0.85vw, 1.65rem);
   --panel-radius: clamp(0.98rem, 0.7vw, 1.35rem);
   --panel-padding: clamp(0.85rem, 0.9vw, 1.15rem);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
 }
 
 @media (min-width: 1440px) {

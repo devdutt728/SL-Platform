@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+﻿import {NextResponse, type NextRequest} from "next/server";
 import { cookies } from "next/headers";
 import { readGoogleOAuthSecrets } from "@/lib/google-oauth";
 import { getRequestOrigin } from "@/lib/request-origin";
@@ -31,11 +31,11 @@ function pickRedirectUri(origin: string, redirectUris: string[], overrideRedirec
   return { redirectUri: defaultRedirectUri, defaultRedirectUri };
 }
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const { clientId, authUri, redirectUris } = readGoogleOAuthSecrets();
   if (!clientId) return new NextResponse("Missing Google OAuth client_id", { status: 500 });
 
-  const origin = process.env.PUBLIC_APP_ORIGIN || getRequestOrigin(request.url);
+  const origin = process.env.PUBLIC_APP_ORIGIN || await getRequestOrigin(request.url);
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const overrideRedirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI;
   const { redirectUri, defaultRedirectUri } = pickRedirectUri(origin, redirectUris, overrideRedirectUri, basePath);
@@ -61,8 +61,9 @@ export async function GET(request: Request) {
 
   const state = randomState();
   const secure = origin.startsWith("https://");
-  cookies().set("slr_oauth_state", state, { httpOnly: true, sameSite: "lax", secure, path: "/" });
-  cookies().set("slr_oauth_redirect_uri", redirectUri, { httpOnly: true, sameSite: "lax", secure, path: "/" });
+  const cookieStore = await cookies();
+  cookieStore.set("slr_oauth_state", state, { httpOnly: true, sameSite: "lax", secure, path: "/" });
+  cookieStore.set("slr_oauth_redirect_uri", redirectUri, { httpOnly: true, sameSite: "lax", secure, path: "/" });
   putOAuthState(state, { returnToOrigin: origin, redirectUri });
 
   const authUrl = new URL(authUri);

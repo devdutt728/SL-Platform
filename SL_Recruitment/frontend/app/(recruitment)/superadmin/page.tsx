@@ -11,7 +11,7 @@ type Me = {
 
 export default async function SuperAdminPage() {
   const cookieHeader = cookies().toString();
-  const meRes = await fetch(internalUrl("/api/auth/me"), {
+  const meRes = await fetch(await internalUrl("/api/auth/me"), {
     cache: "no-store",
     headers: cookieHeader ? { cookie: cookieHeader } : undefined,
   });

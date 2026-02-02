@@ -6,10 +6,10 @@ export async function requireAuth() {
   const authMode = process.env.NEXT_PUBLIC_AUTH_MODE || "dev";
   if (authMode !== "google") return;
 
-  const token = cookies().get("slr_token")?.value;
+  const token = (await cookies()).get("slr_token")?.value;
   if (!token) redirect("/login");
 
-  const res = await fetch(internalUrl("/api/auth/me"), {
+  const res = await fetch(await internalUrl("/api/auth/me"), {
     cache: "no-store",
     headers: { authorization: `Bearer ${token}` },
   });

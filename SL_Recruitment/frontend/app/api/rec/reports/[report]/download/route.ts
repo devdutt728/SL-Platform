@@ -1,13 +1,14 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 
-export async function GET(request: Request, context: { params: { report: string } }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ report: string }> }) {
+  const params = await context.params;
   const url = new URL(request.url);
-  const upstream = new URL(backendUrl(`/rec/reports/${encodeURIComponent(context.params.report)}/download`));
+  const upstream = new URL(backendUrl(`/rec/reports/${encodeURIComponent(params.report)}/download`));
   url.searchParams.forEach((value, key) => upstream.searchParams.set(key, value));
 
-  const res = await fetch(upstream.toString(), { cache: "no-store", headers: { ...authHeaderFromCookie() } });
+  const res = await fetch(upstream.toString(), { cache: "no-store", headers: { ...await authHeaderFromCookie() } });
   const data = await res.arrayBuffer();
   return new NextResponse(data, {
     status: res.status,

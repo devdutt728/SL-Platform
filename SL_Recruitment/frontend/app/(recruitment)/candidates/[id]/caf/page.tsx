@@ -11,7 +11,7 @@ type Me = {
 };
 
 async function fetchCandidateFull(id: string): Promise<CandidateFull | null> {
-  const url = internalUrl(`/api/rec/candidates/${encodeURIComponent(id)}/full`);
+  const url = await internalUrl(`/api/rec/candidates/${encodeURIComponent(id)}/full`);
   const cookieHeader = cookies().toString();
   const res = await fetch(url, { cache: "no-store", headers: cookieHeader ? { cookie: cookieHeader } : undefined });
   if (!res.ok) return null;
@@ -19,7 +19,7 @@ async function fetchCandidateFull(id: string): Promise<CandidateFull | null> {
 }
 
 async function fetchMe(): Promise<Me | null> {
-  const url = internalUrl("/api/auth/me");
+  const url = await internalUrl("/api/auth/me");
   const cookieHeader = cookies().toString();
   const res = await fetch(url, { cache: "no-store", headers: cookieHeader ? { cookie: cookieHeader } : undefined });
   if (!res.ok) return null;

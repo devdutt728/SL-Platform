@@ -1,11 +1,12 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 
-export async function GET(_request: Request, context: { params: { id: string } }) {
-  const res = await fetch(backendUrl(`/rec/candidates/${encodeURIComponent(context.params.id)}/sprints`), {
+export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
+  const res = await fetch(backendUrl(`/rec/candidates/${encodeURIComponent(params.id)}/sprints`), {
     cache: "no-store",
-    headers: { ...authHeaderFromCookie() },
+    headers: { ...await authHeaderFromCookie() },
   });
   const data = await res.text();
   return new NextResponse(data, {
@@ -14,11 +15,12 @@ export async function GET(_request: Request, context: { params: { id: string } }
   });
 }
 
-export async function POST(request: Request, context: { params: { id: string } }) {
+export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const body = await request.text();
-  const res = await fetch(backendUrl(`/rec/candidates/${encodeURIComponent(context.params.id)}/sprints`), {
+  const res = await fetch(backendUrl(`/rec/candidates/${encodeURIComponent(params.id)}/sprints`), {
     method: "POST",
-    headers: { "content-type": "application/json", ...authHeaderFromCookie() },
+    headers: { "content-type": "application/json", ...await authHeaderFromCookie() },
     body,
   });
   const data = await res.text();

@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { readGoogleOAuthSecrets } from "@/lib/google-oauth";
 import { getRequestOrigin } from "@/lib/request-origin";
 
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
-  const derivedOrigin = getRequestOrigin(request.url);
+export async function GET(request: NextRequest) {
+  const derivedOrigin = await getRequestOrigin(request.url);
   const origin = process.env.PUBLIC_APP_ORIGIN || derivedOrigin;
   const { clientId, authUri, tokenUri, redirectUris } = readGoogleOAuthSecrets();
   const overrideRedirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI;

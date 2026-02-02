@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { cookies } from "next/headers";
 
 import { readGoogleOAuthSecrets } from "@/lib/google-oauth";
@@ -25,9 +25,9 @@ function isGoogleHost(host: string) {
 }
 
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const url = new URL(request.url);
-  const origin = process.env.PUBLIC_APP_ORIGIN || getRequestOrigin(request.url);
+  const origin = process.env.PUBLIC_APP_ORIGIN || await getRequestOrigin(request.url);
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const nextPath = basePath ? `${basePath}/` : "/";
   try {
@@ -38,7 +38,8 @@ export async function GET(request: Request) {
     if (error) return new NextResponse(`Google OAuth error: ${error}`, { status: 400 });
     if (!code) return new NextResponse("Missing code", { status: 400 });
 
-    const expectedStateCookie = cookies().get("slp_oauth_state")?.value;
+    const cookieStore = await cookies();
+    const expectedStateCookie = cookieStore.get("slp_oauth_state")?.value;
     const memory = state ? getOAuthState(state) : null;
     const stateOk = !!state && ((expectedStateCookie && expectedStateCookie === state) || !!memory);
     if (!stateOk) return new NextResponse("Invalid state", { status: 400 });
@@ -49,7 +50,7 @@ export async function GET(request: Request) {
     const defaultRedirectUri = `${origin}${basePath}/api/auth/callback/google`;
     const redirectUri =
       process.env.GOOGLE_OAUTH_REDIRECT_URI ||
-      cookies().get("slp_oauth_redirect_uri")?.value ||
+      cookieStore.get("slp_oauth_redirect_uri")?.value ||
       memory?.redirectUri ||
       redirectUris.find((u) => u.startsWith(origin)) ||
       defaultRedirectUri;

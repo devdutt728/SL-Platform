@@ -10,7 +10,7 @@ type Me = {
 };
 
 async function fetchInterviews(params: Record<string, string>) {
-  const url = new URL(internalUrl("/api/rec/interviews"));
+  const url = new URL(await internalUrl("/api/rec/interviews"));
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   const cookieHeader = cookies().toString();
   const res = await fetch(url.toString(), { cache: "no-store", headers: cookieHeader ? { cookie: cookieHeader } : undefined });
@@ -24,7 +24,7 @@ async function fetchInterviews(params: Record<string, string>) {
 
 export default async function InterviewerPage() {
   const cookieHeader = cookies().toString();
-  const meRes = await fetch(internalUrl("/api/auth/me"), {
+  const meRes = await fetch(await internalUrl("/api/auth/me"), {
     cache: "no-store",
     headers: cookieHeader ? { cookie: cookieHeader } : undefined,
   });

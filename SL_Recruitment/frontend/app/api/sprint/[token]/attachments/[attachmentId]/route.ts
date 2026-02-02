@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 
-export async function GET(_request: Request, context: { params: { token: string; attachmentId: string } }) {
-  const { token, attachmentId } = context.params;
+export async function GET(_request: NextRequest, context: { params: Promise<{ token: string; attachmentId: string }> }) {
+  const params = await context.params;
+  const { token, attachmentId } = params;
   const res = await fetch(backendUrl(`/sprint/${encodeURIComponent(token)}/attachments/${encodeURIComponent(attachmentId)}`));
   const headers: Record<string, string> = {
     "content-type": res.headers.get("content-type") || "application/octet-stream",

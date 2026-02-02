@@ -6,7 +6,7 @@ import { SprintTemplatesClient } from "./SprintTemplatesClient";
 async function fetchTemplates() {
   const res = await fetch(backendUrl("/rec/sprint-templates?include_inactive=1"), {
     cache: "no-store",
-    headers: { ...authHeaderFromCookie() },
+    headers: { ...await authHeaderFromCookie() },
   });
   if (!res.ok) return [];
   return (await res.json()) as SprintTemplate[];

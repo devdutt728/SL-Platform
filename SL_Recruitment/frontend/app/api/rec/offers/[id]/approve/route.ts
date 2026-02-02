@@ -1,13 +1,14 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
-export async function POST(_request: Request, { params }: Params) {
+export async function POST(_request: NextRequest, context: Params) {
+  const params = await context.params;
   const res = await fetch(backendUrl(`/rec/offers/${encodeURIComponent(params.id)}/approve`), {
     method: "POST",
-    headers: { ...authHeaderFromCookie() },
+    headers: { ...await authHeaderFromCookie() },
   });
   const data = await res.text();
   return new NextResponse(data, {

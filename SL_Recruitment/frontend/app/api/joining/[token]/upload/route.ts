@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 
-type Params = { params: { token: string } };
+type Params = { params: Promise<{ token: string }> };
 
-export async function POST(request: Request, { params }: Params) {
+export async function POST(request: NextRequest, context: Params) {
+  const params = await context.params;
   const form = await request.formData();
   const res = await fetch(backendUrl(`/joining/${encodeURIComponent(params.token)}/upload`), {
     method: "POST",

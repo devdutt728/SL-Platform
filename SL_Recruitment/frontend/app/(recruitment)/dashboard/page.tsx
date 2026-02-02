@@ -4,7 +4,7 @@ import type { CandidateEvent, CandidateOffer, DashboardMetrics } from "@/lib/typ
 import DashboardClient from "./DashboardClient";
 
 async function fetchDashboard() {
-  const url = internalUrl("/api/rec/dashboard?stuck_days=5");
+  const url = await internalUrl("/api/rec/dashboard?stuck_days=5");
   const cookieHeader = cookies().toString();
   const res = await fetch(url, { cache: "no-store", headers: cookieHeader ? { cookie: cookieHeader } : undefined });
   if (!res.ok) return null;
@@ -12,7 +12,7 @@ async function fetchDashboard() {
 }
 
 async function fetchRecentEvents() {
-  const url = internalUrl("/api/rec/events?limit=10");
+  const url = await internalUrl("/api/rec/events?limit=10");
   const cookieHeader = cookies().toString();
   const res = await fetch(url, { cache: "no-store", headers: cookieHeader ? { cookie: cookieHeader } : undefined });
   if (!res.ok) return [] as CandidateEvent[];
@@ -20,7 +20,7 @@ async function fetchRecentEvents() {
 }
 
 async function fetchOffers() {
-  const url = internalUrl("/api/rec/offers");
+  const url = await internalUrl("/api/rec/offers");
   const cookieHeader = cookies().toString();
   const res = await fetch(url, { cache: "no-store", headers: cookieHeader ? { cookie: cookieHeader } : undefined });
   if (!res.ok) return [] as CandidateOffer[];

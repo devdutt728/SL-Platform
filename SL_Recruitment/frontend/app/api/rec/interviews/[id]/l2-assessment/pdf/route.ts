@@ -1,10 +1,12 @@
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
+import type { NextRequest } from "next/server";
 
-export async function GET(_request: Request, context: { params: { id: string } }) {
-  const res = await fetch(backendUrl(`/rec/interviews/${encodeURIComponent(context.params.id)}/l2-assessment/pdf`), {
+export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
+  const res = await fetch(backendUrl(`/rec/interviews/${encodeURIComponent(params.id)}/l2-assessment/pdf`), {
     cache: "no-store",
-    headers: { ...authHeaderFromCookie() },
+    headers: { ...await authHeaderFromCookie() },
   });
   return new Response(await res.arrayBuffer(), {
     status: res.status,

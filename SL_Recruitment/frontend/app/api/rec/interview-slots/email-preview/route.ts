@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 import fs from "node:fs/promises";
@@ -54,7 +54,7 @@ async function loadTemplate(): Promise<string | null> {
   }
 }
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const candidateId = url.searchParams.get("candidate_id") || "";
   const roundType = url.searchParams.get("round_type") || "";
@@ -67,7 +67,7 @@ export async function GET(request: Request) {
   if (interviewerEmail) upstream.searchParams.set("interviewer_email", interviewerEmail);
   if (startDate) upstream.searchParams.set("start_date", startDate);
 
-  const authHeaders = { ...authHeaderFromCookie() };
+  const authHeaders = { ...await authHeaderFromCookie() };
   const res = await fetch(upstream.toString(), { cache: "no-store", headers: authHeaders });
   if (res.status !== 404) {
     const data = await res.text();

@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const q = url.searchParams.get("q") || "";
   const limit = url.searchParams.get("limit") || "10";
@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     upstream.searchParams.set("include_deleted", includeDeleted);
   }
 
-  const res = await fetch(upstream.toString(), { cache: "no-store", headers: { ...authHeaderFromCookie() } });
+  const res = await fetch(upstream.toString(), { cache: "no-store", headers: { ...await authHeaderFromCookie() } });
   const data = await res.text();
   return new NextResponse(data, {
     status: res.status,
@@ -23,11 +23,11 @@ export async function GET(request: Request) {
   });
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const body = await request.text();
   const res = await fetch(backendUrl("/platform/people"), {
     method: "POST",
-    headers: { "content-type": "application/json", ...authHeaderFromCookie() },
+    headers: { "content-type": "application/json", ...await authHeaderFromCookie() },
     body,
   });
   const data = await res.text();

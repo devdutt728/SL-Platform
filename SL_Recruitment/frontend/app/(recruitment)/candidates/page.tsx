@@ -5,7 +5,7 @@ import { OpeningListItem } from "@/lib/types";
 import { CandidatesClient } from "./CandidatesClient";
 
 async function fetchCandidates() {
-  const url = new URL(internalUrl("/api/rec/candidates"));
+  const url = new URL(await internalUrl("/api/rec/candidates"));
   const cookieHeader = cookies().toString();
   const res = await fetch(url.toString(), {
     cache: "no-store",
@@ -19,7 +19,7 @@ async function fetchCandidates() {
 }
 
 async function fetchOpenings() {
-  const url = internalUrl("/api/rec/openings");
+  const url = await internalUrl("/api/rec/openings");
   const cookieHeader = cookies().toString();
   const res = await fetch(url, { cache: "no-store", headers: cookieHeader ? { cookie: cookieHeader } : undefined });
   if (!res.ok) return [] as OpeningListItem[];

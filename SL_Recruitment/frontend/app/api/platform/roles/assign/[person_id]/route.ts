@@ -1,12 +1,13 @@
-import { NextResponse } from "next/server";
+import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 
-export async function PATCH(request: Request, context: { params: { person_id: string } }) {
+export async function PATCH(request: NextRequest, context: { params: Promise<{ person_id: string }> }) {
+  const params = await context.params;
   const body = await request.text();
-  const res = await fetch(backendUrl(`/platform/roles/assign/${context.params.person_id}`), {
+  const res = await fetch(backendUrl(`/platform/roles/assign/${params.person_id}`), {
     method: "PATCH",
-    headers: { "content-type": "application/json", ...authHeaderFromCookie() },
+    headers: { "content-type": "application/json", ...await authHeaderFromCookie() },
     body,
   });
   const data = await res.text();

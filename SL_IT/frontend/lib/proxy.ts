@@ -17,7 +17,7 @@ export async function proxyToBackend(request: Request, upstreamPath: string) {
   headers.delete("cookie");
   headers.delete("content-length");
 
-  const token = cookies().get("slp_token")?.value;
+  const token = (await cookies()).get("slp_token")?.value;
   if (token && !headers.get("authorization")) {
     headers.set("authorization", `Bearer ${token}`);
   }
