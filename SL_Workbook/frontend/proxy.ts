@@ -17,7 +17,7 @@ function originsMatch(a: string, b: string) {
   }
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const authMode = process.env.NEXT_PUBLIC_AUTH_MODE || "dev";
   if (authMode !== "google") return NextResponse.next();
 

@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 function normalizeOrigin(origin: string) {
@@ -17,11 +17,11 @@ function originsMatch(a: string, b: string) {
   }
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const authMode = process.env.NEXT_PUBLIC_AUTH_MODE || "dev";
   if (authMode !== "google") return NextResponse.next();
 
-  const token = request.cookies.get("slp_token")?.value;
+  const token = request.cookies.get("slr_token")?.value;
   const { pathname } = request.nextUrl;
   const publicOrigin = normalizeOrigin(process.env.PUBLIC_APP_ORIGIN || "");
   const basePath = request.nextUrl.basePath || process.env.NEXT_PUBLIC_BASE_PATH || "";
@@ -39,8 +39,20 @@ export function middleware(request: NextRequest) {
   if (
     normalizedPath.startsWith("/_next") ||
     isFile ||
+    normalizedPath === "/" ||
     normalizedPath === "/login" ||
-    normalizedPath.startsWith("/api/auth")
+    normalizedPath.startsWith("/apply") ||
+    normalizedPath.startsWith("/caf") ||
+    normalizedPath.startsWith("/assessment") ||
+    normalizedPath.startsWith("/offer") ||
+    normalizedPath.startsWith("/schedule") ||
+    normalizedPath.startsWith("/sprint") ||
+    normalizedPath.startsWith("/api/auth") ||
+    normalizedPath.startsWith("/api/apply") ||
+    normalizedPath.startsWith("/api/caf") ||
+    normalizedPath.startsWith("/api/assessment") ||
+    normalizedPath.startsWith("/api/sprint") ||
+    normalizedPath.startsWith("/api/offer")
   ) {
     return NextResponse.next();
   }
