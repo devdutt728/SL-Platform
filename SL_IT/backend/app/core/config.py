@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Literal
 
 from pydantic import AliasChoices, Field
@@ -28,6 +29,16 @@ def _parse_role_map(value: str | None) -> dict[int, list[str]]:
         elif isinstance(roles, list):
             parsed[role_id] = [str(role) for role in roles]
     return parsed
+
+
+def _env_files() -> list[str]:
+    env = os.getenv("SL_ENVIRONMENT", "").strip().lower()
+    files = [".env"]
+    if env and env != "development":
+        files.append(f".env.{env}")
+    else:
+        files.append(".env.local")
+    return files
 
 
 class Settings(BaseSettings):
@@ -63,6 +74,8 @@ class Settings(BaseSettings):
     calendar_id: str = "primary"
     calendar_timezone: str = "Asia/Kolkata"
 
+    public_app_origin: str = ""
+
     role_map_json: str | None = None
     superadmin_email: str = Field(
         default="",
@@ -72,7 +85,7 @@ class Settings(BaseSettings):
     reopen_window_days: int = 7
     rate_limit_ticket_per_minute: int = 5
 
-    model_config = SettingsConfigDict(env_prefix="SL_", env_file=(".env", ".env.local"), extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="SL_", env_file=_env_files(), extra="ignore")
 
     @property
     def role_map(self) -> dict[int, list[str]]:

@@ -1,8 +1,20 @@
+import os
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.paths import resolve_repo_path
+
+
+def _env_files() -> list[str]:
+    base = resolve_repo_path("backend/.env")
+    env = os.getenv("SL_ENVIRONMENT", "").strip().lower()
+    files = [str(base)]
+    if env and env != "development":
+        files.append(str(resolve_repo_path(f"backend/.env.{env}")))
+    else:
+        files.append(str(resolve_repo_path("backend/.env.local")))
+    return files
 
 
 class Settings(BaseSettings):
@@ -46,11 +58,7 @@ class Settings(BaseSettings):
     offer_followup_days: int = 5
     stale_stage_days: int = 5
 
-    model_config = SettingsConfigDict(
-        env_prefix="SL_",
-        env_file=str(resolve_repo_path("backend/.env")),
-        extra="ignore",
-    )
+    model_config = SettingsConfigDict(env_prefix="SL_", env_file=_env_files(), extra="ignore")
 
 
 settings = Settings()

@@ -107,11 +107,12 @@ Frontend env:
 - Set `NEXT_PUBLIC_AUTH_MODE=google` when backend uses Google auth
 - Set `NEXT_PUBLIC_BASE_PATH=/recruitment` to match `next.config.mjs`
 
-### Google login with tunnels
-- Set `PUBLIC_APP_ORIGIN` to the external origin (e.g. `https://xxxx-3000.inc1.devtunnels.ms`).
+### Google login (local + production)
+- Local dev: keep `PUBLIC_APP_ORIGIN=http://localhost:3000`.
+- Production: set `PUBLIC_APP_ORIGIN=https://studiolotushub.in`.
 - Add both redirect URIs to your Google OAuth client:
   - `http://localhost:3000/recruitment/api/auth/callback/google`
-  - `${PUBLIC_APP_ORIGIN}/recruitment/api/auth/callback/google`
+  - `https://studiolotushub.in/recruitment/api/auth/callback/google`
 
 ## Known gaps (not yet built)
 - The `/schedule/[token]` page is a placeholder; candidate slot selection currently uses the public `/interview/slots/{token}` flow.

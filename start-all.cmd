@@ -2,10 +2,7 @@
 set "ROOT=D:\SL Platform"
 set "LOGDIR=%ROOT%\logs"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
-
-set "TUNNEL_HOST=rc0w3dw4-3005.inc1.devtunnels.ms"
-set "TUNNEL_PORT=3005"
-set "START_TUNNEL=1"
+set "SL_ENVIRONMENT=development"
 
 powershell -NoProfile -Command "& { $ErrorActionPreference = 'Continue'; $ports = 3000,3001,3002,3003,8001,8002; foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { $procId = $_.OwningProcess; if ($procId) { try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {} } } } }"
 
@@ -32,8 +29,6 @@ set "WORKBOOK_OUT=%RUN_LOGDIR%\workbook-frontend.log"
 set "WORKBOOK_ERR=%RUN_LOGDIR%\workbook-frontend.err.log"
 set "CADDY_OUT=%RUN_LOGDIR%\caddy.log"
 set "CADDY_ERR=%RUN_LOGDIR%\caddy.err.log"
-set "TUNNEL_OUT=%RUN_LOGDIR%\devtunnel.log"
-set "TUNNEL_ERR=%RUN_LOGDIR%\devtunnel.err.log"
 
 set "CURRENT_LOGS=%LOGDIR%\current-logs.cmd"
 (
@@ -48,8 +43,6 @@ set "CURRENT_LOGS=%LOGDIR%\current-logs.cmd"
   echo set "WORKBOOK_LOG=%WORKBOOK_OUT%"
   echo set "CADDY_LOG=%CADDY_OUT%"
   echo set "CADDY_ERR_LOG=%CADDY_ERR%"
-  echo set "TUNNEL_LOG=%TUNNEL_OUT%"
-  echo set "TUNNEL_ERR_LOG=%TUNNEL_ERR%"
 ) > "%CURRENT_LOGS%"
 
 set "IT_BACKEND_DIR=%ROOT%\SL_IT\backend"
@@ -82,16 +75,7 @@ if exist "%WORKBOOK_DIR%" (
 
 if exist "%ROOT%\tools\caddy.exe" (
   "%ROOT%\tools\caddy.exe" fmt --overwrite "%ROOT%\Caddyfile" >nul 2>nul
-  call :spawn "%ROOT%" "tools\\caddy.exe run --config Caddyfile --adapter caddyfile" "%CADDY_OUT%" "%CADDY_ERR%" "TUNNEL_HOST=%TUNNEL_HOST%"
-)
-
-if "%START_TUNNEL%"=="1" (
-  where devtunnel >nul 2>nul
-  if %ERRORLEVEL%==0 (
-    call :spawn "%ROOT%" "devtunnel host -p %TUNNEL_PORT%" "%TUNNEL_OUT%" "%TUNNEL_ERR%"
-  ) else (
-    echo devtunnel not found in PATH. Skipping tunnel start.
-  )
+  call :spawn "%ROOT%" "tools\\caddy.exe run --config Caddyfile --adapter caddyfile" "%CADDY_OUT%" "%CADDY_ERR%"
 )
 
 if exist "%ROOT%\monitor.cmd" (
