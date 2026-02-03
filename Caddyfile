@@ -5,6 +5,9 @@
 }
 
 :3000 {
+	@notAllowed not host studiolotushub.in www.studiolotushub.in localhost 127.0.0.1
+	respond @notAllowed 403
+
 	@recApi path /api/rec*
 	handle @recApi {
 		uri replace /api/rec /recruitment/api/rec

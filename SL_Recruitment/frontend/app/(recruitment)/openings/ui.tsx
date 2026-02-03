@@ -29,7 +29,6 @@ export function OpeningsClient({ initialOpenings }: Props) {
   const [requestedByOpen, setRequestedByOpen] = useState(false);
   const [updatingOpening, setUpdatingOpening] = useState<OpeningDetail | null>(null);
 
-  const [code, setCode] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [city, setCity] = useState("Delhi");
@@ -147,41 +146,6 @@ export function OpeningsClient({ initialOpenings }: Props) {
     };
   }, [requestedByQuery, requestedByOpen]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const c = code.trim();
-    if (!c) {
-      setUpdatingOpening(null);
-      return;
-    }
-    const handle = window.setTimeout(() => {
-      (async () => {
-        try {
-          const res = await fetch(`/api/rec/openings/by-code/${encodeURIComponent(c)}`, { cache: "no-store" });
-          if (res.status === 404) {
-            if (!cancelled) setUpdatingOpening(null);
-            return;
-          }
-          if (!res.ok) return;
-          const data = (await res.json()) as OpeningDetail;
-          if (cancelled) return;
-          setUpdatingOpening(data);
-          setTitle((prev) => (prev.trim() ? prev : data.title || prev));
-          setDescription((prev) => (prev.trim() ? prev : data.description || prev));
-          setCity((prev) => (prev.trim() ? prev : data.location_city || prev));
-          setCountry((prev) => (prev.trim() ? prev : data.location_country || prev));
-          setHeadcount((prev) => (prev && prev > 0 ? prev : data.headcount_required ?? 1));
-        } catch {
-          // ignore
-        }
-      })();
-    }, 250);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [code]);
-
   useLayoutEffect(() => {
     if (!requestedByTooltip || !requestedByTooltipRef.current) return;
     const padding = 12;
@@ -216,7 +180,6 @@ export function OpeningsClient({ initialOpenings }: Props) {
     setError(null);
 
     const payload = {
-      opening_code: code.trim() || null,
       title: title.trim(),
       description: description.trim() || null,
       location_city: city.trim() || null,
@@ -226,7 +189,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
       is_active: true,
     };
 
-    const isUpdate = !!(updatingOpening && updatingOpening.opening_code === code.trim());
+    const isUpdate = !!updatingOpening;
 
     const res = await fetch(isUpdate ? `/api/rec/openings/${updatingOpening?.opening_id}` : "/api/rec/openings", {
       method: isUpdate ? "PATCH" : "POST",
@@ -248,7 +211,6 @@ export function OpeningsClient({ initialOpenings }: Props) {
     }
     setCreating(false);
     setUpdatingOpening(null);
-    setCode("");
     setTitle("");
     setDescription("");
     setCity("Delhi");
@@ -319,7 +281,6 @@ export function OpeningsClient({ initialOpenings }: Props) {
       }
       const data = (await res.json()) as OpeningDetail;
       setUpdatingOpening(data);
-      setCode(data.opening_code || "");
       setTitle(data.title || "");
       setDescription(data.description || "");
       setCity(data.location_city || "Delhi");
@@ -358,7 +319,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-tight text-slate-500">Create opening</p>
-              <p className="text-sm text-slate-500">Reuse a code to update an existing role.</p>
+              <p className="text-sm text-slate-500">Opening codes are generated automatically. Use Edit on an existing role to update it.</p>
             </div>
             <button
               className="rounded-full bg-teal-600 px-4 py-2 text-xs font-semibold text-white shadow-card hover:bg-teal-700 disabled:opacity-60"
@@ -370,16 +331,6 @@ export function OpeningsClient({ initialOpenings }: Props) {
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-4">
-            <label className="space-y-1">
-              <span className="text-xs text-slate-600">Opening code</span>
-              <input
-                name="opening_code"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2"
-                placeholder={canEditOpenings ? "Leave blank to auto-generate" : "Leave blank (editing requires Superadmin)"}
-              />
-            </label>
           <label className="space-y-1 md:col-span-2">
             <span className="text-xs text-slate-600">Title</span>
             <input
@@ -479,6 +430,11 @@ export function OpeningsClient({ initialOpenings }: Props) {
             ) : null}
           </div>
         </div>
+        {updatingOpening ? (
+          <p className="mt-2 text-xs text-slate-500">
+            Editing: <span className="font-semibold text-slate-700">{updatingOpening.opening_code}</span> — codes are immutable.
+          </p>
+        ) : null}
           {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
         </form>
       ) : null}
@@ -630,14 +586,6 @@ export function OpeningsClient({ initialOpenings }: Props) {
         : null}
     </main>
   );
-}
-
-function numberOrNull(value: FormDataEntryValue | null) {
-  if (value === null) return null;
-  const s = String(value).trim();
-  if (!s) return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
 }
 
 async function formatApiError(res: Response): Promise<string> {

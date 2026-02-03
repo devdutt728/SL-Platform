@@ -119,36 +119,19 @@ async def submit_caf(
     decision = evaluate_screening(payload, opening_config)
     screening.screening_result = decision
 
-    # Apply stage outcomes
-    if decision == "green":
-        candidate.needs_hr_review = False
-        candidate.status = "in_process"
-        await _transition_from_caf(session, candidate_id=candidate.candidate_id, to_stage="l2_shortlist")
-        await log_event(
-            session,
-            candidate_id=candidate.candidate_id,
-            action_type="screening_auto_advance",
-            performed_by_person_id_platform=None,
-            related_entity_type="candidate",
-            related_entity_id=candidate.candidate_id,
-            meta_json={"to_stage": "l2_shortlist"},
+    candidate.needs_hr_review = decision == "amber"
+    candidate.status = "in_process"
+
+    current_stage = (
+        await session.execute(
+            select(RecCandidateStage.stage_name)
+            .where(RecCandidateStage.candidate_id == candidate.candidate_id, RecCandidateStage.stage_status == "pending")
+            .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
+            .limit(1)
         )
-    elif decision == "red":
-        candidate.needs_hr_review = False
-        candidate.status = "rejected"
-        await _transition_from_caf(session, candidate_id=candidate.candidate_id, to_stage="rejected")
-        await log_event(
-            session,
-            candidate_id=candidate.candidate_id,
-            action_type="screening_auto_reject",
-            performed_by_person_id_platform=None,
-            related_entity_type="candidate",
-            related_entity_id=candidate.candidate_id,
-            meta_json={"to_stage": "rejected"},
-        )
-    else:
-        candidate.needs_hr_review = True
-        candidate.status = "in_process"
+    ).scalar_one_or_none()
+    if current_stage != "hr_screening":
+        await _transition_from_caf(session, candidate_id=candidate.candidate_id, to_stage="hr_screening")
         await log_event(
             session,
             candidate_id=candidate.candidate_id,

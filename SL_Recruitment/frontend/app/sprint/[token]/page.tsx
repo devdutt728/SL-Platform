@@ -67,10 +67,11 @@ function formatFileSize(bytes?: number | null) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default async function SprintPage({ params }: { params: { token: string } }) {
-  const sprint = await fetchSprint(params.token);
+export default async function SprintPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  const sprint = await fetchSprint(token);
   const attachmentBase = sprint
-    ? await internalUrl(`/api/sprint/${encodeURIComponent(params.token)}/attachments`)
+    ? await internalUrl(`/api/sprint/${encodeURIComponent(token)}/attachments`)
     : "";
 
   if (!sprint) {
@@ -147,7 +148,7 @@ export default async function SprintPage({ params }: { params: { token: string }
       </div>
 
       <SprintPublicClient
-        token={params.token}
+        token={token}
         defaultSubmissionUrl={sprint.submission_url}
         initialStatus={sprint.status}
         dueAt={sprint.due_at}

@@ -1,19 +1,23 @@
-import { internalUrl } from "@/lib/internal";
+import { backendUrl } from "@/lib/backend";
 import { OpeningApplyPrefill } from "@/lib/types";
 import { ApplyForm } from "./ui";
 import Image from "next/image";
 import { CheckCircle2, ShieldCheck, Sparkles } from "lucide-react";
 
 async function fetchOpening(openingCode: string) {
-  const res = await fetch(await internalUrl(`/api/apply/${openingCode}`), { cache: "no-store" });
-  if (!res.ok) return null;
+  const url = backendUrl(`/apply/${openingCode}`);
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    return null;
+  }
   return (await res.json()) as OpeningApplyPrefill;
 }
 
-export default async function ApplyPage({ params }: { params: { opening_code: string } }) {
+export default async function ApplyPage({ params }: { params: Promise<{ opening_code: string }> }) {
+  const { opening_code } = await params;
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
   const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
-  const opening = await fetchOpening(params.opening_code);
+  const opening = await fetchOpening(opening_code);
 
   if (!opening) {
     return (

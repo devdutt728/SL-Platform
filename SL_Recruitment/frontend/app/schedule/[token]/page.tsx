@@ -6,15 +6,16 @@ const slots = [
   { day: "Wednesday", times: ["09:30", "14:30", "17:30"] },
 ];
 
-export default async function SchedulePage({ params }: { params: { token: string } }) {
-  await requireCandidateAccess(params.token);
+export default async function SchedulePage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  await requireCandidateAccess(token);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-4 px-4 py-10">
       <div className="section-card">
         <p className="text-xs uppercase tracking-tight text-slate-600">Schedule your interview</p>
         <h1 className="text-2xl font-semibold">Pick a slot</h1>
-        <p className="text-xs text-slate-600">Token: {params.token}</p>
+        <p className="text-xs text-slate-600">Token: {token}</p>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
         {slots.map((slot) => (

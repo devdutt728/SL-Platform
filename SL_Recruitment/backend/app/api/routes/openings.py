@@ -151,7 +151,9 @@ async def create_opening(
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
     now = datetime.utcnow()
-    opening_code = payload.opening_code or _generate_opening_code(payload.title)
+    if payload.opening_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Opening code is auto-generated and cannot be set manually.")
+    opening_code = _generate_opening_code(payload.title)
     # Prevent duplicates: if code already exists, return 409 and let caller PATCH instead
     existing = (
         await session.execute(select(RecOpening).where(RecOpening.opening_code == opening_code).limit(1))
@@ -267,7 +269,9 @@ async def create_opening_request(
 ):
     now = datetime.utcnow()
     requested_by = _platform_person_id(user) or payload.requested_by_person_id_platform
-    opening_code = payload.opening_code or _generate_opening_code(payload.title)
+    if payload.opening_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Opening code is auto-generated and cannot be set manually.")
+    opening_code = _generate_opening_code(payload.title)
     opening = RecOpening(
         opening_code=opening_code,
         title=payload.title,
@@ -354,6 +358,8 @@ async def update_opening(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opening not found")
 
     updates = payload.model_dump(exclude_none=True)
+    if "opening_code" in updates:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Opening code cannot be edited.")
     is_superadmin = (user.platform_role_id or None) == 2
 
     # HR can only deactivate an opening (no activate, no editing fields).

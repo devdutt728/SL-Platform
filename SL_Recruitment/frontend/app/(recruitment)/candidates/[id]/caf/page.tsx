@@ -39,8 +39,9 @@ function labelValue(label: string, value: string) {
   );
 }
 
-export default async function CandidateCafPage({ params }: { params: { id: string } }) {
-  const [full, me] = await Promise.all([fetchCandidateFull(params.id), fetchMe()]);
+export default async function CandidateCafPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const [full, me] = await Promise.all([fetchCandidateFull(id), fetchMe()]);
   if (!full) notFound();
 
   const candidate = full.candidate;
@@ -60,7 +61,7 @@ export default async function CandidateCafPage({ params }: { params: { id: strin
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/candidates/${encodeURIComponent(params.id)}`}
+              href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/candidates/${encodeURIComponent(id)}`}
               className="rounded-full border border-slate-200 bg-white/70 px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-white"
             >
               Back

@@ -58,11 +58,12 @@ export function Sidebar() {
   const guards = useMemo(() => {
     const normalized = roles.map((role) => role.toLowerCase());
     const has = (value: string) => normalized.includes(value);
-    const isHr = has("hr_admin") || has("hr_exec");
+    const isHrAdmin = has("hr_admin");
+    const isHr = isHrAdmin || has("hr_exec");
     const isInterviewer = has("interviewer") || isHr;
     const isGl = has("hiring_manager") || has("gl") || isHr;
     const canOffers = has("approver") || isHr;
-    const canReports = isHr || has("approver");
+    const canReports = isHrAdmin;
     return {
       all: true,
       hr: isHr,

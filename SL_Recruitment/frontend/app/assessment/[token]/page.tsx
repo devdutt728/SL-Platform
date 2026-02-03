@@ -8,8 +8,9 @@ async function fetchPrefill(token: string) {
   return (await res.json()) as CandidateAssessmentPrefill;
 }
 
-export default async function AssessmentPage({ params }: { params: { token: string } }) {
-  const prefill = await fetchPrefill(params.token);
+export default async function AssessmentPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  const prefill = await fetchPrefill(token);
 
   if (!prefill) {
     return (
@@ -51,7 +52,7 @@ export default async function AssessmentPage({ params }: { params: { token: stri
         ) : null}
       </div>
 
-      <AssessmentForm token={params.token} prefill={prefill} />
+      <AssessmentForm token={token} prefill={prefill} />
     </main>
   );
 }

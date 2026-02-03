@@ -82,6 +82,21 @@ def _decode_letter_overrides(raw: str | None) -> dict[str, str]:
     return cleaned
 
 
+def _label_yes_no(value: bool | None) -> str:
+    if value is None:
+        return "—"
+    return "Yes" if value else "No"
+
+
+def _label_date(value) -> str:
+    if value is None:
+        return "—"
+    try:
+        return value.isoformat()
+    except Exception:
+        return str(value)
+
+
 async def _ensure_offer_token(session: AsyncSession, offer: RecCandidateOffer) -> None:
     if offer.public_token:
         return
@@ -123,11 +138,18 @@ async def _delete_candidate_with_dependents(session: AsyncSession, candidate: Re
             continue
     if delete_drive:
         try:
-            await anyio.to_thread.run_sync(
-                delete_candidate_folder,
-                candidate_code=candidate.candidate_code,
-                folder_id=candidate.drive_folder_id,
-            )
+            # Try all buckets to catch folders that were moved post-creation.
+            deleted = 0
+            for bucket in ["Ongoing", "Appointed", "Not Appointed"]:
+                deleted += await anyio.to_thread.run_sync(
+                    lambda: delete_candidate_folder(
+                        candidate_code=candidate.candidate_code,
+                        folder_id=candidate.drive_folder_id,
+                        bucket=bucket,  # type: ignore[arg-type]
+                    )
+                )
+            if deleted == 0 and candidate.drive_folder_id:
+                logger.warning("Drive delete attempted but nothing removed for candidate_id=%s", cid)
         except Exception as exc:
             logger.warning("Drive delete failed for candidate_id=%s: %s", cid, exc)
     await session.delete(candidate)
@@ -198,23 +220,15 @@ async def create_candidate(
     candidate.candidate_code = _candidate_code(candidate.candidate_id)
     await session.flush()
 
-    # Initial stage rows: enquiry (completed) -> hr_screening (pending)
+    # Initial stage row: enquiry (pending)
     enquiry = RecCandidateStage(
         candidate_id=candidate.candidate_id,
         stage_name="enquiry",
-        stage_status="completed",
-        started_at=now,
-        ended_at=now,
-        created_at=now,
-    )
-    hr_screening = RecCandidateStage(
-        candidate_id=candidate.candidate_id,
-        stage_name="hr_screening",
         stage_status="pending",
         started_at=now,
         created_at=now,
     )
-    session.add_all([enquiry, hr_screening])
+    session.add(enquiry)
 
     await log_event(
         session,
@@ -242,16 +256,6 @@ async def create_candidate(
     )
 
     caf_link = build_public_link(f"/caf/{candidate.caf_token}")
-    await send_email(
-        session,
-        candidate_id=candidate.candidate_id,
-        to_emails=[candidate.email],
-        subject="Complete your Candidate Application Form",
-        template_name="caf_link",
-        context={"candidate_name": candidate.full_name, "caf_link": caf_link},
-        email_type="caf_link",
-        meta_extra={"caf_token": candidate.caf_token},
-    )
 
     assessment = RecCandidateAssessment(
         candidate_id=candidate.candidate_id,
@@ -272,18 +276,31 @@ async def create_candidate(
     )
 
     assessment_link = build_public_link(f"/assessment/{assessment.assessment_token}")
+
+    screening = (
+        await session.execute(
+            select(RecCandidateScreening).where(RecCandidateScreening.candidate_id == candidate.candidate_id)
+        )
+    ).scalars().first()
     await send_email(
         session,
         candidate_id=candidate.candidate_id,
         to_emails=[candidate.email],
-        subject="Complete your Candidate Assessment Form (CAF)",
-        template_name="assessment_link",
+        subject="Your Studio Lotus application links",
+        template_name="application_links",
         context={
             "candidate_name": candidate.full_name,
+            "candidate_code": candidate.candidate_code,
+            "caf_link": caf_link,
             "assessment_link": assessment_link,
+            "candidate_email": candidate.email,
+            "candidate_phone": candidate.phone or "—",
+            "willing_to_relocate": _label_yes_no(screening.willing_to_relocate) if screening else "—",
+            "two_year_commitment": _label_yes_no(screening.two_year_commitment) if screening else "—",
+            "expected_joining_date": _label_date(screening.expected_joining_date) if screening else "—",
         },
-        email_type="assessment_link",
-        meta_extra={"assessment_token": assessment.assessment_token},
+        email_type="application_links",
+        meta_extra={"caf_token": candidate.caf_token, "assessment_token": assessment.assessment_token},
     )
 
     # Drive folder creation
@@ -311,8 +328,8 @@ async def create_candidate(
         related_entity_type="candidate",
         related_entity_id=candidate.candidate_id,
         from_status=None,
-        to_status="hr_screening",
-        meta_json={"from_stage": None, "to_stage": "hr_screening", "reason": "system_init", "performed_by_email": user.email},
+        to_status="enquiry",
+        meta_json={"from_stage": None, "to_stage": "enquiry", "reason": "system_init", "performed_by_email": user.email},
     )
 
     await session.commit()
@@ -332,7 +349,7 @@ async def create_candidate(
         opening_id=candidate.opening_id,
         opening_title=opening_title,
         status=candidate.status,
-        current_stage="hr_screening",
+        current_stage="enquiry",
         final_decision=candidate.final_decision,
         hired_person_id_platform=candidate.hired_person_id_platform,
         cv_url=candidate.cv_url,
@@ -588,9 +605,6 @@ async def upsert_candidate_screening(
     for key, value in data.items():
         setattr(screening, key, value)
     screening.updated_at = now
-
-    if candidate.caf_submitted_at is None:
-        candidate.caf_submitted_at = now
 
     opening_config = get_opening_config(candidate.opening_id)
     decision = evaluate_screening(payload, opening_config)
@@ -881,6 +895,12 @@ async def transition_stage(
     if (payload.decision or "").lower() == "skip" or (payload.note or "").lower() == "superadmin_skip":
         if (user.platform_role_id or None) != 2:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Skip is restricted to Superadmin.")
+    if candidate.caf_submitted_at is None and payload.to_stage not in {"enquiry", "hr_screening", "caf"}:
+        if (user.platform_role_id or None) != 2:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="CAF must be submitted before advancing to further rounds.",
+            )
 
     now = datetime.utcnow()
     current_stage_row = (

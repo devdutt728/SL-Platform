@@ -30,8 +30,9 @@ async function fetchMe(): Promise<Me | null> {
   }
 }
 
-export default async function CandidateDetailPage({ params }: { params: { id: string } }) {
-  const [full, me] = await Promise.all([fetchCandidateFull(params.id), fetchMe()]);
+export default async function CandidateDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const [full, me] = await Promise.all([fetchCandidateFull(id), fetchMe()]);
   if (!full) notFound();
   const canDelete = (me?.platform_role_id ?? null) === 2 || (me?.platform_role_code ?? "").trim() === "2";
   const roles = (me?.roles || []).map((role) => String(role).toLowerCase());
@@ -56,7 +57,7 @@ export default async function CandidateDetailPage({ params }: { params: { id: st
 
   return (
     <Candidate360Client
-      candidateId={params.id}
+      candidateId={id}
       initial={full}
       canDelete={canDelete}
       canSchedule={canSchedule}

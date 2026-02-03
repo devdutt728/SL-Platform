@@ -666,6 +666,22 @@ async def propose_interview_slots(
         detail = "Interview already scheduled. Only Superadmin can schedule again." if not is_superadmin else "Interview already scheduled."
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
+    now_utc = datetime.utcnow()
+    active_slots_query = select(func.max(RecCandidateInterviewSlot.expires_at)).where(
+        RecCandidateInterviewSlot.candidate_id == candidate_id,
+        RecCandidateInterviewSlot.round_type == payload.round_type,
+        RecCandidateInterviewSlot.status.in_(["proposed", "reserved"]),
+        or_(RecCandidateInterviewSlot.expires_at.is_(None), RecCandidateInterviewSlot.expires_at > now_utc),
+    )
+    active_slots_expiry = (await session.execute(active_slots_query)).scalar_one_or_none()
+    if active_slots_expiry and not _is_superadmin(user):
+        tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
+        expiry_local = active_slots_expiry.replace(tzinfo=timezone.utc).astimezone(tz).strftime("%d %b %Y, %I:%M %p %Z")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Slot invite already sent. It expires on {expiry_local}. Only Superadmin can resend before expiry.",
+        )
+
     tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
     start_day = payload.start_date or datetime.now(tz).date()
     free_slots = filter_free_slots(interviewer_email=interviewer_email, start_day=start_day, tz=tz)
@@ -676,7 +692,6 @@ async def propose_interview_slots(
     if candidate.opening_id is not None:
         opening = (await session.execute(select(RecOpening).where(RecOpening.opening_id == candidate.opening_id))).scalars().first()
 
-    now_utc = datetime.utcnow()
     batch_id = build_selection_token()
     last_slot_end = (free_slots[-1].end_at.astimezone(timezone.utc)).replace(tzinfo=None)
     ttl_floor = datetime.utcnow() + timedelta(hours=settings.public_link_ttl_hours)
@@ -759,6 +774,51 @@ async def propose_interview_slots(
         )
         for slot in slots
     ]
+
+
+class InterviewSlotCancelIn(BaseModel):
+    round_type: str
+
+
+@router.post("/candidates/{candidate_id}/interview-slots/cancel", response_model=dict)
+async def cancel_interview_slots(
+    candidate_id: int,
+    payload: InterviewSlotCancelIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    if not _valid_round_type(payload.round_type):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only L1/L2 rounds are supported")
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+
+    now_utc = datetime.utcnow()
+    result = await session.execute(
+        RecCandidateInterviewSlot.__table__.update()
+        .where(
+            RecCandidateInterviewSlot.candidate_id == candidate_id,
+            RecCandidateInterviewSlot.round_type == payload.round_type,
+            RecCandidateInterviewSlot.status.in_(["proposed", "reserved"]),
+        )
+        .values(status="expired", updated_at=now_utc)
+    )
+    cancelled = result.rowcount or 0
+    if cancelled == 0:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No active slot invite to cancel.")
+
+    await log_event(
+        session,
+        candidate_id=candidate_id,
+        action_type="interview_slot_invite_cancelled",
+        performed_by_person_id_platform=_platform_person_id_int(user),
+        related_entity_type="interview_slot",
+        related_entity_id=None,
+        meta_json={"round_type": payload.round_type, "count": cancelled},
+    )
+
+    await session.commit()
+    return {"candidate_id": candidate_id, "round_type": payload.round_type, "cancelled": cancelled}
 
 
 @router.get("/interview-slots/preview", response_model=list[InterviewSlotPreviewOut])

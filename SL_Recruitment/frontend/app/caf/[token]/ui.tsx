@@ -1,17 +1,45 @@
 "use client";
 
 import { useState } from "react";
-import { CafPrefill } from "@/lib/types";
+import { CafPrefill, Screening } from "@/lib/types";
 
 type CafFormProps = {
   token: string;
   prefill: CafPrefill;
+  screening?: Screening | null;
 };
 
-export function CafForm({ token, prefill }: CafFormProps) {
+export function CafForm({ token, prefill, screening }: CafFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const relocateLocked = screening?.willing_to_relocate !== null && screening?.willing_to_relocate !== undefined;
+  const commitmentLocked = screening?.two_year_commitment !== null && screening?.two_year_commitment !== undefined;
+  const joiningLocked = screening?.expected_joining_date != null;
+  const relocateValue =
+    screening?.willing_to_relocate == null ? "" : screening.willing_to_relocate ? "yes" : "no";
+  const commitmentValue =
+    screening?.two_year_commitment == null ? "" : screening.two_year_commitment ? "yes" : "no";
+  const joiningValue = screening?.expected_joining_date ? formatDateInput(screening.expected_joining_date) : "";
+  const readOnlyMode = Boolean(
+    prefill.caf_submitted_at ||
+      screening?.current_city ||
+      screening?.current_employer ||
+      screening?.total_experience_years != null ||
+      screening?.relevant_experience_years != null ||
+      screening?.current_ctc_annual != null ||
+      screening?.expected_ctc_annual != null ||
+      screening?.willing_to_relocate != null ||
+      screening?.two_year_commitment != null ||
+      screening?.notice_period_days != null ||
+      screening?.expected_joining_date != null ||
+      screening?.reason_for_job_change ||
+      screening?.relocation_notes ||
+      screening?.questions_from_candidate
+  );
+  const readonlyFieldClass = readOnlyMode
+    ? "bg-slate-100/70 text-slate-500 cursor-not-allowed"
+    : "bg-transparent";
 
   async function onSubmit(formData: FormData) {
     setSubmitting(true);
@@ -74,6 +102,7 @@ export function CafForm({ token, prefill }: CafFormProps) {
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] p-3">
         <p className="text-sm font-semibold">{prefill.name}</p>
         <p className="text-xs text-[var(--text-secondary)]">{prefill.email}</p>
+        <p className="text-xs text-[var(--text-secondary)]">{prefill.phone || "—"}</p>
       </div>
 
       <section className="space-y-3">
@@ -82,14 +111,18 @@ export function CafForm({ token, prefill }: CafFormProps) {
           <Field label="Current City">
             <input
               name="current_city"
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              defaultValue={screening?.current_city || ""}
+              disabled={readOnlyMode}
+              className={`w-full rounded-xl border border-[var(--border)] px-3 py-2 ${readonlyFieldClass}`}
               placeholder="Delhi"
             />
           </Field>
           <Field label="Current Employer (if any)">
             <input
               name="current_employer"
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              defaultValue={screening?.current_employer || ""}
+              disabled={readOnlyMode}
+              className={`w-full rounded-xl border border-[var(--border)] px-3 py-2 ${readonlyFieldClass}`}
               placeholder="Company name"
             />
           </Field>
@@ -102,7 +135,9 @@ export function CafForm({ token, prefill }: CafFormProps) {
           <Field label="Total experience (years)">
             <input
               name="total_experience_years"
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              defaultValue={screening?.total_experience_years ?? ""}
+              disabled={readOnlyMode}
+              className={`w-full rounded-xl border border-[var(--border)] px-3 py-2 ${readonlyFieldClass}`}
               type="number"
               step="0.1"
               placeholder="5.5"
@@ -111,7 +146,9 @@ export function CafForm({ token, prefill }: CafFormProps) {
           <Field label="Relevant experience (years)">
             <input
               name="relevant_experience_years"
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              defaultValue={screening?.relevant_experience_years ?? ""}
+              disabled={readOnlyMode}
+              className={`w-full rounded-xl border border-[var(--border)] px-3 py-2 ${readonlyFieldClass}`}
               type="number"
               step="0.1"
               placeholder="3.0"
@@ -126,7 +163,9 @@ export function CafForm({ token, prefill }: CafFormProps) {
           <Field label="Current CTC (annual)">
             <input
               name="current_ctc_annual"
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              defaultValue={screening?.current_ctc_annual ?? ""}
+              disabled={readOnlyMode}
+              className={`w-full rounded-xl border border-[var(--border)] px-3 py-2 ${readonlyFieldClass}`}
               type="number"
               step="0.01"
               placeholder="1200000"
@@ -135,7 +174,9 @@ export function CafForm({ token, prefill }: CafFormProps) {
           <Field label="Expected CTC (annual)">
             <input
               name="expected_ctc_annual"
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              defaultValue={screening?.expected_ctc_annual ?? ""}
+              disabled={readOnlyMode}
+              className={`w-full rounded-xl border border-[var(--border)] px-3 py-2 ${readonlyFieldClass}`}
               type="number"
               step="0.01"
               placeholder="1600000"
@@ -148,7 +189,12 @@ export function CafForm({ token, prefill }: CafFormProps) {
         <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Availability</p>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Willing to relocate?">
-            <select name="willing_to_relocate" className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2">
+            <select
+              name="willing_to_relocate"
+              defaultValue={relocateValue}
+              disabled={readOnlyMode || relocateLocked}
+              className={`w-full rounded-xl border border-[var(--border)] px-3 py-2 disabled:opacity-70 ${readonlyFieldClass}`}
+            >
               <option value="">Select</option>
               <option value="yes">Yes</option>
               <option value="no">No</option>
@@ -158,7 +204,9 @@ export function CafForm({ token, prefill }: CafFormProps) {
             <select
               name="two_year_commitment"
               required
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              defaultValue={commitmentValue}
+              disabled={readOnlyMode || commitmentLocked}
+              className={`w-full rounded-xl border border-[var(--border)] px-3 py-2 disabled:opacity-70 ${readonlyFieldClass}`}
             >
               <option value="">Select</option>
               <option value="yes">Yes</option>
@@ -168,7 +216,9 @@ export function CafForm({ token, prefill }: CafFormProps) {
           <Field label="Notice period (days)">
             <input
               name="notice_period_days"
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              defaultValue={screening?.notice_period_days ?? ""}
+              disabled={readOnlyMode}
+              className={`w-full rounded-xl border border-[var(--border)] px-3 py-2 ${readonlyFieldClass}`}
               type="number"
               placeholder="30"
             />
@@ -176,14 +226,18 @@ export function CafForm({ token, prefill }: CafFormProps) {
           <Field label="Expected joining date">
             <input
               name="expected_joining_date"
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              className={`w-full rounded-xl border border-[var(--border)] px-3 py-2 ${readonlyFieldClass}`}
               type="date"
+              defaultValue={joiningValue}
+              disabled={readOnlyMode || joiningLocked}
             />
           </Field>
           <Field label="Relocation notes (optional)">
             <input
               name="relocation_notes"
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              defaultValue={screening?.relocation_notes || ""}
+              disabled={readOnlyMode}
+              className={`w-full rounded-xl border border-[var(--border)] px-3 py-2 ${readonlyFieldClass}`}
               placeholder="Any constraints"
             />
           </Field>
@@ -195,32 +249,38 @@ export function CafForm({ token, prefill }: CafFormProps) {
         <Field label="Reason for Job Change">
           <textarea
             name="reason_for_job_change"
-            className="min-h-20 w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+            defaultValue={screening?.reason_for_job_change || ""}
+            disabled={readOnlyMode}
+            className={`min-h-20 w-full rounded-xl border border-[var(--border)] px-3 py-2 ${readonlyFieldClass}`}
             placeholder="Briefly share why you are exploring a change"
           />
         </Field>
         <Field label="Anything you’d like us to know?">
           <textarea
             name="questions_from_candidate"
-            className="min-h-24 w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+            defaultValue={screening?.questions_from_candidate || ""}
+            disabled={readOnlyMode}
+            className={`min-h-24 w-full rounded-xl border border-[var(--border)] px-3 py-2 ${readonlyFieldClass}`}
             placeholder="Portfolio highlights, preferences, questions..."
           />
         </Field>
       </section>
 
-      {error && (
+      {error && !readOnlyMode && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
           {error}
         </div>
       )}
 
-      <button
-        className="w-full rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-teal-700 disabled:opacity-60"
-        type="submit"
-        disabled={submitting}
-      >
-        {submitting ? "Submitting..." : "Submit CAF"}
-      </button>
+      {!readOnlyMode ? (
+        <button
+          className="w-full rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-teal-700 disabled:opacity-60"
+          type="submit"
+          disabled={submitting}
+        >
+          {submitting ? "Submitting..." : "Submit CAF"}
+        </button>
+      ) : null}
     </form>
   );
 }
@@ -254,4 +314,11 @@ function boolOrNull(value: FormDataEntryValue | null) {
   if (s === "yes") return true;
   if (s === "no") return false;
   return null;
+}
+
+function formatDateInput(value: string) {
+  const raw = value.trim();
+  if (!raw) return "";
+  if (raw.includes("T")) return raw.split("T")[0];
+  return raw;
 }

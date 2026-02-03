@@ -8,6 +8,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
+from app.middleware.internal_guard import InternalGuardMiddleware
 from app.middleware.logging import RequestLoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_context import RequestContextMiddleware
@@ -31,6 +32,11 @@ def create_app() -> FastAPI:
 
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(
+        InternalGuardMiddleware,
+        api_key=settings.internal_api_key,
+        allow_localhost=settings.internal_api_allow_localhost,
+    )
     app.add_middleware(
         RateLimitMiddleware,
         limit=settings.auth_rate_limit_per_min,

@@ -155,6 +155,21 @@ def _date_or_none(raw: str | None):
         return None
 
 
+def _label_yes_no(value: bool | None) -> str:
+    if value is None:
+        return "—"
+    return "Yes" if value else "No"
+
+
+def _label_date(value) -> str:
+    if value is None:
+        return "—"
+    try:
+        return value.isoformat()
+    except Exception:
+        return str(value)
+
+
 async def _transition_from_caf(session: AsyncSession, *, candidate_id: int, to_stage: str) -> None:
     now = datetime.utcnow()
     current = (
@@ -506,19 +521,11 @@ async def apply_for_opening(
     enquiry = RecCandidateStage(
         candidate_id=candidate.candidate_id,
         stage_name="enquiry",
-        stage_status="completed",
-        started_at=now,
-        ended_at=now,
-        created_at=now,
-    )
-    hr_screening = RecCandidateStage(
-        candidate_id=candidate.candidate_id,
-        stage_name="hr_screening",
         stage_status="pending",
         started_at=now,
         created_at=now,
     )
-    session.add_all([enquiry, hr_screening])
+    session.add(enquiry)
 
     await log_event(
         session,
@@ -546,16 +553,6 @@ async def apply_for_opening(
     )
 
     caf_link = build_public_link(f"/caf/{caf_token}")
-    await send_email(
-        session,
-        candidate_id=candidate.candidate_id,
-        to_emails=[candidate.email],
-        subject="Complete your Candidate Application Form",
-        template_name="caf_link",
-        context={"candidate_name": candidate.full_name, "caf_link": caf_link},
-        email_type="caf_link",
-        meta_extra={"caf_token": caf_token},
-    )
 
     assessment = RecCandidateAssessment(
         candidate_id=candidate.candidate_id,
@@ -576,19 +573,6 @@ async def apply_for_opening(
     )
 
     assessment_link = build_public_link(f"/assessment/{assessment.assessment_token}")
-    await send_email(
-        session,
-        candidate_id=candidate.candidate_id,
-        to_emails=[candidate.email],
-        subject="Complete your Candidate Assessment Form (CAF)",
-        template_name="assessment_link",
-        context={
-            "candidate_name": candidate.full_name,
-            "assessment_link": assessment_link,
-        },
-        email_type="assessment_link",
-        meta_extra={"assessment_token": assessment.assessment_token},
-    )
 
     # Drive folder creation (required)
     drive_folder_id: str | None = None
@@ -719,7 +703,7 @@ async def apply_for_opening(
     candidate.application_docs_status = "complete" if (cv_url or portfolio_url) else "none"
     candidate.linkedin_url = linkedin or None
 
-    # Auto-submit CAF data from the same form
+    # Optionally capture screening data from the same form (do not mark CAF submitted here).
     screening_data = {
         "current_city": (current_city or "").strip() or None,
         "current_employer": (current_employer or "").strip() or None,
@@ -739,7 +723,7 @@ async def apply_for_opening(
     }
 
     decision: str | None = None
-    # If any screening field is provided, upsert CAF and evaluate
+    # If any screening field is provided, upsert screening but do not mark CAF submitted.
     if any(value is not None for value in screening_data.values()):
         screening = (
             await session.execute(
@@ -753,34 +737,12 @@ async def apply_for_opening(
         for key, value in screening_data.items():
             setattr(screening, key, value)
         screening.updated_at = now
-        candidate.caf_submitted_at = now
 
         opening_config = get_opening_config(candidate.opening_id)
         screening_input = ScreeningUpsertIn(**screening_data)
         decision = evaluate_screening(screening_input, opening_config)
         screening.screening_result = decision
-
-        if decision == "green":
-            candidate.needs_hr_review = False
-            candidate.status = "in_process"
-            await _transition_from_caf(session, candidate_id=candidate.candidate_id, to_stage="l2")
-        elif decision == "red":
-            candidate.needs_hr_review = False
-            candidate.status = "rejected"
-            await _transition_from_caf(session, candidate_id=candidate.candidate_id, to_stage="rejected")
-        else:
-            candidate.needs_hr_review = True
-            candidate.status = "in_process"
-
-        await log_event(
-            session,
-            candidate_id=candidate.candidate_id,
-            action_type="caf_submitted",
-            performed_by_person_id_platform=None,
-            related_entity_type="candidate",
-            related_entity_id=candidate.candidate_id,
-            meta_json={"screening_result": decision},
-        )
+        candidate.needs_hr_review = decision == "amber"
 
     response_payload = PublicApplyOut(
         candidate_id=candidate.candidate_id,
@@ -790,6 +752,27 @@ async def apply_for_opening(
         screening_result=decision,
         already_applied=False,
     ).model_dump()
+
+    await send_email(
+        session,
+        candidate_id=candidate.candidate_id,
+        to_emails=[candidate.email],
+        subject="Your Studio Lotus application links",
+        template_name="application_links",
+        context={
+            "candidate_name": candidate.full_name,
+            "candidate_code": candidate.candidate_code,
+            "caf_link": caf_link,
+            "assessment_link": assessment_link,
+            "candidate_email": candidate.email,
+            "candidate_phone": candidate.phone or "—",
+            "willing_to_relocate": _label_yes_no(screening_data.get("willing_to_relocate")),
+            "two_year_commitment": _label_yes_no(screening_data.get("two_year_commitment")),
+            "expected_joining_date": _label_date(screening_data.get("expected_joining_date")),
+        },
+        email_type="application_links",
+        meta_extra={"caf_token": caf_token, "assessment_token": assessment.assessment_token},
+    )
 
     idem.status_code = status.HTTP_201_CREATED
     idem.response_json = json.dumps(response_payload, ensure_ascii=True)

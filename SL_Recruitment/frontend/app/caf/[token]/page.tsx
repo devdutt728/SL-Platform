@@ -14,8 +14,9 @@ async function fetchScreening(token: string) {
   return (await res.json()) as Screening;
 }
 
-export default async function CafPage({ params }: { params: { token: string } }) {
-  const prefill = await fetchPrefill(params.token);
+export default async function CafPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  const prefill = await fetchPrefill(token);
 
   if (!prefill) {
     return (
@@ -29,8 +30,9 @@ export default async function CafPage({ params }: { params: { token: string } })
     );
   }
 
+  const screening = await fetchScreening(token);
+
   if (prefill.caf_submitted_at) {
-    const screening = await fetchScreening(params.token);
     return (
       <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 px-4 py-10">
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-strong)]/70 p-6 shadow-card">
@@ -126,7 +128,7 @@ export default async function CafPage({ params }: { params: { token: string } })
         ) : null}
       </div>
 
-      <CafForm token={params.token} prefill={prefill} />
+      <CafForm token={token} prefill={prefill} screening={screening} />
     </main>
   );
 }

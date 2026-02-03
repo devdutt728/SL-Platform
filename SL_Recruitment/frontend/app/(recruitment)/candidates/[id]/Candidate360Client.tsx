@@ -524,6 +524,8 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [interviewsBusy, setInterviewsBusy] = useState(false);
   const [interviewsError, setInterviewsError] = useState<string | null>(null);
   const [interviewsNotice, setInterviewsNotice] = useState<string | null>(null);
+  const [slotInviteRound, setSlotInviteRound] = useState<string | null>(null);
+  const [slotInviteCancelBusy, setSlotInviteCancelBusy] = useState(false);
   const [expandedInterviewId, setExpandedInterviewId] = useState<number | null>(null);
   const [rescheduleInterviewId, setRescheduleInterviewId] = useState<number | null>(null);
   const [scheduleEmailPreviewOpen, setScheduleEmailPreviewOpen] = useState(false);
@@ -1244,6 +1246,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   async function handleSendSlotInvite() {
     setInterviewsError(null);
     setInterviewsNotice(null);
+    setSlotInviteRound(null);
     if (!scheduleInterviewer) {
       setInterviewsError("Select an interviewer.");
       return;
@@ -1270,13 +1273,51 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         }),
       });
       if (!res.ok) {
-        throw new Error(await res.text());
+        const raw = (await res.text()).trim();
+        let detail = raw;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object" && "detail" in parsed && typeof (parsed as any).detail === "string") {
+            detail = (parsed as any).detail;
+          }
+        } catch {
+          // ignore
+        }
+        if (res.status === 409) {
+          setInterviewsNotice(detail || "Slot invite already sent. Please wait for it to expire.");
+          setSlotInviteRound(roundUpper);
+          return;
+        }
+        throw new Error(detail || "Could not send slot invite.");
       }
       setInterviewsNotice("Slot invite email sent to the candidate.");
     } catch (e: any) {
       setInterviewsError(e?.message || "Could not send slot invite.");
     } finally {
       setSlotInviteBusy(false);
+    }
+  }
+
+  async function handleCancelSlotInvite() {
+    if (!slotInviteRound) return;
+    setSlotInviteCancelBusy(true);
+    setInterviewsError(null);
+    setInterviewsNotice(null);
+    try {
+      const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/interview-slots/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ round_type: slotInviteRound }),
+      });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      setInterviewsNotice("Slot invite cancelled. You can send a new invite now.");
+      setSlotInviteRound(null);
+    } catch (e: any) {
+      setInterviewsError(e?.message || "Could not cancel slot invite.");
+    } finally {
+      setSlotInviteCancelBusy(false);
     }
   }
 
@@ -2449,6 +2490,19 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                 {interviewsNotice ? (
                   <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
                     {interviewsNotice}
+                  </div>
+                ) : null}
+                {slotInviteRound ? (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <span>Slot invite already active for {slotInviteRound}. Cancel it to send a new one.</span>
+                    <button
+                      type="button"
+                      onClick={handleCancelSlotInvite}
+                      disabled={slotInviteCancelBusy}
+                      className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-60"
+                    >
+                      {slotInviteCancelBusy ? "Cancelling..." : "Cancel invite"}
+                    </button>
                   </div>
                 ) : null}
 

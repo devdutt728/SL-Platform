@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     auth_mode: Literal["dev", "google"] = "dev"
     auth_rate_limit_per_min: int = 60
     auth_rate_limit_window_seconds: int = 60
+    internal_api_key: str = ""
+    internal_api_allow_localhost: bool = True
 
     google_client_id: str = ""
     google_client_secret: str = ""

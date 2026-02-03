@@ -168,7 +168,8 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
               name="position_applied_for"
               defaultValue={prefill.opening_title || ""}
               required
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              readOnly
+              className="w-full rounded-xl border border-[var(--border)] bg-slate-100/70 px-3 py-2 text-slate-500"
             />
           </Field>
           <Field label="Total experience (years)">
@@ -194,7 +195,8 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
               name="personal_email"
               defaultValue={prefill.email || ""}
               required
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              readOnly
+              className="w-full rounded-xl border border-[var(--border)] bg-slate-100/70 px-3 py-2 text-slate-500"
             />
           </Field>
           <Field label="Contact number">
@@ -202,7 +204,8 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
               name="contact_number"
               defaultValue={prefill.phone || ""}
               required
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              readOnly
+              className="w-full rounded-xl border border-[var(--border)] bg-slate-100/70 px-3 py-2 text-slate-500"
             />
           </Field>
           <Field label="Current employment status">
