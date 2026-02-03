@@ -29,7 +29,7 @@
 	}
 
 	handle /recruitment/interview/slots* {
-		uri replace /recruitment /recruitment
+		uri replace /recruitment ""
 		reverse_proxy localhost:8002 {
 			header_up X-Original-Host {hostport}
 			header_up X-Original-Proto {scheme}
