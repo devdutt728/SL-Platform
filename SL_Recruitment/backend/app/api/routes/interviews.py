@@ -33,6 +33,7 @@ from app.services.platform_identity import active_status_filter
 from app.services.calendar import create_calendar_event, delete_calendar_event, query_freebusy, update_calendar_event
 from app.services.calendar import list_calendar_events, list_calendar_list_details, list_visible_calendar_ids, service_account_info
 from app.services.email import render_template, send_email
+from app.services.public_links import build_public_link
 from app.services.events import log_event
 from app.services.interview_slots import (
     build_selection_token,
@@ -302,7 +303,7 @@ async def _render_slot_conflict(
             status_code=200,
         )
 
-    base_url = str(request.base_url).rstrip("/")
+    base_url = build_public_link("").rstrip("/") or str(request.base_url).rstrip("/")
     slots_html = "\n".join(
         f'<li class="slot"><span>{_format_slot_label(r.slot_start_at, tz)}</span>'
         f'<a href="{_public_slot_link(base_url, build_signed_selection_token(r.selection_token))}">Select</a></li>'
@@ -819,6 +820,37 @@ async def cancel_interview_slots(
 
     await session.commit()
     return {"candidate_id": candidate_id, "round_type": payload.round_type, "cancelled": cancelled}
+
+
+@router.get("/candidates/{candidate_id}/interview-slots/active", response_model=dict)
+async def get_active_interview_slot_invites(
+    candidate_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    now_utc = datetime.utcnow()
+    rows = await session.execute(
+        select(
+            RecCandidateInterviewSlot.round_type,
+            func.max(RecCandidateInterviewSlot.expires_at).label("expires_at"),
+            func.count(RecCandidateInterviewSlot.candidate_interview_slot_id).label("count"),
+        )
+        .where(
+            RecCandidateInterviewSlot.candidate_id == candidate_id,
+            RecCandidateInterviewSlot.status.in_(["proposed", "reserved"]),
+            or_(RecCandidateInterviewSlot.expires_at.is_(None), RecCandidateInterviewSlot.expires_at > now_utc),
+        )
+        .group_by(RecCandidateInterviewSlot.round_type)
+    )
+    active = [
+        {
+            "round_type": row.round_type,
+            "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+            "count": int(row.count or 0),
+        }
+        for row in rows.all()
+    ]
+    return {"candidate_id": candidate_id, "active_invites": active}
 
 
 @router.get("/interview-slots/preview", response_model=list[InterviewSlotPreviewOut])

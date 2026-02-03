@@ -89,6 +89,11 @@ function formatDateTime(raw?: string | null) {
   });
 }
 
+function formatInviteExpiry(raw?: string | null) {
+  if (!raw) return "No expiry";
+  return formatDateTime(raw) || raw;
+}
+
 function formatDate(raw?: string | null) {
   if (!raw) return "";
   const d = parseDateUtc(raw);
@@ -526,6 +531,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [interviewsNotice, setInterviewsNotice] = useState<string | null>(null);
   const [slotInviteRound, setSlotInviteRound] = useState<string | null>(null);
   const [slotInviteCancelBusy, setSlotInviteCancelBusy] = useState(false);
+  const [activeSlotInvites, setActiveSlotInvites] = useState<
+    { round_type: string; expires_at: string | null; count: number }[]
+  >([]);
   const [expandedInterviewId, setExpandedInterviewId] = useState<number | null>(null);
   const [rescheduleInterviewId, setRescheduleInterviewId] = useState<number | null>(null);
   const [scheduleEmailPreviewOpen, setScheduleEmailPreviewOpen] = useState(false);
@@ -1291,6 +1299,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         throw new Error(detail || "Could not send slot invite.");
       }
       setInterviewsNotice("Slot invite email sent to the candidate.");
+      await refreshActiveSlotInvites();
     } catch (e: any) {
       setInterviewsError(e?.message || "Could not send slot invite.");
     } finally {
@@ -1298,8 +1307,22 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
-  async function handleCancelSlotInvite() {
-    if (!slotInviteRound) return;
+  async function refreshActiveSlotInvites() {
+    try {
+      const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/interview-slots/active`, {
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { active_invites?: { round_type: string; expires_at: string | null; count: number }[] };
+      setActiveSlotInvites(data.active_invites || []);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleCancelSlotInvite(roundOverride?: string) {
+    const round = roundOverride || slotInviteRound;
+    if (!round) return;
     setSlotInviteCancelBusy(true);
     setInterviewsError(null);
     setInterviewsNotice(null);
@@ -1307,13 +1330,14 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/interview-slots/cancel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ round_type: slotInviteRound }),
+        body: JSON.stringify({ round_type: round }),
       });
       if (!res.ok) {
         throw new Error(await res.text());
       }
       setInterviewsNotice("Slot invite cancelled. You can send a new invite now.");
       setSlotInviteRound(null);
+      await refreshActiveSlotInvites();
     } catch (e: any) {
       setInterviewsError(e?.message || "Could not cancel slot invite.");
     } finally {
@@ -1326,6 +1350,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       void refreshInterviews();
     }
   }, [interviews]);
+
+  useEffect(() => {
+    void refreshActiveSlotInvites();
+  }, [candidateId]);
 
   useEffect(() => {
     if (candidateSprints === null) {
@@ -2497,12 +2525,36 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     <span>Slot invite already active for {slotInviteRound}. Cancel it to send a new one.</span>
                     <button
                       type="button"
-                      onClick={handleCancelSlotInvite}
+                      onClick={() => {
+                        void handleCancelSlotInvite();
+                      }}
                       disabled={slotInviteCancelBusy}
                       className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-60"
                     >
                       {slotInviteCancelBusy ? "Cancelling..." : "Cancel invite"}
                     </button>
+                  </div>
+                ) : null}
+                {activeSlotInvites.length ? (
+                  <div className="mt-3 space-y-2 rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 text-sm text-slate-700">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Active slot invites</p>
+                    {activeSlotInvites.map((invite) => (
+                      <div key={invite.round_type} className="flex flex-wrap items-center justify-between gap-2">
+                        <span>
+                          {invite.round_type} slots active{invite.expires_at ? ` · Expires ${formatInviteExpiry(invite.expires_at)}` : ""}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleCancelSlotInvite(invite.round_type);
+                          }}
+                          disabled={slotInviteCancelBusy}
+                          className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                        >
+                          {slotInviteCancelBusy ? "Cancelling..." : "Cancel invite"}
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 ) : null}
 
