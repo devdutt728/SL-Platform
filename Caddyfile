@@ -28,6 +28,16 @@
 		}
 	}
 
+	handle /recruitment/interview/slots* {
+		uri replace /recruitment /recruitment
+		reverse_proxy localhost:8002 {
+			header_up X-Original-Host {hostport}
+			header_up X-Original-Proto {scheme}
+			header_up X-Forwarded-Host {hostport}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
 	handle /recruitment* {
 		reverse_proxy localhost:3002 {
 			header_up X-Original-Host {hostport}

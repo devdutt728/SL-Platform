@@ -2611,17 +2611,22 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                   <button
                                     type="button"
                                     className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                                    onClick={() => {
-                                      if (!window.confirm("Cancel this interview? This will remove it from the interviewer calendar.")) return;
-                                      void (async () => {
-                                        setBusy(true);
-                                        setInterviewsError(null);
-                                        setInterviewsNotice(null);
-                                        try {
-                                          await cancelInterview(item.candidate_interview_id);
-                                          const next = await fetchInterviews(candidateId);
-                                          setInterviews(next);
-                                          setInterviewsNotice("Interview cancelled.");
+                                      onClick={() => {
+                                        if (!window.confirm("Cancel this interview? This will remove it from the interviewer calendar.")) return;
+                                        const reason = window.prompt("Reason for cancelling this interview (required):", "");
+                                        if (!reason || !reason.trim()) {
+                                          setInterviewsError("Cancellation requires a reason.");
+                                          return;
+                                        }
+                                        void (async () => {
+                                          setBusy(true);
+                                          setInterviewsError(null);
+                                          setInterviewsNotice(null);
+                                          try {
+                                            await cancelInterview(item.candidate_interview_id, reason.trim());
+                                            const next = await fetchInterviews(candidateId);
+                                            setInterviews(next);
+                                            setInterviewsNotice("Interview cancelled.");
                                         } catch (e: any) {
                                           setInterviewsError(e?.message || "Could not cancel interview.");
                                         } finally {
@@ -2931,7 +2936,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Slot planner</p>
-                      <p className="text-[11px] text-slate-500">6 slots • 30 mins • 3 business days</p>
+                      <p className="text-[11px] text-slate-500">6 slots • 1 hour • 3 business days</p>
                       </div>
                       <div className="mt-3 grid gap-3 md:grid-cols-[220px_1fr]">
                         <label className="space-y-1 text-xs text-slate-600">

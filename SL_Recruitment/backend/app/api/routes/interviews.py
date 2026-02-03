@@ -117,6 +117,19 @@ def _format_slot_label(dt_utc: datetime, tz: ZoneInfo) -> str:
     return local.strftime("%d %b %Y, %I:%M %p %Z")
 
 
+def _public_base_url(request: Request) -> str:
+    base = build_public_link("").rstrip("/")
+    if base and not base.startswith("/"):
+        return base
+
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("x-forwarded-server")
+    if forwarded_host:
+        forwarded_proto = request.headers.get("x-forwarded-proto", "https").split(",")[0].strip() or "https"
+        return f"{forwarded_proto}://{forwarded_host}"
+
+    return str(request.base_url).rstrip("/")
+
+
 def _public_slot_link(base_url: str, token: str) -> str:
     return f"{base_url.rstrip('/')}/interview/slots/{token}"
 
@@ -303,7 +316,7 @@ async def _render_slot_conflict(
             status_code=200,
         )
 
-    base_url = build_public_link("").rstrip("/") or str(request.base_url).rstrip("/")
+    base_url = _public_base_url(request)
     slots_html = "\n".join(
         f'<li class="slot"><span>{_format_slot_label(r.slot_start_at, tz)}</span>'
         f'<a href="{_public_slot_link(base_url, build_signed_selection_token(r.selection_token))}">Select</a></li>'
@@ -722,7 +735,7 @@ async def propose_interview_slots(
     session.add_all(slots)
     await session.flush()
 
-    base_url = str(request.base_url).rstrip("/")
+    base_url = _public_base_url(request)
     slot_links = [
         {
             "label": _format_slot_label(slot.slot_start_at, tz),
