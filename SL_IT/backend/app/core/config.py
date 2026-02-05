@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     auth_rate_limit_window_seconds: int = 60
     internal_api_key: str = ""
     internal_api_allow_localhost: bool = True
+    session_idle_minutes: int = 15
+    session_table: str = "slp_user_session"
 
     google_client_id: str = ""
     google_client_secret: str = ""

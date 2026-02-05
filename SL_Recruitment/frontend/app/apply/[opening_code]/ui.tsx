@@ -5,6 +5,9 @@ import { Briefcase, CalendarClock, FileText, Sparkles } from "lucide-react";
 
 export function ApplyForm({ openingCode }: { openingCode: string }) {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const runtimeBasePath =
+    typeof window !== "undefined" && window.location.pathname.startsWith("/recruitment") ? "/recruitment" : "";
+  const apiBase = basePath || runtimeBasePath;
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<boolean>(false);
   const [alreadyApplied, setAlreadyApplied] = useState<boolean>(false);
@@ -41,7 +44,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
 
     let res: Response;
     try {
-      res = await fetch(`${basePath}/api/apply/${openingCode}`, {
+      res = await fetch(`${apiBase}/api/apply/${openingCode}`, {
         method: "POST",
         body: formData,
         headers: { "Idempotency-Key": idempotencyKeyRef.current },

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -11,10 +11,22 @@ from app.models.screening import RecCandidateScreening
 from app.models.stage import RecCandidateStage
 from app.schemas.screening import CafPrefillOut, ScreeningOut, ScreeningUpsertIn
 from app.services.events import log_event
+from app.core.config import settings
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
 
 router = APIRouter(prefix="/caf", tags=["caf"])
+
+
+def _caf_expired(candidate: RecCandidate) -> bool:
+    if candidate.caf_submitted_at is not None:
+        return False
+    if candidate.caf_sent_at is None:
+        return False
+    expiry_days = max(int(settings.caf_expiry_days or 0), 0)
+    if expiry_days == 0:
+        return False
+    return datetime.utcnow() > (candidate.caf_sent_at + timedelta(days=expiry_days))
 
 
 @router.get("/{token}", response_model=CafPrefillOut)
@@ -27,6 +39,8 @@ async def get_caf_prefill(
     ).scalars().first()
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid CAF token")
+    if _caf_expired(candidate):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="CAF link expired")
 
     opening_title = None
     opening_description = None
@@ -65,6 +79,8 @@ async def get_caf_screening(
     ).scalars().first()
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid CAF token")
+    if _caf_expired(candidate):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="CAF link expired")
 
     screening = (
         await session.execute(
@@ -87,6 +103,8 @@ async def submit_caf(
     ).scalars().first()
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid CAF token")
+    if _caf_expired(candidate):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="CAF link expired")
     if candidate.caf_submitted_at is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="CAF already submitted")
 

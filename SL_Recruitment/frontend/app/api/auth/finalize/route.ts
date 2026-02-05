@@ -1,4 +1,5 @@
 import {NextResponse, type NextRequest} from "next/server";
+import crypto from "crypto";
 import { getRequestOrigin } from "@/lib/request-origin";
 import { popFinalizeToken } from "@/lib/oauth-memory";
 
@@ -27,7 +28,27 @@ export async function GET(request: NextRequest) {
   const origin = process.env.PUBLIC_APP_ORIGIN || await getRequestOrigin(request.url);
 
   const response = NextResponse.redirect(new URL(nextPath, origin));
+  const sessionId = crypto.randomBytes(16).toString("hex");
+  const now = Date.now().toString();
   response.cookies.set("slp_token", idToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: origin.startsWith("https://"),
+    path: "/",
+  });
+  response.cookies.set("slp_sid", sessionId, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: origin.startsWith("https://"),
+    path: "/",
+  });
+  response.cookies.set("slp_last", now, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: origin.startsWith("https://"),
+    path: "/",
+  });
+  response.cookies.set("slp_session_init", "1", {
     httpOnly: true,
     sameSite: "lax",
     secure: origin.startsWith("https://"),

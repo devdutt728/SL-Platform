@@ -14,6 +14,10 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const runtimeBasePath =
+    typeof window !== "undefined" && window.location.pathname.startsWith("/recruitment") ? "/recruitment" : "";
+  const apiBase = basePath || runtimeBasePath || "/recruitment";
 
   async function onSubmit(formData: FormData) {
     setSubmitting(true);
@@ -122,7 +126,7 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
       declaration_accepted: checkboxOrNull(formData.get("declaration_accepted")),
     };
 
-    const res = await fetch(`/api/assessment/${token}`, {
+    const res = await fetch(`${apiBase}/api/assessment/${token}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),

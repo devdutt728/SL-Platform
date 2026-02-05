@@ -418,7 +418,7 @@ async function fetchPeople(query: string) {
     return (await res.json()) as SlotPreview[];
   }
 
-async function transition(candidateId: string, payload: { to_stage: string; decision?: string; note?: string }) {
+async function transition(candidateId: string, payload: { to_stage: string; decision?: string; note?: string; reason?: string }) {
   const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/transition`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -645,6 +645,14 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     return (first + second).toUpperCase() || "C";
   }, [candidate.name]);
   const currentStageKey = normalizeStage(candidate.current_stage);
+  const cafLocked = !candidate.caf_submitted_at;
+  const cafExpiryDays = 7;
+  const cafSentAt = candidate.caf_sent_at ? new Date(candidate.caf_sent_at) : null;
+  const cafExpiresAt = cafSentAt ? new Date(cafSentAt.getTime() + cafExpiryDays * 24 * 60 * 60 * 1000) : null;
+  const cafDaysLeft =
+    cafExpiresAt && cafSentAt
+      ? Math.max(0, Math.ceil((cafExpiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
+      : null;
 
   useEffect(() => {
     if (candidate.opening_title && !offerDesignation) {
@@ -719,11 +727,20 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
-  async function handleTransition(toStage: string, decision: string) {
+  async function handleTransition(toStage: string, decision: string, reasonOverride?: string) {
     setBusy(true);
     setError(null);
     try {
-      await transition(candidateId, { to_stage: toStage, decision, note: `UI: ${decision}` });
+      let reason = reasonOverride;
+      if (decision === "reject" && !reason) {
+        const input = window.prompt("Reason for rejection (required):");
+        if (!input || !input.trim()) {
+          setBusy(false);
+          return;
+        }
+        reason = input.trim();
+      }
+      await transition(candidateId, { to_stage: toStage, decision, reason, note: `UI: ${decision}` });
       await refreshAll();
     } catch (e: any) {
       setError(e?.message || "Transition failed");
@@ -1457,24 +1474,38 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
 
   const stageButtons = useMemo(() => {
     const current = currentStageKey;
+    if (cafLocked && current && current !== "rejected" && current !== "declined" && current !== "hired") {
+      return [
+        {
+          label: "Reject (CAF pending)",
+          tone: "bg-rose-600 hover:bg-rose-700",
+          icon: <XCircle className="h-4 w-4" />,
+          intent: "reject",
+          action: () => handleTransition("rejected", "reject"),
+        },
+      ];
+    }
     if (current === "hr_screening") {
       return [
         {
           label: "Advance to L2 shortlist",
           tone: "bg-emerald-600 hover:bg-emerald-700",
           icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "advance",
           action: () => handleTransition("l2_shortlist", "advance"),
         },
         {
           label: "Reject after HR screening",
           tone: "bg-rose-600 hover:bg-rose-700",
           icon: <XCircle className="h-4 w-4" />,
+          intent: "reject",
           action: () => handleTransition("rejected", "reject"),
         },
         {
           label: "Review screening",
           tone: "bg-slate-900 hover:bg-slate-800",
           icon: <Layers className="h-4 w-4" />,
+          intent: "review",
           action: () => focusSection("screening", screeningRef),
         },
       ];
@@ -1485,12 +1516,14 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           label: "Move to HR screening",
           tone: "bg-emerald-600 hover:bg-emerald-700",
           icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "advance",
           action: () => handleTransition("hr_screening", "advance"),
         },
         {
           label: "Reject",
           tone: "bg-rose-600 hover:bg-rose-700",
           icon: <XCircle className="h-4 w-4" />,
+          intent: "reject",
           action: () => handleTransition("rejected", "reject"),
         },
       ];
@@ -1501,6 +1534,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         label: "Advance to L2 interview",
         tone: "bg-emerald-600 hover:bg-emerald-700",
         icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "advance",
         action: () => handleTransition("l2_interview", "advance"),
       });
       if (canSchedule) {
@@ -1508,6 +1542,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           label: "Schedule L2 interview",
           tone: "bg-slate-900 hover:bg-slate-800",
           icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "review",
           action: () => {
             void (async () => {
               await handleTransition("l2_interview", "advance");
@@ -1521,6 +1556,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         label: "Go to interviews",
         tone: "bg-slate-900 hover:bg-slate-800",
         icon: <Layers className="h-4 w-4" />,
+        intent: "review",
         action: () => focusSection("interviews", interviewsRef),
       });
       return actions;
@@ -1532,6 +1568,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           label: "Schedule L2 interview",
           tone: "bg-emerald-600 hover:bg-emerald-700",
           icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "advance",
           action: () => {
             focusSection("interviews", interviewsRef);
             openSchedule("L2");
@@ -1542,6 +1579,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         label: "Go to interviews",
         tone: "bg-slate-900 hover:bg-slate-800",
         icon: <Layers className="h-4 w-4" />,
+        intent: "review",
         action: () => focusSection("interviews", interviewsRef),
       });
       return actions;
@@ -1552,18 +1590,21 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           label: "Advance to sprint",
           tone: "bg-emerald-600 hover:bg-emerald-700",
           icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "advance",
           action: () => handleTransition("sprint", "advance"),
         },
         {
           label: "Reject after L2 feedback",
           tone: "bg-rose-600 hover:bg-rose-700",
           icon: <XCircle className="h-4 w-4" />,
+          intent: "reject",
           action: () => handleTransition("rejected", "reject"),
         },
         {
           label: "Go to interviews",
           tone: "bg-slate-900 hover:bg-slate-800",
           icon: <Layers className="h-4 w-4" />,
+          intent: "review",
           action: () => focusSection("interviews", interviewsRef),
         },
       ];
@@ -1575,6 +1616,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           label: "Schedule L1 interview",
           tone: "bg-emerald-600 hover:bg-emerald-700",
           icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "advance",
           action: () => {
             focusSection("interviews", interviewsRef);
             openSchedule("L1");
@@ -1585,6 +1627,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         label: "Go to interviews",
         tone: "bg-slate-900 hover:bg-slate-800",
         icon: <Layers className="h-4 w-4" />,
+        intent: "review",
         action: () => focusSection("interviews", interviewsRef),
       });
       return actions;
@@ -1595,6 +1638,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         label: "Advance to L1 interview",
         tone: "bg-emerald-600 hover:bg-emerald-700",
         icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "advance",
         action: () => handleTransition("l1_interview", "advance"),
       });
       if (canSchedule) {
@@ -1602,6 +1646,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           label: "Schedule L1 interview",
           tone: "bg-slate-900 hover:bg-slate-800",
           icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "review",
           action: () => {
             void (async () => {
               await handleTransition("l1_interview", "advance");
@@ -1615,6 +1660,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         label: "Go to interviews",
         tone: "bg-slate-900 hover:bg-slate-800",
         icon: <Layers className="h-4 w-4" />,
+        intent: "review",
         action: () => focusSection("interviews", interviewsRef),
       });
       return actions;
@@ -1625,18 +1671,21 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           label: "Advance to offer",
           tone: "bg-emerald-600 hover:bg-emerald-700",
           icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "advance",
           action: () => handleTransition("offer", "advance"),
         },
         {
           label: "Reject after L1 feedback",
           tone: "bg-rose-600 hover:bg-rose-700",
           icon: <XCircle className="h-4 w-4" />,
+          intent: "reject",
           action: () => handleTransition("rejected", "reject"),
         },
         {
           label: "Go to interviews",
           tone: "bg-slate-900 hover:bg-slate-800",
           icon: <Layers className="h-4 w-4" />,
+          intent: "review",
           action: () => focusSection("interviews", interviewsRef),
         },
       ];
@@ -1647,6 +1696,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           label: "Assign sprint",
           tone: "bg-emerald-600 hover:bg-emerald-700",
           icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "advance",
           action: () => {
             focusSection("sprint", sprintRef);
             void openAssignSprint();
@@ -1656,6 +1706,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           label: "Go to sprint",
           tone: "bg-slate-900 hover:bg-slate-800",
           icon: <Layers className="h-4 w-4" />,
+          intent: "review",
           action: () => focusSection("sprint", sprintRef),
         },
       ];
@@ -1666,6 +1717,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           label: "Go to offer",
           tone: "bg-slate-900 hover:bg-slate-800",
           icon: <Layers className="h-4 w-4" />,
+          intent: "review",
           action: () => focusSection("offer", offerRef),
         },
       ];
@@ -1676,12 +1728,13 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           label: "Go to documents",
           tone: "bg-slate-900 hover:bg-slate-800",
           icon: <Layers className="h-4 w-4" />,
+          intent: "review",
           action: () => focusSection("documents", documentsRef),
         },
       ];
     }
     return [];
-  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef]);
+  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef, cafLocked]);
 
   const screening = data.screening as Screening | null | undefined;
   const assessment = data.assessment as CandidateAssessment | null | undefined;
@@ -1895,6 +1948,23 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
 
             {collapsedSections.overview ? null : (
               <div className="mt-4 space-y-4">
+                {cafLocked ? (
+                  <div className="rounded-2xl border border-amber-200/70 bg-gradient-to-r from-amber-50 via-white to-cyan-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs uppercase tracking-tight text-amber-700">CAF pending</p>
+                        <p className="mt-1 text-sm text-slate-700">
+                          Candidate must submit CAF before moving to the next stages.
+                        </p>
+                      </div>
+                      <div className="text-right text-xs text-slate-600">
+                        {cafSentAt ? <p>Sent: {formatDateTime(candidate.caf_sent_at)}</p> : null}
+                        {cafExpiresAt ? <p>Expires: {formatDate(cafExpiresAt.toISOString())}</p> : null}
+                        {cafDaysLeft != null ? <p>{cafDaysLeft} days left</p> : null}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 <div>
                   <p className="text-xs uppercase tracking-tight text-slate-500">Stage progress</p>
                   <div className="stage-rail mt-3 rounded-2xl border border-white/70 px-4 py-4">
@@ -1967,9 +2037,12 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                           <button
                             key={b.label}
                             type="button"
-                            className={clsx("inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-60", b.tone)}
+                            className={clsx(
+                              "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-60",
+                              b.intent !== "reject" && cafLocked ? "bg-slate-400 cursor-not-allowed" : b.tone
+                            )}
                             onClick={() => void b.action()}
-                            disabled={busy}
+                            disabled={busy || (cafLocked && b.intent !== "reject")}
                           >
                             {b.icon}
                             {busy ? "Working..." : b.label}

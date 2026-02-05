@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from typing import Iterable, Optional
 
 from fastapi import Depends, HTTPException, Request, status
 import urllib3
 from google.auth.transport.urllib3 import Request as GoogleAuthRequest
 from google.oauth2 import id_token as google_id_token
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
@@ -57,6 +59,7 @@ async def get_current_user(request: Request) -> UserContext:
         roles = _map_platform_roles_to_app_roles(identity.role_ids, identity.role_codes)
         if Role.VIEWER in roles and len(roles) == 1:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
+        await _enforce_single_session(platform_session, request, email)
 
         return UserContext(
             user_id=email,
@@ -100,6 +103,81 @@ async def get_current_user(request: Request) -> UserContext:
         platform_role_code=None,
         platform_role_name=None,
     )
+
+
+def _read_session_id(request: Request) -> Optional[str]:
+    header = request.headers.get("x-slp-session") or ""
+    if header:
+        return header.strip()
+    return request.cookies.get("slp_sid")
+
+
+async def _ensure_session_table(platform_session) -> None:
+    table = settings.session_table
+    await platform_session.execute(
+        text(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table} (
+              email VARCHAR(255) PRIMARY KEY,
+              session_id VARCHAR(64) NOT NULL,
+              last_activity DATETIME NOT NULL,
+              created_at DATETIME NOT NULL,
+              updated_at DATETIME NOT NULL
+            )
+            """
+        )
+    )
+
+
+async def _enforce_single_session(platform_session, request: Request, email: str) -> None:
+    session_id = _read_session_id(request)
+    if not session_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing session")
+
+    await _ensure_session_table(platform_session)
+    table = settings.session_table
+    now = datetime.utcnow()
+    idle_cutoff = now - timedelta(minutes=int(settings.session_idle_minutes or 15))
+
+    row = (
+        await platform_session.execute(
+            text(f"SELECT session_id, last_activity FROM {table} WHERE email = :email"),
+            {"email": email},
+        )
+    ).first()
+
+    if row:
+        current_id, last_activity = row[0], row[1]
+        if last_activity and last_activity < idle_cutoff:
+            await platform_session.execute(text(f"DELETE FROM {table} WHERE email = :email"), {"email": email})
+            await platform_session.commit()
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+
+        if current_id != session_id:
+            allow_override = (request.headers.get("x-slp-session-init") or "").strip() == "1"
+            if not allow_override:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session replaced by another login")
+            await platform_session.execute(
+                text(f"UPDATE {table} SET session_id = :sid, last_activity = :now, updated_at = :now WHERE email = :email"),
+                {"sid": session_id, "now": now, "email": email},
+            )
+            await platform_session.commit()
+            return
+
+        await platform_session.execute(
+            text(f"UPDATE {table} SET last_activity = :now, updated_at = :now WHERE email = :email"),
+            {"now": now, "email": email},
+        )
+        await platform_session.commit()
+        return
+
+    await platform_session.execute(
+        text(
+            f"INSERT INTO {table} (email, session_id, last_activity, created_at, updated_at) VALUES (:email, :sid, :now, :now, :now)"
+        ),
+        {"email": email, "sid": session_id, "now": now},
+    )
+    await platform_session.commit()
 
 
 def _read_bearer_token(request: Request) -> Optional[str]:

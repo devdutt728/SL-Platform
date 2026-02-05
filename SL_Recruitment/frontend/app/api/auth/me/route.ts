@@ -4,7 +4,13 @@ import { authHeaderFromCookie } from "@/lib/auth-server";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
-  const headers = authHeader ? { authorization: authHeader } : await authHeaderFromCookie();
+  const sessionHeader = request.headers.get("x-slp-session");
+  const headers = authHeader
+    ? {
+        authorization: authHeader,
+        ...(sessionHeader ? { "x-slp-session": sessionHeader } : {}),
+      }
+    : await authHeaderFromCookie();
 
   const res = await fetch(backendUrl("/auth/me"), {
     headers,

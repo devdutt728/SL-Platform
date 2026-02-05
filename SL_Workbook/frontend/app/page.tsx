@@ -1,10 +1,16 @@
 import Image from "next/image";
 
-export default function PublicPortalPage() {
+export default function PublicPortalPage({ searchParams }: { searchParams?: { session?: string } }) {
   const logoSrc = "/studio-lotus-logo.png";
+  const sessionExpired = searchParams?.session === "expired";
 
   return (
     <main className="page-shell min-h-screen py-10">
+      {sessionExpired ? (
+        <div className="mb-4 rounded-2xl border border-amber-200/70 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Session expired. You have been signed out and redirected to the public portal.
+        </div>
+      ) : null}
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="relative h-10 w-40">

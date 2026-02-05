@@ -3,9 +3,14 @@ import { redirect } from "next/navigation";
 import { internalUrl } from "@/lib/internal";
 
 async function isValidUserToken(token: string) {
+  const cookieStore = await cookies();
+  const sessionId = cookieStore.get("slp_sid")?.value;
   const res = await fetch(await internalUrl("/api/auth/me"), {
     cache: "no-store",
-    headers: { authorization: `Bearer ${token}` },
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(sessionId ? { "x-slp-session": sessionId } : {}),
+    },
   });
   return res.ok;
 }

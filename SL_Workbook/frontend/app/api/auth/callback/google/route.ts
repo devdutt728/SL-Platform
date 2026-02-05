@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
@@ -95,8 +96,14 @@ export async function GET(request: Request) {
     const idToken = typeof idTokenRaw === "string" ? idTokenRaw : undefined;
     if (!idToken) return NextResponse.json({ error: "missing_id_token", tokenJson }, { status: 401 });
 
+    const sessionId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString("hex");
+    const now = Date.now().toString();
     const meRes = await fetch(backendUrl("/auth/me"), {
-      headers: { authorization: `Bearer ${idToken}` },
+      headers: {
+        authorization: `Bearer ${idToken}`,
+        "x-slp-session": sessionId,
+        "x-slp-session-init": "1",
+      },
       cache: "no-store",
     });
 
@@ -138,6 +145,24 @@ export async function GET(request: Request) {
       const targetOrigin = returnToOrigin || origin;
       const response = NextResponse.redirect(new URL(nextPath, targetOrigin));
       response.cookies.set("slp_token", idToken, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: targetOrigin.startsWith("https://"),
+        path: "/",
+      });
+      response.cookies.set("slp_sid", sessionId, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: targetOrigin.startsWith("https://"),
+        path: "/",
+      });
+      response.cookies.set("slp_last", now, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: targetOrigin.startsWith("https://"),
+        path: "/",
+      });
+      response.cookies.set("slp_session_init", "1", {
         httpOnly: true,
         sameSite: "lax",
         secure: targetOrigin.startsWith("https://"),

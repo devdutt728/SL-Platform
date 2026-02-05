@@ -21,6 +21,10 @@ export async function proxyToBackend(request: Request, upstreamPath: string) {
   if (token && !headers.get("authorization")) {
     headers.set("authorization", `Bearer ${token}`);
   }
+  const sessionId = (await cookies()).get("slp_sid")?.value;
+  if (sessionId && !headers.get("x-slp-session")) {
+    headers.set("x-slp-session", sessionId);
+  }
 
   const body = shouldHaveBody(request.method) ? await request.arrayBuffer() : undefined;
 

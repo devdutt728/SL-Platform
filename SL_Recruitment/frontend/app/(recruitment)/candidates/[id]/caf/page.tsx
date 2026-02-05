@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cookieHeader } from "@/lib/cookie-header";
 import { notFound } from "next/navigation";
-import { CandidateFull } from "@/lib/types";
+import { CandidateAssessment, CandidateFull } from "@/lib/types";
 import { internalUrl } from "@/lib/internal";
 import { parseDateUtc } from "@/lib/datetime";
 
@@ -39,6 +39,22 @@ function labelValue(label: string, value: string) {
   );
 }
 
+function valueOrDash(value: unknown) {
+  if (value === null || value === undefined) return "-";
+  const s = String(value).trim();
+  return s ? s : "-";
+}
+
+function formatDateTime(raw?: string | null) {
+  return parseDateUtc(raw)?.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) ?? "-";
+}
+
+function formatDate(raw?: string | null) {
+  if (!raw) return "-";
+  const date = parseDateUtc(raw);
+  return date ? date.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }) : raw;
+}
+
 export default async function CandidateCafPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [full, me] = await Promise.all([fetchCandidateFull(id), fetchMe()]);
@@ -46,6 +62,7 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
 
   const candidate = full.candidate;
   const screening = full.screening;
+  const assessment = (full.assessment || null) as CandidateAssessment | null;
   const canDelete = (me?.platform_role_id ?? null) === 2 || (me?.platform_role_code ?? "").trim() === "2";
 
   return (
@@ -144,6 +161,195 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
                 <p className="text-[11px] uppercase tracking-wide text-slate-500">Screening notes</p>
                 <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{screening.screening_notes || "-"}</p>
               </div>
+            </div>
+          </div>
+        )}
+
+        {!assessment ? (
+          <div className="mt-4 rounded-2xl border border-white/60 bg-white/30 p-4">
+            <p className="text-sm font-semibold">CAF assessment form</p>
+            <p className="mt-1 text-sm text-slate-600">No CAF assessment data submitted yet.</p>
+          </div>
+        ) : (
+          <div className="mt-4 rounded-2xl border border-white/60 bg-white/30 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold">CAF assessment form</p>
+              <span className="rounded-full bg-white/60 px-3 py-1 text-xs font-semibold text-slate-800">
+                {assessment.assessment_submitted_at ? "Submitted" : "Pending"}
+              </span>
+            </div>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              {labelValue("Position", valueOrDash(assessment.position_applied_for))}
+              {labelValue("Total exp (yrs)", valueOrDash(assessment.total_experience_years))}
+              {labelValue("Architecture exp (yrs)", valueOrDash(assessment.architecture_interior_experience_years))}
+              {labelValue("Personal email", valueOrDash(assessment.personal_email))}
+              {labelValue("Contact", valueOrDash(assessment.contact_number))}
+              {labelValue("Employment status", valueOrDash(assessment.current_employment_status))}
+              {labelValue("Notice / joining", valueOrDash(assessment.notice_period_or_joining_time))}
+              {labelValue("Current location", valueOrDash(assessment.current_location))}
+              {labelValue("Interviewer", valueOrDash(assessment.interviewer_name))}
+              {labelValue("Submitted", assessment.assessment_submitted_at ? formatDateTime(assessment.assessment_submitted_at) : "-")}
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {labelValue("Current job duration (months)", valueOrDash(assessment.current_job_duration_months))}
+              {labelValue("Current organization", valueOrDash(assessment.current_job_org_name))}
+              {labelValue("Previous job duration (months)", valueOrDash(assessment.previous_job_duration_months))}
+              {labelValue("Previous organization", valueOrDash(assessment.previous_job_org_name))}
+            </div>
+
+            <div className="mt-3 grid gap-3">
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Current role and responsibilities</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">
+                  {valueOrDash(assessment.current_job_role_responsibilities)}
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Previous role and responsibilities</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">
+                  {valueOrDash(assessment.previous_job_role_responsibilities)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              {labelValue("10th specialization", valueOrDash(assessment.education_10th_specialization))}
+              {labelValue("10th year", valueOrDash(assessment.education_10th_year))}
+              {labelValue("10th institution", valueOrDash(assessment.education_10th_institution))}
+              {labelValue("10th marks", valueOrDash(assessment.education_10th_marks))}
+              {labelValue("12th specialization", valueOrDash(assessment.education_12th_specialization))}
+              {labelValue("12th year", valueOrDash(assessment.education_12th_year))}
+              {labelValue("12th institution", valueOrDash(assessment.education_12th_institution))}
+              {labelValue("12th marks", valueOrDash(assessment.education_12th_marks))}
+              {labelValue("Graduation specialization", valueOrDash(assessment.education_graduation_specialization))}
+              {labelValue("Graduation year", valueOrDash(assessment.education_graduation_year))}
+              {labelValue("Graduation institution", valueOrDash(assessment.education_graduation_institution))}
+              {labelValue("Graduation marks", valueOrDash(assessment.education_graduation_marks))}
+              {labelValue("Post-grad specialization", valueOrDash(assessment.education_post_graduation_specialization))}
+              {labelValue("Post-grad year", valueOrDash(assessment.education_post_graduation_year))}
+              {labelValue("Post-grad institution", valueOrDash(assessment.education_post_graduation_institution))}
+              {labelValue("Post-grad marks", valueOrDash(assessment.education_post_graduation_marks))}
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              {labelValue("Training 1", valueOrDash(assessment.training1_name))}
+              {labelValue("Training 1 year", valueOrDash(assessment.training1_year))}
+              {labelValue("Training 1 institute", valueOrDash(assessment.training1_institute))}
+              {labelValue("Training 2", valueOrDash(assessment.training2_name))}
+              {labelValue("Training 2 year", valueOrDash(assessment.training2_year))}
+              {labelValue("Training 2 institute", valueOrDash(assessment.training2_institute))}
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              {labelValue("AutoCAD", valueOrDash(assessment.skill_auto_cad))}
+              {labelValue("SketchUp", valueOrDash(assessment.skill_sketch_up))}
+              {labelValue("Revit", valueOrDash(assessment.skill_revit))}
+              {labelValue("Photoshop", valueOrDash(assessment.skill_photoshop))}
+              {labelValue("Illustrator", valueOrDash(assessment.skill_illustrator))}
+              {labelValue("MS Office", valueOrDash(assessment.skill_ms_office))}
+              {labelValue("3D Max", valueOrDash(assessment.skill_3d_max))}
+              {labelValue("InDesign", valueOrDash(assessment.skill_indesign))}
+              {labelValue("Presentation", valueOrDash(assessment.skill_presentation))}
+              {labelValue("Rhino", valueOrDash(assessment.skill_rhino))}
+              {labelValue("BOQs", valueOrDash(assessment.skill_boqs))}
+              {labelValue("Analytical writing", valueOrDash(assessment.skill_analytical_writing))}
+              {labelValue("Graphics", valueOrDash(assessment.skill_graphics))}
+              {labelValue("Drafting", valueOrDash(assessment.skill_drafting))}
+              {labelValue("Hand sketching", valueOrDash(assessment.skill_hand_sketching))}
+              {labelValue("Estimation", valueOrDash(assessment.skill_estimation))}
+              {labelValue("Specifications", valueOrDash(assessment.skill_specifications))}
+              {labelValue("Enscape", valueOrDash(assessment.skill_enscape))}
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              {labelValue("Execution: action orientation", valueOrDash(assessment.proficiency_execution_action_orientation))}
+              {labelValue("Execution: self discipline", valueOrDash(assessment.proficiency_execution_self_discipline))}
+              {labelValue("Execution: independent decision", valueOrDash(assessment.proficiency_execution_independent_decision))}
+              {labelValue("Process: time management", valueOrDash(assessment.proficiency_process_time_management))}
+              {labelValue("Process: following processes", valueOrDash(assessment.proficiency_process_following_processes))}
+              {labelValue("Process: new processes", valueOrDash(assessment.proficiency_process_new_processes))}
+              {labelValue("Strategic: long term thinking", valueOrDash(assessment.proficiency_strategic_long_term_thinking))}
+              {labelValue("Strategic: creativity", valueOrDash(assessment.proficiency_strategic_ideation_creativity))}
+              {labelValue("Strategic: risk taking", valueOrDash(assessment.proficiency_strategic_risk_taking))}
+              {labelValue("People: collaboration", valueOrDash(assessment.proficiency_people_collaboration))}
+              {labelValue("People: coaching", valueOrDash(assessment.proficiency_people_coaching))}
+              {labelValue("People: feedback", valueOrDash(assessment.proficiency_people_feedback))}
+              {labelValue("People: conflict", valueOrDash(assessment.proficiency_people_conflict_resolution))}
+            </div>
+
+            <div className="mt-3 grid gap-3">
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Execution reasoning</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.proficiency_reason_execution)}</p>
+              </div>
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Process reasoning</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.proficiency_reason_process)}</p>
+              </div>
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Strategic reasoning</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.proficiency_reason_strategic)}</p>
+              </div>
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">People reasoning</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.proficiency_reason_people)}</p>
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-3">
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Strengths</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.self_strengths)}</p>
+              </div>
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Improvement areas</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.self_improvement_areas)}</p>
+              </div>
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Learning needs</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.self_learning_needs)}</p>
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-3">
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Q1. Why Studio Lotus?</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.q1_why_studio_lotus)}</p>
+              </div>
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Q2. Project scale</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.q2_project_scale)}</p>
+              </div>
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Q3. Role / site experience</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.q3_role_site_experience)}</p>
+              </div>
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Q4. Inspired project</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.q4_inspired_project)}</p>
+              </div>
+              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Q5. Two year plan</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.q5_two_year_plan)}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              {labelValue("Reference 1 name", valueOrDash(assessment.reference1_name))}
+              {labelValue("Reference 1 contact", valueOrDash(assessment.reference1_contact))}
+              {labelValue("Reference 1 relationship", valueOrDash(assessment.reference1_relationship))}
+              {labelValue("Reference 2 name", valueOrDash(assessment.reference2_name))}
+              {labelValue("Reference 2 contact", valueOrDash(assessment.reference2_contact))}
+              {labelValue("Reference 2 relationship", valueOrDash(assessment.reference2_relationship))}
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {labelValue("Declaration name", valueOrDash(assessment.declaration_name))}
+              {labelValue("Signature", valueOrDash(assessment.declaration_signature))}
+              {labelValue("Declaration date", formatDate(assessment.declaration_date))}
+              {labelValue("Declaration accepted", assessment.declaration_accepted ? "Yes" : "No")}
             </div>
           </div>
         )}

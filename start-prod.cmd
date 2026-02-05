@@ -102,11 +102,11 @@ if "%BUILD_ON_START%"=="1" (
 
 if exist "%IT_BACKEND_DIR%" (
   echo [%DATE% %TIME%] spawn it-backend>> "%TRACE_LOG%"
-  call :spawn "%IT_BACKEND_DIR%" "python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1 --proxy-headers --forwarded-allow-ips=*" "%IT_BACKEND_OUT%" "%IT_BACKEND_ERR%"
+  call :spawn "%IT_BACKEND_DIR%" "python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1" "%IT_BACKEND_OUT%" "%IT_BACKEND_ERR%"
 )
 if exist "%REC_BACKEND_DIR%" (
   echo [%DATE% %TIME%] spawn rec-backend>> "%TRACE_LOG%"
-  call :spawn "%REC_BACKEND_DIR%" "python -m uvicorn app.main:app --host 127.0.0.1 --port 8002 --workers 1 --proxy-headers --forwarded-allow-ips=*" "%REC_BACKEND_OUT%" "%REC_BACKEND_ERR%"
+  call :spawn "%REC_BACKEND_DIR%" "python -m uvicorn app.main:app --host 127.0.0.1 --port 8002 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1" "%REC_BACKEND_OUT%" "%REC_BACKEND_ERR%"
 )
 if exist "%IT_FRONTEND_DIR%" (
   echo [%DATE% %TIME%] spawn it-frontend>> "%TRACE_LOG%"

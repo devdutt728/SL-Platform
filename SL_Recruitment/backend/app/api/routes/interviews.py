@@ -44,6 +44,7 @@ from app.services.interview_slots import (
 
 router = APIRouter(prefix="/rec", tags=["interviews"])
 public_router = APIRouter(prefix="/interview", tags=["interviews-public"])
+public_recruitment_router = APIRouter(prefix="/recruitment/interview", tags=["interviews-public"])
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -1101,6 +1102,7 @@ async def debug_email_settings(
 
 
 @public_router.get("/slots/{token}", response_class=HTMLResponse)
+@public_recruitment_router.get("/slots/{token}", response_class=HTMLResponse)
 async def select_interview_slot(
     token: str,
     request: Request,

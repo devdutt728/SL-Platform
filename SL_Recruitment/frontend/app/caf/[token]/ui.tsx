@@ -13,6 +13,10 @@ export function CafForm({ token, prefill, screening }: CafFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const runtimeBasePath =
+    typeof window !== "undefined" && window.location.pathname.startsWith("/recruitment") ? "/recruitment" : "";
+  const apiBase = basePath || runtimeBasePath;
   const relocateLocked = screening?.willing_to_relocate !== null && screening?.willing_to_relocate !== undefined;
   const commitmentLocked = screening?.two_year_commitment !== null && screening?.two_year_commitment !== undefined;
   const joiningLocked = screening?.expected_joining_date != null;
@@ -62,7 +66,7 @@ export function CafForm({ token, prefill, screening }: CafFormProps) {
       screening_notes: stringOrNull(formData.get("screening_notes")),
     };
 
-    const res = await fetch(`/api/caf/${token}`, {
+    const res = await fetch(`${apiBase}/api/caf/${token}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),

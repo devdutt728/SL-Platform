@@ -5,12 +5,30 @@
 }
 
 :3000 {
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
 	@notAllowed not host studiolotushub.in www.studiolotushub.in localhost 127.0.0.1
 	respond @notAllowed 403
 
 	@recApi path /api/rec*
 	handle @recApi {
 		uri replace /api/rec /recruitment/api/rec
+		reverse_proxy localhost:3002 {
+			header_up X-Original-Host {hostport}
+			header_up X-Original-Proto {scheme}
+			header_up X-Forwarded-Host {hostport}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	@recPublicApi path /api/apply* /api/caf* /api/assessment* /api/offer* /api/sprint* /api/schedule* /api/joining*
+	handle @recPublicApi {
+		uri replace /api /recruitment/api
 		reverse_proxy localhost:3002 {
 			header_up X-Original-Host {hostport}
 			header_up X-Original-Proto {scheme}

@@ -3,3 +3,12 @@ logs/
 SL_Workbook/secrets/Oauth SL_Platform.json
 SL_Workbook/secrets/google-service-account.json
 SL_Workbook/secrets/
+SL_IT/secrets/
+SL_Recruitment/secrets/
+SL_Recruitment/local_uploads/
+SL_IT/backend/.env
+SL_Recruitment/backend/.env
+SL_IT/backend/.env.local
+SL_Recruitment/backend/.env.local
+SL_IT/backend/.env.production
+SL_Recruitment/backend/.env.production

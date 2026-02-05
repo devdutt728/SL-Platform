@@ -6,7 +6,13 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
-  const headers = authHeader ? { authorization: authHeader } : await authHeaderFromCookie();
+  const sessionHeader = request.headers.get("x-slp-session");
+  const headers = authHeader
+    ? {
+        authorization: authHeader,
+        ...(sessionHeader ? { "x-slp-session": sessionHeader } : {}),
+      }
+    : await authHeaderFromCookie();
 
   const res = await fetch(backendUrl("/auth/me"), {
     headers,
