@@ -30,61 +30,91 @@ router = APIRouter(prefix="/rec", tags=["dashboard"])
 async def get_dashboard_metrics(
     stuck_days: int = Query(default=5, ge=1, le=60),
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
 ):
     today = func.curdate()
     now = func.now()
 
+    roles = set(user.roles or [])
+    is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
+    is_superadmin = (user.platform_role_id or None) == 2
+    is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
+    interviewer_id = (user.person_id_platform or "").strip()
+    limited = is_interviewer and not is_hr and not is_superadmin and interviewer_id
+
+    assigned_ids = (
+        select(RecCandidateInterview.candidate_id)
+        .where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
+        .subquery()
+    ) if limited else None
+
+    def _candidate_scope(query):
+        if assigned_ids is None:
+            return query
+        return query.where(RecCandidate.candidate_id.in_(select(assigned_ids.c.candidate_id)))
+
+    def _candidate_id_scope(query, column):
+        if assigned_ids is None:
+            return query
+        return query.where(column.in_(select(assigned_ids.c.candidate_id)))
+
     total_applications_received = (
-        await session.execute(select(func.count()).select_from(RecCandidate))
+        await session.execute(_candidate_scope(select(func.count()).select_from(RecCandidate)))
     ).scalar_one()
 
     total_active_candidates = (
         await session.execute(
-            select(func.count())
-            .select_from(RecCandidate)
-            .where(RecCandidate.status.notin_(["hired", "rejected", "declined"]))
+            _candidate_scope(
+                select(func.count())
+                .select_from(RecCandidate)
+                .where(RecCandidate.status.notin_(["hired", "rejected", "declined"]))
+            )
         )
     ).scalar_one()
 
     new_candidates_last_7_days = (
         await session.execute(
-            select(func.count())
-            .select_from(RecCandidate)
-            .where(RecCandidate.created_at >= func.date_sub(now, text("INTERVAL 7 DAY")))
+            _candidate_scope(
+                select(func.count())
+                .select_from(RecCandidate)
+                .where(RecCandidate.created_at >= func.date_sub(now, text("INTERVAL 7 DAY")))
+            )
         )
     ).scalar_one()
 
     new_applications_today = (
         await session.execute(
-            select(func.count())
-            .select_from(RecCandidate)
-            .where(RecCandidate.created_at >= today)
+            _candidate_scope(
+                select(func.count())
+                .select_from(RecCandidate)
+                .where(RecCandidate.created_at >= today)
+            )
         )
     ).scalar_one()
 
     caf_submitted_today = (
         await session.execute(
-            select(func.count())
-            .select_from(RecCandidate)
-            .where(RecCandidate.caf_submitted_at.is_not(None), RecCandidate.caf_submitted_at >= today)
+            _candidate_scope(
+                select(func.count())
+                .select_from(RecCandidate)
+                .where(RecCandidate.caf_submitted_at.is_not(None), RecCandidate.caf_submitted_at >= today)
+            )
         )
     ).scalar_one()
 
-    openings_count = (
-        await session.execute(
-            select(func.count())
-            .select_from(RecOpening)
-            .where(RecOpening.is_active == 1)
-        )
-    ).scalar_one()
+    openings_query = select(func.count()).select_from(RecOpening).where(RecOpening.is_active == 1)
+    if limited:
+        openings_query = openings_query.where(RecOpening.reporting_person_id_platform == interviewer_id)
+    openings_count = (await session.execute(openings_query)).scalar_one()
 
     needs_review_amber = (
         await session.execute(
-            select(func.count())
-            .select_from(RecCandidate)
-            .outerjoin(RecCandidateScreening, RecCandidateScreening.candidate_id == RecCandidate.candidate_id)
-            .where(RecCandidateScreening.screening_result == "amber")
+            _candidate_scope(
+                select(func.count())
+                .select_from(RecCandidate)
+                .outerjoin(RecCandidateScreening, RecCandidateScreening.candidate_id == RecCandidate.candidate_id)
+                .where(RecCandidateScreening.screening_result == "amber")
+            )
         )
     ).scalar_one()
 
@@ -95,17 +125,20 @@ async def get_dashboard_metrics(
         .group_by(RecCandidateStage.candidate_id)
         .subquery()
     )
+    pending_stage_query = (
+        select(RecCandidateStage.stage_name, func.count().label("count"))
+        .select_from(RecCandidateStage)
+        .join(
+            pending_stage,
+            (pending_stage.c.candidate_id == RecCandidateStage.candidate_id)
+            & (pending_stage.c.started_at == RecCandidateStage.started_at),
+        )
+    )
+    if assigned_ids is not None:
+        pending_stage_query = pending_stage_query.where(RecCandidateStage.candidate_id.in_(select(assigned_ids.c.candidate_id)))
     pending_stage_rows = (
         await session.execute(
-            select(RecCandidateStage.stage_name, func.count().label("count"))
-            .select_from(RecCandidateStage)
-            .join(
-                pending_stage,
-                (pending_stage.c.candidate_id == RecCandidateStage.candidate_id)
-                & (pending_stage.c.started_at == RecCandidateStage.started_at),
-            )
-            .group_by(RecCandidateStage.stage_name)
-            .order_by(func.count().desc())
+            pending_stage_query.group_by(RecCandidateStage.stage_name).order_by(func.count().desc())
         )
     ).all()
 
@@ -113,61 +146,73 @@ async def get_dashboard_metrics(
 
     stuck_in_stage_over_days = (
         await session.execute(
-            select(func.count())
-            .select_from(RecCandidateStage)
-            .where(
-                RecCandidateStage.stage_status == "pending",
-                func.datediff(today, RecCandidateStage.started_at) > stuck_days,
+            _candidate_id_scope(
+                select(func.count())
+                .select_from(RecCandidateStage)
+                .where(
+                    RecCandidateStage.stage_status == "pending",
+                    func.datediff(today, RecCandidateStage.started_at) > stuck_days,
+                ),
+                RecCandidateStage.candidate_id,
             )
         )
     ).scalar_one()
 
     caf_pending_overdue = (
         await session.execute(
-            select(func.count())
-            .select_from(RecCandidate)
-            .join(RecCandidateStage, RecCandidateStage.candidate_id == RecCandidate.candidate_id)
-            .where(
-                RecCandidateStage.stage_status == "pending",
-                RecCandidateStage.stage_name.in_(["hr_screening", "caf"]),
-                RecCandidate.caf_submitted_at.is_(None),
-                RecCandidate.caf_sent_at.is_not(None),
-                RecCandidate.caf_sent_at
-                <= func.date_sub(now, text(f"INTERVAL {settings.caf_reminder_days} DAY")),
+            _candidate_scope(
+                select(func.count())
+                .select_from(RecCandidate)
+                .join(RecCandidateStage, RecCandidateStage.candidate_id == RecCandidate.candidate_id)
+                .where(
+                    RecCandidateStage.stage_status == "pending",
+                    RecCandidateStage.stage_name.in_(["hr_screening", "caf"]),
+                    RecCandidate.caf_submitted_at.is_(None),
+                    RecCandidate.caf_sent_at.is_not(None),
+                    RecCandidate.caf_sent_at
+                    <= func.date_sub(now, text(f"INTERVAL {settings.caf_reminder_days} DAY")),
+                )
             )
         )
     ).scalar_one()
 
-    feedback_pending = (
-        await session.execute(
-            select(func.count())
-            .select_from(RecCandidateInterview)
-            .where(
-                RecCandidateInterview.feedback_submitted.is_(False),
-                RecCandidateInterview.scheduled_end_at
-                <= func.date_sub(now, text(f"INTERVAL {settings.feedback_reminder_hours} HOUR")),
-            )
+    feedback_query = (
+        select(func.count())
+        .select_from(RecCandidateInterview)
+        .where(
+            RecCandidateInterview.feedback_submitted.is_(False),
+            RecCandidateInterview.scheduled_end_at
+            <= func.date_sub(now, text(f"INTERVAL {settings.feedback_reminder_hours} HOUR")),
         )
-    ).scalar_one()
+    )
+    if assigned_ids is not None:
+        feedback_query = feedback_query.where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
+    feedback_pending = (await session.execute(feedback_query)).scalar_one()
 
     sprints_overdue = (
         await session.execute(
-            select(func.count())
-            .select_from(RecCandidateSprint)
-            .where(
-                RecCandidateSprint.status == "assigned",
-                RecCandidateSprint.due_at.is_not(None),
-                RecCandidateSprint.due_at
-                <= func.date_sub(now, text(f"INTERVAL {settings.sprint_overdue_days} DAY")),
+            _candidate_id_scope(
+                select(func.count())
+                .select_from(RecCandidateSprint)
+                .where(
+                    RecCandidateSprint.status == "assigned",
+                    RecCandidateSprint.due_at.is_not(None),
+                    RecCandidateSprint.due_at
+                    <= func.date_sub(now, text(f"INTERVAL {settings.sprint_overdue_days} DAY")),
+                ),
+                RecCandidateSprint.candidate_id,
             )
         )
     ).scalar_one()
 
     offers_awaiting_response = (
         await session.execute(
-            select(func.count())
-            .select_from(RecCandidateOffer)
-            .where(RecCandidateOffer.offer_status == "sent")
+            _candidate_id_scope(
+                select(func.count())
+                .select_from(RecCandidateOffer)
+                .where(RecCandidateOffer.offer_status == "sent"),
+                RecCandidateOffer.candidate_id,
+            )
         )
     ).scalar_one()
 
@@ -196,6 +241,11 @@ async def list_recent_events(
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
 ):
     is_superadmin = (user.platform_role_id or None) == 2 or Role.HR_ADMIN in user.roles
+    roles = set(user.roles or [])
+    is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
+    is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
+    interviewer_id = (user.person_id_platform or "").strip()
+    limited = is_interviewer and not is_hr and not is_superadmin and interviewer_id
     performer_id: int | None = None
     performer_email = (user.email or "").strip().lower()
     if not is_superadmin:
@@ -234,6 +284,14 @@ async def list_recent_events(
                 func.lower(RecCandidateEvent.meta_json).like(f'%\"performed_by_email\":\"{performer_email}\"%'),
             )
         )
+
+    if limited:
+        assigned_ids = (
+            select(RecCandidateInterview.candidate_id)
+            .where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
+            .subquery()
+        )
+        query = query.where(RecCandidateEvent.candidate_id.in_(select(assigned_ids.c.candidate_id)))
 
     rows = (await session.execute(query)).all()
 

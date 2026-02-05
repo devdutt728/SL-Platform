@@ -657,7 +657,9 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
               name="declaration_date"
               type="date"
               required
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              defaultValue={new Date().toISOString().slice(0, 10)}
+              readOnly
+              className="w-full rounded-xl border border-[var(--border)] bg-slate-100/70 px-3 py-2 text-slate-500"
             />
           </Field>
           <label className="flex items-start gap-2 text-sm text-[var(--text-secondary)]">

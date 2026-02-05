@@ -8,8 +8,8 @@ import { Home, Users, Briefcase, LayoutDashboard, CalendarClock, FileSignature, 
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, guard: "all" },
-  { href: "/candidates", label: "Candidates", icon: Users, guard: "all" },
-  { href: "/openings", label: "Openings", icon: Briefcase, guard: "all" },
+  { href: "/candidates", label: "Candidates", icon: Users, guard: "hr" },
+  { href: "/openings", label: "Openings", icon: Briefcase, guard: "hr" },
   { href: "/sprint-templates", label: "Sprint Templates", icon: FolderOpen, guard: "hr" },
   { href: "/interviewer", label: "Interviewer", icon: CalendarClock, guard: "interviewer" },
   { href: "/gl-portal", label: "GL Portal", icon: CalendarClock, guard: "gl" },
@@ -60,8 +60,8 @@ export function Sidebar() {
     const has = (value: string) => normalized.includes(value);
     const isHrAdmin = has("hr_admin");
     const isHr = isHrAdmin || has("hr_exec");
-    const isInterviewer = has("interviewer") || isHr;
-    const isGl = has("hiring_manager") || has("gl") || isHr;
+    const isGl = has("hiring_manager") || has("gl") || has("interviewer") || isHr;
+    const isInterviewer = has("interviewer") || isGl || isHr;
     const canOffers = has("approver") || isHr;
     const canReports = isHrAdmin;
     return {

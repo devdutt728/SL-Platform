@@ -22,6 +22,7 @@ from app.models.event import RecCandidateEvent
 from app.models.opening import RecOpening
 from app.models.screening import RecCandidateScreening
 from app.models.stage import RecCandidateStage
+from app.models.interview import RecCandidateInterview
 from app.schemas.candidate import CandidateCreate, CandidateDetailOut, CandidateListItem, CandidateUpdate
 from app.schemas.event import CandidateEventOut
 from app.schemas.offer import OfferCreateIn, OfferOut
@@ -63,6 +64,41 @@ def _platform_person_id(user: UserContext) -> int | None:
         return int(raw)
     except Exception:
         return None
+
+
+def _is_interviewer_scope(user: UserContext) -> bool:
+    roles = set(user.roles or [])
+    is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
+    is_superadmin = (user.platform_role_id or None) == 2
+    is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
+    return is_interviewer and not is_hr and not is_superadmin
+
+
+def _clean_person_id_platform(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    value = raw.strip()
+    return value or None
+
+
+async def _assert_candidate_access(session: AsyncSession, candidate_id: int, user: UserContext) -> None:
+    if not _is_interviewer_scope(user):
+        return
+    interviewer_id = _clean_person_id_platform(user.person_id_platform)
+    if not interviewer_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
+    row = (
+        await session.execute(
+            select(RecCandidateInterview.candidate_id)
+            .where(
+                RecCandidateInterview.candidate_id == candidate_id,
+                RecCandidateInterview.interviewer_person_id_platform == interviewer_id,
+            )
+            .limit(1)
+        )
+    ).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
 
 
 def _decode_letter_overrides(raw: str | None) -> dict[str, str]:
@@ -423,6 +459,17 @@ async def list_candidates(
                 normalized.append(item)
         query = query.where(current_stage_subq.c.stage_name.in_(normalized))
 
+    if _is_interviewer_scope(user):
+        interviewer_id = _clean_person_id_platform(user.person_id_platform)
+        if not interviewer_id:
+            return []
+        assigned_ids = (
+            select(RecCandidateInterview.candidate_id)
+            .where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
+            .subquery()
+        )
+        query = query.where(RecCandidate.candidate_id.in_(select(assigned_ids.c.candidate_id)))
+
     rows = (await session.execute(query)).all()
     return [
         CandidateListItem(
@@ -454,6 +501,7 @@ async def get_candidate(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    await _assert_candidate_access(session, candidate_id, user)
 
     opening_title = None
     if candidate.opening_id is not None:
@@ -563,6 +611,7 @@ async def get_candidate_screening(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    await _assert_candidate_access(session, candidate_id, user)
 
     try:
         screening = (
@@ -788,6 +837,7 @@ async def list_candidate_events(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    await _assert_candidate_access(session, candidate_id, user)
 
     rows = (
         await session.execute(
@@ -830,6 +880,7 @@ async def list_candidate_offers(
     session: AsyncSession = Depends(deps.get_db_session),
     _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
+    await _assert_candidate_access(session, candidate_id, _user)
     rows = (
         await session.execute(
             select(RecCandidateOffer)
@@ -871,6 +922,7 @@ async def list_candidate_stages(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    await _assert_candidate_access(session, candidate_id, user)
 
     stages = (
         await session.execute(

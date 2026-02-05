@@ -58,6 +58,15 @@ async def list_openings(
     query = select(RecOpening).order_by(RecOpening.updated_at.is_(None), RecOpening.updated_at.desc(), RecOpening.opening_id.desc())
     if is_active is not None:
         query = query.where(RecOpening.is_active == (1 if is_active else 0))
+    roles = set(user.roles or [])
+    is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
+    is_superadmin = (user.platform_role_id or None) == 2
+    is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
+    if is_interviewer and not is_hr and not is_superadmin:
+        requested_by = _clean_platform_person_id(user.person_id_platform)
+        if not requested_by:
+            return []
+        query = query.where(RecOpening.reporting_person_id_platform == requested_by)
     rows = (await session.execute(query)).scalars().all()
 
     # Enrich requested_by names from platform DB
@@ -141,6 +150,14 @@ async def get_opening_by_code(
     ).scalars().first()
     if not opening:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opening not found")
+    roles = set(user.roles or [])
+    is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
+    is_superadmin = (user.platform_role_id or None) == 2
+    is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
+    if is_interviewer and not is_hr and not is_superadmin:
+        requested_by = _clean_platform_person_id(user.person_id_platform)
+        if not requested_by or requested_by != _clean_platform_person_id(opening.reporting_person_id_platform):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
     return OpeningDetailOut.model_validate(opening)
 
 
@@ -330,6 +347,14 @@ async def get_opening(
     opening = await session.get(RecOpening, opening_id)
     if not opening:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opening not found")
+    roles = set(user.roles or [])
+    is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
+    is_superadmin = (user.platform_role_id or None) == 2
+    is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
+    if is_interviewer and not is_hr and not is_superadmin:
+        requested_by = _clean_platform_person_id(user.person_id_platform)
+        if not requested_by or requested_by != _clean_platform_person_id(opening.reporting_person_id_platform):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
     return OpeningDetail(
         opening_id=opening.opening_id,
         opening_code=opening.opening_code,
