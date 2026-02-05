@@ -248,6 +248,16 @@ async function readError(res: Response) {
   return raw;
 }
 
+async function updateCandidate(candidateId: string, payload: Record<string, unknown>) {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as CandidateDetail;
+}
+
 async function fetchInterviews(candidateId: string) {
   const res = await fetch(`/api/rec/interviews?candidate_id=${encodeURIComponent(candidateId)}`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
@@ -614,6 +624,13 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [personBusy, setPersonBusy] = useState(false);
   const [personOpen, setPersonOpen] = useState(false);
   const [personHighlight, setPersonHighlight] = useState(0);
+  const [l2OwnerQuery, setL2OwnerQuery] = useState("");
+  const [l2OwnerOptions, setL2OwnerOptions] = useState<PlatformPersonSuggestion[]>([]);
+  const [l2OwnerOpen, setL2OwnerOpen] = useState(false);
+  const [l2OwnerLoading, setL2OwnerLoading] = useState(false);
+  const [l2OwnerSelected, setL2OwnerSelected] = useState<PlatformPersonSuggestion | null>(null);
+  const [l2OwnerSaving, setL2OwnerSaving] = useState(false);
+  const [l2OwnerError, setL2OwnerError] = useState<string | null>(null);
   const [slotPreviewDate, setSlotPreviewDate] = useState("");
   const [slotPreviewSlots, setSlotPreviewSlots] = useState<SlotPreview[]>([]);
   const [slotPreviewBusy, setSlotPreviewBusy] = useState(false);
@@ -663,6 +680,21 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       setOfferTemplateCode(suggestion);
     }
   }, [candidate.opening_title]);
+
+  useEffect(() => {
+    if (candidate.l2_owner_email) {
+      setL2OwnerSelected({
+        person_id: candidate.l2_owner_email,
+        person_code: "",
+        full_name: candidate.l2_owner_name || candidate.l2_owner_email.split("@")[0] || candidate.l2_owner_email,
+        email: candidate.l2_owner_email,
+      });
+      setL2OwnerQuery("");
+    } else {
+      setL2OwnerSelected(null);
+      setL2OwnerQuery("");
+    }
+  }, [candidate.l2_owner_email, candidate.l2_owner_name]);
 
   useEffect(() => {
     if (!searchParams || autoRescheduleOpened) return;
@@ -727,10 +759,45 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
+  async function handleSaveL2Owner() {
+    const email = (l2OwnerSelected?.email || l2OwnerQuery || "").trim().toLowerCase();
+    const name = (l2OwnerSelected?.full_name || "").trim() || undefined;
+    if (!email || !email.includes("@")) {
+      setL2OwnerError("Enter a valid email or select from suggestions.");
+      return;
+    }
+    setL2OwnerError(null);
+    setL2OwnerSaving(true);
+    try {
+      const updated = await updateCandidate(candidateId, {
+        l2_owner_email: email,
+        l2_owner_name: name,
+      });
+      setData((prev) => ({ ...prev, candidate: updated }));
+      setL2OwnerSelected({
+        person_id: updated.l2_owner_email || email,
+        person_code: "",
+        full_name: updated.l2_owner_name || name || email.split("@")[0] || email,
+        email: updated.l2_owner_email || email,
+      });
+      setL2OwnerQuery("");
+      setL2OwnerOptions([]);
+    } catch (e: any) {
+      setL2OwnerError(e?.message || "Could not save GL/L2 owner.");
+    } finally {
+      setL2OwnerSaving(false);
+    }
+  }
+
   async function handleTransition(toStage: string, decision: string, reasonOverride?: string) {
     setBusy(true);
     setError(null);
     try {
+      if (toStage === "hr_screening" && !candidate.l2_owner_email) {
+        setBusy(false);
+        setError("Assign GL/L2 email before moving to HR screening.");
+        return;
+      }
       let reason = reasonOverride;
       if (decision === "reject" && !reason) {
         const input = window.prompt("Reason for rejection (required):");
@@ -1136,6 +1203,33 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     }
   }
 
+  async function prefillL2Owner(roundType: string) {
+    const roundUpper = roundType.toUpperCase();
+    if (roundUpper !== "L2") return;
+    const ownerEmail = (candidate.l2_owner_email || "").trim().toLowerCase();
+    if (!ownerEmail) return;
+    try {
+      const matches = await fetchPeople(ownerEmail);
+      const match =
+        matches.find((item) => (item.email || "").toLowerCase() === ownerEmail) ||
+        matches[0];
+      if (match) {
+        setScheduleInterviewer(match);
+        setPersonQuery(match.full_name || match.email || ownerEmail);
+        return;
+      }
+    } catch {
+      // Ignore lookup failures and fall back to manual selection.
+    }
+    setScheduleInterviewer({
+      person_id: "",
+      person_code: "",
+      full_name: candidate.l2_owner_name || ownerEmail,
+      email: ownerEmail,
+    });
+    setPersonQuery(candidate.l2_owner_name || ownerEmail);
+  }
+
   function openSchedule(roundType: string, rescheduleId: number | null = null) {
     const existing = rescheduleId ? interviews?.find((item) => item.candidate_interview_id === rescheduleId) : null;
     setScheduleRound(existing?.round_type || roundType);
@@ -1168,7 +1262,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       setPersonQuery(suggestion.full_name);
       const today = new Date().toISOString().slice(0, 10);
       setSlotPreviewDate(today);
+      return;
     }
+    void prefillL2Owner(roundType);
   }
 
   async function handleScheduleSubmit() {
@@ -1176,6 +1272,24 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     setInterviewsNotice(null);
     if (!scheduleInterviewer) {
       setInterviewsError("Select an interviewer.");
+      return;
+    }
+    let resolvedInterviewer = scheduleInterviewer;
+    if (!resolvedInterviewer.person_id && resolvedInterviewer.email) {
+      try {
+        const matches = await fetchPeople(resolvedInterviewer.email);
+        const match = matches.find((item) => (item.email || "").toLowerCase() === resolvedInterviewer.email?.toLowerCase()) || matches[0];
+        if (match?.person_id) {
+          resolvedInterviewer = match;
+          setScheduleInterviewer(match);
+          setPersonQuery(match.full_name || match.email || resolvedInterviewer.email || "");
+        }
+      } catch {
+        // Ignore lookup failure and surface validation below.
+      }
+    }
+    if (!resolvedInterviewer.person_id) {
+      setInterviewsError("Select a valid interviewer.");
       return;
     }
     const roundUpper = scheduleRound.toUpperCase();
@@ -1212,7 +1326,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         }
         await createInterview(candidateId, {
           round_type: scheduleRound,
-          interviewer_person_id_platform: scheduleInterviewer.person_id,
+          interviewer_person_id_platform: resolvedInterviewer.person_id,
           scheduled_start_at: startIso,
           scheduled_end_at: endIso,
           location: scheduleLocation || undefined,
@@ -1463,6 +1577,33 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }, [scheduleInterviewer, scheduleOpen, scheduleRound, slotPreviewDate]);
 
   useEffect(() => {
+    if (!l2OwnerOpen) return;
+    const q = l2OwnerQuery.trim();
+    if (!q) {
+      setL2OwnerOptions([]);
+      return;
+    }
+    let cancelled = false;
+    const handle = window.setTimeout(() => {
+      setL2OwnerLoading(true);
+      fetchPeople(q)
+        .then((items) => {
+          if (!cancelled) setL2OwnerOptions(items);
+        })
+        .catch(() => {
+          if (!cancelled) setL2OwnerOptions([]);
+        })
+        .finally(() => {
+          if (!cancelled) setL2OwnerLoading(false);
+        });
+    }, q.length < 2 ? 0 : 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [l2OwnerOpen, l2OwnerQuery]);
+
+  useEffect(() => {
     if (!scheduleOpen) return;
     const node = schedulePanelRef.current;
     if (node) node.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1517,6 +1658,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           tone: "bg-emerald-600 hover:bg-emerald-700",
           icon: <CheckCircle2 className="h-4 w-4" />,
           intent: "advance",
+          disabled: !candidate.l2_owner_email,
           action: () => handleTransition("hr_screening", "advance"),
         },
         {
@@ -1734,7 +1876,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       ];
     }
     return [];
-  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef, cafLocked]);
+  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef, cafLocked, candidate.l2_owner_email]);
 
   const screening = data.screening as Screening | null | undefined;
   const assessment = data.assessment as CandidateAssessment | null | undefined;
@@ -1965,6 +2107,81 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     </div>
                   </div>
                 ) : null}
+                <div className="rounded-2xl border border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-cyan-50 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-xs uppercase tracking-tight text-slate-500">GL / L2 Owner</p>
+                      <p className="mt-1 text-sm text-slate-700">Required before HR screening. Used for interview visibility.</p>
+                    </div>
+                    <Chip className={candidate.l2_owner_email ? chipTone("green") : chipTone("amber")}>
+                      {candidate.l2_owner_email ? "Assigned" : "Required"}
+                    </Chip>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+                    <div className="relative">
+                      <input
+                        value={
+                          l2OwnerSelected
+                            ? `${l2OwnerSelected.full_name} (${l2OwnerSelected.email})`
+                            : l2OwnerQuery
+                        }
+                        onChange={(e) => {
+                          setL2OwnerSelected(null);
+                          setL2OwnerQuery(e.target.value);
+                        }}
+                        onFocus={() => setL2OwnerOpen(true)}
+                        onBlur={() => window.setTimeout(() => setL2OwnerOpen(false), 150)}
+                        className="w-full rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/20"
+                        placeholder="Type name or email"
+                      />
+                      {l2OwnerLoading ? (
+                        <div className="absolute right-3 top-2 text-xs text-slate-500">Searching…</div>
+                      ) : null}
+                      {!l2OwnerSelected && l2OwnerOpen && l2OwnerOptions.length > 0 ? (
+                        <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
+                          {l2OwnerOptions.map((person) => (
+                            <button
+                              key={person.person_id}
+                              type="button"
+                              className="flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                              onClick={() => {
+                                setL2OwnerSelected(person);
+                                setL2OwnerOptions([]);
+                              }}
+                            >
+                              <span className="truncate">
+                                <span className="font-medium">{person.full_name}</span>{" "}
+                                <span className="text-slate-500">({person.email})</span>
+                              </span>
+                              <span className="shrink-0 text-xs text-slate-500">{person.role_name || person.role_code || ""}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-60"
+                      onClick={() => void handleSaveL2Owner()}
+                      disabled={l2OwnerSaving}
+                    >
+                      {l2OwnerSaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                  {l2OwnerSelected ? (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Selected: {l2OwnerSelected.full_name} • {l2OwnerSelected.email}
+                    </p>
+                  ) : candidate.l2_owner_email ? (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Current: {candidate.l2_owner_name || candidate.l2_owner_email} • {candidate.l2_owner_email}
+                    </p>
+                  ) : null}
+                  {l2OwnerError ? (
+                    <p className="mt-2 text-xs text-rose-700">{l2OwnerError}</p>
+                  ) : null}
+                </div>
                 <div>
                   <p className="text-xs uppercase tracking-tight text-slate-500">Stage progress</p>
                   <div className="stage-rail mt-3 rounded-2xl border border-white/70 px-4 py-4">
@@ -2039,10 +2256,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                             type="button"
                             className={clsx(
                               "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-60",
-                              b.intent !== "reject" && cafLocked ? "bg-slate-400 cursor-not-allowed" : b.tone
+                              b.disabled || (b.intent !== "reject" && cafLocked) ? "bg-slate-400 cursor-not-allowed" : b.tone
                             )}
                             onClick={() => void b.action()}
-                            disabled={busy || (cafLocked && b.intent !== "reject")}
+                            disabled={busy || (cafLocked && b.intent !== "reject") || b.disabled}
                           >
                             {b.icon}
                             {busy ? "Working..." : b.label}
@@ -2052,6 +2269,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                 ) : (
                   <p className="mt-3 text-sm text-slate-600">Use the action buttons above to jump into the next step.</p>
                 )}
+                    {!candidate.l2_owner_email && currentStageKey === "enquiry" ? (
+                      <p className="mt-2 text-xs text-amber-700">Assign GL/L2 email to unlock HR screening.</p>
+                    ) : null}
 
                     {canSkip ? (
                       <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-3">

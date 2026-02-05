@@ -27,3 +27,18 @@ export async function DELETE(_request: NextRequest, context: { params: Promise<{
     headers: { "content-type": res.headers.get("content-type") || "application/json" },
   });
 }
+
+export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
+  const body = await request.text();
+  const res = await fetch(backendUrl(`/rec/candidates/${params.id}`), {
+    method: "PATCH",
+    headers: { ...await authHeaderFromCookie(), "content-type": request.headers.get("content-type") || "application/json" },
+    body,
+  });
+  const data = await res.text();
+  return new NextResponse(data, {
+    status: res.status,
+    headers: { "content-type": res.headers.get("content-type") || "application/json" },
+  });
+}

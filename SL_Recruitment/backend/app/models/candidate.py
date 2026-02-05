@@ -33,6 +33,8 @@ class RecCandidate(Base):
 
     owner_person_id_platform: Mapped[int | None] = mapped_column(Integer, nullable=True)
     hired_person_id_platform: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    l2_owner_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    l2_owner_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     drive_folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     drive_folder_url: Mapped[str | None] = mapped_column(Text, nullable=True)

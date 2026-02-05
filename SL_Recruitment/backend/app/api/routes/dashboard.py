@@ -39,14 +39,37 @@ async def get_dashboard_metrics(
     is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
     is_superadmin = (user.platform_role_id or None) == 2
     is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
+    is_role6 = (user.platform_role_id or None) == 6 or (user.platform_role_code or "").strip() == "6"
     interviewer_id = (user.person_id_platform or "").strip()
-    limited = is_interviewer and not is_hr and not is_superadmin and interviewer_id
+    interviewer_email = (user.email or "").strip().lower()
+    limited = (is_interviewer or is_role6) and not is_hr and not is_superadmin and (interviewer_id or interviewer_email)
 
-    assigned_ids = (
-        select(RecCandidateInterview.candidate_id)
-        .where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
-        .subquery()
-    ) if limited else None
+    assigned_ids = None
+    if limited:
+        interview_subq = None
+        if interviewer_id:
+            interview_subq = (
+                select(RecCandidateInterview.candidate_id)
+                .where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
+                .subquery()
+            )
+        owner_subq = None
+        if interviewer_email:
+            owner_subq = (
+                select(RecCandidate.candidate_id)
+                .where(func.lower(RecCandidate.l2_owner_email) == interviewer_email)
+                .subquery()
+            )
+        if interview_subq is not None and owner_subq is not None:
+            assigned_ids = (
+                select(interview_subq.c.candidate_id)
+                .union(select(owner_subq.c.candidate_id))
+                .subquery()
+            )
+        elif interview_subq is not None:
+            assigned_ids = interview_subq
+        elif owner_subq is not None:
+            assigned_ids = owner_subq
 
     def _candidate_scope(query):
         if assigned_ids is None:
@@ -102,8 +125,13 @@ async def get_dashboard_metrics(
         )
     ).scalar_one()
 
-    openings_query = select(func.count()).select_from(RecOpening).where(RecOpening.is_active == 1)
-    if limited:
+    openings_query = (
+        select(func.count())
+        .select_from(RecOpening)
+        .where(or_(RecOpening.is_active == 1, RecOpening.is_active == True, RecOpening.is_active.is_(True)))
+    )
+    limit_openings = limited and interviewer_id and not is_role6
+    if limit_openings:
         openings_query = openings_query.where(RecOpening.reporting_person_id_platform == interviewer_id)
     openings_count = (await session.execute(openings_query)).scalar_one()
 
@@ -119,8 +147,8 @@ async def get_dashboard_metrics(
     ).scalar_one()
 
     # Current pending stage counts.
-    pending_stage = (
-        select(RecCandidateStage.candidate_id, func.max(RecCandidateStage.started_at).label("started_at"))
+    latest_stage = (
+        select(RecCandidateStage.candidate_id, func.max(RecCandidateStage.stage_id).label("stage_id"))
         .where(RecCandidateStage.stage_status == "pending")
         .group_by(RecCandidateStage.candidate_id)
         .subquery()
@@ -128,11 +156,7 @@ async def get_dashboard_metrics(
     pending_stage_query = (
         select(RecCandidateStage.stage_name, func.count().label("count"))
         .select_from(RecCandidateStage)
-        .join(
-            pending_stage,
-            (pending_stage.c.candidate_id == RecCandidateStage.candidate_id)
-            & (pending_stage.c.started_at == RecCandidateStage.started_at),
-        )
+        .join(latest_stage, latest_stage.c.stage_id == RecCandidateStage.stage_id)
     )
     if assigned_ids is not None:
         pending_stage_query = pending_stage_query.where(RecCandidateStage.candidate_id.in_(select(assigned_ids.c.candidate_id)))
@@ -186,7 +210,9 @@ async def get_dashboard_metrics(
         )
     )
     if assigned_ids is not None:
-        feedback_query = feedback_query.where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
+        feedback_query = feedback_query.where(
+            RecCandidateInterview.candidate_id.in_(select(assigned_ids.c.candidate_id))
+        )
     feedback_pending = (await session.execute(feedback_query)).scalar_one()
 
     sprints_overdue = (
@@ -244,8 +270,10 @@ async def list_recent_events(
     roles = set(user.roles or [])
     is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
     is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
+    is_role6 = (user.platform_role_id or None) == 6 or (user.platform_role_code or "").strip() == "6"
     interviewer_id = (user.person_id_platform or "").strip()
-    limited = is_interviewer and not is_hr and not is_superadmin and interviewer_id
+    interviewer_email = (user.email or "").strip().lower()
+    limited = (is_interviewer or is_role6) and not is_hr and not is_superadmin and (interviewer_id or interviewer_email)
     performer_id: int | None = None
     performer_email = (user.email or "").strip().lower()
     if not is_superadmin:
@@ -286,12 +314,34 @@ async def list_recent_events(
         )
 
     if limited:
-        assigned_ids = (
-            select(RecCandidateInterview.candidate_id)
-            .where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
-            .subquery()
-        )
-        query = query.where(RecCandidateEvent.candidate_id.in_(select(assigned_ids.c.candidate_id)))
+        interview_subq = None
+        if interviewer_id:
+            interview_subq = (
+                select(RecCandidateInterview.candidate_id)
+                .where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
+                .subquery()
+            )
+        owner_subq = None
+        if interviewer_email:
+            owner_subq = (
+                select(RecCandidate.candidate_id)
+                .where(func.lower(RecCandidate.l2_owner_email) == interviewer_email)
+                .subquery()
+            )
+        if interview_subq is not None and owner_subq is not None:
+            assigned_ids = (
+                select(interview_subq.c.candidate_id)
+                .union(select(owner_subq.c.candidate_id))
+                .subquery()
+            )
+        elif interview_subq is not None:
+            assigned_ids = interview_subq
+        elif owner_subq is not None:
+            assigned_ids = owner_subq
+        else:
+            assigned_ids = None
+        if assigned_ids is not None:
+            query = query.where(RecCandidateEvent.candidate_id.in_(select(assigned_ids.c.candidate_id)))
 
     rows = (await session.execute(query)).all()
 

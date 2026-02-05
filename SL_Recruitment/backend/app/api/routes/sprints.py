@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi.responses import StreamingResponse
 import re
 
-from sqlalchemy import select
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
@@ -35,7 +35,7 @@ from app.schemas.stage import StageTransitionRequest
 from app.schemas.sprint_template import SprintTemplateCreateIn, SprintTemplateListItem, SprintTemplateUpdateIn
 from app.schemas.user import UserContext
 import anyio
-from app.services.platform_identity import active_status_filter
+from app.services.platform_identity import active_status_filter, resolve_identity_by_email
 from app.services.drive import (
     copy_sprint_attachment_to_candidate,
     download_drive_file,
@@ -57,6 +57,20 @@ def _normalize_person_id(raw: str | None) -> str | None:
         return None
     val = raw.strip()
     return val or None
+
+
+async def _resolve_person_id_by_email(email: str | None) -> str | None:
+    email_norm = (email or "").strip().lower()
+    if not email_norm:
+        return None
+    try:
+        async with PlatformSessionLocal() as platform_session:
+            identity = await resolve_identity_by_email(platform_session, email_norm)
+            if identity and identity.person_id:
+                return str(identity.person_id)
+    except Exception:
+        return None
+    return None
 
 
 async def _fetch_platform_people(ids: set[str]) -> dict[str, dict]:
@@ -478,6 +492,7 @@ async def assign_sprint(
     due_at = _compute_due_at(now, template, payload.due_at)
     public_token = uuid4().hex
 
+    reviewer_person_id = await _resolve_person_id_by_email(candidate.l2_owner_email)
     sprint = RecCandidateSprint(
         candidate_id=candidate_id,
         sprint_template_id=template.sprint_template_id,
@@ -485,6 +500,7 @@ async def assign_sprint(
         assigned_at=now,
         due_at=due_at,
         status="assigned",
+        reviewed_by_person_id_platform=_normalize_person_id(reviewer_person_id),
         public_token=public_token,
         created_at=now,
         updated_at=now,
@@ -669,8 +685,15 @@ async def list_sprints(
     )
     if status_filter:
         query = query.where(RecCandidateSprint.status == status_filter)
-    if reviewer == "me" and user.person_id_platform and status_filter not in {"submitted"}:
-        query = query.where(RecCandidateSprint.reviewed_by_person_id_platform == _normalize_person_id(user.person_id_platform))
+    if reviewer == "me":
+        reviewer_filter = None
+        if user.person_id_platform:
+            reviewer_filter = RecCandidateSprint.reviewed_by_person_id_platform == _normalize_person_id(user.person_id_platform)
+        if user.email:
+            email_filter = func.lower(RecCandidate.l2_owner_email) == user.email.lower()
+            reviewer_filter = email_filter if reviewer_filter is None else or_(reviewer_filter, email_filter)
+        if reviewer_filter is not None:
+            query = query.where(reviewer_filter)
 
     rows = (await session.execute(query)).all()
     reviewer_ids = {_normalize_person_id(sprint.reviewed_by_person_id_platform) or "" for sprint, _, _, _ in rows}

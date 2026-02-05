@@ -320,6 +320,11 @@ function assessmentModeForInterview(interview: Interview | null): AssessmentMode
   return interview.round_type.toLowerCase().includes("l1") ? "l1" : "l2";
 }
 
+function interviewReason(interview: Interview) {
+  const reason = (interview.interview_status_reason || interview.notes_internal || "").trim();
+  return reason || "";
+}
+
 async function fetchInterviews(params: Record<string, string>) {
   const url = new URL("/api/rec/interviews", window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
@@ -403,11 +408,11 @@ async function submitAssessment(interviewId: number, data: Record<string, any>, 
   return (await res.json()) as L2Assessment;
 }
 
-async function markInterview(interviewId: number, status: "taken" | "not_taken") {
+async function markInterview(interviewId: number, status: "taken" | "not_taken", reason?: string) {
   const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/status`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, reason }),
   });
   if (!res.ok) throw new Error(await res.text());
   return await res.json();
@@ -560,6 +565,10 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
   const sections = activeMode === "l1" ? L1_SECTION_FIELDS : L2_SECTION_FIELDS;
   const activeInterviewStatus = (active?.interview_status || "").toLowerCase();
   const isInterviewNotTaken = activeInterviewStatus === "not_taken";
+  const isInterviewTaken = activeInterviewStatus === "taken";
+  const scheduledStart = active?.scheduled_start_at ? parseDateUtc(active.scheduled_start_at) : null;
+  const hasMeetingStarted = !!scheduledStart && !Number.isNaN(scheduledStart.getTime()) && scheduledStart.getTime() <= Date.now();
+  const canUpdateInterviewStatus = !!active && hasMeetingStarted;
 
   async function markInterviewStatus(status: "taken" | "not_taken") {
     if (!active || !candidate) return;
@@ -567,7 +576,12 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
     setError(null);
     setNotice(null);
     try {
-      await markInterview(active.candidate_interview_id, status);
+      let reason: string | undefined;
+      if (status === "not_taken") {
+        const response = window.prompt("Reason for marking as not taken? (optional)") || "";
+        reason = response.trim() || undefined;
+      }
+      await markInterview(active.candidate_interview_id, status, reason);
       await refreshList();
       const candidateDetail = await fetchCandidate(active.candidate_id);
       setCandidate(candidateDetail);
@@ -599,7 +613,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
     const commonProps = {
       className:
         "w-full rounded-2xl border border-slate-200/80 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6)] focus:outline-none focus:ring-2 focus:ring-slate-900/20 disabled:bg-slate-100",
-      disabled: locked,
+      disabled: locked || !isInterviewTaken,
     };
     if (field.type === "yesno") {
       return (
@@ -748,6 +762,9 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                               </a>
                             ) : null}
                           </div>
+                          {interviewReason(item) ? (
+                            <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
+                          ) : null}
                         </button>
                       ))
                     )}
@@ -789,6 +806,9 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                               </a>
                             ) : null}
                           </div>
+                          {interviewReason(item) ? (
+                            <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
+                          ) : null}
                         </button>
                       ))
                     )}
@@ -828,6 +848,9 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                               </a>
                             ) : null}
                           </div>
+                          {interviewReason(item) ? (
+                            <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
+                          ) : null}
                         </button>
                       ))}
                     </div>
@@ -876,7 +899,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                     type="button"
                     className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
                     onClick={() => void markInterviewStatus("taken")}
-                    disabled={busy}
+                    disabled={busy || !canUpdateInterviewStatus}
                   >
                     Mark interview taken
                   </button>
@@ -884,16 +907,26 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                     type="button"
                     className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
                     onClick={() => void markInterviewStatus("not_taken")}
-                    disabled={busy}
+                    disabled={busy || !canUpdateInterviewStatus}
                   >
                     Mark not taken
                   </button>
                 </div>
               </div>
+              {!hasMeetingStarted ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-2 text-xs text-amber-700">
+                  Interview status can be updated once the scheduled start time begins.
+                </div>
+              ) : null}
 
               {locked ? (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-2 text-xs text-amber-700">
                   This assessment is locked after submission.
+                </div>
+              ) : null}
+              {!isInterviewTaken && !isInterviewNotTaken ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2 text-xs text-slate-600">
+                  Mark the interview as taken to unlock feedback.
                 </div>
               ) : null}
 
@@ -942,7 +975,10 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                 {!isInterviewNotTaken ? sections.map((section) => (
                   <section
                     key={section.title}
-                    className="rounded-3xl border border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-slate-100 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)]"
+                    className={clsx(
+                      "rounded-3xl border border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-slate-100 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)]",
+                      !isInterviewTaken && "opacity-60"
+                    )}
                   >
                     <div className="flex flex-wrap items-end justify-between gap-2">
                       <div>
@@ -992,7 +1028,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                     type="button"
                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
                     onClick={() => void handleSave()}
-                    disabled={busy || locked || isInterviewNotTaken}
+                    disabled={busy || locked || isInterviewNotTaken || !isInterviewTaken}
                   >
                     Save draft
                   </button>
@@ -1000,7 +1036,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
                     type="button"
                     className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
                     onClick={() => void handleSubmit()}
-                    disabled={busy || locked || isInterviewNotTaken}
+                    disabled={busy || locked || isInterviewNotTaken || !isInterviewTaken}
                   >
                     {isSubmitted ? "Submitted" : "Submit"}
                   </button>

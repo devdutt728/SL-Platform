@@ -84,8 +84,6 @@ async def resolve_identity_by_email(session: AsyncSession, email: str) -> Option
             .order_by(DimRole.role_id.asc())
         )
     ).all()
-    if not role_rows and row.role_id is not None:
-        role_rows = [(row.role_id, row.role_code, row.role_name)]
 
     role_ids = []
     role_codes = []

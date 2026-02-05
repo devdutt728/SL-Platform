@@ -9,7 +9,7 @@ declare global {
   }
 }
 
-export function LoginPanel({ clientId }: { clientId: string }) {
+export function LoginPanel({ clientId, sessionExpired }: { clientId: string; sessionExpired?: boolean }) {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +27,11 @@ export function LoginPanel({ clientId }: { clientId: string }) {
       <p className="mt-2 text-center text-sm text-[var(--text-secondary)]">
         Sign in with your Studio Lotus Google account.
       </p>
+      {sessionExpired && (
+        <div className="mt-4 rounded-xl border border-amber-200/60 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
+          Session expired. Please sign in again.
+        </div>
+      )}
 
       <div className="mt-6 flex justify-center">
         <a

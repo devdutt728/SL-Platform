@@ -382,6 +382,7 @@ def _build_interview_out(
     opening: RecOpening | None = None,
     interviewer_meta: dict | None = None,
     interview_status: str | None = None,
+    interview_status_reason: str | None = None,
 ) -> InterviewOut:
     return InterviewOut(
         candidate_interview_id=interview.candidate_interview_id,
@@ -389,6 +390,7 @@ def _build_interview_out(
         stage_name=interview.stage_name,
         round_type=interview.round_type,
         interview_status=interview_status,
+        interview_status_reason=interview_status_reason,
         interviewer_person_id_platform=interview.interviewer_person_id_platform,
         interviewer_name=(interviewer_meta or {}).get("name"),
         interviewer_email=(interviewer_meta or {}).get("email"),
@@ -443,7 +445,7 @@ async def _load_interview_statuses(
     session: AsyncSession,
     *,
     interview_ids: list[int],
-) -> dict[int, str]:
+) -> dict[int, dict[str, str]]:
     if not interview_ids:
         return {}
     rows = (
@@ -466,7 +468,7 @@ async def _load_interview_statuses(
             )
         )
     ).all()
-    latest: dict[int, str] = {}
+    latest: dict[int, dict[str, str]] = {}
     for related_id, meta_json, _created_at, _event_id in rows:
         if related_id is None or related_id in latest:
             continue
@@ -476,12 +478,17 @@ async def _load_interview_statuses(
             meta = {}
         status_value = meta.get("status") if isinstance(meta, dict) else None
         if isinstance(status_value, str) and status_value.strip():
-            latest[int(related_id)] = status_value.strip()
+            entry = {"status": status_value.strip()}
+            reason_value = meta.get("reason") if isinstance(meta, dict) else None
+            if isinstance(reason_value, str) and reason_value.strip():
+                entry["reason"] = reason_value.strip()
+            latest[int(related_id)] = entry
     return latest
 
 
 class InterviewStatusPayload(BaseModel):
     status: str
+    reason: str | None = None
 
 
 @router.post("/candidates/{candidate_id}/interviews", response_model=InterviewOut, status_code=status.HTTP_201_CREATED)
@@ -1593,12 +1600,14 @@ async def reschedule_interview(
 
     await session.commit()
     status_lookup = await _load_interview_statuses(session, interview_ids=[interview.candidate_interview_id])
+    status_meta = status_lookup.get(interview.candidate_interview_id, {})
     return _build_interview_out(
         interview,
         candidate=candidate,
         opening=opening,
         interviewer_meta=interviewer_meta,
-        interview_status=status_lookup.get(interview.candidate_interview_id),
+        interview_status=status_meta.get("status"),
+        interview_status_reason=status_meta.get("reason"),
     )
 
 
@@ -1622,19 +1631,24 @@ async def list_interviews(
     if interviewer == "me":
         if user.person_id_platform:
             interviewer_filter = user.person_id_platform
-        else:
-            if settings.environment == "production":
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user has no platform person id")
+        elif not user.email and settings.environment == "production":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user has no platform person id")
     elif (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and not (
         Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles or Role.HIRING_MANAGER in user.roles
     ):
         if user.person_id_platform:
             interviewer_filter = user.person_id_platform
-        elif settings.environment == "production":
+        elif not user.email and settings.environment == "production":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user has no platform person id")
 
     if interviewer_filter:
-        query = query.where(RecCandidateInterview.interviewer_person_id_platform == _clean_platform_person_id(interviewer_filter))
+        base_filter = RecCandidateInterview.interviewer_person_id_platform == _clean_platform_person_id(interviewer_filter)
+        if (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and user.email:
+            base_filter = or_(base_filter, func.lower(RecCandidate.l2_owner_email) == user.email.lower())
+        query = query.where(base_filter)
+    elif (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and user.email:
+        # Fallback: show interviews for candidates assigned to the interviewer via L2 owner email.
+        query = query.where(func.lower(RecCandidate.l2_owner_email) == user.email.lower())
 
     if candidate_id is not None:
         query = query.where(RecCandidateInterview.candidate_id == candidate_id)
@@ -1661,13 +1675,15 @@ async def list_interviews(
     out: list[InterviewOut] = []
     for interview, candidate, opening in rows:
         meta = interviewer_lookup.get(_clean_platform_person_id(interview.interviewer_person_id_platform) or "", {})
+        status_meta = status_lookup.get(interview.candidate_interview_id, {})
         out.append(
             _build_interview_out(
                 interview,
                 candidate=candidate,
                 opening=opening,
                 interviewer_meta=meta,
-                interview_status=status_lookup.get(interview.candidate_interview_id),
+                interview_status=status_meta.get("status"),
+                interview_status_reason=status_meta.get("reason"),
             )
         )
     return out
@@ -1695,12 +1711,14 @@ async def get_interview(
         _clean_platform_person_id(interview.interviewer_person_id_platform) or "", {}
     )
     status_lookup = await _load_interview_statuses(session, interview_ids=[candidate_interview_id])
+    status_meta = status_lookup.get(candidate_interview_id, {})
     return _build_interview_out(
         interview,
         candidate=candidate,
         opening=opening,
         interviewer_meta=interviewer_meta,
-        interview_status=status_lookup.get(candidate_interview_id),
+        interview_status=status_meta.get("status"),
+        interview_status_reason=status_meta.get("reason"),
     )
 
 
@@ -1765,12 +1783,14 @@ async def update_interview(
         _clean_platform_person_id(interview.interviewer_person_id_platform) or "", {}
     )
     status_lookup = await _load_interview_statuses(session, interview_ids=[candidate_interview_id])
+    status_meta = status_lookup.get(candidate_interview_id, {})
     return _build_interview_out(
         interview,
         candidate=candidate,
         opening=opening,
         interviewer_meta=interviewer_meta,
-        interview_status=status_lookup.get(candidate_interview_id),
+        interview_status=status_meta.get("status"),
+        interview_status_reason=status_meta.get("reason"),
     )
 
 
@@ -1789,6 +1809,7 @@ async def mark_interview_status(
     status_value = (payload.status or "").strip().lower()
     if status_value not in {"taken", "not_taken"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Status must be 'taken' or 'not_taken'")
+    reason_value = (payload.reason or "").strip()
 
     already_marked = (
         await session.execute(
@@ -1805,6 +1826,14 @@ async def mark_interview_status(
     if already_marked:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview status already set")
 
+    meta_json = {
+        "status": status_value,
+        "round_type": interview.round_type,
+        "performed_by_email": user.email,
+    }
+    if reason_value:
+        meta_json["reason"] = reason_value
+
     await log_event(
         session,
         candidate_id=interview.candidate_id,
@@ -1812,11 +1841,7 @@ async def mark_interview_status(
         performed_by_person_id_platform=_platform_person_id_int(user),
         related_entity_type="interview",
         related_entity_id=candidate_interview_id,
-        meta_json={
-            "status": status_value,
-            "round_type": interview.round_type,
-            "performed_by_email": user.email,
-        },
+        meta_json=meta_json,
     )
 
     if status_value == "taken":

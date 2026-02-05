@@ -4,6 +4,8 @@ export type CandidateListItem = {
   name: string;
   opening_id?: number | null;
   opening_title?: string | null;
+  l2_owner_email?: string | null;
+  l2_owner_name?: string | null;
   current_stage?: string | null;
   status: string;
   ageing_days: number;
@@ -23,6 +25,8 @@ export type CandidateDetail = {
   phone?: string | null;
   opening_id?: number | null;
   opening_title?: string | null;
+  l2_owner_email?: string | null;
+  l2_owner_name?: string | null;
   status: string;
   current_stage?: string | null;
   final_decision?: string | null;
@@ -59,6 +63,7 @@ export type Interview = {
   stage_name?: string | null;
   round_type: string;
   interview_status?: string | null;
+  interview_status_reason?: string | null;
   interviewer_person_id_platform?: string | null;
   interviewer_name?: string | null;
   interviewer_email?: string | null;

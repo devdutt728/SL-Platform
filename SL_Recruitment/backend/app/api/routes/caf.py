@@ -149,16 +149,27 @@ async def submit_caf(
         )
     ).scalar_one_or_none()
     if current_stage != "hr_screening":
-        await _transition_from_caf(session, candidate_id=candidate.candidate_id, to_stage="hr_screening")
-        await log_event(
-            session,
-            candidate_id=candidate.candidate_id,
-            action_type="screening_needs_review",
-            performed_by_person_id_platform=None,
-            related_entity_type="candidate",
-            related_entity_id=candidate.candidate_id,
-            meta_json={"stage": "hr_screening"},
-        )
+        if candidate.l2_owner_email:
+            await _transition_from_caf(session, candidate_id=candidate.candidate_id, to_stage="hr_screening")
+            await log_event(
+                session,
+                candidate_id=candidate.candidate_id,
+                action_type="screening_needs_review",
+                performed_by_person_id_platform=None,
+                related_entity_type="candidate",
+                related_entity_id=candidate.candidate_id,
+                meta_json={"stage": "hr_screening"},
+            )
+        else:
+            await log_event(
+                session,
+                candidate_id=candidate.candidate_id,
+                action_type="stage_blocked",
+                performed_by_person_id_platform=None,
+                related_entity_type="candidate",
+                related_entity_id=candidate.candidate_id,
+                meta_json={"stage": "hr_screening", "reason": "missing_l2_owner_email"},
+            )
 
     await log_event(
         session,

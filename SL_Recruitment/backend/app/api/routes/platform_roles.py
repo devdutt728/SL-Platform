@@ -131,8 +131,5 @@ async def assign_role(
             [DimPersonRole(person_id=person_id, role_id=role_id) for role_id in role_ids]
         )
 
-    person.role_id = role_ids[0] if role_ids else None
-    if 2 in role_ids:
-        person.role_id = 2
     await session.commit()
     return {"person_id": person_id, "role_ids": role_ids}

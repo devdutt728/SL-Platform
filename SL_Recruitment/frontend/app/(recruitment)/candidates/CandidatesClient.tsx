@@ -12,6 +12,7 @@ import { redirectToLogin } from "@/lib/auth-client";
 type Props = {
   initialCandidates: CandidateListItem[];
   openings: OpeningListItem[];
+  canNavigate?: boolean;
 };
 
 const stageTone: Record<string, string> = {
@@ -135,7 +136,7 @@ async function fetchCandidates(params: {
   return (await res.json()) as CandidateListItem[];
 }
 
-export function CandidatesClient({ initialCandidates, openings }: Props) {
+export function CandidatesClient({ initialCandidates, openings, canNavigate = true }: Props) {
   const [candidates, setCandidates] = useState<CandidateListItem[]>(initialCandidates);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -474,15 +475,19 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
                       )
                     )
                   : 0;
+            const rowClass = clsx(
+              "gap-2 px-3 py-3 transition",
+              canNavigate ? "hover:bg-white/70" : "",
+              tableGrid,
+              isHighAge || isHigh ? "bg-rose-500/10" : attention ? "bg-amber-500/5" : ""
+            );
+            const RowTag = canNavigate ? Link : "div";
+            const rowProps = canNavigate ? { href: `/candidates/${c.candidate_id}` } : {};
             return (
-              <Link
+              <RowTag
                 key={c.candidate_id}
-                href={`/candidates/${c.candidate_id}`}
-                className={clsx(
-                  "gap-2 px-3 py-3 transition hover:bg-white/70",
-                  tableGrid,
-                  isHighAge || isHigh ? "bg-rose-500/10" : attention ? "bg-amber-500/5" : ""
-                )}
+                {...rowProps}
+                className={rowClass}
               >
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-slate-900">{c.name}</p>
@@ -513,7 +518,7 @@ export function CandidatesClient({ initialCandidates, openings }: Props) {
                     {c.status.split("_").join(" ")}
                   </span>
                 </div>
-              </Link>
+              </RowTag>
             );
           })}
 

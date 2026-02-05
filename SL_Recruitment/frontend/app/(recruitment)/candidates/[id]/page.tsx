@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { CandidateFull } from "@/lib/types";
 import { internalUrl } from "@/lib/internal";
 import { Candidate360Client } from "./Candidate360Client";
+import { redirect } from "next/navigation";
 
 type Me = {
   platform_role_id?: number | null;
@@ -34,6 +35,11 @@ export default async function CandidateDetailPage({ params }: { params: Promise<
   const { id } = await params;
   const [full, me] = await Promise.all([fetchCandidateFull(id), fetchMe()]);
   if (!full) notFound();
+  const roleId = me?.platform_role_id ?? null;
+  const roleCode = (me?.platform_role_code ?? "").trim();
+  if (roleId === 6 || roleCode === "6") {
+    redirect("/interviewer");
+  }
   const canDelete = (me?.platform_role_id ?? null) === 2 || (me?.platform_role_code ?? "").trim() === "2";
   const roles = (me?.roles || []).map((role) => String(role).toLowerCase());
   const canSchedule =

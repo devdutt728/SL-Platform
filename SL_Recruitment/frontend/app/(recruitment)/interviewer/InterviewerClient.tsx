@@ -5,14 +5,17 @@ import { clsx } from "clsx";
 import { CalendarCheck2, ExternalLink, Loader2, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CandidateSprint, Interview, L2Assessment, PlatformPersonSuggestion } from "@/lib/types";
+import { CandidateListItem, CandidateSprint, Interview, L2Assessment, PlatformPersonSuggestion } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
 
 type Props = {
   initialUpcoming: Interview[];
   initialPast: Interview[];
+  assignedCandidates?: CandidateListItem[];
   useMeFilter: boolean;
   canAssignReviewer: boolean;
+  canManageInterviews: boolean;
+  canViewCandidate360: boolean;
 };
 
 type SprintReviewForm = {
@@ -77,6 +80,11 @@ function interviewStatusLabel(raw?: string | null) {
   if (value === "taken") return "Interview taken";
   if (value === "not_taken") return "Interview not taken";
   return "";
+}
+
+function interviewReason(item: Interview) {
+  const reason = (item.interview_status_reason || item.notes_internal || "").trim();
+  return reason || "";
 }
 
 async function fetchInterviews(params: Record<string, string>) {
@@ -221,7 +229,7 @@ function InterviewCard({
   );
 }
 
-export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter, canAssignReviewer }: Props) {
+export function InterviewerClient({ initialUpcoming, initialPast, assignedCandidates, useMeFilter, canAssignReviewer, canManageInterviews, canViewCandidate360 }: Props) {
   const router = useRouter();
   const [upcoming, setUpcoming] = useState<Interview[]>(initialUpcoming);
   const [past, setPast] = useState<Interview[]>(initialPast);
@@ -520,6 +528,39 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter, c
 
       {error ? <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
+      {assignedCandidates && assignedCandidates.length > 0 ? (
+        <section className="section-card">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold">Assigned candidates</p>
+              <p className="text-xs text-slate-600">Visible right after HR screening assignment.</p>
+            </div>
+            <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+              {assignedCandidates.length} total
+            </span>
+          </div>
+          <div className="mt-3 space-y-2">
+            {assignedCandidates.map((candidate) => (
+              <div key={candidate.candidate_id} className="rounded-2xl border border-white/60 bg-white/40 px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{candidate.name}</p>
+                    <p className="text-xs text-slate-600">{candidate.opening_title || "Opening"}</p>
+                  </div>
+                  <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>
+                    {candidate.current_stage ? candidate.current_stage.replace(/_/g, " ") : "Stage pending"}
+                  </span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                  <span>Code: {candidate.candidate_code}</span>
+                  <span>Status: {candidate.status.replace(/_/g, " ")}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
         <div className="section-card">
           <div className="flex items-center justify-between">
@@ -537,8 +578,8 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter, c
                   key={slot.candidate_interview_id}
                   interview={slot}
                   onSelect={openAssessment}
-                  onCancel={handleCancel}
-                  onReschedule={handleReschedule}
+                  onCancel={canManageInterviews ? handleCancel : undefined}
+                  onReschedule={canManageInterviews ? handleReschedule : undefined}
                 />
               ))
             )}
@@ -626,6 +667,9 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter, c
                               </a>
                             ) : null}
                           </div>
+                          {interviewReason(item) ? (
+                            <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
+                          ) : null}
                         </button>
                       ))
                     )}
@@ -666,6 +710,9 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter, c
                               </a>
                             ) : null}
                           </div>
+                          {interviewReason(item) ? (
+                            <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
+                          ) : null}
                         </button>
                       ))
                     )}
@@ -708,6 +755,9 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter, c
                               </a>
                             ) : null}
                           </div>
+                          {interviewReason(item) ? (
+                            <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
+                          ) : null}
                         </button>
                       ))}
                     </div>
@@ -811,6 +861,12 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter, c
                   {sprint.submitted_at ? <span>Submitted {formatDateTime(sprint.submitted_at)}</span> : null}
                   {sprint.due_at ? <span>Due {formatDateTime(sprint.due_at)}</span> : null}
                 </div>
+                {sprint.decision || sprint.comments_internal ? (
+                  <p className="text-xs text-slate-600">
+                    {sprint.decision ? `Decision: ${sprint.decision.replace(/_/g, " ")}` : "Decision: —"}
+                    {sprint.comments_internal ? ` · Reason: ${sprint.comments_internal}` : ""}
+                  </p>
+                ) : null}
                 {canAssignReviewer ? (
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -956,12 +1012,14 @@ export function InterviewerClient({ initialUpcoming, initialPast, useMeFilter, c
                 >
                   Open assessment portal
                 </Link>
-                <Link
-                  href={`/candidates/${encodeURIComponent(String(active.candidate_id))}`}
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
-                >
-                  View candidate
-                </Link>
+                {canViewCandidate360 ? (
+                  <Link
+                    href={`/candidates/${encodeURIComponent(String(active.candidate_id))}`}
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
+                  >
+                    View candidate
+                  </Link>
+                ) : null}
               </div>
             </div>
           </div>

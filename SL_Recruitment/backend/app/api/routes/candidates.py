@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
 import json
 from pydantic import BaseModel
-from sqlalchemy import func, select, delete, text
+from sqlalchemy import func, select, delete, text, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
@@ -71,7 +71,8 @@ def _is_interviewer_scope(user: UserContext) -> bool:
     is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
     is_superadmin = (user.platform_role_id or None) == 2
     is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
-    return is_interviewer and not is_hr and not is_superadmin
+    is_role6 = (user.platform_role_id or None) == 6 or (user.platform_role_code or "").strip() == "6"
+    return (is_interviewer or is_role6) and not is_hr and not is_superadmin
 
 
 def _clean_person_id_platform(raw: str | None) -> str | None:
@@ -85,19 +86,34 @@ async def _assert_candidate_access(session: AsyncSession, candidate_id: int, use
     if not _is_interviewer_scope(user):
         return
     interviewer_id = _clean_person_id_platform(user.person_id_platform)
-    if not interviewer_id:
+    user_email = (user.email or "").strip().lower()
+    if not interviewer_id and not user_email:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
-    row = (
-        await session.execute(
-            select(RecCandidateInterview.candidate_id)
-            .where(
-                RecCandidateInterview.candidate_id == candidate_id,
-                RecCandidateInterview.interviewer_person_id_platform == interviewer_id,
+    interview_row = None
+    if interviewer_id:
+        interview_row = (
+            await session.execute(
+                select(RecCandidateInterview.candidate_id)
+                .where(
+                    RecCandidateInterview.candidate_id == candidate_id,
+                    RecCandidateInterview.interviewer_person_id_platform == interviewer_id,
+                )
+                .limit(1)
             )
-            .limit(1)
-        )
-    ).first()
-    if not row:
+        ).first()
+    owner_row = None
+    if user_email:
+        owner_row = (
+            await session.execute(
+                select(RecCandidate.candidate_id)
+                .where(
+                    RecCandidate.candidate_id == candidate_id,
+                    func.lower(RecCandidate.l2_owner_email) == user_email,
+                )
+                .limit(1)
+            )
+        ).first()
+    if not interview_row and not owner_row:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
 
 
@@ -241,6 +257,8 @@ async def create_candidate(
         phone=payload.phone,
         opening_id=payload.opening_id,
         source_channel=payload.source_channel,
+        l2_owner_email=str(payload.l2_owner_email).lower() if payload.l2_owner_email else None,
+        l2_owner_name=payload.l2_owner_name,
         status="enquiry",
         cv_url=payload.cv_url,
         caf_token=uuid4().hex,
@@ -384,6 +402,8 @@ async def create_candidate(
         phone=candidate.phone,
         opening_id=candidate.opening_id,
         opening_title=opening_title,
+        l2_owner_email=candidate.l2_owner_email,
+        l2_owner_name=candidate.l2_owner_name,
         status=candidate.status,
         current_stage="enquiry",
         final_decision=candidate.final_decision,
@@ -412,9 +432,15 @@ async def list_candidates(
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
+    latest_stage_subq = (
+        select(RecCandidateStage.candidate_id, func.max(RecCandidateStage.stage_id).label("stage_id"))
+        .where(RecCandidateStage.stage_status == "pending")
+        .group_by(RecCandidateStage.candidate_id)
+        .subquery()
+    )
     current_stage_subq = (
         select(RecCandidateStage.candidate_id, RecCandidateStage.stage_name, RecCandidateStage.started_at)
-        .where(RecCandidateStage.stage_status == "pending")
+        .join(latest_stage_subq, latest_stage_subq.c.stage_id == RecCandidateStage.stage_id)
         .subquery()
     )
 
@@ -425,6 +451,8 @@ async def list_candidates(
             RecCandidate.full_name,
             RecCandidate.status,
             RecCandidate.opening_id.label("opening_id"),
+            RecCandidate.l2_owner_email.label("l2_owner_email"),
+            RecCandidate.l2_owner_name.label("l2_owner_name"),
             RecCandidate.created_at.label("created_at"),
             RecCandidate.caf_sent_at.label("caf_sent_at"),
             RecCandidate.caf_submitted_at.label("caf_submitted_at"),
@@ -461,14 +489,20 @@ async def list_candidates(
 
     if _is_interviewer_scope(user):
         interviewer_id = _clean_person_id_platform(user.person_id_platform)
-        if not interviewer_id:
+        user_email = (user.email or "").strip().lower()
+        if not interviewer_id and not user_email:
             return []
-        assigned_ids = (
-            select(RecCandidateInterview.candidate_id)
-            .where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
-            .subquery()
-        )
-        query = query.where(RecCandidate.candidate_id.in_(select(assigned_ids.c.candidate_id)))
+        filters = []
+        if interviewer_id:
+            assigned_ids = (
+                select(RecCandidateInterview.candidate_id)
+                .where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
+                .subquery()
+            )
+            filters.append(RecCandidate.candidate_id.in_(select(assigned_ids.c.candidate_id)))
+        if user_email:
+            filters.append(func.lower(RecCandidate.l2_owner_email) == user_email)
+        query = query.where(or_(*filters))
 
     rows = (await session.execute(query)).all()
     return [
@@ -478,6 +512,8 @@ async def list_candidates(
             name=row.full_name,
             opening_id=row.opening_id,
             opening_title=row.opening_title,
+            l2_owner_email=row.l2_owner_email,
+            l2_owner_name=row.l2_owner_name,
             current_stage=row.current_stage,
             status=row.status,
             ageing_days=int(row.ageing_days or 0),
@@ -518,6 +554,8 @@ async def get_candidate(
         phone=candidate.phone,
         opening_id=candidate.opening_id,
         opening_title=opening_title,
+        l2_owner_email=candidate.l2_owner_email,
+        l2_owner_name=candidate.l2_owner_name,
         status=candidate.status,
         current_stage=current_stage,
         final_decision=candidate.final_decision,
@@ -568,6 +606,8 @@ async def get_candidate_full(
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
+    if (user.platform_role_id or None) == 6 or (user.platform_role_code or "").strip() == "6":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 is not available for interviewer role")
     candidate = await get_candidate(candidate_id, session, user)  # type: ignore[arg-type]
 
     stages = await list_candidate_stages(candidate_id, session, user)  # type: ignore[arg-type]
@@ -762,6 +802,8 @@ async def update_candidate(
     updates = payload.model_dump(exclude_none=True)
     if "name" in updates:
         candidate.full_name = updates.pop("name")
+    if "l2_owner_email" in updates:
+        updates["l2_owner_email"] = str(updates["l2_owner_email"]).lower()
     for key, value in updates.items():
         setattr(candidate, key, value)
     candidate.updated_at = datetime.utcnow()
@@ -953,6 +995,11 @@ async def transition_stage(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="CAF must be submitted before advancing to further rounds.",
             )
+    if payload.to_stage == "hr_screening" and not candidate.l2_owner_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Assign GL/L2 email before moving to HR screening.",
+        )
 
     now = datetime.utcnow()
     current_stage_row = (
@@ -967,8 +1014,11 @@ async def transition_stage(
     from_stage = None
     if current_stage_row:
         from_stage = current_stage_row.stage_name
-        current_stage_row.stage_status = "completed"
-        current_stage_row.ended_at = now
+        await session.execute(
+            update(RecCandidateStage)
+            .where(RecCandidateStage.candidate_id == candidate_id, RecCandidateStage.stage_status == "pending")
+            .values(stage_status="completed", ended_at=now)
+        )
 
     new_stage = RecCandidateStage(
         candidate_id=candidate_id,

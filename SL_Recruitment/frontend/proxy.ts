@@ -40,6 +40,11 @@ export function proxy(request: NextRequest) {
   const detectedBasePath = request.nextUrl.basePath || (pathname.startsWith("/recruitment") ? "/recruitment" : "");
   const doublePrefix = detectedBasePath && pathname.startsWith(`${detectedBasePath}${detectedBasePath}/`);
   const effectivePathname = doublePrefix ? pathname.replace(`${detectedBasePath}${detectedBasePath}`, detectedBasePath) : pathname;
+  if (doublePrefix) {
+    const url = request.nextUrl.clone();
+    url.pathname = effectivePathname;
+    return NextResponse.redirect(url);
+  }
   const basePath = detectedBasePath;
   const normalizedPath = basePath && effectivePathname.startsWith(basePath) ? effectivePathname.slice(basePath.length) || "/" : effectivePathname;
   const fullPath = basePath ? `${basePath}${normalizedPath}` : normalizedPath;
@@ -95,6 +100,10 @@ export function proxy(request: NextRequest) {
     url.searchParams.set("session", "expired");
     const response = NextResponse.redirect(url);
     const options = { ...cookieOptions(isSecure), maxAge: 0 };
+    response.cookies.set("slp_session_expired", "1", {
+      ...cookieOptions(isSecure),
+      maxAge: 300,
+    });
     response.cookies.set("slp_token", "", options);
     response.cookies.set("slp_sid", "", options);
     response.cookies.set("slp_last", "", options);
@@ -103,7 +112,17 @@ export function proxy(request: NextRequest) {
   }
 
   if (publicOrigin && hasForwarded && !normalizedPath.startsWith("/api/") && !originsMatch(requestOrigin, publicOrigin)) {
-    const url = new URL(fullPath + request.nextUrl.search, publicOrigin);
+    let pathForPublic = fullPath;
+    try {
+      const publicUrl = new URL(publicOrigin);
+      const publicBasePath = publicUrl.pathname.replace(/\/$/, "");
+      if (publicBasePath && pathForPublic.startsWith(publicBasePath)) {
+        pathForPublic = pathForPublic.slice(publicBasePath.length) || "/";
+      }
+    } catch {
+      // ignore
+    }
+    const url = new URL(pathForPublic + request.nextUrl.search, publicOrigin);
     return NextResponse.redirect(url);
   }
 
@@ -112,7 +131,16 @@ export function proxy(request: NextRequest) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
     const url = request.nextUrl.clone();
-    url.pathname = `${basePath}/login`;
+    const base = basePath || request.nextUrl.basePath || "";
+    const loginPath = base ? `${base}/login` : "/login";
+    url.pathname = loginPath;
+    const expired = request.cookies.get("slp_session_expired")?.value;
+    if (expired) {
+      url.searchParams.set("session", "expired");
+      const response = NextResponse.redirect(url);
+      response.cookies.set("slp_session_expired", "", { ...cookieOptions(isSecure), maxAge: 0 });
+      return response;
+    }
     return NextResponse.redirect(url);
   }
 

@@ -11,6 +11,8 @@ class CandidateCreate(BaseModel):
     opening_id: Optional[int] = None
     source_channel: Optional[str] = None
     cv_url: Optional[str] = None
+    l2_owner_email: Optional[EmailStr] = None
+    l2_owner_name: Optional[str] = None
 
 
 class CandidateUpdate(BaseModel):
@@ -19,6 +21,8 @@ class CandidateUpdate(BaseModel):
     opening_id: Optional[int] = None
     status: Optional[str] = None
     cv_url: Optional[str] = None
+    l2_owner_email: Optional[EmailStr] = None
+    l2_owner_name: Optional[str] = None
 
 
 class CandidateListItem(BaseModel):
@@ -27,6 +31,8 @@ class CandidateListItem(BaseModel):
     name: str
     opening_id: Optional[int] = None
     opening_title: Optional[str] = None
+    l2_owner_email: Optional[EmailStr] = None
+    l2_owner_name: Optional[str] = None
     current_stage: Optional[str] = None
     status: str
     ageing_days: int
@@ -46,6 +52,8 @@ class CandidateDetailOut(BaseModel):
     phone: Optional[str] = None
     opening_id: Optional[int] = None
     opening_title: Optional[str] = None
+    l2_owner_email: Optional[EmailStr] = None
+    l2_owner_name: Optional[str] = None
 
     status: str
     current_stage: Optional[str] = None

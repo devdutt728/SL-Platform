@@ -30,22 +30,32 @@ export async function GET(request: Request) {
   const origin = process.env.PUBLIC_APP_ORIGIN || (await getRequestOrigin(request.url));
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const nextPath = basePath ? `${basePath}/employee` : "/employee";
+  const loginPath = basePath ? `${basePath}/login` : "/login";
+  const redirectError = (code: string, status: number, detail?: string) => {
+    const errorUrl = new URL(loginPath, origin);
+    errorUrl.searchParams.set("error", code);
+    errorUrl.searchParams.set("status", String(status));
+    if (detail) errorUrl.searchParams.set("detail", detail.slice(0, 500));
+    return NextResponse.redirect(errorUrl);
+  };
   try {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     const error = url.searchParams.get("error");
 
-    if (error) return new NextResponse(`Google OAuth error: ${error}`, { status: 400 });
-    if (!code) return new NextResponse("Missing code", { status: 400 });
+    if (error) return redirectError("google_oauth_error", 400, error);
+    if (!code) return redirectError("missing_code", 400, "Missing OAuth code.");
 
     const cookieStore = await cookies();
     const expectedStateCookie = cookieStore.get("slw_oauth_state")?.value;
     const memory = state ? getOAuthState(state) : null;
     const stateOk = !!state && ((expectedStateCookie && expectedStateCookie === state) || !!memory);
-    if (!stateOk) return new NextResponse("Invalid state", { status: 400 });
+    if (!stateOk) return redirectError("invalid_state", 400, "Invalid OAuth state.");
 
     const { clientId, clientSecret, tokenUri, redirectUris } = readGoogleOAuthSecrets();
-    if (!clientId || !clientSecret) return new NextResponse("Missing Google OAuth client credentials", { status: 500 });
+    if (!clientId || !clientSecret) {
+      return redirectError("missing_google_oauth_client", 500, "Missing Google OAuth client credentials.");
+    }
 
     const defaultRedirectUri = `${origin}${basePath}/api/auth/callback/google`;
     const redirectUri =
@@ -70,31 +80,19 @@ export async function GET(request: Request) {
 
     const tokenText = await tokenRes.text();
     if (!tokenRes.ok) {
-      return NextResponse.json(
-        {
-          error: "token_exchange_failed",
-          status: tokenRes.status,
-          redirectUri,
-          tokenUri,
-          body: tokenText,
-        },
-        { status: 401 }
-      );
+      return redirectError("token_exchange_failed", tokenRes.status, tokenText);
     }
 
     let tokenJson: Record<string, unknown> = {};
     try {
       tokenJson = JSON.parse(tokenText);
     } catch {
-      return NextResponse.json(
-        { error: "token_exchange_invalid_json", redirectUri, tokenUri, body: tokenText },
-        { status: 401 }
-      );
+      return redirectError("token_exchange_invalid_json", 401, "Invalid token response.");
     }
 
     const idTokenRaw = (tokenJson as { id_token?: unknown }).id_token;
     const idToken = typeof idTokenRaw === "string" ? idTokenRaw : undefined;
-    if (!idToken) return NextResponse.json({ error: "missing_id_token", tokenJson }, { status: 401 });
+    if (!idToken) return redirectError("missing_id_token", 401, "Missing id_token.");
 
     const sessionId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString("hex");
     const now = Date.now().toString();
@@ -109,10 +107,16 @@ export async function GET(request: Request) {
 
     const meText = await meRes.text();
     if (!meRes.ok) {
-      return NextResponse.json(
-        { error: "backend_auth_failed", status: meRes.status, body: meText },
-        { status: 401 }
-      );
+      let detail = meText;
+      try {
+        const parsed = JSON.parse(meText);
+        if (parsed && typeof parsed.detail === "string") {
+          detail = parsed.detail;
+        }
+      } catch {
+        // keep raw detail
+      }
+      return redirectError("backend_auth_failed", meRes.status, detail);
     }
 
     let returnToOrigin = memory?.returnToOrigin || origin;
@@ -183,10 +187,6 @@ export async function GET(request: Request) {
     return response;
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
-    const stack = e instanceof Error ? e.stack : undefined;
-    return NextResponse.json(
-      { error: "callback_exception", message, stack },
-      { status: 500 }
-    );
+    return redirectError("callback_exception", 500, message);
   }
 }

@@ -43,6 +43,7 @@ class InterviewOut(BaseModel):
     stage_name: Optional[str] = None
     round_type: str
     interview_status: Optional[str] = None
+    interview_status_reason: Optional[str] = None
     interviewer_person_id_platform: Optional[str] = None
     interviewer_name: Optional[str] = None
     interviewer_email: Optional[str] = None
