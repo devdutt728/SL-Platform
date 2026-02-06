@@ -481,14 +481,8 @@ export function CandidatesClient({ initialCandidates, openings, canNavigate = tr
               tableGrid,
               isHighAge || isHigh ? "bg-rose-500/10" : attention ? "bg-amber-500/5" : ""
             );
-            const RowTag = canNavigate ? Link : "div";
-            const rowProps = canNavigate ? { href: `/candidates/${c.candidate_id}` } : {};
-            return (
-              <RowTag
-                key={c.candidate_id}
-                {...rowProps}
-                className={rowClass}
-              >
+            const rowContent = (
+              <>
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-slate-900">{c.name}</p>
                   <p className="text-xs text-slate-600">{c.candidate_code}</p>
@@ -518,7 +512,24 @@ export function CandidatesClient({ initialCandidates, openings, canNavigate = tr
                     {c.status.split("_").join(" ")}
                   </span>
                 </div>
-              </RowTag>
+              </>
+            );
+
+            return canNavigate ? (
+              <Link
+                key={c.candidate_id}
+                href={`/candidates/${c.candidate_id}`}
+                className={rowClass}
+              >
+                {rowContent}
+              </Link>
+            ) : (
+              <div
+                key={c.candidate_id}
+                className={rowClass}
+              >
+                {rowContent}
+              </div>
             );
           })}
 

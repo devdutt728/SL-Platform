@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { CandidateAssessment, CandidateFull, CandidateOffer, CandidateStage, CandidateSprint, Interview, JoiningDoc, PlatformPersonSuggestion, Screening, SprintTemplate, SprintTemplateAttachment } from "@/lib/types";
+import { CandidateAssessment, CandidateDetail, CandidateFull, CandidateOffer, CandidateStage, CandidateSprint, Interview, JoiningDoc, PlatformPersonSuggestion, Screening, SprintTemplate, SprintTemplateAttachment } from "@/lib/types";
 import { clsx } from "clsx";
 import { CheckCircle2, Copy, ExternalLink, FileText, Layers, Mail, Phone, XCircle } from "lucide-react";
 import { DeleteCandidateButton } from "./DeleteCandidateButton";
@@ -23,6 +23,15 @@ type SlotPreview = {
   slot_start_at: string;
   slot_end_at: string;
   label: string;
+};
+
+type StageButton = {
+  label: string;
+  tone: string;
+  icon: JSX.Element;
+  intent: string;
+  action: () => void | Promise<void>;
+  disabled?: boolean;
 };
 
 const stageOrder = [
@@ -1613,7 +1622,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     setSelectedSlot(null);
   }, [scheduleRound]);
 
-  const stageButtons = useMemo(() => {
+  const stageButtons = useMemo<StageButton[]>(() => {
     const current = currentStageKey;
     if (cafLocked && current && current !== "rejected" && current !== "declined" && current !== "hired") {
       return [

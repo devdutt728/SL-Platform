@@ -132,15 +132,17 @@ export function proxy(request: NextRequest) {
     }
     const url = request.nextUrl.clone();
     const base = basePath || request.nextUrl.basePath || "";
-    const loginPath = base ? `${base}/login` : "/login";
-    url.pathname = loginPath;
     const expired = request.cookies.get("slp_session_expired")?.value;
     if (expired) {
+      url.pathname = publicPortalPath;
+      url.search = "";
       url.searchParams.set("session", "expired");
       const response = NextResponse.redirect(url);
       response.cookies.set("slp_session_expired", "", { ...cookieOptions(isSecure), maxAge: 0 });
       return response;
     }
+    const loginPath = base ? `${base}/login` : "/login";
+    url.pathname = loginPath;
     return NextResponse.redirect(url);
   }
 

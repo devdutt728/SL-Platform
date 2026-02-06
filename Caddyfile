@@ -18,7 +18,7 @@
 	@recApi path /api/rec*
 	handle @recApi {
 		uri replace /api/rec /recruitment/api/rec
-		reverse_proxy localhost:3002 {
+		reverse_proxy 127.0.0.1:3002 {
 			header_up X-Original-Host {hostport}
 			header_up X-Original-Proto {scheme}
 			header_up X-Forwarded-Host {hostport}
@@ -29,7 +29,7 @@
 	@recPublicApi path /api/apply* /api/caf* /api/assessment* /api/offer* /api/sprint* /api/schedule* /api/joining*
 	handle @recPublicApi {
 		uri replace /api /recruitment/api
-		reverse_proxy localhost:3002 {
+		reverse_proxy 127.0.0.1:3002 {
 			header_up X-Original-Host {hostport}
 			header_up X-Original-Proto {scheme}
 			header_up X-Forwarded-Host {hostport}
@@ -38,7 +38,7 @@
 	}
 
 	handle /it* {
-		reverse_proxy localhost:3001 {
+		reverse_proxy 127.0.0.1:3001 {
 			header_up X-Original-Host {hostport}
 			header_up X-Original-Proto {scheme}
 			header_up X-Forwarded-Host {hostport}
@@ -48,7 +48,7 @@
 
 	handle /recruitment/interview/slots* {
 		uri replace /recruitment ""
-		reverse_proxy localhost:8002 {
+		reverse_proxy 127.0.0.1:8002 {
 			header_up X-Original-Host {hostport}
 			header_up X-Original-Proto {scheme}
 			header_up X-Forwarded-Host {hostport}
@@ -57,7 +57,7 @@
 	}
 
 	handle /recruitment* {
-		reverse_proxy localhost:3002 {
+		reverse_proxy 127.0.0.1:3002 {
 			header_up X-Original-Host {hostport}
 			header_up X-Original-Proto {scheme}
 			header_up X-Forwarded-Host {hostport}
@@ -66,7 +66,7 @@
 	}
 
 	handle {
-		reverse_proxy localhost:3003 {
+		reverse_proxy 127.0.0.1:3003 {
 			header_up X-Original-Host {hostport}
 			header_up X-Original-Proto {scheme}
 			header_up X-Forwarded-Host {hostport}

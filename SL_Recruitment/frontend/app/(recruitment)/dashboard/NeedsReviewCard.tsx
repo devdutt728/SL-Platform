@@ -9,7 +9,7 @@ type Props = {
 export default function NeedsReviewCard({ initialMetrics }: Props) {
   const metrics = initialMetrics;
   return (
-    <div className="section-card space-y-3 p-4">
+    <div className="section-card motion-fade-up motion-delay-6 space-y-3 p-4">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <AlarmClock className="h-4 w-4 text-amber-500" />

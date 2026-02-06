@@ -4,9 +4,9 @@
 
 :root {
   --page-width: 1680px;
-  --page-gutter: clamp(0.8rem, 0.85vw, 1.65rem);
-  --panel-radius: clamp(0.98rem, 0.7vw, 1.35rem);
-  --panel-padding: clamp(0.85rem, 0.9vw, 1.15rem);
+  --page-gutter: clamp(1rem, 1.1vw, 2.2rem);
+  --panel-radius: clamp(1.05rem, 0.9vw, 1.65rem);
+  --panel-padding: clamp(1.1rem, 1.15vw, 1.8rem);
   --text-primary: #0f172a;
   --text-secondary: #475569;
 }
@@ -14,42 +14,78 @@
 @media (min-width: 1440px) {
   :root {
     --page-width: 1850px;
-    --page-gutter: clamp(0.9rem, 0.85vw, 1.75rem);
+    --page-gutter: clamp(1.1rem, 1vw, 2.4rem);
+    --panel-padding: clamp(1.15rem, 1.1vw, 1.95rem);
   }
 }
 
 @media (min-width: 1920px) {
   :root {
     --page-width: 2150px;
-    --page-gutter: clamp(0.95rem, 0.8vw, 1.9rem);
+    --page-gutter: clamp(1.2rem, 0.95vw, 2.6rem);
+    --panel-padding: clamp(1.25rem, 1vw, 2rem);
   }
 }
 
 @media (min-width: 2560px) {
   :root {
-    --page-width: 2500px;
-    --page-gutter: clamp(1.05rem, 0.8vw, 2.1rem);
-    --panel-padding: clamp(0.85rem, 0.82vw, 1.1rem);
+    --page-width: 2600px;
+    --page-gutter: clamp(1.35rem, 0.9vw, 2.9rem);
+    --panel-padding: clamp(1.35rem, 0.95vw, 2.2rem);
   }
 }
 
 @media (min-width: 3200px) {
   :root {
-    --page-width: 2800px;
-    --page-gutter: clamp(1.15rem, 0.8vw, 2.25rem);
+    --page-width: 3000px;
+    --page-gutter: clamp(1.5rem, 0.85vw, 3.2rem);
+    --panel-padding: clamp(1.5rem, 0.9vw, 2.5rem);
   }
 }
 
 @media (min-width: 3840px) {
   :root {
-    --page-width: 3100px;
-    --page-gutter: clamp(1.25rem, 0.8vw, 2.4rem);
+    --page-width: 3400px;
+    --page-gutter: clamp(1.7rem, 0.8vw, 3.6rem);
+    --panel-padding: clamp(1.7rem, 0.85vw, 2.8rem);
+  }
+
+  html {
+    font-size: 17px;
+  }
+}
+
+@media (min-width: 5120px) {
+  :root {
+    --page-width: 4200px;
+    --page-gutter: clamp(2rem, 0.8vw, 4.2rem);
+    --panel-padding: clamp(2rem, 0.9vw, 3.2rem);
+  }
+
+  html {
+    font-size: 18px;
+  }
+}
+
+@media (min-width: 6144px) {
+  :root {
+    --page-width: 4800px;
+    --page-gutter: clamp(2.3rem, 0.75vw, 5rem);
+    --panel-padding: clamp(2.2rem, 0.85vw, 3.8rem);
+  }
+
+  html {
+    font-size: 19px;
   }
 }
 
 html,
 body {
   min-height: 100%;
+}
+
+html {
+  font-size: 16px;
 }
 
 body {
@@ -263,6 +299,38 @@ a {
   animation: fade-up 520ms ease both;
 }
 
+.motion-delay-1 {
+  animation-delay: 60ms;
+}
+
+.motion-delay-2 {
+  animation-delay: 120ms;
+}
+
+.motion-delay-3 {
+  animation-delay: 180ms;
+}
+
+.motion-delay-4 {
+  animation-delay: 240ms;
+}
+
+.motion-delay-5 {
+  animation-delay: 300ms;
+}
+
+.motion-delay-6 {
+  animation-delay: 360ms;
+}
+
+.motion-delay-7 {
+  animation-delay: 420ms;
+}
+
+.motion-delay-8 {
+  animation-delay: 480ms;
+}
+
 .motion-float {
   animation: float 7.5s ease-in-out infinite;
 }
@@ -367,10 +435,10 @@ a {
   }
 
   .content-gap {
-    gap: clamp(0.6rem, 0.8vw, 1.2rem);
+    gap: clamp(0.9rem, 1vw, 1.9rem);
   }
 
   .content-pad {
-    padding: clamp(0.75rem, 0.9vw, 1.25rem);
+    padding: clamp(1.05rem, 1.2vw, 2.1rem);
   }
 }

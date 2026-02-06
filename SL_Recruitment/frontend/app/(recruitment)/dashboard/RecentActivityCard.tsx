@@ -28,7 +28,7 @@ export default function RecentActivityCard({ events }: Props) {
   const [collapsed, setCollapsed] = useState(true);
 
   return (
-    <div className="section-card lg:col-span-2">
+    <div className="section-card motion-fade-up motion-delay-7 lg:col-span-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Activity className="h-4 w-4 text-violet-500" />
