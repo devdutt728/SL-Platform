@@ -5,18 +5,20 @@ from uuid import uuid4
 
 import hashlib
 import io
+import logging
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Response
 from fastapi.responses import StreamingResponse
 import re
 
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError, DataError
 
 from app.api import deps
 from app.api.routes.candidates import transition_stage
-from app.core.auth import require_roles
+from app.core.auth import require_roles, require_superadmin
+from app.core.config import settings
 from app.core.roles import Role
 from app.core.uploads import SPRINT_EXTENSIONS, SPRINT_MIME_TYPES, normalize_submission_url, validate_upload
 from app.models.candidate import RecCandidate
@@ -45,11 +47,13 @@ from app.services.drive import (
 from app.services.email import send_email
 from app.services.public_links import build_public_link
 from app.services.events import log_event
+from app.services.sprint_brief import render_sprint_brief_html
 
 router = APIRouter(prefix="/rec", tags=["sprints"])
 public_router = APIRouter(prefix="/sprint", tags=["sprints-public"])
 
 MAX_SPRINT_ATTACHMENT_BYTES = 25 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 def _normalize_person_id(raw: str | None) -> str | None:
@@ -120,6 +124,8 @@ def _default_template_code(name: str) -> str:
 
 
 def _assert_public_sprint_active(sprint: RecCandidateSprint) -> None:
+    if sprint.status in {"deleted", "submitted"}:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Sprint link expired")
     if sprint.due_at and datetime.utcnow() > sprint.due_at:
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Sprint link expired")
 
@@ -158,40 +164,33 @@ def _compute_due_at(now: datetime, template: RecSprintTemplate, due_at: datetime
     return None
 
 
-def _format_due_date(value: datetime | None) -> str:
-    if not value:
-        return "TBD"
-    return value.date().isoformat()
-
-
 def _render_template_description(
     template: RecSprintTemplate | None,
     sprint: RecCandidateSprint,
     candidate: RecCandidate | None,
     opening: RecOpening | None,
 ) -> str | None:
-    if not template or not template.description:
-        return template.description if template else None
-    result = template.description
-    replacements = {
-        "{{candidate_name}}": candidate.full_name if candidate else "",
-        "{{candidate_code}}": candidate.candidate_code if candidate else "",
-        "{{due_date}}": _format_due_date(sprint.due_at),
-        "{{opening_title}}": opening.title if opening else "",
-        "{{template_name}}": template.name,
-    }
-    for key, value in replacements.items():
-        result = result.replace(key, value)
-    return result
+    return render_sprint_brief_html(
+        template=template,
+        sprint=sprint,
+        candidate=candidate,
+        opening=opening,
+        include_signature=False,
+    )
 
 
 async def _build_candidate_sprint(
+    session: AsyncSession,
     sprint: RecCandidateSprint,
     template: RecSprintTemplate | None,
     candidate: RecCandidate | None = None,
     opening: RecOpening | None = None,
     reviewer_meta: dict | None = None,
 ) -> CandidateSprintOut:
+    attachments: list[SprintAttachmentPublicOut] = []
+    if sprint.public_token:
+        attachments = await _load_public_attachments(session, candidate_sprint_id=sprint.candidate_sprint_id, token=sprint.public_token)
+
     return CandidateSprintOut(
         candidate_sprint_id=sprint.candidate_sprint_id,
         candidate_id=sprint.candidate_id,
@@ -202,6 +201,7 @@ async def _build_candidate_sprint(
         status=sprint.status,
         submission_url=sprint.submission_url,
         submitted_at=sprint.submitted_at,
+        deleted_at=sprint.deleted_at,
         reviewed_by_person_id_platform=sprint.reviewed_by_person_id_platform,
         reviewed_by_name=(reviewer_meta or {}).get("name"),
         reviewed_by_email=(reviewer_meta or {}).get("email"),
@@ -214,12 +214,14 @@ async def _build_candidate_sprint(
         created_at=sprint.created_at,
         updated_at=sprint.updated_at,
         template_name=template.name if template else None,
+        template_code=template.sprint_template_code if template else None,
         template_description=_render_template_description(template, sprint, candidate, opening),
         instructions_url=template.instructions_url if template else None,
         expected_duration_days=template.expected_duration_days if template else None,
         candidate_name=candidate.full_name if candidate else None,
         candidate_code=candidate.candidate_code if candidate else None,
         opening_title=opening.title if opening else None,
+        attachments=attachments,
     )
 
 
@@ -236,6 +238,47 @@ async def _load_public_attachments(
     ).all()
     attachments: list[SprintAttachmentPublicOut] = []
     for link, attachment in rows:
+        attachments.append(
+            SprintAttachmentPublicOut(
+                sprint_attachment_id=attachment.sprint_attachment_id,
+                file_name=attachment.file_name,
+                content_type=attachment.content_type,
+                file_size=attachment.file_size,
+                download_url=f"/sprint/{token}/attachments/{attachment.sprint_attachment_id}",
+            )
+        )
+    if attachments:
+        return attachments
+
+    sprint_template_id = (
+        await session.execute(
+            select(RecCandidateSprint.sprint_template_id)
+            .where(RecCandidateSprint.candidate_sprint_id == candidate_sprint_id)
+        )
+    ).scalar_one_or_none()
+    if not sprint_template_id:
+        return []
+    template_rows = (
+        await session.execute(
+            select(RecSprintTemplateAttachment, RecSprintAttachment)
+            .join(RecSprintAttachment, RecSprintAttachment.sprint_attachment_id == RecSprintTemplateAttachment.sprint_attachment_id)
+            .where(
+                RecSprintTemplateAttachment.sprint_template_id == sprint_template_id,
+                RecSprintTemplateAttachment.is_active == 1,
+            )
+            .order_by(RecSprintTemplateAttachment.created_at.asc(), RecSprintTemplateAttachment.sprint_template_attachment_id.asc())
+        )
+    ).all()
+    if not template_rows:
+        template_rows = (
+            await session.execute(
+                select(RecSprintTemplateAttachment, RecSprintAttachment)
+                .join(RecSprintAttachment, RecSprintAttachment.sprint_attachment_id == RecSprintTemplateAttachment.sprint_attachment_id)
+                .where(RecSprintTemplateAttachment.sprint_template_id == sprint_template_id)
+                .order_by(RecSprintTemplateAttachment.created_at.asc(), RecSprintTemplateAttachment.sprint_template_attachment_id.asc())
+            )
+        ).all()
+    for link, attachment in template_rows:
         attachments.append(
             SprintAttachmentPublicOut(
                 sprint_attachment_id=attachment.sprint_attachment_id,
@@ -276,7 +319,7 @@ async def list_sprint_templates(
 async def create_sprint_template(
     payload: SprintTemplateCreateIn,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN])),
+    _user: UserContext = Depends(require_superadmin()),
 ):
     code = _normalize_template_code(payload.sprint_template_code)
     if not code:
@@ -321,7 +364,7 @@ async def update_sprint_template(
     sprint_template_id: int,
     payload: SprintTemplateUpdateIn,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN])),
+    _user: UserContext = Depends(require_superadmin()),
 ):
     template = await session.get(RecSprintTemplate, sprint_template_id)
     if not template:
@@ -396,7 +439,7 @@ async def delete_sprint_template_attachment(
     sprint_template_id: int,
     sprint_template_attachment_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN])),
+    _user: UserContext = Depends(require_superadmin()),
 ):
     link = await session.get(RecSprintTemplateAttachment, sprint_template_attachment_id)
     if not link or link.sprint_template_id != sprint_template_id:
@@ -417,13 +460,18 @@ async def upload_sprint_template_attachment_route(
     sprint_template_id: int,
     upload: UploadFile = File(...),
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER])),
+    user: UserContext = Depends(require_superadmin()),
 ):
     template = await session.get(RecSprintTemplate, sprint_template_id)
     if not template or not template.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint template not found")
 
-    safe_name = validate_upload(upload, allowed_extensions=SPRINT_EXTENSIONS, allowed_mime_types=SPRINT_MIME_TYPES)
+    safe_name = validate_upload(
+        upload,
+        allowed_extensions=SPRINT_EXTENSIONS,
+        allowed_mime_types=SPRINT_MIME_TYPES,
+        allow_unknown_content_type=True,
+    )
     data = await upload.read()
     if len(data) > MAX_SPRINT_ATTACHMENT_BYTES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Attachment too large (max 25MB).")
@@ -506,7 +554,17 @@ async def assign_sprint(
         updated_at=now,
     )
     session.add(sprint)
-    await session.flush()
+    try:
+        await session.flush()
+    except DataError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "DB schema mismatch: `rec_candidate_sprint.assigned_by_person_id_platform` "
+                "and `reviewed_by_person_id_platform` must be VARCHAR(64). "
+                "Apply `backend/migrations/0022_candidate_sprint_platform_id_varchar.sql`."
+            ),
+        ) from exc
 
     template_attachments = (
         await session.execute(
@@ -521,34 +579,45 @@ async def assign_sprint(
     attachment_names = [attachment.file_name for _, attachment in template_attachments if attachment.file_name]
     attachment_list_html = "".join(f"<li>{name}</li>" for name in attachment_names)
     attachment_summary = attachment_list_html or "<li>No attachments</li>"
-    for template_link, attachment in template_attachments:
-        copied_drive_id = await anyio.to_thread.run_sync(
-            lambda: copy_sprint_attachment_to_candidate(
-                candidate_id=candidate.candidate_id,
-                candidate_sprint_id=sprint.candidate_sprint_id,
-                source_file_id=attachment.drive_file_id,
-                filename=attachment.file_name,
-            )
-        )
-        copied_attachment = RecSprintAttachment(
-            drive_file_id=copied_drive_id,
-            file_name=attachment.file_name,
-            content_type=attachment.content_type,
-            file_size=attachment.file_size,
-            sha256=attachment.sha256,
-            created_by_person_id_platform=_normalize_person_id(user.person_id_platform),
-            created_at=datetime.utcnow(),
-        )
-        session.add(copied_attachment)
-        await session.flush()
-        session.add(
-            RecCandidateSprintAttachment(
-                candidate_sprint_id=sprint.candidate_sprint_id,
-                sprint_attachment_id=copied_attachment.sprint_attachment_id,
-                source_sprint_template_attachment_id=template_link.sprint_template_attachment_id,
-                created_at=datetime.utcnow(),
-            )
-        )
+    if settings.drive_root_folder_id:
+        for template_link, attachment in template_attachments:
+            try:
+                copied_drive_id = await anyio.to_thread.run_sync(
+                    lambda: copy_sprint_attachment_to_candidate(
+                        candidate_id=candidate.candidate_id,
+                        candidate_sprint_id=sprint.candidate_sprint_id,
+                        source_file_id=attachment.drive_file_id,
+                        filename=attachment.file_name,
+                    )
+                )
+                copied_attachment = RecSprintAttachment(
+                    drive_file_id=copied_drive_id,
+                    file_name=attachment.file_name,
+                    content_type=attachment.content_type,
+                    file_size=attachment.file_size,
+                    sha256=attachment.sha256,
+                    created_by_person_id_platform=_normalize_person_id(user.person_id_platform),
+                    created_at=datetime.utcnow(),
+                )
+                session.add(copied_attachment)
+                await session.flush()
+                session.add(
+                    RecCandidateSprintAttachment(
+                        candidate_sprint_id=sprint.candidate_sprint_id,
+                        sprint_attachment_id=copied_attachment.sprint_attachment_id,
+                        source_sprint_template_attachment_id=template_link.sprint_template_attachment_id,
+                        created_at=datetime.utcnow(),
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to copy sprint attachment",
+                    extra={
+                        "candidate_id": candidate.candidate_id,
+                        "candidate_sprint_id": sprint.candidate_sprint_id,
+                        "attachment_id": attachment.sprint_attachment_id,
+                    },
+                )
 
     await log_event(
         session,
@@ -595,7 +664,7 @@ async def assign_sprint(
         )
 
     await session.commit()
-    return await _build_candidate_sprint(sprint, template, candidate, opening)
+    return await _build_candidate_sprint(session, sprint, template, candidate, opening)
 
 
 @router.get("/candidates/{candidate_id}/sprints", response_model=list[CandidateSprintOut])
@@ -631,6 +700,7 @@ async def list_candidate_sprints(
     reviewer_meta = await _fetch_platform_people(reviewer_ids)
     return [
         await _build_candidate_sprint(
+            session,
             sprint,
             template,
             candidate,
@@ -661,6 +731,7 @@ async def get_sprint(
     sprint, template, candidate, opening = row
     reviewer_meta = await _fetch_platform_people({_normalize_person_id(sprint.reviewed_by_person_id_platform) or ""})
     return await _build_candidate_sprint(
+        session,
         sprint,
         template,
         candidate,
@@ -700,6 +771,7 @@ async def list_sprints(
     reviewer_meta = await _fetch_platform_people(reviewer_ids)
     return [
         await _build_candidate_sprint(
+            session,
             sprint,
             template,
             candidate,
@@ -776,6 +848,7 @@ async def update_sprint(
     sprint, template, candidate, opening = row
     reviewer_meta = await _fetch_platform_people({_normalize_person_id(sprint.reviewed_by_person_id_platform) or ""})
     return await _build_candidate_sprint(
+        session,
         sprint,
         template,
         candidate,
@@ -824,12 +897,30 @@ async def assign_sprint_reviewer(
     sprint, template, candidate, opening = row
     reviewer_meta = await _fetch_platform_people({_normalize_person_id(sprint.reviewed_by_person_id_platform) or ""})
     return await _build_candidate_sprint(
+        session,
         sprint,
         template,
         candidate,
         opening,
         reviewer_meta=reviewer_meta.get(_normalize_person_id(sprint.reviewed_by_person_id_platform) or "", {}),
     )
+
+
+@router.delete("/sprints/{candidate_sprint_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_sprint(
+    candidate_sprint_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    _user: UserContext = Depends(require_superadmin()),
+):
+    sprint = await session.get(RecCandidateSprint, candidate_sprint_id)
+    if not sprint:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint not found")
+
+    sprint.status = "deleted"
+    sprint.deleted_at = datetime.utcnow()
+    sprint.updated_at = datetime.utcnow()
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @public_router.get("/{token}", response_model=SprintPublicOut)
@@ -858,7 +949,13 @@ async def get_public_sprint(
         opening_title=opening.title if opening else None,
         sprint_template_id=template.sprint_template_id,
         template_name=template.name,
-        template_description=_render_template_description(template, sprint, candidate, opening),
+        template_description=render_sprint_brief_html(
+            template=template,
+            sprint=sprint,
+            candidate=candidate,
+            opening=opening,
+            include_signature=True,
+        ),
         instructions_url=template.instructions_url,
         due_at=sprint.due_at,
         status=sprint.status,
@@ -887,10 +984,13 @@ async def submit_public_sprint(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid sprint token")
     sprint, template, candidate, opening = row
+    _assert_public_sprint_active(sprint)
 
     cleaned_url = normalize_submission_url(submission_url)
-    if submission_file is None and not cleaned_url:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide a file or a submission link")
+    if cleaned_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Submission links are not allowed. Please upload a file.")
+    if submission_file is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please upload a file.")
 
     uploaded_url = None
     if submission_file is not None:
@@ -898,6 +998,7 @@ async def submit_public_sprint(
             submission_file,
             allowed_extensions=SPRINT_EXTENSIONS,
             allowed_mime_types=SPRINT_MIME_TYPES,
+            allow_unknown_content_type=True,
         )
         data = await submission_file.read()
         if len(data) > 15 * 1024 * 1024:
@@ -914,7 +1015,7 @@ async def submit_public_sprint(
             )
         )
 
-    sprint.submission_url = uploaded_url or cleaned_url
+    sprint.submission_url = uploaded_url
     sprint.submitted_at = datetime.utcnow()
     sprint.status = "submitted"
     sprint.updated_at = datetime.utcnow()
@@ -936,7 +1037,13 @@ async def submit_public_sprint(
         opening_title=opening.title if opening else None,
         sprint_template_id=template.sprint_template_id,
         template_name=template.name,
-        template_description=_render_template_description(template, sprint, candidate, opening),
+        template_description=render_sprint_brief_html(
+            template=template,
+            sprint=sprint,
+            candidate=candidate,
+            opening=opening,
+            include_signature=True,
+        ),
         instructions_url=template.instructions_url,
         due_at=sprint.due_at,
         status=sprint.status,
@@ -960,9 +1067,39 @@ async def download_public_sprint_attachment(
             .where(RecCandidateSprint.public_token == token, RecSprintAttachment.sprint_attachment_id == attachment_id)
         )
     ).first()
-    if not row:
+    sprint = None
+    attachment = None
+    if row:
+        attachment, _, sprint = row
+    else:
+        fallback = (
+            await session.execute(
+                select(RecSprintAttachment, RecCandidateSprint)
+                .join(RecSprintTemplateAttachment, RecSprintTemplateAttachment.sprint_attachment_id == RecSprintAttachment.sprint_attachment_id)
+                .join(RecCandidateSprint, RecCandidateSprint.sprint_template_id == RecSprintTemplateAttachment.sprint_template_id)
+                .where(
+                    RecCandidateSprint.public_token == token,
+                    RecSprintAttachment.sprint_attachment_id == attachment_id,
+                    RecSprintTemplateAttachment.is_active == 1,
+                )
+            )
+        ).first()
+        if not fallback:
+            fallback = (
+                await session.execute(
+                    select(RecSprintAttachment, RecCandidateSprint)
+                    .join(RecSprintTemplateAttachment, RecSprintTemplateAttachment.sprint_attachment_id == RecSprintAttachment.sprint_attachment_id)
+                    .join(RecCandidateSprint, RecCandidateSprint.sprint_template_id == RecSprintTemplateAttachment.sprint_template_id)
+                    .where(
+                        RecCandidateSprint.public_token == token,
+                        RecSprintAttachment.sprint_attachment_id == attachment_id,
+                    )
+                )
+            ).first()
+        if fallback:
+            attachment, sprint = fallback
+    if not attachment or not sprint:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    attachment, _, sprint = row
     _assert_public_sprint_active(sprint)
 
     data, content_type, file_name = await anyio.to_thread.run_sync(lambda: download_drive_file(attachment.drive_file_id))

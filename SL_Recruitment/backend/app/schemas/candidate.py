@@ -42,6 +42,10 @@ class CandidateListItem(BaseModel):
     caf_submitted_at: Optional[datetime] = None
     needs_hr_review: bool = False
     screening_result: Optional[str] = None
+    l1_interview_count: int = 0
+    l1_feedback_submitted: bool = False
+    l2_interview_count: int = 0
+    l2_feedback_submitted: bool = False
 
 
 class CandidateDetailOut(BaseModel):

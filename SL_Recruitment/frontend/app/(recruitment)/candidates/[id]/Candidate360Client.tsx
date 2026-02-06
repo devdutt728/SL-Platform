@@ -125,6 +125,38 @@ function formatRelativeDue(raw?: string | null) {
   return `Overdue by ${diffDays} days`;
 }
 
+function formatPreviewDueAt(raw?: string) {
+  if (!raw) return "-";
+  const due = new Date(raw);
+  if (Number.isNaN(due.getTime())) return raw;
+  return due.toLocaleString("en-IN", {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+  });
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function stripHtml(raw?: string | null) {
+  if (!raw) return "";
+  return raw
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function chipTone(kind: "neutral" | "green" | "amber" | "red" | "blue") {
   if (kind === "green") return "bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/20";
   if (kind === "amber") return "bg-amber-500/15 text-amber-700 ring-1 ring-amber-500/20";
@@ -286,6 +318,11 @@ async function fetchCandidateSprints(candidateId: string) {
   const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/sprints`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateSprint[];
+}
+
+async function deleteCandidateSprint(candidateSprintId: number) {
+  const res = await fetch(`/api/rec/sprints/${encodeURIComponent(String(candidateSprintId))}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 async function fetchSprintTemplates() {
@@ -562,6 +599,14 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [candidateSprints, setCandidateSprints] = useState<CandidateSprint[] | null>(null);
   const [sprintsBusy, setSprintsBusy] = useState(false);
   const [sprintsError, setSprintsError] = useState<string | null>(null);
+  const [lastSprintNotice, setLastSprintNotice] = useState<{
+    template_name?: string | null;
+    template_code?: string | null;
+    assigned_at?: string | null;
+    due_at?: string | null;
+    status: string;
+    deleted_at?: string | null;
+  } | null>(null);
   const [templatePreview, setTemplatePreview] = useState<SprintTemplate | null>(null);
   const [templateAttachments, setTemplateAttachments] = useState<SprintTemplateAttachment[]>([]);
   const [templatePreviewBusy, setTemplatePreviewBusy] = useState(false);
@@ -585,6 +630,13 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const [offerProbationMonths, setOfferProbationMonths] = useState("3");
   const [offerGradeId, setOfferGradeId] = useState("");
   const [offerNotes, setOfferNotes] = useState("");
+  const activeSprints = useMemo(
+    () => (candidateSprints || []).filter((sprint) => sprint.status !== "deleted"),
+    [candidateSprints]
+  );
+  const sprintAssigned = activeSprints.length > 0;
+  const sprintAssignDisabled = sprintAssigned && !canSkip;
+  const [sprintDeleteBusy, setSprintDeleteBusy] = useState(false);
   function isCancelled(item: Interview) {
     if ((item.decision || "").toLowerCase() === "cancelled") return true;
     const note = (item.notes_internal || "").toLowerCase();
@@ -723,6 +775,131 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     if (generated) return { label: "CAF pending", tone: chipTone("amber") };
     return { label: "CAF not sent", tone: chipTone("neutral") };
   }, [candidate.caf_sent_at, candidate.caf_submitted_at, cafLink?.caf_token]);
+  const l2FeedbackEvent = useMemo(() => {
+    const list = interviews || [];
+    const submitted = list
+      .filter((item) => item.feedback_submitted && item.round_type.toLowerCase().includes("l2"))
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0];
+    if (submitted) {
+      return { created_at: submitted.updated_at };
+    }
+    const events = data.events || [];
+    const matches = events.filter((ev) => {
+      if (ev.action_type !== "interview_feedback_submitted") return false;
+      const roundType = (ev.meta_json as { round_type?: unknown })?.round_type;
+      return typeof roundType === "string" && roundType.toLowerCase().includes("l2");
+    });
+    if (matches.length === 0) return null;
+    return matches.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+  }, [data.events, interviews]);
+  const l1FeedbackEvent = useMemo(() => {
+    const list = interviews || [];
+    const submitted = list
+      .filter((item) => item.feedback_submitted && item.round_type.toLowerCase().includes("l1"))
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0];
+    if (submitted) {
+      return { created_at: submitted.updated_at };
+    }
+    const events = data.events || [];
+    const matches = events.filter((ev) => {
+      if (ev.action_type !== "interview_feedback_submitted") return false;
+      const roundType = (ev.meta_json as { round_type?: unknown })?.round_type;
+      return typeof roundType === "string" && roundType.toLowerCase().includes("l1");
+    });
+    if (matches.length === 0) return null;
+    return matches.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+  }, [data.events, interviews]);
+  const sprintEmailPreviewHtml = useMemo(() => {
+    if (!templatePreview) return "";
+    const candidateName = escapeHtml(candidate.name || "Candidate");
+    const sprintName = escapeHtml(templatePreview.name || "Sprint assignment");
+    const openingTitle = escapeHtml(candidate.opening_title || "Role");
+    const dueLabel = escapeHtml(formatPreviewDueAt(dueAt));
+    const attachments = templateAttachments.length > 0
+      ? templateAttachments.map((item) => `<li>${escapeHtml(item.file_name)}</li>`).join("")
+      : "<li>No attachments</li>";
+    return `
+      <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#f8fafc;padding:12px 0;">
+        <tr>
+          <td align="center">
+            <table width="640" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+              <tr>
+                <td style="padding:24px 28px 8px 28px;font-family:Arial,sans-serif;color:#0f172a;">
+                  <div style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:#94a3b8;">Sprint Assignment</div>
+                  <h1 style="margin:10px 0 4px 0;font-size:22px;font-weight:700;">Hi ${candidateName},</h1>
+                  <p style="margin:0;font-size:14px;color:#475569;">Your sprint assignment is ready.</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:0 28px 16px 28px;font-family:Arial,sans-serif;color:#0f172a;">
+                  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:16px 0;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;">
+                    <tr>
+                      <td style="padding:12px 16px;font-size:13px;color:#475569;">Sprint</td>
+                      <td style="padding:12px 16px;font-size:14px;font-weight:600;color:#0f172a;">${sprintName}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding:12px 16px;font-size:13px;color:#475569;border-top:1px solid #e2e8f0;">Role</td>
+                      <td style="padding:12px 16px;font-size:14px;font-weight:600;color:#0f172a;border-top:1px solid #e2e8f0;">${openingTitle}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding:12px 16px;font-size:13px;color:#475569;border-top:1px solid #e2e8f0;">Due by</td>
+                      <td style="padding:12px 16px;font-size:14px;font-weight:600;color:#0f172a;border-top:1px solid #e2e8f0;">${dueLabel}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding:12px 16px;font-size:13px;color:#475569;border-top:1px solid #e2e8f0;">Attachments</td>
+                      <td style="padding:12px 16px;font-size:14px;font-weight:600;color:#0f172a;border-top:1px solid #e2e8f0;">
+                        <ul style="margin:0;padding-left:18px;color:#0f172a;font-size:13px;font-weight:500;">
+                          ${attachments}
+                        </ul>
+                      </td>
+                    </tr>
+                  </table>
+                  <div style="margin:16px 0 18px;">
+                    <a href="#" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f172a;color:#ffffff;text-decoration:none;font-size:13px;font-weight:600;">View sprint</a>
+                  </div>
+                  <p style="margin:16px 0 0 0;font-size:14px;line-height:1.6;color:#334155;font-family:Arial,sans-serif;">Regards,<br />Studio Lotus Recruitment Team</p>
+                  <div style="margin-top:14px;">
+                    <div style="font-family:arial,sans-serif;">
+                      <div style="color:rgb(34,34,34);">
+                        <span style="text-align:justify;font-family:georgia,palatino,serif;font-size:large;color:rgb(126,124,123);">studio</span>
+                        <span style="text-align:justify;font-family:georgia,palatino,serif;font-size:large;color:rgb(241,92,55);">lotus</span>
+                      </div>
+                      <div style="text-align:justify;">
+                        <span style="color:rgb(241,92,55);font-family:arial,sans-serif;font-size:x-small;">creating meaning </span>
+                        <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;font-size:x-small;">| </span>
+                        <span style="color:rgb(241,92,55);font-family:arial,sans-serif;font-size:x-small;">celebrating context</span>
+                      </div>
+                      <div style="color:rgb(34,34,34);font-size:x-small;font-family:arial,sans-serif;">
+                        World's 100 Best Architecture Firms, Archello
+                        <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;"> | </span>
+                        WAF
+                        <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;"> | </span>
+                        TIME Magazine
+                        <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;"> | </span>
+                        Prix Versailles
+                        <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;"> | </span>
+                        Dezeen Awards
+                      </div>
+                      <div style="font-size:x-small;font-family:arial,sans-serif;">
+                        <a href="https://studiolotus.in/" style="color:rgb(17,85,204);" target="_blank" rel="noopener">Website</a>
+                        <span> | </span>
+                        <a href="https://www.instagram.com/studio_lotus/" style="color:rgb(17,85,204);" target="_blank" rel="noopener">Instagram</a>
+                        <span> | </span>
+                        <a href="https://www.linkedin.com/company/studiolotus/" style="color:rgb(17,85,204);" target="_blank" rel="noopener">LinkedIn</a>
+                        <span> | </span>
+                        <a href="https://www.facebook.com/studiolotus.in/" style="color:rgb(17,85,204);" target="_blank" rel="noopener">Facebook</a>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:12px 0 0 0;font-size:11px;color:#94a3b8;font-family:Arial,sans-serif;">This email contains confidential information intended only for the recipient.</p>
+          </td>
+        </tr>
+      </table>
+    `;
+  }, [templatePreview, templateAttachments, candidate.name, candidate.opening_title, dueAt]);
 
   const needsReviewChip = useMemo(() => {
     if (!candidate.needs_hr_review) return null;
@@ -858,6 +1035,27 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     try {
       const list = await fetchCandidateSprints(candidateId);
       setCandidateSprints(list);
+      const active = list.filter((sprint) => sprint.status !== "deleted");
+      if (active.length === 0) {
+        const deleted = list
+          .filter((sprint) => sprint.status === "deleted")
+          .sort((a, b) => new Date(b.deleted_at || b.updated_at).getTime() - new Date(a.deleted_at || a.updated_at).getTime());
+        if (deleted.length > 0) {
+          const latest = deleted[0];
+          setLastSprintNotice({
+            template_name: latest.template_name,
+            template_code: latest.template_code,
+            assigned_at: latest.assigned_at,
+            due_at: latest.due_at,
+            status: "deleted",
+            deleted_at: latest.deleted_at || latest.updated_at,
+          });
+        } else {
+          setLastSprintNotice(null);
+        }
+      } else {
+        setLastSprintNotice(null);
+      }
     } catch (e: any) {
       setSprintsError(e?.message || "Could not load sprints.");
     } finally {
@@ -983,6 +1181,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }
 
   async function openAssignSprint() {
+    if (sprintAssignDisabled) {
+      setSprintsError("Sprint already assigned. Contact a superadmin to reassign.");
+      return;
+    }
     setAssignOpen(true);
     setSprintsError(null);
     setSelectedTemplateId("");
@@ -1053,6 +1255,34 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       setSprintsError(e?.message || "Sprint assignment failed.");
     } finally {
       setSprintsBusy(false);
+    }
+  }
+
+  async function handleDeleteSprint(candidateSprintId: number) {
+    if (!canSkip) return;
+    const confirmed = window.confirm("Delete this sprint assignment? This cannot be undone.");
+    if (!confirmed) return;
+    setSprintsError(null);
+    setSprintDeleteBusy(true);
+    try {
+      const deleted = (candidateSprints || []).find((sprint) => sprint.candidate_sprint_id === candidateSprintId);
+      await deleteCandidateSprint(candidateSprintId);
+      const list = await fetchCandidateSprints(candidateId);
+      setCandidateSprints(list);
+      if (deleted) {
+        setLastSprintNotice({
+          template_name: deleted.template_name,
+          template_code: deleted.template_code,
+          assigned_at: deleted.assigned_at,
+          due_at: deleted.due_at,
+          status: "deleted",
+          deleted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e: any) {
+      setSprintsError(e?.message || "Could not delete sprint.");
+    } finally {
+      setSprintDeleteBusy(false);
     }
   }
 
@@ -1500,6 +1730,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       void refreshSprints();
     }
   }, [candidateSprints]);
+  useEffect(() => {
+    if (activeSprints.length > 0 && lastSprintNotice) {
+      setLastSprintNotice(null);
+    }
+  }, [activeSprints, lastSprintNotice]);
 
   useEffect(() => {
     if (candidateOffers === null) {
@@ -1848,6 +2083,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           tone: "bg-emerald-600 hover:bg-emerald-700",
           icon: <CheckCircle2 className="h-4 w-4" />,
           intent: "advance",
+          disabled: sprintAssignDisabled,
           action: () => {
             focusSection("sprint", sprintRef);
             void openAssignSprint();
@@ -1885,7 +2121,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       ];
     }
     return [];
-  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef, cafLocked, candidate.l2_owner_email]);
+  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef, cafLocked, candidate.l2_owner_email, sprintAssignDisabled]);
 
   const screening = data.screening as Screening | null | undefined;
   const assessment = data.assessment as CandidateAssessment | null | undefined;
@@ -2036,6 +2272,18 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                 <span className="text-xs text-slate-600">Sent: {formatDateTime(candidate.caf_sent_at)}</span>
               ) : null}
             </div>
+            {l2FeedbackEvent ? (
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <Chip className={chipTone("green")}>L2 feedback</Chip>
+                <span className="text-xs text-slate-600">Submitted: {formatDateTime(l2FeedbackEvent.created_at)}</span>
+              </div>
+            ) : null}
+            {l1FeedbackEvent && l2FeedbackEvent ? (
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <Chip className={chipTone("green")}>L1 feedback submitted</Chip>
+                <span className="text-xs text-slate-600">Submitted: {formatDateTime(l1FeedbackEvent.created_at)}</span>
+              </div>
+            ) : null}
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -2987,11 +3235,18 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                         </a>
                                       ) : null}
                                       {item.rating_overall ? <Chip className={chipTone("neutral")}>Overall {item.rating_overall}/5</Chip> : null}
-                                      {item.feedback_submitted ? (
-                                        <Chip className={chipTone("green")}>Feedback submitted</Chip>
-                                      ) : (
-                                        <Chip className={chipTone("amber")}>Feedback pending</Chip>
-                                      )}
+                                      {(() => {
+                                        const roundLabel = item.round_type.toLowerCase().includes("l1")
+                                          ? "L1"
+                                          : item.round_type.toLowerCase().includes("l2")
+                                            ? "L2"
+                                            : "Interview";
+                                        return item.feedback_submitted ? (
+                                          <Chip className={chipTone("green")}>{roundLabel} feedback submitted</Chip>
+                                        ) : (
+                                          <Chip className={chipTone("amber")}>{roundLabel} feedback pending</Chip>
+                                        );
+                                      })()}
                                     </div>
                                     <button
                                       type="button"
@@ -3017,7 +3272,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                         {item.round_type.toLowerCase().includes("l1") || item.round_type.toLowerCase().includes("l2") ? (
                                           <a
                                             className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
-                                            href={`/gl-portal?interview=${encodeURIComponent(String(item.candidate_interview_id))}`}
+                                            href={`${process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment"}/interviews/${encodeURIComponent(
+                                              String(item.candidate_interview_id),
+                                            )}`}
                                           >
                                             {item.round_type.toLowerCase().includes("l1") ? "Open L1 assessment" : "Open L2 assessment"}
                                           </a>
@@ -3376,8 +3633,8 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           ) : null}
 
           {assignOpen ? (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
-              <div className="w-full max-w-xl rounded-3xl border border-white/20 bg-white/95 p-5 shadow-xl">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6">
+              <div className="w-full max-w-3xl rounded-3xl border border-white/20 bg-white/95 p-6 shadow-xl">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs uppercase tracking-tight text-slate-500">Assign sprint</p>
@@ -3419,48 +3676,18 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     />
                   </label>
 
-                  <div className="rounded-2xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-700">
-                    <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Template preview</p>
+                  <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 text-sm text-slate-700">
+                    <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Email preview</p>
                     {templatePreviewBusy ? (
                       <p className="mt-2 text-sm text-slate-600">Loading preview...</p>
                     ) : templatePreview ? (
-                      <div className="mt-2 space-y-2">
-                        <div>
-                          <p className="text-sm font-semibold">{templatePreview.name}</p>
-                          <p className="text-xs text-slate-600">{templatePreview.description || "No description provided."}</p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                          {templatePreview.expected_duration_days ? (
-                            <Chip className={chipTone("neutral")}>{templatePreview.expected_duration_days} days expected</Chip>
-                          ) : null}
-                          {templatePreview.instructions_url ? (
-                            <a
-                              className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
-                              href={templatePreview.instructions_url}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              <ExternalLink className="h-3.5 w-3.5" /> Open brief
-                            </a>
-                          ) : null}
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Attachments</p>
-                          {templateAttachments.length > 0 ? (
-                            <div className="space-y-1">
-                              {templateAttachments.map((attachment) => (
-                                <div
-                                  key={attachment.sprint_template_attachment_id}
-                                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs"
-                                >
-                                  <span className="truncate">{attachment.file_name}</span>
-                                  <span className="text-slate-500">{formatBytes(attachment.file_size)}</span>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-xs text-slate-500">No attachments for this template.</p>
-                          )}
+                      <div className="mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                        <div
+                          className="max-h-[520px] overflow-auto p-4"
+                          dangerouslySetInnerHTML={{ __html: sprintEmailPreviewHtml }}
+                        />
+                        <div className="border-t border-slate-200 px-4 py-2 text-[11px] text-slate-500">
+                          The sprint link activates after assignment.
                         </div>
                       </div>
                     ) : (
@@ -3492,7 +3719,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     type="button"
                     className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
                     onClick={() => void handleAssignSprint()}
-                    disabled={sprintsBusy}
+                    disabled={sprintsBusy || sprintAssignDisabled}
                   >
                     {sprintsBusy ? "Assigning..." : "Assign sprint"}
                   </button>
@@ -3522,72 +3749,150 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                 <div className="mt-3 space-y-3">
                   {sprintsBusy && !candidateSprints ? (
                     <div className="rounded-2xl border border-white/60 bg-white/30 p-4 text-sm text-slate-600">Loading sprint data...</div>
-                  ) : candidateSprints && candidateSprints.length > 0 ? (
-                    candidateSprints.map((sprint) => (
-                      <div key={sprint.candidate_sprint_id} className="rounded-2xl border border-white/60 bg-white/30 p-4">
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-semibold">{sprint.template_name || "Sprint assignment"}</p>
-                            <p className="text-xs text-slate-600">{sprint.template_description || "No description provided."}</p>
+                  ) : activeSprints.length > 0 ? (
+                    activeSprints.map((sprint) => {
+                      const summary = stripHtml(sprint.template_description);
+                      const attachments = sprint.attachments || [];
+                      return (
+                        <div key={sprint.candidate_sprint_id} className="rounded-2xl border border-white/60 bg-white/30 p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-semibold">{sprint.template_name || "Sprint assignment"}</p>
+                                {sprint.template_code ? (
+                                  <span className="rounded-full border border-slate-200 bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                                    {sprint.template_code}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <p className="mt-1 text-xs text-slate-600">{summary || "No brief text provided."}</p>
+                            </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Chip className={chipTone(sprint.status === "submitted" ? "amber" : sprint.status === "completed" ? "green" : "neutral")}>
+                              {sprint.status.replace("_", " ")}
+                            </Chip>
+                            {canSkip ? (
+                              <button
+                                type="button"
+                                className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                                onClick={() => void handleDeleteSprint(sprint.candidate_sprint_id)}
+                                disabled={sprintDeleteBusy}
+                              >
+                                {sprintDeleteBusy ? "Deleting..." : "Delete sprint"}
+                              </button>
+                            ) : null}
                           </div>
-                          <Chip className={chipTone(sprint.status === "submitted" ? "amber" : sprint.status === "completed" ? "green" : "neutral")}>
-                            {sprint.status.replace("_", " ")}
-                          </Chip>
+                          </div>
+                          <div className="mt-3 grid gap-2 md:grid-cols-3">
+                            <Metric label="Assigned" value={formatDateTime(sprint.assigned_at)} />
+                            <Metric label="Due" value={sprint.due_at ? formatDateTime(sprint.due_at) : "-"} />
+                            <Metric label="Status" value={formatRelativeDue(sprint.due_at)} />
+                          </div>
+                          <div className="mt-3 grid gap-2 md:grid-cols-2">
+                            <div className="rounded-xl border border-white/60 bg-white/60 p-3">
+                              <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Links</p>
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-700">
+                                {sprint.public_token ? (
+                                  <a
+                                    className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
+                                    href={`${basePath}/sprint/${encodeURIComponent(sprint.public_token)}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5" /> Open sprint page
+                                  </a>
+                                ) : null}
+                                {sprint.instructions_url ? (
+                                  <a
+                                    className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
+                                    href={sprint.instructions_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5" /> Sprint brief
+                                  </a>
+                                ) : null}
+                                {sprint.submission_url ? (
+                                  <a
+                                    className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
+                                    href={sprint.submission_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5" /> Submission link
+                                  </a>
+                                ) : (
+                                  <span className="text-xs text-slate-500">No submission yet.</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="rounded-xl border border-white/60 bg-white/60 p-3">
+                              <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Attachments</p>
+                              {attachments.length > 0 ? (
+                                <div className="mt-2 space-y-1 text-xs text-slate-700">
+                                  {attachments.map((attachment) => (
+                                    <a
+                                      key={attachment.sprint_attachment_id}
+                                      className="flex items-center justify-between rounded-lg border border-slate-200 bg-white/80 px-2 py-1 underline decoration-dotted underline-offset-2"
+                                      href={`${basePath}${attachment.download_url}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      <span className="truncate">{attachment.file_name}</span>
+                                      <span className="text-slate-500">{formatBytes(attachment.file_size)}</span>
+                                    </a>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="mt-2 text-xs text-slate-500">No attachments available.</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                            {sprint.score_overall != null ? <Chip className={chipTone("blue")}>Score {sprint.score_overall}</Chip> : null}
+                            {sprint.decision ? <Chip className={decisionTone(sprint.decision)}>{sprint.decision.replace("_", " ")}</Chip> : null}
+                          </div>
                         </div>
-                        <div className="mt-3 grid gap-2 md:grid-cols-3">
-                          <Metric label="Assigned" value={formatDateTime(sprint.assigned_at)} />
-                          <Metric label="Due" value={sprint.due_at ? formatDateTime(sprint.due_at) : "-"} />
-                          <Metric label="Status" value={formatRelativeDue(sprint.due_at)} />
-                        </div>
-                        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                          {sprint.public_token ? (
-                            <a
-                              className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
-                              href={`${basePath}/sprint/${encodeURIComponent(sprint.public_token)}`}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              <ExternalLink className="h-3.5 w-3.5" /> Open sprint page
-                            </a>
+                      );
+                    })
+                  ) : lastSprintNotice ? (
+                    <div className="rounded-2xl border border-white/60 bg-white/30 p-4 text-sm text-slate-600">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold">{lastSprintNotice.template_name || "Sprint assignment"}</p>
+                          {lastSprintNotice.template_code ? (
+                            <p className="mt-1 text-xs text-slate-500">Code: {lastSprintNotice.template_code}</p>
                           ) : null}
-                          {sprint.instructions_url ? (
-                            <a
-                              className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
-                              href={sprint.instructions_url}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              <ExternalLink className="h-3.5 w-3.5" /> Sprint brief
-                            </a>
-                          ) : null}
-                          {sprint.submission_url ? (
-                            <a
-                              className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
-                              href={sprint.submission_url}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              <ExternalLink className="h-3.5 w-3.5" /> Submission
-                            </a>
-                          ) : (
-                            <span>No submission yet.</span>
-                          )}
-                          {sprint.score_overall != null ? <Chip className={chipTone("blue")}>Score {sprint.score_overall}</Chip> : null}
-                          {sprint.decision ? <Chip className={decisionTone(sprint.decision)}>{sprint.decision.replace("_", " ")}</Chip> : null}
                         </div>
+                        <Chip className={chipTone("neutral")}>Deleted</Chip>
                       </div>
-                    ))
+                      <div className="mt-3 grid gap-2 md:grid-cols-3">
+                        <Metric label="Assigned" value={lastSprintNotice.assigned_at ? formatDateTime(lastSprintNotice.assigned_at) : "-"} />
+                        <Metric label="Due" value={lastSprintNotice.due_at ? formatDateTime(lastSprintNotice.due_at) : "-"} />
+                        <Metric
+                          label="Deleted"
+                          value={lastSprintNotice.deleted_at ? formatDateTime(lastSprintNotice.deleted_at) : "-"}
+                        />
+                      </div>
+                    </div>
                   ) : currentStageKey === "sprint" ? (
                     <div className="rounded-2xl border border-dashed border-amber-200 bg-amber-500/5 p-4">
                       <p className="text-sm font-semibold text-amber-700">Sprint stage active</p>
                       <p className="mt-1 text-sm text-amber-700">Assign a sprint template to share the brief with the candidate.</p>
                       <button
                         type="button"
-                        className="mt-3 rounded-full bg-amber-500 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-600"
+                        className={clsx(
+                          "mt-3 rounded-full px-4 py-2 text-xs font-semibold text-white",
+                          sprintAssignDisabled ? "bg-slate-400 cursor-not-allowed" : "bg-amber-500 hover:bg-amber-600"
+                        )}
                         onClick={() => void openAssignSprint()}
+                        disabled={sprintAssignDisabled}
                       >
                         Assign sprint
                       </button>
+                      {sprintAssignDisabled ? (
+                        <p className="mt-2 text-xs text-slate-500">Sprint already assigned. Only superadmin can reassign.</p>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="rounded-2xl border border-white/60 bg-white/30 p-4 text-sm text-slate-600">

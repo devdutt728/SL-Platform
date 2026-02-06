@@ -286,6 +286,21 @@ def require_superadmin():
         # Platform role_id=2 => Superadmin (see _map_platform_role_to_app_roles)
         if (user.platform_role_id or None) == 2:
             return user
+        if user.platform_role_ids and 2 in user.platform_role_ids:
+            return user
+        codes = []
+        if user.platform_role_code:
+            codes.append(user.platform_role_code)
+        if user.platform_role_codes:
+            codes.extend(user.platform_role_codes)
+        names = []
+        if user.platform_role_name:
+            names.append(user.platform_role_name)
+        if user.platform_role_names:
+            names.extend(user.platform_role_names)
+        normalized = {str(val).strip().lower().replace(" ", "").replace("-", "_") for val in (codes + names) if val}
+        if {"2", "superadmin", "s_admin", "super_admin"} & normalized:
+            return user
         # Dev-mode fallback: allow HR_ADMIN to behave as superadmin.
         if user.platform_role_id is None and Role.HR_ADMIN in user.roles and settings.environment != "production":
             return user

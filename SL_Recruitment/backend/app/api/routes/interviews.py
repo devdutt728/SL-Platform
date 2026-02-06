@@ -25,6 +25,7 @@ from app.models.interview_slot import RecCandidateInterviewSlot
 from app.models.opening import RecOpening
 from app.models.platform_person import DimPerson
 from app.models.platform_role import DimRole
+from app.models.stage import RecCandidateStage
 from app.schemas.interview import InterviewCancel, InterviewCreate, InterviewOut, InterviewReschedule, InterviewUpdate
 from app.schemas.interview_slots import InterviewSlotOut, InterviewSlotPreviewOut, InterviewSlotProposalIn
 from app.schemas.stage import StageTransitionRequest
@@ -77,6 +78,25 @@ def _normalize_person_id_int(raw: int | str | None) -> int | None:
 
 def _normalize_round(raw: str | None) -> str:
     return (raw or "").strip().lower()
+
+
+async def _get_current_stage_name(session: AsyncSession, *, candidate_id: int) -> str | None:
+    pending = await session.execute(
+        select(RecCandidateStage.stage_name)
+        .where(RecCandidateStage.candidate_id == candidate_id, RecCandidateStage.stage_status == "pending")
+        .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
+        .limit(1)
+    )
+    stage = pending.scalar_one_or_none()
+    if stage:
+        return stage
+    latest = await session.execute(
+        select(RecCandidateStage.stage_name)
+        .where(RecCandidateStage.candidate_id == candidate_id)
+        .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
+        .limit(1)
+    )
+    return latest.scalar_one_or_none()
 
 
 def _round_to_transition(round_type: str, decision: str) -> str | None:
@@ -718,7 +738,7 @@ async def propose_interview_slots(
     last_slot_end = (free_slots[-1].end_at.astimezone(timezone.utc)).replace(tzinfo=None)
     ttl_floor = datetime.utcnow() + timedelta(hours=settings.public_link_ttl_hours)
     expires_at = max(last_slot_end, ttl_floor)
-    created_by = _platform_person_id_int(user)
+    created_by = _clean_platform_person_id(user.person_id_platform)
     slots: list[RecCandidateInterviewSlot] = []
     for slot in free_slots:
         slot_start = slot.start_at.astimezone(timezone.utc).replace(tzinfo=None)

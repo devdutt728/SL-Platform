@@ -4,13 +4,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-import { Home, Users, Briefcase, LayoutDashboard, CalendarClock, FileSignature, FolderOpen, BarChart3, Shield } from "lucide-react";
+import { Home, Users, Briefcase, LayoutDashboard, CalendarClock, FileSignature, BarChart3, Shield } from "lucide-react";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, guard: "all" },
   { href: "/candidates", label: "Candidates", icon: Users, guard: "interviewer" },
   { href: "/openings", label: "Openings", icon: Briefcase, guard: "hr" },
-  { href: "/sprint-templates", label: "Sprint Templates", icon: FolderOpen, guard: "hr" },
   { href: "/interviewer", label: "Interviewer", icon: CalendarClock, guard: "interviewer" },
   { href: "/gl-portal", label: "GL Portal", icon: CalendarClock, guard: "gl" },
   { href: "/offers", label: "Offers", icon: FileSignature, guard: "offers" },

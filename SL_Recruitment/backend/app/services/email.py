@@ -36,10 +36,15 @@ def _template_path(name: str) -> Path:
     return resolve_repo_path(f"backend/app/templates/email/{name}.html")
 
 
+class _SafeFormatDict(dict):
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
 def render_template(name: str, context: dict[str, Any]) -> str:
     path = _template_path(name)
     raw = path.read_text(encoding="utf-8")
-    html = raw.format_map({k: ("" if v is None else v) for k, v in context.items()})
+    html = raw.format_map(_SafeFormatDict({k: ("" if v is None else v) for k, v in context.items()}))
     return html
 
 
@@ -57,6 +62,9 @@ async def send_email(
     related_entity_id: int | None = None,
     meta_extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    candidate_suffix = f" | Candidate ID: {candidate_id}"
+    if "Candidate ID:" not in subject:
+        subject = f"{subject}{candidate_suffix}"
     meta: dict[str, Any] = {
         "to": to_emails,
         "cc": cc_emails or [],

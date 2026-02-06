@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     caf_reminder_days: int = 3
     feedback_reminder_hours: int = 24
     feedback_escalation_hours: int = 48
+    interview_status_reminder_minutes: int = 30
     sprint_reminder_hours: int = 24
     sprint_overdue_days: int = 2
     offer_followup_days: int = 5

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, exists, and_, or_
 
 from app.core.config import settings
 from app.db.platform_session import PlatformSessionLocal
@@ -21,6 +21,7 @@ from app.services.email import send_email
 from app.services.public_links import build_public_link
 from app.services.events import log_event
 from app.services.platform_identity import active_status_filter
+from app.services.sprint_brief import render_sprint_brief_html
 
 
 def _caf_link(token: str) -> str:
@@ -101,6 +102,18 @@ async def _interviewer_email(interviewer_person_id_platform: str | None) -> str 
             )
         ).first()
         return row[0] if row else None
+
+
+def _active_interview_filter():
+    cancelled_values = ("cancelled", "canceled")
+    decision_normalized = func.lower(func.coalesce(RecCandidateInterview.decision, ""))
+    notes_normalized = func.lower(func.coalesce(RecCandidateInterview.notes_internal, ""))
+    cancelled_marker = or_(
+        decision_normalized.in_(cancelled_values),
+        notes_normalized.like("%cancelled%"),
+        notes_normalized.like("%canceled%"),
+    )
+    return ~cancelled_marker
 
 
 async def run_caf_reminders() -> None:
@@ -202,6 +215,68 @@ async def run_interview_feedback_reminders() -> None:
                     "interview_id": related_id,
                     "interviewer_email": interviewer_email,
                     "escalated": escalation,
+                },
+            )
+        await session.commit()
+
+
+async def run_interview_status_reminders() -> None:
+    now = datetime.utcnow()
+    cutoff = now - timedelta(minutes=settings.interview_status_reminder_minutes)
+
+    async with SessionLocal() as session:
+        status_event_exists = (
+            select(RecCandidateEvent.candidate_event_id)
+            .where(
+                RecCandidateEvent.related_entity_type == "interview",
+                RecCandidateEvent.related_entity_id == RecCandidateInterview.candidate_interview_id,
+                RecCandidateEvent.action_type == "interview_status_marked",
+            )
+            .limit(1)
+        )
+        rows = (
+            await session.execute(
+                select(RecCandidateInterview, RecCandidate, RecOpening)
+                .join(RecCandidate, RecCandidate.candidate_id == RecCandidateInterview.candidate_id)
+                .outerjoin(RecOpening, RecOpening.opening_id == RecCandidate.opening_id)
+                .where(
+                    RecCandidateInterview.scheduled_end_at <= cutoff,
+                    _active_interview_filter(),
+                    ~exists(status_event_exists),
+                )
+            )
+        ).all()
+
+        for interview, candidate, opening in rows:
+            related_id = interview.candidate_interview_id
+            if await _email_event_exists(
+                session,
+                candidate_id=candidate.candidate_id,
+                related_entity_type="interview",
+                related_entity_id=related_id,
+                email_type="interview_status_elapsed",
+            ):
+                continue
+            interviewer_email = await _interviewer_email(interview.interviewer_person_id_platform)
+            if not interviewer_email:
+                continue
+            await send_email(
+                session,
+                candidate_id=candidate.candidate_id,
+                to_emails=[interviewer_email],
+                subject="Interview status pending",
+                template_name="interview_status_elapsed",
+                context={
+                    "candidate_name": candidate.full_name,
+                    "round_type": interview.round_type,
+                    "opening_title": opening.title if opening else "",
+                },
+                email_type="interview_status_elapsed",
+                related_entity_type="interview",
+                related_entity_id=related_id,
+                meta_extra={
+                    "interview_id": related_id,
+                    "interviewer_email": interviewer_email,
                 },
             )
         await session.commit()

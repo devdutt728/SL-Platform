@@ -47,6 +47,10 @@ DOC_MIME_TYPES = {
 SPRINT_EXTENSIONS = DOC_EXTENSIONS | {".7z", ".rar", ".zip"}
 SPRINT_MIME_TYPES = DOC_MIME_TYPES | {
     "application/x-7z-compressed",
+    "application/x-rar",
+    "application/x-rar-compressed",
+    "application/rar",
+    "application/vnd.comicbook-rar",
     "application/vnd.rar",
     "application/zip",
 }
@@ -71,6 +75,7 @@ def validate_upload(
     *,
     allowed_extensions: set[str],
     allowed_mime_types: set[str],
+    allow_unknown_content_type: bool = False,
 ) -> str:
     filename = sanitize_filename(upload.filename)
     ext = Path(filename).suffix.lower()
@@ -81,7 +86,11 @@ def validate_upload(
         )
 
     content_type = (upload.content_type or "").strip().lower()
+    if ";" in content_type:
+        content_type = content_type.split(";", 1)[0].strip()
     if content_type and content_type not in allowed_mime_types and content_type not in OCTET_STREAM_MIME_TYPES:
+        if allow_unknown_content_type:
+            return filename
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported file content type.",

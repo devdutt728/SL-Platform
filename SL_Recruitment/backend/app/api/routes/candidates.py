@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
 import json
 from pydantic import BaseModel
-from sqlalchemy import func, select, delete, text, or_, update
+from sqlalchemy import func, select, delete, text, or_, update, case, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
@@ -443,6 +443,43 @@ async def list_candidates(
         .join(latest_stage_subq, latest_stage_subq.c.stage_id == RecCandidateStage.stage_id)
         .subquery()
     )
+    interview_agg_subq = (
+        select(
+            RecCandidateInterview.candidate_id.label("candidate_id"),
+            func.sum(
+                case((func.lower(RecCandidateInterview.round_type).like("%l1%"), 1), else_=0)
+            ).label("l1_interview_count"),
+            func.max(
+                case(
+                    (
+                        and_(
+                            func.lower(RecCandidateInterview.round_type).like("%l1%"),
+                            RecCandidateInterview.feedback_submitted.is_(True),
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("l1_feedback_submitted"),
+            func.sum(
+                case((func.lower(RecCandidateInterview.round_type).like("%l2%"), 1), else_=0)
+            ).label("l2_interview_count"),
+            func.max(
+                case(
+                    (
+                        and_(
+                            func.lower(RecCandidateInterview.round_type).like("%l2%"),
+                            RecCandidateInterview.feedback_submitted.is_(True),
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("l2_feedback_submitted"),
+        )
+        .group_by(RecCandidateInterview.candidate_id)
+        .subquery()
+    )
 
     query = (
         select(
@@ -462,11 +499,16 @@ async def list_candidates(
             current_stage_subq.c.stage_name.label("current_stage"),
             func.coalesce(func.datediff(func.curdate(), current_stage_subq.c.started_at), 0).label("ageing_days"),
             func.coalesce(func.datediff(func.curdate(), RecCandidate.created_at), 0).label("applied_ageing_days"),
+            func.coalesce(interview_agg_subq.c.l1_interview_count, 0).label("l1_interview_count"),
+            func.coalesce(interview_agg_subq.c.l1_feedback_submitted, 0).label("l1_feedback_submitted"),
+            func.coalesce(interview_agg_subq.c.l2_interview_count, 0).label("l2_interview_count"),
+            func.coalesce(interview_agg_subq.c.l2_feedback_submitted, 0).label("l2_feedback_submitted"),
         )
         .select_from(RecCandidate)
         .outerjoin(RecOpening, RecOpening.opening_id == RecCandidate.opening_id)
         .outerjoin(RecCandidateScreening, RecCandidateScreening.candidate_id == RecCandidate.candidate_id)
         .outerjoin(current_stage_subq, current_stage_subq.c.candidate_id == RecCandidate.candidate_id)
+        .outerjoin(interview_agg_subq, interview_agg_subq.c.candidate_id == RecCandidate.candidate_id)
         .order_by(RecCandidate.created_at.desc(), RecCandidate.candidate_id.desc())
         .limit(limit)
         .offset(offset)
@@ -523,6 +565,10 @@ async def list_candidates(
             caf_submitted_at=row.caf_submitted_at,
             needs_hr_review=bool(row.needs_hr_review),
             screening_result=row.screening_result,
+            l1_interview_count=int(row.l1_interview_count or 0),
+            l1_feedback_submitted=bool(row.l1_feedback_submitted),
+            l2_interview_count=int(row.l2_interview_count or 0),
+            l2_feedback_submitted=bool(row.l2_feedback_submitted),
         )
         for row in rows
     ]

@@ -23,6 +23,6 @@ class RecCandidateInterviewSlot(Base):
     booked_interview_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    created_by_person_id_platform: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_by_person_id_platform: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

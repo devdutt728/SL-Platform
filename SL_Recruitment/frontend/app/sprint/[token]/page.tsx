@@ -67,12 +67,28 @@ function formatFileSize(bytes?: number | null) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function decodeHtmlEntities(raw: string) {
+  return raw
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/&amp;/gi, "&");
+}
+
+function sanitizeSprintHtml(raw?: string | null) {
+  if (!raw) return "";
+  let cleaned = decodeHtmlEntities(raw)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ");
+  return cleaned;
+}
+
 export default async function SprintPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const sprint = await fetchSprint(token);
-  const attachmentBase = sprint
-    ? await internalUrl(`/api/sprint/${encodeURIComponent(token)}/attachments`)
-    : "";
+  const attachmentBase = sprint ? await internalUrl(`/api/sprint/${encodeURIComponent(token)}/attachments`) : "";
 
   if (!sprint) {
     return (
@@ -101,7 +117,12 @@ export default async function SprintPage({ params }: { params: Promise<{ token: 
       </div>
 
       <div className="section-card space-y-4">
-        <p className="text-sm text-slate-600">{sprint.template_description || "Complete the task and submit your work below."}</p>
+        <div
+          className="prose prose-slate max-w-none text-sm leading-6"
+          dangerouslySetInnerHTML={{
+            __html: sanitizeSprintHtml(sprint.template_description) || "<p>Complete the task and submit your work below.</p>",
+          }}
+        />
         <div className="grid gap-3 md:grid-cols-2">
           {sprint.instructions_url ? (
             <a
@@ -144,12 +165,15 @@ export default async function SprintPage({ params }: { params: Promise<{ token: 
               ))}
             </div>
           </div>
-        ) : null}
+        ) : (
+          <div className="rounded-xl border border-white/60 bg-white/30 px-3 py-2 text-sm text-slate-600">
+            No attachments available for this sprint.
+          </div>
+        )}
       </div>
 
       <SprintPublicClient
         token={token}
-        defaultSubmissionUrl={sprint.submission_url}
         initialStatus={sprint.status}
         dueAt={sprint.due_at}
       />

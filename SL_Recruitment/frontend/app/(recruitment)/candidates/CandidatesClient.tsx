@@ -462,6 +462,10 @@ export function CandidatesClient({ initialCandidates, openings, canNavigate = tr
                 isMedium ||
                 isLow ||
                 cafPendingTooLong;
+            const l1Count = c.l1_interview_count || 0;
+            const l2Count = c.l2_interview_count || 0;
+            const l1Feedback = !!c.l1_feedback_submitted;
+            const l2Feedback = !!c.l2_feedback_submitted;
 
             const appliedAgeRaw = Number.isFinite(c.applied_ageing_days) ? c.applied_ageing_days : 0;
             const appliedAge =
@@ -496,12 +500,32 @@ export function CandidatesClient({ initialCandidates, openings, canNavigate = tr
                     {stageLabel(c.current_stage) || "-"}
                   </span>
                 </div>
-                <div className="flex flex-nowrap items-center gap-2 whitespace-nowrap">
+                <div className="flex flex-wrap items-center gap-2 whitespace-nowrap">
                   <span className={clsx("rounded-full px-2 py-1 text-xs font-semibold", caf.tone)}>{caf.label}</span>
                   {screening ? (
                     <span className={clsx("inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold", screening.tone)}>
                       <CheckCircle2 className="h-3.5 w-3.5" />
                       {screening.label}
+                    </span>
+                  ) : null}
+                  {l1Count > 0 ? (
+                    <span
+                      className={clsx(
+                        "rounded-full px-2 py-1 text-xs font-semibold",
+                        l1Feedback ? chipTone("green") : chipTone("amber")
+                      )}
+                    >
+                      L1 feedback {l1Feedback ? "submitted" : "pending"}
+                    </span>
+                  ) : null}
+                  {l2Count > 0 ? (
+                    <span
+                      className={clsx(
+                        "rounded-full px-2 py-1 text-xs font-semibold",
+                        l2Feedback ? chipTone("green") : chipTone("amber")
+                      )}
+                    >
+                      L2 feedback {l2Feedback ? "submitted" : "pending"}
                     </span>
                   ) : null}
                 </div>

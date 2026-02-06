@@ -4,7 +4,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from app.schemas.sprint_attachment import SprintAttachmentPublicOut
-SprintStatus = Literal["assigned", "submitted", "under_review", "completed", "cancelled"]
+SprintStatus = Literal["assigned", "submitted", "under_review", "completed", "cancelled", "deleted"]
 SprintDecision = Literal["advance", "reject", "keep_warm"]
 
 
@@ -35,6 +35,7 @@ class CandidateSprintOut(BaseModel):
     status: str
     submission_url: Optional[str] = None
     submitted_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
     reviewed_by_person_id_platform: Optional[str] = None
     reviewed_by_name: Optional[str] = None
     reviewed_by_email: Optional[str] = None
@@ -48,6 +49,7 @@ class CandidateSprintOut(BaseModel):
     updated_at: datetime
 
     template_name: Optional[str] = None
+    template_code: Optional[str] = None
     template_description: Optional[str] = None
     instructions_url: Optional[str] = None
     expected_duration_days: Optional[int] = None
@@ -55,6 +57,7 @@ class CandidateSprintOut(BaseModel):
     candidate_name: Optional[str] = None
     candidate_code: Optional[str] = None
     opening_title: Optional[str] = None
+    attachments: list[SprintAttachmentPublicOut] = []
 
     class Config:
         from_attributes = True

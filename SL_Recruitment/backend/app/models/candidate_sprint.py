@@ -18,6 +18,7 @@ class RecCandidateSprint(Base):
     status: Mapped[str] = mapped_column(String(20), default="assigned")
     submission_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     reviewed_by_person_id_platform: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     score_overall: Mapped[float | None] = mapped_column(Numeric(4, 2), nullable=True)

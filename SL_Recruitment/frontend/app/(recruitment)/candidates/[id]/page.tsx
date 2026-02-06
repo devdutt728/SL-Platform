@@ -37,18 +37,29 @@ export default async function CandidateDetailPage({ params }: { params: Promise<
   if (!full) notFound();
   const roleId = me?.platform_role_id ?? null;
   const roleCode = (me?.platform_role_code ?? "").trim();
+  const roleName = (me?.platform_role_name ?? "").trim().toLowerCase();
+  const roleCodes = (me?.platform_role_codes || []).map((code) => String(code).trim().toLowerCase());
+  const roleNames = (me?.platform_role_names || []).map((name) => String(name).trim().toLowerCase());
+  const isSuperadmin =
+    roleId === 2 ||
+    roleCode === "2" ||
+    roleName.replace(/\s+/g, "") === "superadmin" ||
+    roleCodes.includes("2") ||
+    roleCodes.includes("superadmin") ||
+    roleCodes.includes("s_admin") ||
+    roleNames.some((name) => name.replace(/\s+/g, "") === "superadmin");
   if (roleId === 6 || roleCode === "6") {
     redirect("/interviewer");
   }
-  const canDelete = (me?.platform_role_id ?? null) === 2 || (me?.platform_role_code ?? "").trim() === "2";
+  const canDelete = isSuperadmin;
   const roles = (me?.roles || []).map((role) => String(role).toLowerCase());
   const canSchedule =
     roles.includes("hr_admin") ||
     roles.includes("hr_exec") ||
-    (me?.platform_role_id ?? null) === 2 ||
+    isSuperadmin ||
     (me?.platform_role_id ?? null) === 5 ||
     ["2", "5"].includes((me?.platform_role_code ?? "").trim());
-  const canSkip = (me?.platform_role_id ?? null) === 2 || (me?.platform_role_code ?? "").trim() === "2";
+  const canSkip = isSuperadmin;
   const canCancelInterview =
     canSkip ||
     roles.includes("hr_admin") ||
@@ -58,7 +69,7 @@ export default async function CandidateDetailPage({ params }: { params: Promise<
   const canUploadJoiningDocs =
     roles.includes("hr_admin") ||
     roles.includes("hr_exec") ||
-    (me?.platform_role_id ?? null) === 2 ||
+    isSuperadmin ||
     ["2"].includes((me?.platform_role_code ?? "").trim());
 
   return (

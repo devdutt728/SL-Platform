@@ -15,6 +15,10 @@ export type CandidateListItem = {
   caf_submitted_at?: string | null;
   needs_hr_review?: boolean;
   screening_result?: string | null;
+  l1_interview_count?: number;
+  l1_feedback_submitted?: boolean;
+  l2_interview_count?: number;
+  l2_feedback_submitted?: boolean;
 };
 
 export type CandidateDetail = {
@@ -97,6 +101,7 @@ export type L2Assessment = {
   status: string;
   data: Record<string, unknown>;
   submitted_at?: string | null;
+  deleted_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   locked: boolean;
@@ -397,6 +402,14 @@ export type SprintTemplateAttachment = {
   is_active: boolean;
 };
 
+export type SprintAttachmentPublic = {
+  sprint_attachment_id: number;
+  file_name: string;
+  content_type?: string | null;
+  file_size?: number | null;
+  download_url: string;
+};
+
 export type CandidateSprint = {
   candidate_sprint_id: number;
   candidate_id: number;
@@ -419,12 +432,14 @@ export type CandidateSprint = {
   created_at: string;
   updated_at: string;
   template_name?: string | null;
+  template_code?: string | null;
   template_description?: string | null;
   instructions_url?: string | null;
   expected_duration_days?: number | null;
   candidate_name?: string | null;
   candidate_code?: string | null;
   opening_title?: string | null;
+  attachments?: SprintAttachmentPublic[];
 };
 
 export type CandidateOffer = {

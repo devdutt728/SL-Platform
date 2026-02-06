@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CandidateListItem, SprintTemplate, SprintTemplateAttachment } from "@/lib/types";
+import { SprintTemplate, SprintTemplateAttachment } from "@/lib/types";
 import { redirectToLogin } from "@/lib/auth-client";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
@@ -41,22 +41,16 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
-  const [previewTemplateId, setPreviewTemplateId] = useState<string>("");
   const [previewCandidateName, setPreviewCandidateName] = useState("");
   const [previewCandidateCode, setPreviewCandidateCode] = useState("");
   const [previewDueDate, setPreviewDueDate] = useState("");
   const [previewOpeningTitle, setPreviewOpeningTitle] = useState("");
   const [previewBody, setPreviewBody] = useState<string | null>(null);
-  const [previewCandidateId, setPreviewCandidateId] = useState<string>("");
-  const [previewCandidates, setPreviewCandidates] = useState<CandidateListItem[]>([]);
-  const [previewCandidatesLoading, setPreviewCandidatesLoading] = useState(false);
 
   const isSuperadmin = useMemo(
     () => platformRoleId === 2 || (platformRoleId == null && !!roles?.includes("hr_admin")),
     [platformRoleId, roles]
   );
-  const isHr = useMemo(() => platformRoleId === 5 || (platformRoleId == null && !!roles?.includes("hr_exec")), [platformRoleId, roles]);
-  const canPreview = isSuperadmin || isHr;
 
   useEffect(() => {
     let cancelled = false;
@@ -82,28 +76,12 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!canPreview) return;
-    let cancelled = false;
-    (async () => {
-      setPreviewCandidatesLoading(true);
-      try {
-        const url = new URL("/api/rec/candidates", window.location.origin);
-        url.searchParams.set("stage", "sprint");
-        url.searchParams.set("limit", "200");
-        const res = await fetch(url.toString(), { cache: "no-store" });
-        if (!res.ok) return;
-        const data = (await res.json()) as CandidateListItem[];
-        if (!cancelled) setPreviewCandidates(data);
-      } catch {
-        // ignore
-      } finally {
-        if (!cancelled) setPreviewCandidatesLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [canPreview]);
+    if (!selectedTemplateId) {
+      setAttachmentTemplateId("");
+      return;
+    }
+    setAttachmentTemplateId(selectedTemplateId);
+  }, [selectedTemplateId]);
 
   useEffect(() => {
     if (!selectedTemplateId) {
@@ -209,7 +187,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
     const payload = {
       sprint_template_code: form.sprint_template_code.trim() || null,
       name: form.name.trim(),
-      description: form.description.trim() || null,
+      description: normalizeDescription(form.description) || null,
       instructions_url: form.instructions_url.trim() || null,
       expected_duration_days: form.expected_duration_days ? Number(form.expected_duration_days) : null,
       is_active: form.is_active,
@@ -307,32 +285,29 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
 
   useEffect(() => {
     setPreviewBody(null);
-  }, [previewTemplateId, previewCandidateName, previewCandidateCode, previewDueDate, previewOpeningTitle]);
+  }, [previewCandidateName, previewCandidateCode, previewDueDate, previewOpeningTitle, form.description, form.name]);
 
   function renderPreview() {
-    if (!previewTemplateId) {
-      setPreviewBody("Select a template to preview.");
-      return;
-    }
-    const template = templates.find((t) => String(t.sprint_template_id) === previewTemplateId);
-    if (!template) {
-      setPreviewBody("Template not found.");
-      return;
-    }
-    const description = template.description || "";
-    const dueDateValue = previewDueDate || deriveDueDate(template.expected_duration_days);
+    const description = form.description || "";
+    const dueDateValue = previewDueDate || deriveDueDate(form.expected_duration_days ? Number(form.expected_duration_days) : null);
     const replacements: Record<string, string> = {
       "{{candidate_name}}": previewCandidateName.trim(),
       "{{candidate_code}}": previewCandidateCode.trim(),
       "{{due_date}}": dueDateValue || "TBD",
       "{{opening_title}}": previewOpeningTitle.trim(),
-      "{{template_name}}": template.name || "",
+      "{{template_name}}": form.name || "",
     };
     let output = description;
     Object.entries(replacements).forEach(([key, value]) => {
       output = output.split(key).join(value);
     });
-    setPreviewBody(output || "(No description set)");
+    const normalized = normalizeDescription(output);
+    if (!normalized) {
+      setPreviewBody("<p>(No description set)</p>");
+      return;
+    }
+    const signature = hasSignature(normalized) ? "" : `\n${SPRINT_SIGNATURE_HTML}`;
+    setPreviewBody(`${normalized}${signature}`);
   }
 
   return (
@@ -347,7 +322,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
       </div>
 
       {isSuperadmin ? (
-        <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
           <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -403,15 +378,18 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
               </label>
 
               <label className="space-y-1 md:col-span-2">
-                <span className="text-xs text-slate-600">Description</span>
+                <span className="text-xs text-slate-600">Sprint brief</span>
                 <textarea
                   value={form.description}
                   onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-                  className="min-h-24 w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2"
-                  placeholder="Short brief and expectations for the sprint."
+                  className="min-h-36 w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2"
+                  placeholder="Write the brief in plain text. Line breaks are preserved."
                 />
                 <span className="text-[11px] text-slate-500">
                   Supports placeholders: {"{{candidate_name}}"}, {"{{candidate_code}}"}, {"{{due_date}}"}, {"{{opening_title}}"}, {"{{template_name}}"}.
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  Superadmin only. Plain text is auto-converted to HTML; the Studio Lotus signature is appended on public sprint pages and sprint emails.
                 </span>
               </label>
 
@@ -452,26 +430,72 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
 
           <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm">
             <div className="space-y-1">
-              <p className="text-xs uppercase tracking-tight text-slate-500">Attachments</p>
-              <p className="text-sm text-slate-500">Upload the files that will be snapshotted per candidate.</p>
+              <p className="text-xs uppercase tracking-tight text-slate-500">Preview & attachments</p>
+              <p className="text-sm text-slate-500">What the candidate will see, plus the sprint files.</p>
             </div>
 
             <div className="mt-4 space-y-3">
-              <label className="space-y-1">
-                <span className="text-xs text-slate-600">Template</span>
-                <select
-                  className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm"
-                  value={attachmentTemplateId}
-                  onChange={(e) => setAttachmentTemplateId(e.target.value)}
-                >
-                  <option value="">Select template</option>
-                  {templates.map((t) => (
-                    <option key={t.sprint_template_id} value={String(t.sprint_template_id)}>
-                      {t.sprint_template_code || "No code"} - {t.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="space-y-1">
+                  <span className="text-xs text-slate-600">Candidate name</span>
+                  <input
+                    value={previewCandidateName}
+                    onChange={(e) => setPreviewCandidateName(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2"
+                    placeholder="Candidate name"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-slate-600">Candidate code</span>
+                  <input
+                    value={previewCandidateCode}
+                    onChange={(e) => setPreviewCandidateCode(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2"
+                    placeholder="SLR-0000"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-slate-600">Due date (optional)</span>
+                  <input
+                    type="date"
+                    value={previewDueDate}
+                    onChange={(e) => setPreviewDueDate(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-slate-600">Opening title</span>
+                  <input
+                    value={previewOpeningTitle}
+                    onChange={(e) => setPreviewOpeningTitle(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2"
+                    placeholder="Role title"
+                  />
+                </label>
+              </div>
+
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-white"
+                onClick={() => renderPreview()}
+              >
+                Update preview
+              </button>
+
+              <div className="rounded-xl border border-slate-200 bg-white/60 p-3 text-sm text-slate-700">
+                {previewBody ? (
+                  <div dangerouslySetInnerHTML={{ __html: previewBody }} />
+                ) : (
+                  "Click update preview to render the sprint brief."
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3 border-t border-slate-200/70 pt-4">
+              <div className="space-y-1">
+                <p className="text-xs uppercase tracking-tight text-slate-500">Attachments</p>
+                <p className="text-xs text-slate-500">Save the template first to upload files.</p>
+              </div>
 
               <label className="space-y-1">
                 <span className="text-xs text-slate-600">Upload file (max 25 MB)</span>
@@ -479,6 +503,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
                   type="file"
                   className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm text-slate-700"
                   onChange={(e) => setAttachmentFile(e.target.files?.[0] || null)}
+                  disabled={!attachmentTemplateId}
                 />
               </label>
 
@@ -486,7 +511,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
                 type="button"
                 className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-card disabled:opacity-60"
                 onClick={() => void uploadAttachment()}
-                disabled={uploading}
+                disabled={uploading || !attachmentTemplateId}
               >
                 {uploading ? "Uploading..." : "Add attachment"}
               </button>
@@ -499,7 +524,10 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
                 <p className="text-xs text-slate-500">No attachments yet.</p>
               ) : (
                 attachments.map((att) => (
-                  <div key={att.sprint_template_attachment_id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-sm">
+                  <div
+                    key={att.sprint_template_attachment_id}
+                    className="flex items-center justify-between rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-sm"
+                  >
                     <span className="truncate">{att.file_name}</span>
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-slate-500">{formatFileSize(att.file_size)}</span>
@@ -519,115 +547,72 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
         </div>
       ) : null}
 
-      {canPreview ? (
-        <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-xs uppercase tracking-tight text-slate-500">Preview email body</p>
-              <p className="text-sm text-slate-500">Use a sprint-stage candidate and preview the email output.</p>
-            </div>
-            <button
-              type="button"
-              className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-white"
-              onClick={() => renderPreview()}
-            >
-              Preview email body
-            </button>
-          </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <label className="space-y-1 md:col-span-2">
-              <span className="text-xs text-slate-600">Template</span>
-              <select
-                className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm"
-                value={previewTemplateId}
-                onChange={(e) => setPreviewTemplateId(e.target.value)}
-              >
-                <option value="">Select template</option>
-                {templates.map((t) => (
-                  <option key={t.sprint_template_id} value={String(t.sprint_template_id)}>
-                    {t.sprint_template_code || "No code"} - {t.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="space-y-1 md:col-span-2">
-              <span className="text-xs text-slate-600">Candidate (Sprint stage)</span>
-              <select
-                className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm"
-                value={previewCandidateId}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setPreviewCandidateId(value);
-                  const selected = previewCandidates.find((c) => String(c.candidate_id) === value);
-                  setPreviewCandidateName(selected?.name || "");
-                  setPreviewCandidateCode(selected?.candidate_code || "");
-                  setPreviewOpeningTitle(selected?.opening_title || "");
-                }}
-              >
-                <option value="">{previewCandidatesLoading ? "Loading candidates..." : "Select candidate"}</option>
-                {previewCandidates.map((c) => (
-                  <option key={c.candidate_id} value={String(c.candidate_id)}>
-                    {c.name} ({c.candidate_code})
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="space-y-1">
-              <span className="text-xs text-slate-600">Candidate name</span>
-              <input
-                value={previewCandidateName}
-                onChange={(e) => setPreviewCandidateName(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2"
-                placeholder="Candidate name"
-              />
-            </label>
-
-            <label className="space-y-1">
-              <span className="text-xs text-slate-600">Candidate code</span>
-              <input
-                value={previewCandidateCode}
-                onChange={(e) => setPreviewCandidateCode(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2"
-                placeholder="Candidate code"
-              />
-            </label>
-
-            <label className="space-y-1">
-              <span className="text-xs text-slate-600">Due date (optional)</span>
-              <input
-                type="date"
-                value={previewDueDate}
-                onChange={(e) => setPreviewDueDate(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2"
-              />
-            </label>
-
-            <label className="space-y-1">
-              <span className="text-xs text-slate-600">Opening title</span>
-              <input
-                value={previewOpeningTitle}
-                onChange={(e) => setPreviewOpeningTitle(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2"
-                placeholder="Opening title"
-              />
-            </label>
-          </div>
-
-          <div className="mt-4 rounded-xl border border-slate-200 bg-white/60 p-3 text-sm text-slate-700">
-            {previewBody ? (
-              <div dangerouslySetInnerHTML={{ __html: previewBody }} />
-            ) : (
-              "Click preview to render the email body."
-            )}
-          </div>
-        </div>
-      ) : null}
     </main>
   );
 }
+
+function escapeHtml(raw: string): string {
+  return raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function normalizeDescription(raw: string): string {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) return "";
+  const looksLikeHtml = /<\/?[a-z][\s\S]*>/i.test(trimmed);
+  if (looksLikeHtml) return trimmed;
+  const escaped = escapeHtml(trimmed);
+  const paragraphs = escaped
+    .split(/\n{2,}/)
+    .map((chunk) => chunk.replace(/\n/g, "<br>"))
+    .join("</p><p>");
+  return `<p>${paragraphs}</p>`;
+}
+
+function hasSignature(raw: string): boolean {
+  return /regards,|studio\s*lotus/i.test(raw);
+}
+
+const SPRINT_SIGNATURE_HTML = `
+<p style="margin:16px 0 0 0;font-size:14px;line-height:1.6;color:#334155;font-family:Arial,sans-serif;">Regards,<br />Studio Lotus Recruitment Team</p>
+<div style="margin-top:14px;">
+  <div style="font-family:arial,sans-serif;">
+    <div style="color:rgb(34,34,34);">
+      <span style="text-align:justify;font-family:georgia,palatino,serif;font-size:large;color:rgb(126,124,123);">studio</span>
+      <span style="text-align:justify;font-family:georgia,palatino,serif;font-size:large;color:rgb(241,92,55);">lotus</span>
+    </div>
+    <div style="text-align:justify;">
+      <span style="color:rgb(241,92,55);font-family:arial,sans-serif;font-size:x-small;">creating meaning </span>
+      <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;font-size:x-small;">| </span>
+      <span style="color:rgb(241,92,55);font-family:arial,sans-serif;font-size:x-small;">celebrating context</span>
+    </div>
+    <div style="color:rgb(34,34,34);font-size:x-small;font-family:arial,sans-serif;">
+      World's 100 Best Architecture Firms, Archello
+      <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;"> | </span>
+      WAF
+      <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;"> | </span>
+      TIME Magazine
+      <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;"> | </span>
+      Prix Versailles
+      <span style="color:rgb(241,92,55);font-family:georgia,palatino,serif;"> | </span>
+      Dezeen Awards
+    </div>
+    <div style="font-size:x-small;font-family:arial,sans-serif;">
+      <a href="https://studiolotus.in/" style="color:rgb(17,85,204);" target="_blank" rel="noopener">Website</a>
+      <span> | </span>
+      <a href="https://www.instagram.com/studio_lotus/" style="color:rgb(17,85,204);" target="_blank" rel="noopener">Instagram</a>
+      <span> | </span>
+      <a href="https://www.linkedin.com/company/studiolotus/" style="color:rgb(17,85,204);" target="_blank" rel="noopener">LinkedIn</a>
+      <span> | </span>
+      <a href="https://www.facebook.com/studiolotus.in/" style="color:rgb(17,85,204);" target="_blank" rel="noopener">Facebook</a>
+    </div>
+  </div>
+</div>
+`.trim();
 
 function formatFileSize(bytes?: number | null) {
   if (!bytes || bytes <= 0) return "";
