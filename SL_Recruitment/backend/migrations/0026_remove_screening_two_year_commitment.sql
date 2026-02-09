@@ -1,0 +1,1 @@
+ALTER TABLE rec_candidate_screening DROP COLUMN two_year_commitment;

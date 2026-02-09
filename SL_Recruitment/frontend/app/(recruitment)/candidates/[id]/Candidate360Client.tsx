@@ -140,11 +140,11 @@ function formatPreviewDueAt(raw?: string) {
 
 function escapeHtml(value: string) {
   return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;")
-    .replaceAll("'", "&#39;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function stripHtml(raw?: string | null) {
@@ -633,6 +633,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   const activeSprints = useMemo(
     () => (candidateSprints || []).filter((sprint) => sprint.status !== "deleted"),
     [candidateSprints]
+  );
+  const hasSubmittedSprint = useMemo(
+    () => activeSprints.some((sprint) => sprint.status === "submitted"),
+    [activeSprints]
   );
   const sprintAssigned = activeSprints.length > 0;
   const sprintAssignDisabled = sprintAssigned && !canSkip;
@@ -2077,7 +2081,17 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       ];
     }
     if (current === "sprint") {
-      return [
+      const actions: StageButton[] = [];
+      if (hasSubmittedSprint) {
+        actions.push({
+          label: "Advance to L1 shortlist",
+          tone: "bg-emerald-600 hover:bg-emerald-700",
+          icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "advance",
+          action: () => handleTransition("l1_shortlist", "advance"),
+        });
+      }
+      actions.push(
         {
           label: "Assign sprint",
           tone: "bg-emerald-600 hover:bg-emerald-700",
@@ -2095,8 +2109,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
           icon: <Layers className="h-4 w-4" />,
           intent: "review",
           action: () => focusSection("sprint", sprintRef),
-        },
-      ];
+        }
+      );
+      return actions;
     }
     if (current === "offer") {
       return [
@@ -2121,7 +2136,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       ];
     }
     return [];
-  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef, cafLocked, candidate.l2_owner_email, sprintAssignDisabled]);
+  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef, cafLocked, candidate.l2_owner_email, sprintAssignDisabled, hasSubmittedSprint]);
 
   const screening = data.screening as Screening | null | undefined;
   const assessment = data.assessment as CandidateAssessment | null | undefined;
@@ -2492,9 +2507,6 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                     <p className="text-xs uppercase tracking-tight text-slate-500">Key screening values</p>
                     {screening ? (
                       <div className="mt-3 grid gap-2 md:grid-cols-2">
-                        <Metric label="Total exp (yrs)" value={screening.total_experience_years != null ? String(screening.total_experience_years) : "?"} />
-                        <Metric label="Relevant exp (yrs)" value={screening.relevant_experience_years != null ? String(screening.relevant_experience_years) : "?"} />
-                        <Metric label="Expected CTC" value={screening.expected_ctc_annual != null ? formatMoney(screening.expected_ctc_annual) : "?"} />
                         <Metric label="Relocate" value={screening.willing_to_relocate == null ? "?" : screening.willing_to_relocate ? "Yes" : "No"} />
                       </div>
                     ) : (
@@ -2637,14 +2649,6 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                       </Chip>
                     </div>
                     <div className="mt-3 grid gap-2 md:grid-cols-3">
-                      <Metric label="Current city" value={screening.current_city ? String(screening.current_city) : "-"} />
-                      <Metric label="Employer" value={screening.current_employer ? String(screening.current_employer) : "-"} />
-                      <Metric label="Total exp" value={screening.total_experience_years != null ? String(screening.total_experience_years) : "-"} />
-                      <Metric label="Relevant exp" value={screening.relevant_experience_years != null ? String(screening.relevant_experience_years) : "-"} />
-                      <Metric label="Notice (days)" value={screening.notice_period_days != null ? String(screening.notice_period_days) : "-"} />
-                      <Metric label="Current CTC" value={screening.current_ctc_annual != null ? formatMoney(screening.current_ctc_annual) : "-"} />
-                      <Metric label="Expected CTC" value={screening.expected_ctc_annual != null ? formatMoney(screening.expected_ctc_annual) : "-"} />
-                      <Metric label="Joining date" value={screening.expected_joining_date ? formatDate(screening.expected_joining_date) : "-"} />
                     </div>
 
                     <div className="mt-4 grid gap-2 md:grid-cols-2">
@@ -2653,17 +2657,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                         <p className="mt-1 text-sm font-semibold">
                           {screening.willing_to_relocate == null ? "?" : screening.willing_to_relocate ? "Yes" : "No"}
                         </p>
-                        <p className="mt-1 text-xs text-slate-600">{screening.relocation_notes || "?"}</p>
                       </div>
                       <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
                         <p className="text-xs uppercase tracking-tight text-slate-500">Notes / questions</p>
-                        {screening.reason_for_job_change ? (
-                          <div className="mt-1">
-                            <p className="text-xs font-semibold text-slate-700">Reason for job change</p>
-                            <p className="mt-1 text-sm text-slate-700">{screening.reason_for_job_change}</p>
-                          </div>
-                        ) : null}
-                        <p className="mt-1 text-sm text-slate-700">{screening.questions_from_candidate || "-"}</p>
+                        <p className="mt-1 text-sm text-slate-700">{candidate.questions_from_candidate || "-"}</p>
                         <p className="mt-2 text-xs text-slate-600">{screening.screening_notes || ""}</p>
                       </div>
                       </div>
@@ -2686,16 +2683,26 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
 
                       <div className="mt-3 grid gap-2 md:grid-cols-3">
                         <Metric label="Position" value={valueOrDash(assessment.position_applied_for)} />
-                        <Metric label="Total exp" value={valueOrDash(assessment.total_experience_years)} />
+                        <Metric label="Employer" value={valueOrDash(assessment.current_employer)} />
+                        <Metric label="Relevant exp" value={valueOrDash(assessment.relevant_experience_years)} />
                         <Metric label="Architecture exp" value={valueOrDash(assessment.architecture_interior_experience_years)} />
                         <Metric label="Personal email" value={valueOrDash(assessment.personal_email)} />
                         <Metric label="Contact" value={valueOrDash(assessment.contact_number)} />
                         <Metric label="Employment status" value={valueOrDash(assessment.current_employment_status)} />
                         <Metric label="Notice / joining" value={valueOrDash(assessment.notice_period_or_joining_time)} />
+                        <Metric label="Notice (days)" value={valueOrDash(assessment.notice_period_days)} />
+                        <Metric label="Current CTC" value={valueOrDash(assessment.current_ctc_annual)} />
+                        <Metric label="Expected CTC" value={valueOrDash(assessment.expected_ctc_annual)} />
                         <Metric label="Current location" value={valueOrDash(assessment.current_location)} />
                         <Metric label="Interviewer" value={valueOrDash(assessment.interviewer_name)} />
                         <Metric label="Submitted" value={assessment.assessment_submitted_at ? formatDateTime(assessment.assessment_submitted_at) : "-"} />
                       </div>
+                      {assessment.reason_for_job_change ? (
+                        <div className="mt-3 rounded-2xl border border-white/60 bg-white/35 p-3">
+                          <p className="text-xs uppercase tracking-tight text-slate-500">Reason for job change</p>
+                          <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{assessment.reason_for_job_change}</p>
+                        </div>
+                      ) : null}
 
                       <div className="mt-4 grid gap-3 md:grid-cols-2">
                         <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
@@ -3730,7 +3737,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
 
           <div ref={sprintRef} className="section-card">
             <div className="flex items-center justify-between">
-              <p className="text-xs uppercase tracking-tight text-slate-500">Sprint</p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs uppercase tracking-tight text-slate-500">Sprint</p>
+                {hasSubmittedSprint ? <Chip className={chipTone("amber")}>Submitted</Chip> : null}
+              </div>
               <button
                 type="button"
                 className="rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-white"
@@ -3783,16 +3793,17 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                             ) : null}
                           </div>
                           </div>
-                          <div className="mt-3 grid gap-2 md:grid-cols-3">
+                          <div className="mt-3 grid gap-2 md:grid-cols-4">
                             <Metric label="Assigned" value={formatDateTime(sprint.assigned_at)} />
                             <Metric label="Due" value={sprint.due_at ? formatDateTime(sprint.due_at) : "-"} />
                             <Metric label="Status" value={formatRelativeDue(sprint.due_at)} />
+                            <Metric label="Submitted" value={sprint.submitted_at ? formatDateTime(sprint.submitted_at) : "-"} />
                           </div>
                           <div className="mt-3 grid gap-2 md:grid-cols-2">
                             <div className="rounded-xl border border-white/60 bg-white/60 p-3">
                               <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Links</p>
                               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-700">
-                                {sprint.public_token ? (
+                                {sprint.public_token && sprint.status !== "submitted" ? (
                                   <a
                                     className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
                                     href={`${basePath}/sprint/${encodeURIComponent(sprint.public_token)}`}
@@ -3801,6 +3812,8 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                   >
                                     <ExternalLink className="h-3.5 w-3.5" /> Open sprint page
                                   </a>
+                                ) : sprint.status === "submitted" ? (
+                                  <span className="text-xs text-slate-500">Public sprint link expired after submission.</span>
                                 ) : null}
                                 {sprint.instructions_url ? (
                                   <a
@@ -3819,7 +3832,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                     target="_blank"
                                     rel="noreferrer"
                                   >
-                                    <ExternalLink className="h-3.5 w-3.5" /> Submission link
+                                    <ExternalLink className="h-3.5 w-3.5" /> Submission file
                                   </a>
                                 ) : (
                                   <span className="text-xs text-slate-500">No submission yet.</span>
@@ -3834,7 +3847,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                     <a
                                       key={attachment.sprint_attachment_id}
                                       className="flex items-center justify-between rounded-lg border border-slate-200 bg-white/80 px-2 py-1 underline decoration-dotted underline-offset-2"
-                                      href={`${basePath}${attachment.download_url}`}
+                                      href={`/api/rec/sprints/${encodeURIComponent(
+                                        String(sprint.candidate_sprint_id)
+                                      )}/attachments/${encodeURIComponent(String(attachment.sprint_attachment_id))}`}
                                       target="_blank"
                                       rel="noreferrer"
                                     >

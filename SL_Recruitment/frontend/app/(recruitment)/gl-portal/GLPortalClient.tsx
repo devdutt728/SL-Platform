@@ -378,10 +378,8 @@ function applyCafPrefill(base: L2Data, candidate: CandidateDetail | null, interv
   setIfEmpty("candidate_name", candidate?.name || "");
   setIfEmpty("team_lead", interview?.interviewer_name || "");
   if (screening) {
-    setIfEmpty("preferred_joining_date", dateValue(screening.expected_joining_date));
-    setIfEmpty("two_year_commitment", yesNo(screening.two_year_commitment));
     setIfEmpty("family_support", yesNo(screening.willing_to_relocate));
-    setIfEmpty("other_questions", screening.questions_from_candidate || screening.relocation_notes || "");
+    setIfEmpty("other_questions", "");
   }
   return next;
 }

@@ -8,6 +8,10 @@ import { redirect } from "next/navigation";
 type Me = {
   platform_role_id?: number | null;
   platform_role_code?: string | null;
+  platform_role_name?: string | null;
+  platform_role_ids?: number[] | null;
+  platform_role_codes?: string[] | null;
+  platform_role_names?: string[] | null;
   roles?: string[] | null;
 };
 

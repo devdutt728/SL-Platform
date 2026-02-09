@@ -22,12 +22,4 @@ def evaluate_screening(screening: ScreeningUpsertIn, opening_config: Optional[Op
     if opening_config.requires_relocation and screening.willing_to_relocate is False:
         return "red"
 
-    if (
-        opening_config.salary_band_max_annual is not None
-        and screening.expected_ctc_annual is not None
-        and screening.expected_ctc_annual > (opening_config.salary_band_max_annual * 1.3)
-    ):
-        return "red"
-
     return "green"
-

@@ -133,29 +133,13 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
             </div>
 
             <div className="mt-3 grid gap-3 md:grid-cols-3">
-              {labelValue("Current city", screening.current_city ? String(screening.current_city) : "-")}
-              {labelValue("Employer", screening.current_employer ? String(screening.current_employer) : "-")}
-              {labelValue("Total exp (yrs)", screening.total_experience_years != null ? String(screening.total_experience_years) : "-")}
-              {labelValue("Relevant exp (yrs)", screening.relevant_experience_years != null ? String(screening.relevant_experience_years) : "-")}
-              {labelValue("Notice (days)", screening.notice_period_days != null ? String(screening.notice_period_days) : "-")}
-              {labelValue("Expected CTC", screening.expected_ctc_annual != null ? String(screening.expected_ctc_annual) : "-")}
               {labelValue("Relocate", screening.willing_to_relocate == null ? "-" : screening.willing_to_relocate ? "Yes" : "No")}
-              {labelValue(
-                "2-year commitment",
-                screening.two_year_commitment == null ? "-" : screening.two_year_commitment ? "Yes" : "No"
-              )}
-              {labelValue("Joining date", screening.expected_joining_date ? String(screening.expected_joining_date) : "-")}
-              {labelValue("Job change", screening.reason_for_job_change ? String(screening.reason_for_job_change) : "-")}
             </div>
 
             <div className="mt-3 grid gap-3">
               <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-wide text-slate-500">Relocation notes</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{screening.relocation_notes || "-"}</p>
-              </div>
-              <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-wide text-slate-500">Questions</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{screening.questions_from_candidate || "-"}</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{candidate.questions_from_candidate || "-"}</p>
               </div>
               <div className="rounded-xl border border-white/60 bg-white/35 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-wide text-slate-500">Screening notes</p>
@@ -181,16 +165,26 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
 
             <div className="mt-3 grid gap-3 md:grid-cols-3">
               {labelValue("Position", valueOrDash(assessment.position_applied_for))}
-              {labelValue("Total exp (yrs)", valueOrDash(assessment.total_experience_years))}
+              {labelValue("Employer", valueOrDash(assessment.current_employer))}
+              {labelValue("Relevant exp (yrs)", valueOrDash(assessment.relevant_experience_years))}
               {labelValue("Architecture exp (yrs)", valueOrDash(assessment.architecture_interior_experience_years))}
               {labelValue("Personal email", valueOrDash(assessment.personal_email))}
               {labelValue("Contact", valueOrDash(assessment.contact_number))}
               {labelValue("Employment status", valueOrDash(assessment.current_employment_status))}
               {labelValue("Notice / joining", valueOrDash(assessment.notice_period_or_joining_time))}
+              {labelValue("Notice (days)", valueOrDash(assessment.notice_period_days))}
+              {labelValue("Current CTC", valueOrDash(assessment.current_ctc_annual))}
+              {labelValue("Expected CTC", valueOrDash(assessment.expected_ctc_annual))}
               {labelValue("Current location", valueOrDash(assessment.current_location))}
               {labelValue("Interviewer", valueOrDash(assessment.interviewer_name))}
               {labelValue("Submitted", assessment.assessment_submitted_at ? formatDateTime(assessment.assessment_submitted_at) : "-")}
             </div>
+            {assessment.reason_for_job_change ? (
+              <div className="mt-3 rounded-xl border border-white/60 bg-white/35 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Reason for job change</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{valueOrDash(assessment.reason_for_job_change)}</p>
+              </div>
+            ) : null}
 
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               {labelValue("Current job duration (months)", valueOrDash(assessment.current_job_duration_months))}

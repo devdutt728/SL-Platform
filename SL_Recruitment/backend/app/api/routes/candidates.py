@@ -140,14 +140,6 @@ def _label_yes_no(value: bool | None) -> str:
     return "Yes" if value else "No"
 
 
-def _label_date(value) -> str:
-    if value is None:
-        return "—"
-    try:
-        return value.isoformat()
-    except Exception:
-        return str(value)
-
 
 async def _ensure_offer_token(session: AsyncSession, offer: RecCandidateOffer) -> None:
     if offer.public_token:
@@ -350,8 +342,6 @@ async def create_candidate(
             "candidate_email": candidate.email,
             "candidate_phone": candidate.phone or "—",
             "willing_to_relocate": _label_yes_no(screening.willing_to_relocate) if screening else "—",
-            "two_year_commitment": _label_yes_no(screening.two_year_commitment) if screening else "—",
-            "expected_joining_date": _label_date(screening.expected_joining_date) if screening else "—",
         },
         email_type="application_links",
         meta_extra={"caf_token": candidate.caf_token, "assessment_token": assessment.assessment_token},
@@ -411,6 +401,7 @@ async def create_candidate(
         cv_url=candidate.cv_url,
         portfolio_url=candidate.portfolio_url,
         portfolio_not_uploaded_reason=candidate.portfolio_not_uploaded_reason,
+        questions_from_candidate=candidate.questions_from_candidate,
         drive_folder_url=candidate.drive_folder_url,
         caf_sent_at=candidate.caf_sent_at,
         caf_submitted_at=candidate.caf_submitted_at,

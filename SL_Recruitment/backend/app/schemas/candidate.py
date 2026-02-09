@@ -67,6 +67,7 @@ class CandidateDetailOut(BaseModel):
     cv_url: Optional[str] = None
     portfolio_url: Optional[str] = None
     portfolio_not_uploaded_reason: Optional[str] = None
+    questions_from_candidate: Optional[str] = None
     drive_folder_url: Optional[str] = None
 
     caf_sent_at: Optional[datetime] = None

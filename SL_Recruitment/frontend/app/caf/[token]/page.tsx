@@ -74,26 +74,6 @@ export default async function CafPage({ params }: { params: Promise<{ token: str
           {screening ? (
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)]/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Total experience</p>
-                <p className="mt-1 text-sm font-semibold">{screening.total_experience_years ?? "—"}</p>
-              </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)]/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Relevant experience</p>
-                <p className="mt-1 text-sm font-semibold">{screening.relevant_experience_years ?? "—"}</p>
-              </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)]/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Current CTC</p>
-                <p className="mt-1 text-sm font-semibold">{screening.current_ctc_annual ?? "—"}</p>
-              </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)]/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Expected CTC</p>
-                <p className="mt-1 text-sm font-semibold">{screening.expected_ctc_annual ?? "—"}</p>
-              </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)]/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Notice period (days)</p>
-                <p className="mt-1 text-sm font-semibold">{screening.notice_period_days ?? "—"}</p>
-              </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)]/60 p-3">
                 <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Relocate</p>
                 <p className="mt-1 text-sm font-semibold">
                   {screening.willing_to_relocate == null ? "—" : screening.willing_to_relocate ? "Yes" : "No"}

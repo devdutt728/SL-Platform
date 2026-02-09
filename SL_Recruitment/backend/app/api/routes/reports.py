@@ -154,7 +154,6 @@ REPORTS = {
             "cv_url": RecCandidate.cv_url,
             "portfolio_url": RecCandidate.portfolio_url,
             "portfolio_not_uploaded_reason": RecCandidate.portfolio_not_uploaded_reason,
-            "linkedin_url": RecCandidate.linkedin_url,
             "owner_person_id_platform": RecCandidate.owner_person_id_platform,
             "hired_person_id_platform": RecCandidate.hired_person_id_platform,
             "drive_folder_id": RecCandidate.drive_folder_id,

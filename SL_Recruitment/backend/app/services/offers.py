@@ -18,7 +18,6 @@ from app.models.candidate_offer import RecCandidateOffer
 from app.models.opening import RecOpening
 from app.models.platform_person import DimPerson
 from app.models.stage import RecCandidateStage
-from app.models.screening import RecCandidateScreening
 from app.schemas.user import UserContext
 from app.core.config import settings
 from app.core.paths import resolve_repo_path
@@ -162,17 +161,6 @@ async def _resolve_reporting_to(opening: RecOpening | None) -> str:
 async def _resolve_candidate_address(session: AsyncSession, candidate: RecCandidate | None, opening: RecOpening | None) -> str:
     if candidate and candidate.current_location:
         return candidate.current_location
-    if candidate:
-        try:
-            screening = (
-                await session.execute(
-                    select(RecCandidateScreening.current_city).where(RecCandidateScreening.candidate_id == candidate.candidate_id)
-                )
-            ).scalar_one_or_none()
-            if screening:
-                return screening
-        except Exception:
-            pass
     city = opening.location_city if opening else None
     country = opening.location_country if opening else None
     parts = [p for p in [city, country] if p]

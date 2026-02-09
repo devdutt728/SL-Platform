@@ -6,14 +6,19 @@ from pydantic import BaseModel
 
 class CandidateAssessmentUpsertIn(BaseModel):
     position_applied_for: Optional[str] = None
-    total_experience_years: Optional[float] = None
+    current_employer: Optional[str] = None
+    relevant_experience_years: Optional[float] = None
     architecture_interior_experience_years: Optional[float] = None
     personal_email: Optional[str] = None
     contact_number: Optional[str] = None
     current_employment_status: Optional[str] = None
     interviewer_name: Optional[str] = None
     notice_period_or_joining_time: Optional[str] = None
+    notice_period_days: Optional[int] = None
+    current_ctc_annual: Optional[float] = None
+    expected_ctc_annual: Optional[float] = None
     current_location: Optional[str] = None
+    reason_for_job_change: Optional[str] = None
 
     current_job_duration_months: Optional[int] = None
     current_job_org_name: Optional[str] = None
@@ -114,14 +119,19 @@ class CandidateAssessmentOut(BaseModel):
     assessment_submitted_at: Optional[datetime] = None
 
     position_applied_for: Optional[str] = None
-    total_experience_years: Optional[float] = None
+    current_employer: Optional[str] = None
+    relevant_experience_years: Optional[float] = None
     architecture_interior_experience_years: Optional[float] = None
     personal_email: Optional[str] = None
     contact_number: Optional[str] = None
     current_employment_status: Optional[str] = None
     interviewer_name: Optional[str] = None
     notice_period_or_joining_time: Optional[str] = None
+    notice_period_days: Optional[int] = None
+    current_ctc_annual: Optional[float] = None
+    expected_ctc_annual: Optional[float] = None
     current_location: Optional[str] = None
+    reason_for_job_change: Optional[str] = None
 
     current_job_duration_months: Optional[int] = None
     current_job_org_name: Optional[str] = None

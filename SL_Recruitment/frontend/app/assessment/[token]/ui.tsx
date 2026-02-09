@@ -25,14 +25,19 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
 
     const payload = {
       position_applied_for: stringOrNull(formData.get("position_applied_for")),
-      total_experience_years: numberOrNull(formData.get("total_experience_years")),
+      current_employer: stringOrNull(formData.get("current_employer")),
+      relevant_experience_years: numberOrNull(formData.get("relevant_experience_years")),
       architecture_interior_experience_years: numberOrNull(formData.get("architecture_interior_experience_years")),
       personal_email: stringOrNull(formData.get("personal_email")),
       contact_number: stringOrNull(formData.get("contact_number")),
       current_employment_status: stringOrNull(formData.get("current_employment_status")),
       interviewer_name: stringOrNull(formData.get("interviewer_name")),
       notice_period_or_joining_time: stringOrNull(formData.get("notice_period_or_joining_time")),
+      notice_period_days: intOrNull(formData.get("notice_period_days")),
+      current_ctc_annual: numberOrNull(formData.get("current_ctc_annual")),
+      expected_ctc_annual: numberOrNull(formData.get("expected_ctc_annual")),
       current_location: stringOrNull(formData.get("current_location")),
+      reason_for_job_change: stringOrNull(formData.get("reason_for_job_change")),
 
       current_job_duration_months: intOrNull(formData.get("current_job_duration_months")),
       current_job_org_name: stringOrNull(formData.get("current_job_org_name")),
@@ -176,12 +181,18 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
               className="w-full rounded-xl border border-[var(--border)] bg-slate-100/70 px-3 py-2 text-slate-500"
             />
           </Field>
-          <Field label="Total experience (years)">
+          <Field label="Current Employer (if any)">
             <input
-              name="total_experience_years"
+              name="current_employer"
+              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              placeholder="Company name"
+            />
+          </Field>
+          <Field label="Relevant experience (years)">
+            <input
+              name="relevant_experience_years"
               type="number"
               step="0.1"
-              required
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
             />
           </Field>
@@ -228,6 +239,30 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
               placeholder="30 days"
             />
           </Field>
+          <Field label="Notice period (days)">
+            <input
+              name="notice_period_days"
+              type="number"
+              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              placeholder="30"
+            />
+          </Field>
+          <Field label="Current CTC (annual)">
+            <input
+              name="current_ctc_annual"
+              type="number"
+              step="0.01"
+              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+            />
+          </Field>
+          <Field label="Expected CTC (annual)">
+            <input
+              name="expected_ctc_annual"
+              type="number"
+              step="0.01"
+              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+            />
+          </Field>
           <Field label="Current location">
             <input
               name="current_location"
@@ -241,6 +276,13 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
               name="interviewer_name"
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
               placeholder="Name"
+            />
+          </Field>
+          <Field label="Reason for job change">
+            <textarea
+              name="reason_for_job_change"
+              className="min-h-20 w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              placeholder="Briefly share why you are exploring a change"
             />
           </Field>
         </div>

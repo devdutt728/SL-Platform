@@ -38,6 +38,7 @@ export type CandidateDetail = {
   cv_url?: string | null;
   portfolio_url?: string | null;
   portfolio_not_uploaded_reason?: string | null;
+  questions_from_candidate?: string | null;
   drive_folder_url?: string | null;
   caf_sent_at?: string | null;
   caf_submitted_at?: string | null;
@@ -223,22 +224,10 @@ export type PlatformRole = {
 
 export type Screening = {
   candidate_id: number;
-  current_city?: string | null;
-  current_employer?: string | null;
-  total_experience_years?: number | null;
-  relevant_experience_years?: number | null;
-  current_ctc_annual?: number | null;
-  expected_ctc_annual?: number | null;
   salary_band_fit?: string | null;
   willing_to_relocate?: boolean | null;
-  two_year_commitment?: boolean | null;
-  notice_period_days?: number | null;
-  expected_joining_date?: string | null;
   gender_identity?: string | null;
   gender_self_describe?: string | null;
-  reason_for_job_change?: string | null;
-  relocation_notes?: string | null;
-  questions_from_candidate?: string | null;
   screening_result?: string | null;
   screening_notes?: string | null;
   created_at: string;
@@ -269,14 +258,19 @@ export type CandidateAssessment = {
   assessment_sent_at?: string | null;
   assessment_submitted_at?: string | null;
   position_applied_for?: string | null;
-  total_experience_years?: number | null;
+  current_employer?: string | null;
+  relevant_experience_years?: number | null;
   architecture_interior_experience_years?: number | null;
   personal_email?: string | null;
   contact_number?: string | null;
   current_employment_status?: string | null;
   interviewer_name?: string | null;
   notice_period_or_joining_time?: string | null;
+  notice_period_days?: number | null;
+  current_ctc_annual?: number | null;
+  expected_ctc_annual?: number | null;
   current_location?: string | null;
+  reason_for_job_change?: string | null;
   current_job_duration_months?: number | null;
   current_job_org_name?: string | null;
   current_job_role_responsibilities?: string | null;
@@ -420,6 +414,7 @@ export type CandidateSprint = {
   status: string;
   submission_url?: string | null;
   submitted_at?: string | null;
+  deleted_at?: string | null;
   reviewed_by_person_id_platform?: string | null;
   reviewed_by_name?: string | null;
   reviewed_by_email?: string | null;

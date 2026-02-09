@@ -107,67 +107,11 @@ def _bool_or_none(raw: str | None) -> bool | None:
     return None
 
 
-def _float_or_none(raw: str | None) -> float | None:
-    if raw is None:
-        return None
-    s = raw.strip()
-    if not s:
-        return None
-    try:
-        return float(s)
-    except Exception:
-        return None
-
-
-def _validate_currency(value: float | None, field: str) -> float | None:
-    if value is None:
-        return None
-    # DECIMAL(12,2) max value is 99_999_999_99.99, keep a small buffer.
-    if abs(value) > 9_999_999_999.99:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{field} is too large. Please enter a realistic amount (max 9,999,999,999.99).",
-        )
-    return value
-
-
-def _int_or_none(raw: str | None) -> int | None:
-    if raw is None:
-        return None
-    s = raw.strip()
-    if not s:
-        return None
-    try:
-        return int(s)
-    except Exception:
-        return None
-
-
-def _date_or_none(raw: str | None):
-    if raw is None:
-        return None
-    s = raw.strip()
-    if not s:
-        return None
-    try:
-        return datetime.fromisoformat(s).date()
-    except Exception:
-        return None
-
-
 def _label_yes_no(value: bool | None) -> str:
     if value is None:
         return "—"
     return "Yes" if value else "No"
 
-
-def _label_date(value) -> str:
-    if value is None:
-        return "—"
-    try:
-        return value.isoformat()
-    except Exception:
-        return str(value)
 
 
 async def _transition_from_caf(session: AsyncSession, *, candidate_id: int, to_stage: str) -> None:
@@ -257,21 +201,9 @@ async def apply_for_opening(
     name: str = Form(...),
     email: EmailStr = Form(...),
     phone: str | None = Form(default=None),
-    linkedin: str | None = Form(default=None),
     note: str | None = Form(default=None),
-    current_city: str | None = Form(default=None),
-    current_employer: str | None = Form(default=None),
-    total_experience_years: str | None = Form(default=None),
-    relevant_experience_years: str | None = Form(default=None),
-    current_ctc_annual: str | None = Form(default=None),
-    expected_ctc_annual: str | None = Form(default=None),
     willing_to_relocate: str | None = Form(default=None),
-    two_year_commitment: str | None = Form(default=None),
-    notice_period_days: str | None = Form(default=None),
-    expected_joining_date: str | None = Form(default=None),
-    relocation_notes: str | None = Form(default=None),
     questions_from_candidate: str | None = Form(default=None),
-    reason_for_job_change: str | None = Form(default=None),
     gender_identity: str | None = Form(default=None),
     gender_self_describe: str | None = Form(default=None),
     portfolio_not_uploaded_reason: str | None = Form(default=None),
@@ -333,21 +265,9 @@ async def apply_for_opening(
             "email": email_normalized,
             "name": (name or "").strip(),
             "phone": (phone or "").strip() if phone else None,
-            "linkedin": (linkedin or "").strip() if linkedin else None,
             "note": (note or "").strip() if note else None,
-            "current_city": (current_city or "").strip() if current_city else None,
-            "current_employer": (current_employer or "").strip() if current_employer else None,
-            "total_experience_years": (total_experience_years or "").strip() if total_experience_years else None,
-            "relevant_experience_years": (relevant_experience_years or "").strip() if relevant_experience_years else None,
-            "current_ctc_annual": (current_ctc_annual or "").strip() if current_ctc_annual else None,
-            "expected_ctc_annual": (expected_ctc_annual or "").strip() if expected_ctc_annual else None,
-            "willing_to_relocate": (willing_to_relocate or "").strip() if willing_to_relocate else None,
-            "two_year_commitment": (two_year_commitment or "").strip() if two_year_commitment else None,
-            "notice_period_days": (notice_period_days or "").strip() if notice_period_days else None,
-            "expected_joining_date": (expected_joining_date or "").strip() if expected_joining_date else None,
-            "relocation_notes": (relocation_notes or "").strip() if relocation_notes else None,
             "questions_from_candidate": (questions_from_candidate or "").strip() if questions_from_candidate else None,
-            "reason_for_job_change": (reason_for_job_change or "").strip() if reason_for_job_change else None,
+            "willing_to_relocate": (willing_to_relocate or "").strip() if willing_to_relocate else None,
             "gender_identity": (gender_identity or "").strip() if gender_identity else None,
             "gender_self_describe": (gender_self_describe or "").strip() if gender_self_describe else None,
             "portfolio_not_uploaded_reason": (portfolio_not_uploaded_reason or "").strip() if portfolio_not_uploaded_reason else None,
@@ -538,7 +458,6 @@ async def apply_for_opening(
             "source_channel": "website",
             "opening_id": opening.opening_id,
             "opening_code": opening_code,
-            "linkedin": linkedin,
             "note": note,
         },
     )
@@ -701,25 +620,12 @@ async def apply_for_opening(
         candidate.portfolio_not_uploaded_reason = (portfolio_not_uploaded_reason or "").strip() or None
 
     candidate.application_docs_status = "complete" if (cv_url or portfolio_url) else "none"
-    candidate.linkedin_url = linkedin or None
-
+    candidate.questions_from_candidate = (questions_from_candidate or "").strip() or None
     # Optionally capture screening data from the same form (do not mark CAF submitted here).
     screening_data = {
-        "current_city": (current_city or "").strip() or None,
-        "current_employer": (current_employer or "").strip() or None,
-        "total_experience_years": _float_or_none(total_experience_years),
-        "relevant_experience_years": _float_or_none(relevant_experience_years),
-        "current_ctc_annual": _validate_currency(_float_or_none(current_ctc_annual), "Current CTC"),
-        "expected_ctc_annual": _validate_currency(_float_or_none(expected_ctc_annual), "Expected CTC"),
         "willing_to_relocate": _bool_or_none(willing_to_relocate),
-        "two_year_commitment": _bool_or_none(two_year_commitment),
-        "notice_period_days": _int_or_none(notice_period_days),
-        "expected_joining_date": _date_or_none(expected_joining_date),
-        "reason_for_job_change": (reason_for_job_change or "").strip() or None,
         "gender_identity": (gender_identity or "").strip() or None,
         "gender_self_describe": (gender_self_describe or "").strip() or None,
-        "relocation_notes": (relocation_notes or "").strip() or None,
-        "questions_from_candidate": (questions_from_candidate or "").strip() or None,
     }
 
     decision: str | None = None
@@ -767,8 +673,6 @@ async def apply_for_opening(
             "candidate_email": candidate.email,
             "candidate_phone": candidate.phone or "—",
             "willing_to_relocate": _label_yes_no(screening_data.get("willing_to_relocate")),
-            "two_year_commitment": _label_yes_no(screening_data.get("two_year_commitment")),
-            "expected_joining_date": _label_date(screening_data.get("expected_joining_date")),
         },
         email_type="application_links",
         meta_extra={"caf_token": caf_token, "assessment_token": assessment.assessment_token},

@@ -1105,3 +1105,58 @@ async def download_public_sprint_attachment(
     data, content_type, file_name = await anyio.to_thread.run_sync(lambda: download_drive_file(attachment.drive_file_id))
     headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}
     return StreamingResponse(io.BytesIO(data), media_type=content_type, headers=headers)
+
+
+@router.get("/sprints/{candidate_sprint_id}/attachments/{attachment_id}")
+async def download_sprint_attachment(
+    candidate_sprint_id: int,
+    attachment_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+):
+    row = (
+        await session.execute(
+            select(RecSprintAttachment)
+            .join(RecCandidateSprintAttachment, RecCandidateSprintAttachment.sprint_attachment_id == RecSprintAttachment.sprint_attachment_id)
+            .where(
+                RecCandidateSprintAttachment.candidate_sprint_id == candidate_sprint_id,
+                RecSprintAttachment.sprint_attachment_id == attachment_id,
+            )
+        )
+    ).first()
+
+    attachment = row[0] if row else None
+    if not attachment:
+        fallback = (
+            await session.execute(
+                select(RecSprintAttachment)
+                .join(RecSprintTemplateAttachment, RecSprintTemplateAttachment.sprint_attachment_id == RecSprintAttachment.sprint_attachment_id)
+                .join(RecCandidateSprint, RecCandidateSprint.sprint_template_id == RecSprintTemplateAttachment.sprint_template_id)
+                .where(
+                    RecCandidateSprint.candidate_sprint_id == candidate_sprint_id,
+                    RecSprintAttachment.sprint_attachment_id == attachment_id,
+                    RecSprintTemplateAttachment.is_active == 1,
+                )
+            )
+        ).first()
+        if not fallback:
+            fallback = (
+                await session.execute(
+                    select(RecSprintAttachment)
+                    .join(RecSprintTemplateAttachment, RecSprintTemplateAttachment.sprint_attachment_id == RecSprintAttachment.sprint_attachment_id)
+                    .join(RecCandidateSprint, RecCandidateSprint.sprint_template_id == RecSprintTemplateAttachment.sprint_template_id)
+                    .where(
+                        RecCandidateSprint.candidate_sprint_id == candidate_sprint_id,
+                        RecSprintAttachment.sprint_attachment_id == attachment_id,
+                    )
+                )
+            ).first()
+        if fallback:
+            attachment = fallback[0]
+
+    if not attachment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+
+    data, content_type, file_name = await anyio.to_thread.run_sync(lambda: download_drive_file(attachment.drive_file_id))
+    headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}
+    return StreamingResponse(io.BytesIO(data), media_type=content_type, headers=headers)
