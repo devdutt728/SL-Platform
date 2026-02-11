@@ -66,6 +66,15 @@ function stageLabel(raw?: string | null) {
   return stageLabels[key] || (key ? key.replace(/_/g, " ") : "");
 }
 
+function sourceLabel(candidate: CandidateListItem) {
+  const origin = (candidate.source_origin || "").trim();
+  const channel = (candidate.source_channel || "").trim();
+  if (origin && channel) return `${origin} • ${channel}`;
+  if (origin) return origin;
+  if (channel) return channel;
+  return "";
+}
+
 function chipTone(kind: "neutral" | "green" | "amber" | "red" | "blue") {
   if (kind === "green") return "bg-emerald-500/15 text-emerald-800 ring-1 ring-emerald-500/20";
   if (kind === "amber") return "bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/20";
@@ -490,6 +499,7 @@ export function CandidatesClient({ initialCandidates, openings, canNavigate = tr
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-slate-900">{c.name}</p>
                   <p className="text-xs text-slate-600">{c.candidate_code}</p>
+                  {sourceLabel(c) ? <p className="text-[11px] text-slate-500">{sourceLabel(c)}</p> : null}
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-slate-800">{c.opening_title || "-"}</p>

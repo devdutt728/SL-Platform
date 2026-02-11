@@ -20,6 +20,13 @@ class RecCandidate(Base):
 
     opening_id: Mapped[int | None] = mapped_column("applied_opening_id", Integer, nullable=True, index=True)
     source_channel: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_origin: Mapped[str] = mapped_column(String(32), nullable=False, default="ui")
+    external_source_ref: Mapped[str | None] = mapped_column(String(191), nullable=True)
+    educational_qualification: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    years_of_experience: Mapped[float | None] = mapped_column(nullable=True)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    terms_consent: Mapped[bool] = mapped_column(Boolean, default=False)
+    terms_consent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     current_location: Mapped[str | None] = mapped_column(String(100), nullable=True)
     current_company: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
@@ -27,6 +34,7 @@ class RecCandidate(Base):
     final_decision: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     cv_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    resume_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     portfolio_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     portfolio_not_uploaded_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     questions_from_candidate: Mapped[str | None] = mapped_column(Text, nullable=True)

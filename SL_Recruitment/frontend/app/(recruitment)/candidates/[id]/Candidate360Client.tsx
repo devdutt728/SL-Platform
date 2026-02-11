@@ -2907,6 +2907,16 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                       Open CV
                     </Link>
                   ) : null}
+                  {candidate.resume_url ? (
+                    <Link
+                      href={candidate.resume_url}
+                      target="_blank"
+                      className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-white"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open Resume
+                    </Link>
+                  ) : null}
                   {candidate.portfolio_url ? (
                     <Link
                       href={candidate.portfolio_url}

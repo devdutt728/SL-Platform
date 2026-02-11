@@ -7,7 +7,7 @@ export default function PublicPortalPage({ searchParams }: { searchParams?: { se
   return (
     <main className="page-shell min-h-screen py-10">
       {sessionExpired ? (
-        <div className="mb-4 rounded-2xl border border-amber-200/70 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="mb-4 rounded-2xl border border-[#E74011]/30 bg-[#E74011]/10 px-4 py-3 text-sm text-[#5D5552]">
           Session expired. You have been signed out and redirected to the public portal.
         </div>
       ) : null}

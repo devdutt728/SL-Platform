@@ -26,7 +26,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
             Use your @studiolotus.in account to access the portal.
           </p>
           <Link
-            className="inline-flex mt-6 px-6 py-3 rounded-full bg-ink text-white font-semibold"
+            className="inline-flex mt-6 px-6 py-3 rounded-full bg-brand text-white font-semibold"
             href={`${basePath}/login`}
           >
             Continue to sign in

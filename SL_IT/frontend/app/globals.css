@@ -3,12 +3,40 @@
 @tailwind utilities;
 
 :root {
-  --ink: 23 24 27;
-  --lotus: 214 77 63;
-  --leaf: 31 122 97;
-  --sand: 247 242 234;
-  --mist: 244 246 250;
-  --steel: 100 116 139;
+  --brand-color: #E74011;
+  --dim-grey: #5D5552;
+  --white: #FFFFFF;
+  --accessible-components--dark-grey: #D1D1D1;
+  --light-grey: #9B9B9BCC;
+  --accessible-components--dodger-blue: #1378D1;
+
+  --ink: 93 85 82;
+  --lotus: 231 64 17;
+  --leaf: 19 120 209;
+  --sand: 248 246 245;
+  --mist: 245 243 242;
+  --steel: 111 103 98;
+
+  --surface-base: #f4f4f4;
+  --surface-card: #f6f6f6;
+  --surface-panel: #ffffff;
+  --border-soft: #e3dedc;
+  --shadow-soft: 0 2px 8px -5px rgba(93, 85, 82, 0.25);
+  --shadow-soft-hover: 0 9px 22px -14px rgba(93, 85, 82, 0.32);
+
+  --font-stack-fallback:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Oxygen,
+    Ubuntu,
+    Cantarell,
+    "Fira Sans",
+    "Droid Sans",
+    "Helvetica Neue",
+    sans-serif;
   --page-width: 1680px;
   --page-gutter: clamp(0.8rem, 0.85vw, 1.65rem);
   --panel-radius: clamp(0.98rem, 0.7vw, 1.35rem);
@@ -58,14 +86,9 @@ body {
 
 body {
   color-scheme: light;
-  background-color: #f8fafc;
-  background-image:
-    radial-gradient(circle at 12% 18%, rgba(59, 130, 246, 0.22), transparent 45%),
-    radial-gradient(circle at 82% 16%, rgba(236, 72, 153, 0.16), transparent 42%),
-    radial-gradient(circle at 72% 72%, rgba(34, 211, 238, 0.18), transparent 46%),
-    radial-gradient(circle at 24% 82%, rgba(168, 85, 247, 0.14), transparent 46%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(248, 250, 252, 0.95));
-  background-attachment: fixed;
+  font-family: var(--font-primary), Roboto, var(--font-stack-fallback);
+  color: var(--dim-grey);
+  background-color: var(--surface-base);
 }
 
 * {
@@ -86,13 +109,13 @@ button {
 
 .glass,
 .glass-panel {
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(93, 85, 82, 0.16);
   box-shadow:
-    0 24px 60px -40px rgba(15, 23, 42, 0.28),
-    0 10px 30px -22px rgba(15, 23, 42, 0.24);
+    0 20px 40px -32px rgba(93, 85, 82, 0.2),
+    0 8px 20px -18px rgba(93, 85, 82, 0.18);
   border-radius: var(--panel-radius);
   transition: background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
   will-change: transform;
@@ -101,25 +124,18 @@ button {
 .section-card {
   border-radius: var(--panel-radius);
   padding: var(--panel-padding);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.45)),
-    radial-gradient(circle at 12% 12%, rgba(59, 130, 246, 0.14), transparent 40%),
-    radial-gradient(circle at 88% 10%, rgba(168, 85, 247, 0.12), transparent 40%);
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  box-shadow:
-    0 24px 60px -40px rgba(15, 23, 42, 0.28),
-    0 10px 30px -22px rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-soft);
   transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
   will-change: transform;
 }
 
 .section-card:hover {
   transform: translate3d(0, -2px, 0);
-  box-shadow:
-    0 30px 80px -55px rgba(15, 23, 42, 0.35),
-    0 12px 36px -26px rgba(15, 23, 42, 0.24);
+  box-shadow: var(--shadow-soft-hover);
 }
 
 .workbook-launch {
@@ -127,15 +143,15 @@ button {
   overflow: hidden;
   isolation: isolate;
   border-radius: 999px;
-  border: 1px solid rgba(59, 130, 246, 0.35);
+  border: 1px solid rgba(93, 85, 82, 0.22);
   background:
-    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.18), transparent 55%),
-    linear-gradient(120deg, rgba(255, 255, 255, 0.7), rgba(239, 246, 255, 0.35));
-  color: var(--text-secondary, #475569);
+    radial-gradient(circle at 20% 20%, rgba(231, 64, 17, 0.08), transparent 58%),
+    linear-gradient(120deg, rgba(255, 255, 255, 0.92), rgba(245, 243, 242, 0.8));
+  color: var(--dim-grey);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
-    0 12px 30px -22px rgba(15, 23, 42, 0.3),
-    0 0 20px -16px rgba(59, 130, 246, 0.6);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.7),
+    0 12px 24px -22px rgba(93, 85, 82, 0.2),
+    0 0 16px -18px rgba(231, 64, 17, 0.35);
   transition: transform 200ms ease, box-shadow 220ms ease, border-color 220ms ease, color 200ms ease;
 }
 
@@ -146,9 +162,9 @@ button {
   background: linear-gradient(
     120deg,
     transparent 30%,
-    rgba(59, 130, 246, 0.16) 45%,
-    rgba(255, 255, 255, 0.7) 52%,
-    rgba(59, 130, 246, 0.2) 58%,
+    rgba(231, 64, 17, 0.14) 45%,
+    rgba(255, 255, 255, 0.65) 52%,
+    rgba(231, 64, 17, 0.2) 58%,
     transparent 70%
   );
   transform: translateX(-120%);
@@ -161,23 +177,23 @@ button {
   position: absolute;
   inset: -2px;
   border-radius: inherit;
-  border: 1px solid rgba(59, 130, 246, 0.4);
+  border: 1px solid rgba(231, 64, 17, 0.35);
   opacity: 0;
   box-shadow:
-    0 0 22px rgba(56, 189, 248, 0.35),
-    0 0 40px rgba(59, 130, 246, 0.2);
+    0 0 20px rgba(231, 64, 17, 0.2),
+    0 0 34px rgba(231, 64, 17, 0.16);
   transition: opacity 220ms ease;
   pointer-events: none;
 }
 
 .workbook-launch:hover {
   transform: translate3d(0, -1px, 0) scale(1.02);
-  border-color: rgba(59, 130, 246, 0.6);
-  color: var(--text-primary, #0f172a);
+  border-color: rgba(231, 64, 17, 0.48);
+  color: #2f2927;
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.75),
-    0 18px 45px -26px rgba(15, 23, 42, 0.35),
-    0 0 26px -14px rgba(59, 130, 246, 0.75);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.85),
+    0 16px 36px -24px rgba(93, 85, 82, 0.24),
+    0 0 22px -16px rgba(231, 64, 17, 0.5);
 }
 
 .workbook-launch:hover::before {
@@ -189,7 +205,7 @@ button {
 }
 
 .workbook-launch:focus-visible {
-  outline: 2px solid rgba(56, 189, 248, 0.6);
+  outline: 2px solid rgba(231, 64, 17, 0.45);
   outline-offset: 2px;
 }
 

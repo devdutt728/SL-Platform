@@ -20,6 +20,7 @@ from app.models.stage import RecCandidateStage
 from app.services.email import send_email
 from app.services.public_links import build_public_link
 from app.services.events import log_event
+from app.services.operation_queue import process_due_operations
 from app.services.platform_identity import active_status_filter
 from app.services.sprint_brief import render_sprint_brief_html
 
@@ -456,3 +457,8 @@ async def run_stale_stage_sweep() -> None:
                 meta_json={"stage": stage.stage_name, "started_at": stage.started_at.isoformat()},
             )
         await session.commit()
+
+
+async def run_operation_retries() -> None:
+    async with SessionLocal() as session:
+        await process_due_operations(session, limit=50)

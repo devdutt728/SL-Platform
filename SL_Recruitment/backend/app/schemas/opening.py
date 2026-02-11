@@ -1,10 +1,12 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class OpeningCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     opening_code: Optional[str] = None
     title: str
     description: Optional[str] = None
@@ -24,6 +26,8 @@ class OpeningCreate(BaseModel):
 
 
 class OpeningUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: Optional[str] = None
     description: Optional[str] = None
     location_city: Optional[str] = None

@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import OperationalError, SQLAlchemyError, DataError
 
 from app.api import deps
-from app.api.routes.candidates import transition_stage
 from app.core.auth import require_roles, require_superadmin
 from app.core.config import settings
 from app.core.roles import Role
@@ -33,7 +32,6 @@ from app.db.platform_session import PlatformSessionLocal
 from app.models.platform_person import DimPerson
 from app.schemas.sprint import CandidateSprintOut, SprintAssignIn, SprintPublicOut, SprintUpdateIn, SprintReviewerAssignIn
 from app.schemas.sprint_attachment import SprintAttachmentPublicOut, SprintTemplateAttachmentOut
-from app.schemas.stage import StageTransitionRequest
 from app.schemas.sprint_template import SprintTemplateCreateIn, SprintTemplateListItem, SprintTemplateUpdateIn
 from app.schemas.user import UserContext
 import anyio
@@ -47,6 +45,7 @@ from app.services.drive import (
 from app.services.email import send_email
 from app.services.public_links import build_public_link
 from app.services.events import log_event
+from app.services.stage_transitions import apply_stage_transition
 from app.services.sprint_brief import render_sprint_brief_html
 
 router = APIRouter(prefix="/rec", tags=["sprints"])
@@ -656,11 +655,14 @@ async def assign_sprint(
 
     current_stage = await _current_stage_name(session, candidate_id=candidate_id)
     if current_stage != "sprint":
-        await transition_stage(
-            candidate_id,
-            StageTransitionRequest(to_stage="sprint", decision="advance", note="sprint_assigned"),
+        await apply_stage_transition(
             session,
-            user,
+            candidate=candidate,
+            to_stage="sprint",
+            decision="advance",
+            note="sprint_assigned",
+            user=user,
+            source="sprint_assigned",
         )
 
     await session.commit()
@@ -818,18 +820,30 @@ async def update_sprint(
     )
 
     if sprint.decision == "advance":
-        await transition_stage(
-            sprint.candidate_id,
-            StageTransitionRequest(to_stage="l1_shortlist", decision="advance", note="sprint_review"),
+        candidate = await session.get(RecCandidate, sprint.candidate_id)
+        if not candidate:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+        await apply_stage_transition(
             session,
-            user,
+            candidate=candidate,
+            to_stage="l1_shortlist",
+            decision="advance",
+            note="sprint_review",
+            user=user,
+            source="sprint_review",
         )
     elif sprint.decision == "reject":
-        await transition_stage(
-            sprint.candidate_id,
-            StageTransitionRequest(to_stage="rejected", decision="reject", note="sprint_review"),
+        candidate = await session.get(RecCandidate, sprint.candidate_id)
+        if not candidate:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+        await apply_stage_transition(
             session,
-            user,
+            candidate=candidate,
+            to_stage="rejected",
+            decision="reject",
+            note="sprint_review",
+            user=user,
+            source="sprint_review",
         )
 
     await session.commit()

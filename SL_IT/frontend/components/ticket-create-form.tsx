@@ -216,7 +216,7 @@ export function TicketCreateForm() {
 
       <button
         type="submit"
-        className="px-6 py-3 rounded-full bg-ink text-white font-semibold"
+        className="px-6 py-3 rounded-full bg-brand text-white font-semibold"
         disabled={submitting}
       >
         {submitting ? "Submitting..." : "Create ticket"}

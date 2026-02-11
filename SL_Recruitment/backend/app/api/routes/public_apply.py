@@ -1,6 +1,11 @@
 from datetime import datetime, timedelta
 import hashlib
 import json
+import mimetypes
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import unquote, urlparse
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
 import anyio
@@ -16,7 +21,6 @@ from app.models.apply_idempotency import RecApplyIdempotency
 from app.models.candidate import RecCandidate
 from app.models.candidate_assessment import RecCandidateAssessment
 from app.models.opening import RecOpening
-from app.models.stage import RecCandidateStage
 from app.models.screening import RecCandidateScreening
 from app.services.drive import create_candidate_folder, upload_application_doc
 from app.services.email import send_email
@@ -24,21 +28,27 @@ from app.services.events import log_event
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
 from app.services.public_links import build_public_link, build_public_path
+from app.services.stage_transitions import apply_stage_transition
 from app.schemas.screening import ScreeningUpsertIn
-from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, SPRINT_EXTENSIONS, SPRINT_MIME_TYPES, validate_upload
+from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, SPRINT_EXTENSIONS, SPRINT_MIME_TYPES, sanitize_filename, validate_upload
 
 router = APIRouter(prefix="/apply", tags=["apply"])
 
 IDEMPOTENCY_TTL = timedelta(hours=24)
 RATE_LIMIT_WINDOW = timedelta(minutes=1)
 RATE_LIMIT_MAX = 5
+EXTERNAL_DOC_MAX_BYTES_DOC = 2 * 1024 * 1024
+EXTERNAL_DOC_MAX_BYTES_PORTFOLIO = 10 * 1024 * 1024
 
 
 class PublicApplyIn(BaseModel):
-    name: str
+    first_name: str
+    last_name: str
     email: EmailStr
     phone: str | None = None
     cv_url: str | None = None
+    portfolio_url: str | None = None
+    resume_url: str | None = None
 
 
 class PublicApplyOut(BaseModel):
@@ -100,9 +110,9 @@ def _bool_or_none(raw: str | None) -> bool | None:
     if raw is None:
         return None
     val = raw.strip().lower()
-    if val in {"yes", "true", "1"}:
+    if val in {"yes", "true", "1", "on", "y"}:
         return True
-    if val in {"no", "false", "0"}:
+    if val in {"no", "false", "0", "off", "n"}:
         return False
     return None
 
@@ -113,44 +123,106 @@ def _label_yes_no(value: bool | None) -> str:
     return "Yes" if value else "No"
 
 
+def _strip_optional(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
 
-async def _transition_from_caf(session: AsyncSession, *, candidate_id: int, to_stage: str) -> None:
-    now = datetime.utcnow()
-    current = (
-        await session.execute(
-            select(RecCandidateStage)
-            .where(RecCandidateStage.candidate_id == candidate_id, RecCandidateStage.stage_status == "pending")
-            .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
-            .limit(1)
+
+def _compose_full_name(first_name: str, last_name: str | None) -> str:
+    first = (first_name or "").strip()
+    last = (last_name or "").strip()
+    return f"{first} {last}".strip() or first
+
+
+def _application_docs_status(*, cv_url: str | None, portfolio_url: str | None, resume_url: str | None) -> str:
+    count = sum(1 for value in [cv_url, portfolio_url, resume_url] if value)
+    if count <= 0:
+        return "none"
+    if count >= 3:
+        return "complete"
+    return "partial"
+
+
+def _parse_years_of_experience(raw: str | None) -> float | None:
+    cleaned = _strip_optional(raw)
+    if cleaned is None:
+        return None
+    try:
+        years = float(cleaned)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Years of experience must be a number.",
         )
-    ).scalars().first()
-
-    from_stage = None
-    if current:
-        from_stage = current.stage_name
-        current.stage_status = "completed"
-        current.ended_at = now
-
-    session.add(
-        RecCandidateStage(
-            candidate_id=candidate_id,
-            stage_name=to_stage,
-            stage_status="pending",
-            started_at=now,
-            created_at=now,
+    if years < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Years of experience cannot be negative.",
         )
-    )
-    await log_event(
-        session,
-        candidate_id=candidate_id,
-        action_type="stage_change",
-        performed_by_person_id_platform=None,
-        related_entity_type="candidate",
-        related_entity_id=candidate_id,
-        from_status=from_stage,
-        to_status=to_stage,
-        meta_json={"from_stage": from_stage, "to_stage": to_stage, "reason": "caf_screening"},
-    )
+    return years
+
+
+def _download_external_file(url: str, *, max_bytes: int) -> tuple[bytes, str, str]:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported URL scheme for '{url}'.")
+
+    request = Request(url, headers={"User-Agent": "SL-Recruitment-Apply/1.0"})
+    try:
+        with urlopen(request, timeout=25) as response:
+            content_type = (response.headers.get_content_type() or "application/octet-stream").strip().lower()
+            data = response.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"File from '{url}' exceeds max allowed size.",
+                )
+    except HTTPException:
+        raise
+    except HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not download file '{url}' (HTTP {exc.code}).",
+        )
+    except URLError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not download file '{url}' ({exc.reason}).",
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not download file '{url}' ({exc}).",
+        )
+
+    raw_name = unquote(Path(parsed.path or "").name or "document")
+    filename = sanitize_filename(raw_name, default="document")
+    if "." not in filename:
+        guessed_ext = mimetypes.guess_extension(content_type or "") or ""
+        if guessed_ext:
+            filename = f"{filename}{guessed_ext}"
+
+    return data, filename, content_type or "application/octet-stream"
+
+
+def _validate_external_document(kind: str, filename: str, content_type: str) -> str:
+    ext = Path(filename).suffix.lower()
+    if kind == "portfolio":
+        allowed_extensions = SPRINT_EXTENSIONS
+        allowed_mime_types = SPRINT_MIME_TYPES
+    else:
+        allowed_extensions = DOC_EXTENSIONS
+        allowed_mime_types = DOC_MIME_TYPES
+    if ext and ext not in allowed_extensions:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported {kind} file type.")
+
+    normalized_type = (content_type or "").split(";", 1)[0].strip().lower()
+    if normalized_type and normalized_type not in allowed_mime_types and normalized_type not in {"application/octet-stream", "binary/octet-stream"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported {kind} content type.")
+
+    return sanitize_filename(filename, default=f"{kind}.pdf")
 
 
 @router.get("", response_model=list[OpeningPublicListItemOut])
@@ -198,19 +270,68 @@ async def get_opening_apply_prefill(
 async def apply_for_opening(
     opening_code: str,
     request: Request,
-    name: str = Form(...),
+    first_name: str | None = Form(default=None),
+    last_name: str | None = Form(default=None),
+    name: str | None = Form(default=None),
     email: EmailStr = Form(...),
     phone: str | None = Form(default=None),
     note: str | None = Form(default=None),
+    educational_qualification: str | None = Form(default=None),
+    years_of_experience: str | None = Form(default=None),
+    city: str | None = Form(default=None),
     willing_to_relocate: str | None = Form(default=None),
+    terms_consent: str | None = Form(default=None),
     questions_from_candidate: str | None = Form(default=None),
     gender_identity: str | None = Form(default=None),
     gender_self_describe: str | None = Form(default=None),
-    portfolio_not_uploaded_reason: str | None = Form(default=None),
+    cv_url: str | None = Form(default=None),
+    portfolio_url: str | None = Form(default=None),
+    resume_url: str | None = Form(default=None),
     cv_file: UploadFile | None = File(default=None),
     portfolio_file: UploadFile | None = File(default=None),
+    resume_file: UploadFile | None = File(default=None),
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    first_name_clean = _strip_optional(first_name)
+    last_name_clean = _strip_optional(last_name)
+    if not first_name_clean or not last_name_clean:
+        legacy_name = _strip_optional(name)
+        if legacy_name:
+            parsed_first, parsed_last = _split_name(legacy_name)
+            first_name_clean = first_name_clean or _strip_optional(parsed_first)
+            last_name_clean = last_name_clean or _strip_optional(parsed_last)
+    if not first_name_clean or not last_name_clean:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="First name and last name are required.",
+        )
+
+    terms_accepted = _bool_or_none(terms_consent)
+    if terms_accepted is not True:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please accept the recruitment data consent terms.",
+        )
+
+    cv_source_url = _strip_optional(cv_url)
+    portfolio_source_url = _strip_optional(portfolio_url)
+    resume_source_url = _strip_optional(resume_url)
+    has_cv_file = bool(cv_file and (cv_file.filename or "").strip())
+    has_portfolio_file = bool(portfolio_file and (portfolio_file.filename or "").strip())
+    has_resume_file = bool(resume_file and (resume_file.filename or "").strip())
+    if not has_portfolio_file and not portfolio_source_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Portfolio is mandatory. Upload a portfolio or provide a valid URL.",
+        )
+
+    years_of_experience_value = _parse_years_of_experience(years_of_experience)
+    educational_qualification_value = _strip_optional(educational_qualification)
+    city_value = _strip_optional(city)
+    phone_value = _strip_optional(phone)
+    note_value = _strip_optional(note)
+    questions_value = _strip_optional(questions_from_candidate)
+
     idempotency_key = (request.headers.get("idempotency-key") or request.headers.get("Idempotency-Key") or "").strip()
     if not idempotency_key:
         raise HTTPException(
@@ -263,16 +384,24 @@ async def apply_for_opening(
         {
             "opening_code": opening_code,
             "email": email_normalized,
-            "name": (name or "").strip(),
-            "phone": (phone or "").strip() if phone else None,
-            "note": (note or "").strip() if note else None,
-            "questions_from_candidate": (questions_from_candidate or "").strip() if questions_from_candidate else None,
-            "willing_to_relocate": (willing_to_relocate or "").strip() if willing_to_relocate else None,
-            "gender_identity": (gender_identity or "").strip() if gender_identity else None,
-            "gender_self_describe": (gender_self_describe or "").strip() if gender_self_describe else None,
-            "portfolio_not_uploaded_reason": (portfolio_not_uploaded_reason or "").strip() if portfolio_not_uploaded_reason else None,
-            "cv_filename": cv_file.filename if cv_file else None,
-            "portfolio_filename": portfolio_file.filename if portfolio_file else None,
+            "first_name": first_name_clean,
+            "last_name": last_name_clean,
+            "phone": phone_value,
+            "note": note_value,
+            "educational_qualification": educational_qualification_value,
+            "years_of_experience": years_of_experience_value,
+            "city": city_value,
+            "questions_from_candidate": questions_value,
+            "willing_to_relocate": _strip_optional(willing_to_relocate),
+            "terms_consent": terms_accepted,
+            "gender_identity": _strip_optional(gender_identity),
+            "gender_self_describe": _strip_optional(gender_self_describe),
+            "cv_filename": cv_file.filename if has_cv_file else None,
+            "portfolio_filename": portfolio_file.filename if has_portfolio_file else None,
+            "resume_filename": resume_file.filename if has_resume_file else None,
+            "cv_url": cv_source_url,
+            "portfolio_url": portfolio_source_url,
+            "resume_url": resume_source_url,
         }
     )
 
@@ -359,21 +488,34 @@ async def apply_for_opening(
         return JSONResponse(content=response_payload, status_code=status.HTTP_200_OK)
 
     caf_token = uuid4().hex
-    application_docs_status = "complete" if cv_file else "none"
-    first_name, last_name = _split_name(name)
+    full_name = _compose_full_name(first_name_clean, last_name_clean)
+    application_docs_status = _application_docs_status(
+        cv_url=cv_source_url if has_cv_file or cv_source_url else None,
+        portfolio_url=portfolio_source_url if has_portfolio_file or portfolio_source_url else None,
+        resume_url=resume_source_url if has_resume_file or resume_source_url else None,
+    )
     temp_candidate_code = uuid4().hex[:8].upper()
 
     candidate = RecCandidate(
         candidate_code=temp_candidate_code,
-        first_name=first_name,
-        last_name=last_name,
-        full_name=name,
+        first_name=first_name_clean,
+        last_name=last_name_clean,
+        full_name=full_name,
         email=email_normalized,
-        phone=phone,
+        phone=phone_value,
         source_channel="website",
+        source_origin="public_apply",
         opening_id=opening.opening_id,
+        educational_qualification=educational_qualification_value,
+        years_of_experience=years_of_experience_value,
+        city=city_value,
+        current_location=city_value,
+        terms_consent=True,
+        terms_consent_at=now,
         status="enquiry",
-        cv_url=None,
+        cv_url=cv_source_url,
+        portfolio_url=portfolio_source_url,
+        resume_url=resume_source_url,
         caf_token=caf_token,
         caf_sent_at=now,
         application_docs_status=application_docs_status,
@@ -403,14 +545,14 @@ async def apply_for_opening(
                 existing_candidate.caf_token = caf_token_existing
                 existing_candidate.caf_sent_at = now
                 existing_candidate.updated_at = now
-                response_payload = PublicApplyOut(
-                    candidate_id=existing_candidate.candidate_id,
-                    candidate_code=existing_candidate.candidate_code,
-                    caf_token=caf_token_existing,
-                    caf_url=build_public_path(f"/caf/{caf_token_existing}"),
-                    screening_result=None,
-                    already_applied=True,
-                ).model_dump()
+            response_payload = PublicApplyOut(
+                candidate_id=existing_candidate.candidate_id,
+                candidate_code=existing_candidate.candidate_code,
+                caf_token=caf_token_existing,
+                caf_url=build_public_path(f"/caf/{caf_token_existing}"),
+                screening_result=None,
+                already_applied=True,
+            ).model_dump()
             # Best-effort: persist idempotency completion.
             try:
                 session.add(
@@ -438,14 +580,14 @@ async def apply_for_opening(
     candidate.candidate_code = _candidate_code(candidate.candidate_id)
     await session.flush()
 
-    enquiry = RecCandidateStage(
-        candidate_id=candidate.candidate_id,
-        stage_name="enquiry",
-        stage_status="pending",
-        started_at=now,
-        created_at=now,
+    await apply_stage_transition(
+        session,
+        candidate=candidate,
+        to_stage="enquiry",
+        reason="system_init",
+        note="system_init",
+        source="public_apply",
     )
-    session.add(enquiry)
 
     await log_event(
         session,
@@ -458,7 +600,11 @@ async def apply_for_opening(
             "source_channel": "website",
             "opening_id": opening.opening_id,
             "opening_code": opening_code,
-            "note": note,
+            "note": note_value,
+            "city": city_value,
+            "educational_qualification": educational_qualification_value,
+            "years_of_experience": years_of_experience_value,
+            "terms_consent": True,
         },
     )
     await log_event(
@@ -527,35 +673,26 @@ async def apply_for_opening(
             detail="Unable to create candidate folder in Drive. Please retry later.",
         )
 
-    async def _upload(
+    async def _upload_bytes(
         kind: str,
-        upload: UploadFile,
-        max_bytes: int,
         *,
-        allowed_extensions: set[str],
-        allowed_mime_types: set[str],
-    ) -> str | None:
-        safe_name = validate_upload(upload, allowed_extensions=allowed_extensions, allowed_mime_types=allowed_mime_types)
-        data = await upload.read()
-        if len(data) > max_bytes:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"{kind.upper()} file too large. Max allowed is {max_bytes // (1024 * 1024)}MB.",
-            )
-
+        filename: str,
+        content_type: str,
+        data: bytes,
+    ) -> str:
         if not drive_folder_id:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Drive folder missing; please retry later.",
             )
-
-        filename = f"{candidate.candidate_code}-{kind}-{safe_name}"
+        safe_name = sanitize_filename(filename, default=f"{kind}.pdf")
+        stored_name = f"{candidate.candidate_code}-{kind}-{safe_name}"
         try:
             _, file_url = await anyio.to_thread.run_sync(
                 lambda: upload_application_doc(
                     drive_folder_id,
-                    filename=filename,
-                    content_type=upload.content_type or "application/octet-stream",
+                    filename=stored_name,
+                    content_type=content_type or "application/octet-stream",
                     data=data,
                 )
             )
@@ -592,41 +729,107 @@ async def apply_for_opening(
                 detail=f"Unable to upload {kind} to Drive. Please retry later.",
             )
 
+    async def _upload_file(
+        kind: str,
+        upload: UploadFile,
+        max_bytes: int,
+        *,
+        allowed_extensions: set[str],
+        allowed_mime_types: set[str],
+    ) -> str:
+        safe_name = validate_upload(upload, allowed_extensions=allowed_extensions, allowed_mime_types=allowed_mime_types)
+        data = await upload.read()
+        if len(data) > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{kind.upper()} file too large. Max allowed is {max_bytes // (1024 * 1024)}MB.",
+            )
+        return await _upload_bytes(
+            kind,
+            filename=safe_name,
+            content_type=upload.content_type or "application/octet-stream",
+            data=data,
+        )
+
+    async def _upload_remote(kind: str, source_url: str) -> str:
+        max_bytes = EXTERNAL_DOC_MAX_BYTES_PORTFOLIO if kind == "portfolio" else EXTERNAL_DOC_MAX_BYTES_DOC
+        data, filename, content_type = await anyio.to_thread.run_sync(
+            lambda: _download_external_file(source_url, max_bytes=max_bytes)
+        )
+        safe_name = _validate_external_document(kind, filename, content_type)
+        return await _upload_bytes(
+            kind,
+            filename=safe_name,
+            content_type=content_type,
+            data=data,
+        )
+
     cv_url: str | None = None
     portfolio_url: str | None = None
-    if cv_file:
-        cv_url = await _upload(
+    resume_url_uploaded: str | None = None
+    if has_cv_file and cv_file:
+        cv_url = await _upload_file(
             "cv",
             cv_file,
             max_bytes=2 * 1024 * 1024,
             allowed_extensions=DOC_EXTENSIONS,
             allowed_mime_types=DOC_MIME_TYPES,
         )
-    if portfolio_file:
-        portfolio_url = await _upload(
+    elif cv_source_url:
+        cv_url = await _upload_remote("cv", cv_source_url)
+
+    if has_portfolio_file and portfolio_file:
+        portfolio_url = await _upload_file(
             "portfolio",
             portfolio_file,
             max_bytes=10 * 1024 * 1024,
             allowed_extensions=SPRINT_EXTENSIONS,
             allowed_mime_types=SPRINT_MIME_TYPES,
         )
+    elif portfolio_source_url:
+        portfolio_url = await _upload_remote("portfolio", portfolio_source_url)
 
-    if cv_url:
-        candidate.cv_url = cv_url
-    if portfolio_url:
-        candidate.portfolio_url = portfolio_url
-        candidate.portfolio_not_uploaded_reason = None
-    else:
-        candidate.portfolio_not_uploaded_reason = (portfolio_not_uploaded_reason or "").strip() or None
+    if has_resume_file and resume_file:
+        resume_url_uploaded = await _upload_file(
+            "resume",
+            resume_file,
+            max_bytes=2 * 1024 * 1024,
+            allowed_extensions=DOC_EXTENSIONS,
+            allowed_mime_types=DOC_MIME_TYPES,
+        )
+    elif resume_source_url:
+        resume_url_uploaded = await _upload_remote("resume", resume_source_url)
 
-    candidate.application_docs_status = "complete" if (cv_url or portfolio_url) else "none"
-    candidate.questions_from_candidate = (questions_from_candidate or "").strip() or None
+    if not portfolio_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Portfolio upload failed. Please retry with a valid file/link.",
+        )
+
+    candidate.cv_url = cv_url
+    candidate.portfolio_url = portfolio_url
+    candidate.resume_url = resume_url_uploaded
+    candidate.portfolio_not_uploaded_reason = None
+    candidate.application_docs_status = _application_docs_status(
+        cv_url=candidate.cv_url,
+        portfolio_url=candidate.portfolio_url,
+        resume_url=candidate.resume_url,
+    )
+    candidate.questions_from_candidate = questions_value
+
     # Optionally capture screening data from the same form (do not mark CAF submitted here).
+    willing_to_relocate_value = _strip_optional(willing_to_relocate)
     screening_data = {
-        "willing_to_relocate": _bool_or_none(willing_to_relocate),
-        "gender_identity": (gender_identity or "").strip() or None,
-        "gender_self_describe": (gender_self_describe or "").strip() or None,
+        "willing_to_relocate": _bool_or_none(willing_to_relocate_value),
+        "gender_identity": _strip_optional(gender_identity),
+        "gender_self_describe": _strip_optional(gender_self_describe),
     }
+
+    if willing_to_relocate_value is not None and screening_data["willing_to_relocate"] is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid value for willing_to_relocate. Use yes/no.",
+        )
 
     decision: str | None = None
     # If any screening field is provided, upsert screening but do not mark CAF submitted.
@@ -636,13 +839,13 @@ async def apply_for_opening(
                 select(RecCandidateScreening).where(RecCandidateScreening.candidate_id == candidate.candidate_id)
             )
         ).scalars().first()
-        now = datetime.utcnow()
+        screening_now = datetime.utcnow()
         if screening is None:
-            screening = RecCandidateScreening(candidate_id=candidate.candidate_id, created_at=now, updated_at=now)
+            screening = RecCandidateScreening(candidate_id=candidate.candidate_id, created_at=screening_now, updated_at=screening_now)
             session.add(screening)
         for key, value in screening_data.items():
             setattr(screening, key, value)
-        screening.updated_at = now
+        screening.updated_at = screening_now
 
         opening_config = get_opening_config(candidate.opening_id)
         screening_input = ScreeningUpsertIn(**screening_data)

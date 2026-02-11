@@ -18,7 +18,8 @@ PRIMARY_SENDER_EMAIL = "hr@studiolotus.in"
 
 
 def _resolve_sender_email() -> str:
-    return PRIMARY_SENDER_EMAIL
+    configured = (settings.gmail_sender_email or "").strip()
+    return configured or PRIMARY_SENDER_EMAIL
 
 
 def _gmail_client():
@@ -119,7 +120,7 @@ async def send_email(
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
     try:
         service = _gmail_client()
-        service.users().messages().send(userId=sender, body={"raw": raw}).execute()
+        service.users().messages().send(userId="me", body={"raw": raw}).execute()
         meta["status"] = "sent"
     except Exception as exc:  # noqa: BLE001
         meta["status"] = "failed"

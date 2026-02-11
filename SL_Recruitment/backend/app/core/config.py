@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     sprint_overdue_days: int = 2
     offer_followup_days: int = 5
     stale_stage_days: int = 5
+    sheet_ingest_token: str = ""
+    # 0 or negative disables per-request row cap for Google Sheet ingest.
+    sheet_ingest_max_rows: int = 0
 
     model_config = SettingsConfigDict(env_prefix="SL_", env_file=_env_files(), extra="ignore")
 

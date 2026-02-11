@@ -17,13 +17,14 @@ from app.models.candidate import RecCandidate
 from app.models.candidate_offer import RecCandidateOffer
 from app.models.opening import RecOpening
 from app.models.platform_person import DimPerson
-from app.models.stage import RecCandidateStage
 from app.schemas.user import UserContext
 from app.core.config import settings
 from app.core.paths import resolve_repo_path
 from app.services.drive import move_candidate_folder, upload_offer_doc
 from app.services.events import log_event
+from app.services.operation_queue import OP_DRIVE_MOVE_FOLDER, enqueue_operation
 from app.services.platform_identity import active_status_filter
+from app.services.stage_transitions import apply_stage_transition
 
 
 def _format_date(value) -> str:
@@ -283,43 +284,6 @@ def _event_meta(user: UserContext, extra: dict[str, Any] | None = None) -> dict[
     return meta
 
 
-async def _transition_stage(session: AsyncSession, *, candidate_id: int, to_stage: str, user: UserContext | None = None) -> None:
-    now = datetime.utcnow()
-    current = (
-        await session.execute(
-            select(RecCandidateStage)
-            .where(RecCandidateStage.candidate_id == candidate_id, RecCandidateStage.stage_status == "pending")
-            .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
-            .limit(1)
-        )
-    ).scalars().first()
-    from_stage = None
-    if current:
-        from_stage = current.stage_name
-        current.stage_status = "completed"
-        current.ended_at = now
-    session.add(
-        RecCandidateStage(
-            candidate_id=candidate_id,
-            stage_name=to_stage,
-            stage_status="pending",
-            started_at=now,
-            created_at=now,
-        )
-    )
-    await log_event(
-        session,
-        candidate_id=candidate_id,
-        action_type="stage_change",
-        performed_by_person_id_platform=_platform_person_id(user) if user else None,
-        related_entity_type="candidate",
-        related_entity_id=candidate_id,
-        from_status=from_stage,
-        to_status=to_stage,
-        meta_json={"from_stage": from_stage, "to_stage": to_stage, "reason": "offer_flow"},
-    )
-
-
 async def create_offer(session: AsyncSession, *, candidate: RecCandidate, opening: RecOpening | None, payload: dict[str, Any], user: UserContext) -> RecCandidateOffer:
     now = datetime.utcnow()
     letter_overrides = payload.get("letter_overrides")
@@ -518,7 +482,15 @@ async def record_candidate_response(
             candidate.status = "offer"
             candidate.final_decision = None
             candidate.updated_at = now
-            await _transition_stage(session, candidate_id=candidate.candidate_id, to_stage="joining_documents", user=None)
+            await apply_stage_transition(
+                session,
+                candidate=candidate,
+                to_stage="joining_documents",
+                decision="accept",
+                reason=reason,
+                note="offer_flow",
+                source="offer_response",
+            )
     else:
         offer.offer_status = "declined"
         offer.declined_at = now
@@ -527,7 +499,15 @@ async def record_candidate_response(
             candidate.status = "declined"
             candidate.final_decision = "declined"
             candidate.updated_at = now
-            await _transition_stage(session, candidate_id=candidate.candidate_id, to_stage="declined", user=None)
+            await apply_stage_transition(
+                session,
+                candidate=candidate,
+                to_stage="declined",
+                decision="decline",
+                reason=reason,
+                note="offer_flow",
+                source="offer_response",
+            )
     offer.updated_at = now
     await log_event(
         session,
@@ -572,7 +552,15 @@ async def convert_candidate_to_employee(session: AsyncSession, *, candidate: Rec
     candidate.status = "hired"
     candidate.updated_at = datetime.utcnow()
 
-    await _transition_stage(session, candidate_id=candidate.candidate_id, to_stage="hired", user=user)
+    await apply_stage_transition(
+        session,
+        candidate=candidate,
+        to_stage="hired",
+        decision="advance",
+        note="offer_flow",
+        user=user,
+        source="candidate_convert",
+    )
 
     if candidate.drive_folder_id:
         try:
@@ -586,9 +574,28 @@ async def convert_candidate_to_employee(session: AsyncSession, *, candidate: Rec
                 related_entity_id=candidate.candidate_id,
                 meta_json=_event_meta(user, {"bucket": "Appointed"}),
             )
-        except Exception:
-            # Best-effort move
-            pass
+        except Exception as exc:  # noqa: BLE001
+            await log_event(
+                session,
+                candidate_id=candidate.candidate_id,
+                action_type="drive_folder_move_failed",
+                performed_by_person_id_platform=_platform_person_id(user),
+                related_entity_type="candidate",
+                related_entity_id=candidate.candidate_id,
+                meta_json=_event_meta(user, {"bucket": "Appointed", "error": str(exc)}),
+            )
+            await enqueue_operation(
+                session,
+                operation_type=OP_DRIVE_MOVE_FOLDER,
+                payload={
+                    "folder_id": candidate.drive_folder_id,
+                    "target_bucket": "Appointed",
+                },
+                candidate_id=candidate.candidate_id,
+                related_entity_type="candidate",
+                related_entity_id=candidate.candidate_id,
+                idempotency_key=f"drive_move_appointed:{candidate.candidate_id}",
+            )
 
     await log_event(
         session,

@@ -15,7 +15,6 @@ from app.core.roles import Role
 from app.models.candidate import RecCandidate
 from app.models.candidate_offer import RecCandidateOffer
 from app.models.opening import RecOpening
-from app.models.stage import RecCandidateStage
 from app.schemas.offer import OfferCreateIn, OfferDecisionIn, OfferOut, OfferPublicOut, OfferUpdateIn
 from app.schemas.user import UserContext
 from app.services.offers import (
@@ -40,6 +39,8 @@ from app.services.offers import (
 from app.services.events import log_event
 from app.services.drive import delete_drive_item, download_drive_file, move_candidate_folder, upload_offer_doc
 from app.services.email import render_template, send_email
+from app.services.operation_queue import OP_DRIVE_DELETE_ITEM, OP_DRIVE_MOVE_FOLDER, enqueue_operation
+from app.services.stage_transitions import apply_stage_transition
 
 router = APIRouter(prefix="/rec/offers", tags=["offers"])
 public_router = APIRouter(prefix="/offer", tags=["offers-public"])
@@ -226,7 +227,32 @@ async def delete_offer(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only draft offers can be deleted")
     file_id = _extract_drive_file_id(offer.pdf_url)
     if file_id:
-        delete_drive_item(file_id)
+        try:
+            deleted = delete_drive_item(file_id)
+            if not deleted:
+                raise RuntimeError("delete_drive_item returned false")
+        except Exception as exc:  # noqa: BLE001
+            await log_event(
+                session,
+                candidate_id=offer.candidate_id,
+                action_type="drive_file_delete_failed",
+                performed_by_person_id_platform=_safe_person_id(user.person_id_platform),
+                related_entity_type="offer",
+                related_entity_id=offer.candidate_offer_id,
+                meta_json={
+                    "file_id": file_id,
+                    "error": str(exc),
+                },
+            )
+            await enqueue_operation(
+                session,
+                operation_type=OP_DRIVE_DELETE_ITEM,
+                payload={"item_id": file_id},
+                candidate_id=offer.candidate_id,
+                related_entity_type="offer",
+                related_entity_id=offer.candidate_offer_id,
+                idempotency_key=f"drive_delete_offer_pdf:{offer.candidate_offer_id}:{file_id}",
+            )
     await log_event(
         session,
         candidate_id=offer.candidate_id,
@@ -581,30 +607,18 @@ async def decide_public_offer(
 
     candidate = await session.get(RecCandidate, offer.candidate_id)
     if candidate and payload.decision.strip().lower() == "decline":
-        candidate.status = "rejected"
         candidate.final_decision = "not_hired"
         candidate.updated_at = datetime.utcnow()
-        # Transition stage to rejected.
-        current = (
-            await session.execute(
-                select(RecCandidateStage)
-                .where(RecCandidateStage.candidate_id == candidate.candidate_id, RecCandidateStage.stage_status == "pending")
-                .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
-                .limit(1)
-            )
-        ).scalars().first()
-        now = datetime.utcnow()
-        if current:
-            current.stage_status = "completed"
-            current.ended_at = now
-        session.add(
-            RecCandidateStage(
-                candidate_id=candidate.candidate_id,
-                stage_name="rejected",
-                stage_status="pending",
-                started_at=now,
-                created_at=now,
-            )
+        await apply_stage_transition(
+            session,
+            candidate=candidate,
+            to_stage="rejected",
+            decision="reject",
+            reason=payload.reason,
+            note="public_offer_decline_override",
+            source="public_offer_decision",
+            skip_requested=True,
+            skip_requires_superadmin=False,
         )
         if candidate.drive_folder_id:
             try:
@@ -618,8 +632,28 @@ async def decide_public_offer(
                     related_entity_id=candidate.candidate_id,
                     meta_json={"bucket": "Not Appointed"},
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                await log_event(
+                    session,
+                    candidate_id=candidate.candidate_id,
+                    action_type="drive_folder_move_failed",
+                    performed_by_person_id_platform=None,
+                    related_entity_type="candidate",
+                    related_entity_id=candidate.candidate_id,
+                    meta_json={"bucket": "Not Appointed", "error": str(exc)},
+                )
+                await enqueue_operation(
+                    session,
+                    operation_type=OP_DRIVE_MOVE_FOLDER,
+                    payload={
+                        "folder_id": candidate.drive_folder_id,
+                        "target_bucket": "Not Appointed",
+                    },
+                    candidate_id=candidate.candidate_id,
+                    related_entity_type="candidate",
+                    related_entity_id=candidate.candidate_id,
+                    idempotency_key=f"drive_move_not_appointed:{candidate.candidate_id}",
+                )
     await session.commit()
     opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
     return OfferPublicOut(

@@ -24,6 +24,7 @@ from app.models.screening import RecCandidateScreening
 from app.models.stage import RecCandidateStage
 from uuid import uuid4
 from app.services.drive import delete_drive_item
+from app.services.operation_queue import OP_DRIVE_DELETE_ITEM, enqueue_operation
 from app.services.platform_identity import active_status_filter
 
 router = APIRouter(prefix="/rec/openings", tags=["openings"])
@@ -165,7 +166,7 @@ async def get_opening_by_code(
 async def create_opening(
     payload: OpeningCreate,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+    user: UserContext = Depends(require_superadmin()),
 ):
     now = datetime.utcnow()
     if payload.opening_code:
@@ -282,7 +283,7 @@ async def create_opening(
 async def create_opening_request(
     payload: OpeningCreate,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER])),
+    user: UserContext = Depends(require_superadmin()),
 ):
     now = datetime.utcnow()
     requested_by = _platform_person_id(user) or payload.requested_by_person_id_platform
@@ -387,7 +388,7 @@ async def update_opening(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Opening code cannot be edited.")
     is_superadmin = (user.platform_role_id or None) == 2
 
-    # HR can only deactivate an opening (no activate, no editing fields).
+    # HR can only toggle active/inactive state. All other edits are superadmin-only.
     if not is_superadmin:
         allowed = {"is_active"}
         rejected = [k for k in updates.keys() if k not in allowed]
@@ -395,9 +396,6 @@ async def update_opening(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Superadmin can edit opening details.")
         if "is_active" not in updates:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to update.")
-        if updates["is_active"] is True:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Superadmin can activate an opening.")
-        updates["is_active"] = 0
 
     if "is_active" in updates:
         updates["is_active"] = 1 if updates["is_active"] else 0
@@ -442,7 +440,20 @@ async def delete_opening(
                 except Exception:
                     continue
             if candidate.drive_folder_id:
-                await anyio.to_thread.run_sync(delete_drive_item, candidate.drive_folder_id)
+                try:
+                    deleted = await anyio.to_thread.run_sync(delete_drive_item, candidate.drive_folder_id)
+                    if not deleted:
+                        raise RuntimeError("delete_drive_item returned false")
+                except Exception:
+                    await enqueue_operation(
+                        session,
+                        operation_type=OP_DRIVE_DELETE_ITEM,
+                        payload={"item_id": candidate.drive_folder_id},
+                        candidate_id=None,
+                        related_entity_type="opening",
+                        related_entity_id=opening_id,
+                        idempotency_key=f"drive_delete_candidate_folder:{cid}:{candidate.drive_folder_id}",
+                    )
             await session.delete(candidate)
 
         await session.delete(opening)

@@ -465,7 +465,7 @@ export function UserAdminTable() {
             type="button"
             disabled={importBusy || !importFile}
             onClick={() => void importUsers()}
-            className="rounded-full border border-black/10 bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
+            className="rounded-full border border-black/10 bg-brand px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
           >
             Import CSV
           </button>
@@ -542,7 +542,7 @@ export function UserAdminTable() {
           type="button"
           disabled={createBusy}
           onClick={() => void createUser()}
-          className="w-full rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
+          className="w-full rounded-xl bg-brand px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
         >
           Add user
         </button>
@@ -561,3 +561,4 @@ export function UserAdminTable() {
     </div>
   );
 }
+

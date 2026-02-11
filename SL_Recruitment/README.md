@@ -14,8 +14,8 @@ Full-stack recruitment workflow for Studio Lotus, with a FastAPI backend and a N
 - Auth + roles: `backend/app/core/auth.py`, `backend/app/core/roles.py`
 - API routes:
   - Auth context: `backend/app/api/routes/auth.py`
-  - Openings CRUD + opening request flow: `backend/app/api/routes/openings.py`
-  - Candidate CRUD, stages, events, screening, drive cleanup: `backend/app/api/routes/candidates.py`
+  - Openings CRUD + opening request flow: `backend/app/api/routes/openings.py` (creation/editing is superadmin-only; HR can activate/deactivate)
+  - Candidate CRUD, stages, events, screening, drive cleanup, Google Sheet ingest: `backend/app/api/routes/candidates.py`
   - CAF prefill + submission: `backend/app/api/routes/caf.py`
   - Public apply with idempotency + rate limiting: `backend/app/api/routes/public_apply.py`
   - Dashboard metrics + recent events + stream: `backend/app/api/routes/dashboard.py`
@@ -42,6 +42,7 @@ See `backend/.env.example`. Required highlights:
 - Drive config and service account (see below)
 - Gmail/Calendar toggles: `SL_ENABLE_GMAIL`, `SL_ENABLE_CALENDAR`
 - Public links: `SL_PUBLIC_APP_ORIGIN`, `SL_PUBLIC_APP_BASE_PATH`, `SL_PUBLIC_LINK_TTL_HOURS`, `SL_PUBLIC_LINK_SIGNING_KEY`
+- Google Sheet ingest: `SL_SHEET_INGEST_TOKEN`, `SL_SHEET_INGEST_MAX_ROWS` (`0` or negative = unlimited)
 
 ### Offer PDF generation
 Offer PDFs are generated with WeasyPrint and require system libraries.
@@ -68,6 +69,19 @@ Apply in order to `sl_recruitment`:
 - `backend/migrations/0016_joining_docs.sql`
 - `backend/migrations/0017_screening_add_two_year_commitment.sql`
 - `backend/migrations/0018_l2_assessment.sql`
+- `backend/migrations/0019_candidate_assessment_form.sql`
+- `backend/migrations/0020_candidate_l2_owner.sql`
+- `backend/migrations/0021_interview_created_by_platform_id_varchar.sql`
+- `backend/migrations/0022_candidate_sprint_platform_id_varchar.sql`
+- `backend/migrations/0023_candidate_sprint_deleted_at.sql`
+- `backend/migrations/0024_remove_application_fields.sql`
+- `backend/migrations/0025_move_screening_fields_to_assessment.sql`
+- `backend/migrations/0026_remove_screening_two_year_commitment.sql`
+- `backend/migrations/0027_remove_screening_expected_joining_date.sql`
+- `backend/migrations/0028_move_questions_to_candidate.sql`
+- `backend/migrations/0029_operation_retry_queue.sql`
+- `backend/migrations/0030_candidate_source_bifurcation.sql`
+- `backend/migrations/0031_candidate_intake_fields.sql`
 
 ### Drive setup
 Required for candidate creation and public apply uploads:
@@ -116,3 +130,46 @@ Frontend env:
 
 ## Known gaps (not yet built)
 - The `/schedule/[token]` page is a placeholder; candidate slot selection currently uses the public `/interview/slots/{token}` flow.
+
+## Google Sheet candidate automation
+- Endpoint: `POST /recruitment/api/rec/candidates/import/google-sheet`
+- Header: `x-sheet-ingest-token: <SL_SHEET_INGEST_TOKEN>`
+- Row validation (required): `job_id/opening_code`, `first_name`, `last_name`, `email`, `portfolio`, `terms=true`
+- Optional columns: `date`, `applying_for`, `contact_number`, `educational_qualification`, `years_of_experience`, `city`, `willing_to_relocate`, `cv`, `resume`, `source_channel`, `external_source_ref`
+- Behavior:
+  - Opening code must exist and be active.
+  - If `applying_for` is sent along with `job_id`, title mismatch is rejected.
+  - Duplicate check uses `opening + email` and returns `status=duplicate` without creating a new candidate.
+  - External document links (portfolio/cv/resume) are downloaded and uploaded into candidate Drive folder.
+  - Created candidates follow the same backend automation path: `SLR-####` code generation, CAF + assessment link generation, drive folder creation, stage initialization.
+  - Source bifurcation is stored in candidate row (`source_origin`: `ui` / `public_apply` / `google_sheet`).
+
+Example payload:
+```json
+{
+  "batch_id": "2026-02-10-09:30",
+  "sheet_id": "1abc...",
+  "sheet_name": "Portal Intake",
+  "rows": [
+    {
+      "row_key": "42",
+      "job_id": "ARCH-A12F",
+      "applying_for": "Sr. Architect",
+      "first_name": "Jane",
+      "last_name": "Doe",
+      "email": "jane@example.com",
+      "contact_number": "+91-9999999999",
+      "educational_qualification": "B.Arch",
+      "years_of_experience": 5,
+      "city": "Delhi",
+      "willing_to_relocate": "Yes",
+      "terms": "Yes",
+      "portfolio": "https://files.example.com/jane-portfolio.pdf",
+      "cv": "https://files.example.com/jane-cv.pdf",
+      "resume": "https://files.example.com/jane-resume.pdf"
+    }
+  ]
+}
+```
+
+Detailed runbook + Apps Script sample: `GOOGLE_SHEET_AUTOMATION.md`.

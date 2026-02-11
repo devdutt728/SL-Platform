@@ -13,7 +13,7 @@ export default function HomePage() {
       <section className="section-card">
         <h2 className="text-lg font-semibold">Quick actions</h2>
         <div className="mt-4 flex flex-wrap gap-3">
-          <Link className="px-5 py-2 rounded-full bg-ink text-white" href="/new">
+          <Link className="px-5 py-2 rounded-full bg-brand text-white" href="/new">
             Create IT ticket
           </Link>
           <Link className="px-5 py-2 rounded-full border border-black/10" href="/my">

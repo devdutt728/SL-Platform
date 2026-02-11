@@ -8,10 +8,10 @@ from app.api import deps
 from app.models.candidate import RecCandidate
 from app.models.candidate_assessment import RecCandidateAssessment
 from app.models.opening import RecOpening
-from app.models.stage import RecCandidateStage
 from app.schemas.candidate_assessment import CandidateAssessmentOut, CandidateAssessmentPrefillOut, CandidateAssessmentUpsertIn
 from app.services.email import send_email
 from app.services.events import log_event
+from app.services.stage_transitions import apply_stage_transition
 
 router = APIRouter(prefix="/assessment", tags=["candidate-assessment"])
 
@@ -132,20 +132,41 @@ async def submit_candidate_assessment(
     if candidate.caf_submitted_at is None:
         candidate.caf_submitted_at = now
         candidate.status = "in_process"
-
-        current_stage = (
-            await session.execute(
-                select(RecCandidateStage.stage_name)
-                .where(
-                    RecCandidateStage.candidate_id == candidate.candidate_id,
-                    RecCandidateStage.stage_status == "pending",
+        if candidate.l2_owner_email:
+            try:
+                await apply_stage_transition(
+                    session,
+                    candidate=candidate,
+                    to_stage="hr_screening",
+                    decision="advance",
+                    note="caf_assessment",
+                    source="assessment_submit",
+                    allow_noop=True,
                 )
-                .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
-                .limit(1)
+            except HTTPException as exc:
+                await log_event(
+                    session,
+                    candidate_id=candidate.candidate_id,
+                    action_type="stage_blocked",
+                    performed_by_person_id_platform=None,
+                    related_entity_type="candidate",
+                    related_entity_id=candidate.candidate_id,
+                    meta_json={
+                        "stage": "hr_screening",
+                        "reason": "transition_guard_rejected",
+                        "detail": str(exc.detail),
+                    },
+                )
+        else:
+            await log_event(
+                session,
+                candidate_id=candidate.candidate_id,
+                action_type="stage_blocked",
+                performed_by_person_id_platform=None,
+                related_entity_type="candidate",
+                related_entity_id=candidate.candidate_id,
+                meta_json={"stage": "hr_screening", "reason": "missing_l2_owner_email"},
             )
-        ).scalar_one_or_none()
-        if current_stage != "hr_screening":
-            await _transition_from_assessment(session, candidate_id=candidate.candidate_id, to_stage="hr_screening")
 
     await log_event(
         session,
@@ -171,42 +192,3 @@ async def submit_candidate_assessment(
     await session.commit()
     await session.refresh(assessment)
     return CandidateAssessmentOut.model_validate(assessment)
-
-
-async def _transition_from_assessment(session: AsyncSession, *, candidate_id: int, to_stage: str) -> None:
-    now = datetime.utcnow()
-    current = (
-        await session.execute(
-            select(RecCandidateStage)
-            .where(RecCandidateStage.candidate_id == candidate_id, RecCandidateStage.stage_status == "pending")
-            .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
-            .limit(1)
-        )
-    ).scalars().first()
-
-    from_stage = None
-    if current:
-        from_stage = current.stage_name
-        current.stage_status = "completed"
-        current.ended_at = now
-
-    session.add(
-        RecCandidateStage(
-            candidate_id=candidate_id,
-            stage_name=to_stage,
-            stage_status="pending",
-            started_at=now,
-            created_at=now,
-        )
-    )
-    await log_event(
-        session,
-        candidate_id=candidate_id,
-        action_type="stage_change",
-        performed_by_person_id_platform=None,
-        related_entity_type="candidate",
-        related_entity_id=candidate_id,
-        from_status=from_stage,
-        to_status=to_stage,
-        meta_json={"from_stage": from_stage, "to_stage": to_stage, "reason": "caf_assessment"},
-    )

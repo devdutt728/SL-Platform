@@ -42,9 +42,9 @@ export function Topbar() {
     <header className="glass-panel fixed left-4 right-4 top-4 z-20 hidden h-16 overflow-hidden rounded-2xl md:flex md:left-72">
       <div className="page-shell flex h-full items-center justify-between">
         <div className="flex items-center gap-3">
-          <Sparkles className="h-4 w-4 text-emerald-500" />
+          <Sparkles className="h-4 w-4 text-brand" />
           <span className="text-sm font-semibold text-slate-800">IT Helpdesk</span>
-          <span className="rounded-full border border-white/60 bg-white/30 px-3 py-1 text-xs font-semibold text-slate-700">
+          <span className="rounded-full border border-slate-300/80 bg-white/70 px-3 py-1 text-xs font-semibold text-slate-700">
             Internal
           </span>
           <span className="text-xs font-semibold text-slate-500">
@@ -54,7 +54,7 @@ export function Topbar() {
 
         <div className="flex items-center gap-3">
           <details className="relative">
-            <summary className="cursor-pointer list-none rounded-xl border border-white/60 bg-white/30 px-3 py-2 text-xs font-semibold text-slate-800 backdrop-blur">
+            <summary className="cursor-pointer list-none rounded-xl border border-slate-300/80 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-800 backdrop-blur">
               Apps
             </summary>
             <div className="absolute right-0 mt-2 w-44 rounded-xl border border-slate-200 bg-white/95 p-2 text-xs font-semibold text-slate-700 shadow-lg">
@@ -73,9 +73,9 @@ export function Topbar() {
             </div>
           </details>
           {loading ? (
-            <div className="h-10 w-52 animate-pulse rounded-xl bg-white/20" />
+            <div className="h-10 w-52 animate-pulse rounded-xl bg-slate-200/70" />
           ) : user ? (
-            <div className="flex items-center gap-2 rounded-xl bg-gradient-to-tr from-slate-900/90 to-emerald-500 px-3 py-2 text-sm font-medium text-white shadow-lg">
+            <div className="flex items-center gap-2 rounded-xl bg-gradient-to-tr from-brand/95 to-[#c53a0f] px-3 py-2 text-sm font-medium text-white shadow-lg">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/25">
                 <User className="h-4 w-4" />
               </div>
@@ -95,7 +95,7 @@ export function Topbar() {
           ) : (
             <a
               href={`${basePath}/login`}
-              className="rounded-xl border border-white/60 bg-white/30 px-3 py-2 text-sm font-semibold text-slate-800 backdrop-blur"
+              className="rounded-xl border border-slate-300/80 bg-white/85 px-3 py-2 text-sm font-semibold text-slate-800 backdrop-blur"
             >
               Sign in
             </a>

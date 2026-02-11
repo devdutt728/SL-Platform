@@ -300,7 +300,7 @@ export function ItLicensesAdmin() {
             type="button"
             disabled={busy || !vendorName.trim()}
             onClick={() => void addVendor()}
-            className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
             Add vendor
           </button>
@@ -331,7 +331,7 @@ export function ItLicensesAdmin() {
             </label>
             <button
               type="button"
-              className="rounded-full border border-black/10 bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              className="rounded-full border border-black/10 bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               disabled={busy || !licenseCsvFile}
               onClick={() => licenseCsvFile && void uploadLicenseCsv(licenseCsvFile)}
             >
@@ -381,7 +381,7 @@ export function ItLicensesAdmin() {
         <textarea className="mt-3 w-full rounded-xl border border-black/10 bg-white/60 px-4 py-3" placeholder="Notes" value={licenseForm.notes} onChange={(e) => setLicenseForm((s) => ({ ...s, notes: e.target.value }))} />
 
         <div className="mt-4 flex justify-start">
-          <button type="button" disabled={busy || !licenseForm.name.trim()} onClick={() => void addLicense()} className="rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50">
+          <button type="button" disabled={busy || !licenseForm.name.trim()} onClick={() => void addLicense()} className="rounded-full bg-brand px-6 py-3 text-sm font-semibold text-white disabled:opacity-50">
             Save license
           </button>
         </div>
@@ -426,7 +426,7 @@ export function ItLicensesAdmin() {
             </label>
             <button
               type="button"
-              className="rounded-full border border-black/10 bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              className="rounded-full border border-black/10 bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               disabled={busy || !assignmentCsvFile}
               onClick={() => assignmentCsvFile && void uploadAssignmentCsv(assignmentCsvFile)}
             >
@@ -447,7 +447,7 @@ export function ItLicensesAdmin() {
               <input className="rounded-xl border border-black/10 bg-white/60 px-4 py-2" placeholder="Notes" value={assignmentForm.notes} onChange={(e) => setAssignmentForm((s) => ({ ...s, notes: e.target.value }))} />
             </div>
             <div className="mt-4">
-              <button type="button" disabled={busy} onClick={() => void addAssignment()} className="rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50">
+              <button type="button" disabled={busy} onClick={() => void addAssignment()} className="rounded-full bg-brand px-6 py-3 text-sm font-semibold text-white disabled:opacity-50">
                 Add assignment
               </button>
             </div>
@@ -492,3 +492,4 @@ export function ItLicensesAdmin() {
     </div>
   );
 }
+

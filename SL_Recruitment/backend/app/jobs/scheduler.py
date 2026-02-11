@@ -7,6 +7,7 @@ from app.jobs.tasks import (
     run_caf_reminders,
     run_interview_feedback_reminders,
     run_interview_status_reminders,
+    run_operation_retries,
     run_offer_followups,
     run_sprint_reminders,
     run_stale_stage_sweep,
@@ -31,5 +32,6 @@ def start_scheduler() -> AsyncIOScheduler:
     scheduler.add_job(run_sprint_reminders, IntervalTrigger(minutes=60), id="sprint_reminders", replace_existing=True)
     scheduler.add_job(run_offer_followups, IntervalTrigger(hours=6), id="offer_followups", replace_existing=True)
     scheduler.add_job(run_stale_stage_sweep, IntervalTrigger(hours=6), id="stale_stage_sweep", replace_existing=True)
+    scheduler.add_job(run_operation_retries, IntervalTrigger(minutes=5), id="operation_retries", replace_existing=True)
     scheduler.start()
     return scheduler

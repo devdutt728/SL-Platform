@@ -8,12 +8,12 @@ from app.api import deps
 from app.models.candidate import RecCandidate
 from app.models.opening import RecOpening
 from app.models.screening import RecCandidateScreening
-from app.models.stage import RecCandidateStage
 from app.schemas.screening import CafPrefillOut, ScreeningOut, ScreeningUpsertIn
 from app.services.events import log_event
 from app.core.config import settings
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
+from app.services.stage_transitions import apply_stage_transition
 
 router = APIRouter(prefix="/caf", tags=["caf"])
 
@@ -140,27 +140,28 @@ async def submit_caf(
     candidate.needs_hr_review = decision == "amber"
     candidate.status = "in_process"
 
-    current_stage = (
-        await session.execute(
-            select(RecCandidateStage.stage_name)
-            .where(RecCandidateStage.candidate_id == candidate.candidate_id, RecCandidateStage.stage_status == "pending")
-            .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if current_stage != "hr_screening":
-        if candidate.l2_owner_email:
-            await _transition_from_caf(session, candidate_id=candidate.candidate_id, to_stage="hr_screening")
-            await log_event(
+    if candidate.l2_owner_email:
+        try:
+            transition = await apply_stage_transition(
                 session,
-                candidate_id=candidate.candidate_id,
-                action_type="screening_needs_review",
-                performed_by_person_id_platform=None,
-                related_entity_type="candidate",
-                related_entity_id=candidate.candidate_id,
-                meta_json={"stage": "hr_screening"},
+                candidate=candidate,
+                to_stage="hr_screening",
+                decision="advance",
+                note="caf_screening",
+                source="caf_submit",
+                allow_noop=True,
             )
-        else:
+            if transition.changed:
+                await log_event(
+                    session,
+                    candidate_id=candidate.candidate_id,
+                    action_type="screening_needs_review",
+                    performed_by_person_id_platform=None,
+                    related_entity_type="candidate",
+                    related_entity_id=candidate.candidate_id,
+                    meta_json={"stage": "hr_screening"},
+                )
+        except HTTPException as exc:
             await log_event(
                 session,
                 candidate_id=candidate.candidate_id,
@@ -168,8 +169,22 @@ async def submit_caf(
                 performed_by_person_id_platform=None,
                 related_entity_type="candidate",
                 related_entity_id=candidate.candidate_id,
-                meta_json={"stage": "hr_screening", "reason": "missing_l2_owner_email"},
+                meta_json={
+                    "stage": "hr_screening",
+                    "reason": "transition_guard_rejected",
+                    "detail": str(exc.detail),
+                },
             )
+    else:
+        await log_event(
+            session,
+            candidate_id=candidate.candidate_id,
+            action_type="stage_blocked",
+            performed_by_person_id_platform=None,
+            related_entity_type="candidate",
+            related_entity_id=candidate.candidate_id,
+            meta_json={"stage": "hr_screening", "reason": "missing_l2_owner_email"},
+        )
 
     await log_event(
         session,
@@ -184,42 +199,3 @@ async def submit_caf(
     await session.commit()
     await session.refresh(screening)
     return ScreeningOut.model_validate(screening)
-
-
-async def _transition_from_caf(session: AsyncSession, *, candidate_id: int, to_stage: str) -> None:
-    now = datetime.utcnow()
-    current = (
-        await session.execute(
-            select(RecCandidateStage)
-            .where(RecCandidateStage.candidate_id == candidate_id, RecCandidateStage.stage_status == "pending")
-            .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
-            .limit(1)
-        )
-    ).scalars().first()
-
-    from_stage = None
-    if current:
-        from_stage = current.stage_name
-        current.stage_status = "completed"
-        current.ended_at = now
-
-    session.add(
-        RecCandidateStage(
-            candidate_id=candidate_id,
-            stage_name=to_stage,
-            stage_status="pending",
-            started_at=now,
-            created_at=now,
-        )
-    )
-    await log_event(
-        session,
-        candidate_id=candidate_id,
-        action_type="stage_change",
-        performed_by_person_id_platform=None,
-        related_entity_type="candidate",
-        related_entity_id=candidate_id,
-        from_status=from_stage,
-        to_status=to_stage,
-        meta_json={"from_stage": from_stage, "to_stage": to_stage, "reason": "caf_screening"},
-    )

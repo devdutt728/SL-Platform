@@ -312,7 +312,7 @@ export function ItAdminSettings() {
           </label>
           <button
             type="button"
-            className="rounded-full border border-black/10 bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="rounded-full border border-black/10 bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             disabled={policyBusy || !policyFile}
             onClick={() => policyFile && void uploadPolicyCsv(policyFile)}
           >
@@ -336,7 +336,7 @@ export function ItAdminSettings() {
             value={categoryName}
             onChange={(event) => setCategoryName(event.target.value)}
           />
-          <button className="px-4 py-2 rounded-full bg-ink text-white" onClick={createCategory}>
+          <button className="px-4 py-2 rounded-full bg-brand text-white" onClick={createCategory}>
             Add
           </button>
         </div>
@@ -422,7 +422,7 @@ export function ItAdminSettings() {
             value={subcategoryForm.name}
             onChange={(event) => setSubcategoryForm({ ...subcategoryForm, name: event.target.value })}
           />
-          <button className="rounded-full bg-ink px-4 py-2 text-white" onClick={createSubcategory}>
+          <button className="rounded-full bg-brand px-4 py-2 text-white" onClick={createSubcategory}>
             Add
           </button>
         </div>
@@ -534,7 +534,7 @@ export function ItAdminSettings() {
             }
           />
         </div>
-        <button className="mt-4 px-4 py-2 rounded-full bg-ink text-white" onClick={createSla}>
+        <button className="mt-4 px-4 py-2 rounded-full bg-brand text-white" onClick={createSla}>
           Add SLA
         </button>
         <div className="mt-4 grid gap-2">
@@ -665,7 +665,7 @@ export function ItAdminSettings() {
             }
           />
         </div>
-        <button className="mt-4 rounded-full bg-ink px-4 py-2 text-white" onClick={createRoutingRule}>
+        <button className="mt-4 rounded-full bg-brand px-4 py-2 text-white" onClick={createRoutingRule}>
           Add routing rule
         </button>
         <div className="mt-4 grid gap-2">
@@ -769,3 +769,4 @@ export function ItAdminSettings() {
     </div>
   );
 }
+

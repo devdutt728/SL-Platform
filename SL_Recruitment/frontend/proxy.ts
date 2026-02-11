@@ -5,6 +5,30 @@ function normalizeOrigin(origin: string) {
   return origin.replace(/\/$/, "");
 }
 
+function normalizePath(path: string) {
+  const raw = String(path || "").trim();
+  if (!raw) return "/";
+  return raw.startsWith("/") ? raw : `/${raw}`;
+}
+
+function stripBasePrefix(path: string, basePath: string) {
+  const normalized = normalizePath(path);
+  if (!basePath) return normalized;
+  if (normalized === basePath) return "/";
+  if (normalized.startsWith(`${basePath}/`)) return normalized.slice(basePath.length) || "/";
+  return normalized;
+}
+
+function collapseDuplicatedBase(pathname: string, basePath: string) {
+  if (!basePath) return pathname;
+  let out = pathname;
+  const doubled = `${basePath}${basePath}`;
+  while (out === doubled || out.startsWith(`${doubled}/`)) {
+    out = out.replace(doubled, basePath);
+  }
+  return out;
+}
+
 function originsMatch(a: string, b: string) {
   try {
     const aUrl = new URL(a);
@@ -38,9 +62,10 @@ export function proxy(request: NextRequest) {
   const publicOrigin = normalizeOrigin(process.env.PUBLIC_APP_ORIGIN || "");
   const publicPortalPath = process.env.PUBLIC_PORTAL_PATH || process.env.NEXT_PUBLIC_PUBLIC_PORTAL_PATH || "/";
   const detectedBasePath = request.nextUrl.basePath || (pathname.startsWith("/recruitment") ? "/recruitment" : "");
-  const doublePrefix = detectedBasePath && pathname.startsWith(`${detectedBasePath}${detectedBasePath}/`);
-  const effectivePathname = doublePrefix ? pathname.replace(`${detectedBasePath}${detectedBasePath}`, detectedBasePath) : pathname;
-  if (doublePrefix) {
+  const collapsedPathname = collapseDuplicatedBase(pathname, detectedBasePath);
+  const hasCollapsed = collapsedPathname !== pathname;
+  const effectivePathname = hasCollapsed ? collapsedPathname : pathname;
+  if (hasCollapsed) {
     const url = request.nextUrl.clone();
     url.pathname = effectivePathname;
     return NextResponse.redirect(url);
@@ -71,6 +96,7 @@ export function proxy(request: NextRequest) {
     path.startsWith("/_next") ||
     path === "/" ||
     path === "/login" ||
+    path.startsWith("/api/rec/candidates/import/google-sheet") ||
     path.startsWith("/apply") ||
     path.startsWith("/caf") ||
     path.startsWith("/assessment") ||
@@ -95,7 +121,7 @@ export function proxy(request: NextRequest) {
 
   if (token && idleMs > 0 && lastSeen && now - lastSeen > idleMs) {
     const url = request.nextUrl.clone();
-    url.pathname = publicPortalPath;
+    url.pathname = stripBasePrefix(publicPortalPath, basePath);
     url.search = "";
     url.searchParams.set("session", "expired");
     const response = NextResponse.redirect(url);
@@ -131,18 +157,16 @@ export function proxy(request: NextRequest) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
     const url = request.nextUrl.clone();
-    const base = basePath || request.nextUrl.basePath || "";
     const expired = request.cookies.get("slp_session_expired")?.value;
     if (expired) {
-      url.pathname = publicPortalPath;
+      url.pathname = stripBasePrefix(publicPortalPath, basePath);
       url.search = "";
       url.searchParams.set("session", "expired");
       const response = NextResponse.redirect(url);
       response.cookies.set("slp_session_expired", "", { ...cookieOptions(isSecure), maxAge: 0 });
       return response;
     }
-    const loginPath = base ? `${base}/login` : "/login";
-    url.pathname = loginPath;
+    url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 

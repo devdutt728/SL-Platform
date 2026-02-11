@@ -1,15 +1,21 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+import hmac
 import logging
+import mimetypes
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import unquote, urlparse
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
 import anyio
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
 import json
-from pydantic import BaseModel
-from sqlalchemy import func, select, delete, text, or_, update, case, and_
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, ValidationError, field_validator, model_validator
+from sqlalchemy import func, select, delete, text, or_, case, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import SQLAlchemyError, OperationalError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError, IntegrityError
 
 from app.api import deps
 from app.core.auth import require_roles, require_superadmin
@@ -31,16 +37,342 @@ from app.schemas.candidate_assessment import CandidateAssessmentOut
 from app.schemas.screening import ScreeningOut, ScreeningUpsertIn
 from app.schemas.stage import CandidateStageOut, StageTransitionRequest
 from app.schemas.user import UserContext
-from app.services.drive import create_candidate_folder, delete_candidate_folder, delete_all_candidate_folders
+from app.services.drive import create_candidate_folder, delete_candidate_folder, delete_all_candidate_folders, upload_application_doc
 from app.services.email import send_email
 from app.services.events import log_event
 from app.services.offers import convert_candidate_to_employee, create_offer, offer_pdf_signed_url
 from app.services.public_links import build_public_link, build_public_path
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
+from app.services.stage_transitions import apply_stage_transition
+from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, SPRINT_EXTENSIONS, SPRINT_MIME_TYPES, sanitize_filename
 
 router = APIRouter(prefix="/rec/candidates", tags=["candidates"])
 logger = logging.getLogger("slr.candidates")
+
+SOURCE_ORIGIN_UI = "ui"
+SOURCE_ORIGIN_GOOGLE_SHEET = "google_sheet"
+EXTERNAL_DOC_MAX_BYTES_DOC = 2 * 1024 * 1024
+EXTERNAL_DOC_MAX_BYTES_PORTFOLIO = 10 * 1024 * 1024
+GOOGLE_SHEET_DUPLICATE_WINDOW = timedelta(hours=24)
+
+
+def _strip_optional(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _parse_yes_no(value: str | bool | None) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return None
+
+
+def _parse_optional_datetime(value: str | datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        raw = value.strip()
+        if not raw:
+            return None
+        normalized = raw.replace("Z", "+00:00")
+        parsed = None
+        for fmt in (
+            None,
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d %H:%M",
+            "%d-%m-%Y %H:%M:%S",
+            "%d/%m/%Y %H:%M:%S",
+        ):
+            try:
+                if fmt is None:
+                    parsed = datetime.fromisoformat(normalized)
+                else:
+                    parsed = datetime.strptime(raw, fmt)
+                break
+            except Exception:
+                continue
+        if parsed is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid date value '{value}'. Use ISO format or YYYY-MM-DD HH:MM:SS.",
+            )
+    if parsed.tzinfo is not None:
+        parsed = parsed.replace(tzinfo=None)
+    return parsed
+
+
+def _extract_row_key(raw_row: dict[str, object], idx: int) -> str:
+    for key in ("row_key", "row", "Row", "Row ID", "row_id"):
+        raw_value = raw_row.get(key)
+        if raw_value is None:
+            continue
+        text = str(raw_value).strip()
+        if text:
+            return text
+    return str(idx)
+
+
+def _compose_full_name(first_name: str, last_name: str | None) -> str:
+    first = (first_name or "").strip()
+    last = (last_name or "").strip()
+    return f"{first} {last}".strip() or first
+
+
+def _application_docs_status(*, cv_url: str | None, portfolio_url: str | None, resume_url: str | None) -> str:
+    count = sum(1 for value in [cv_url, portfolio_url, resume_url] if value)
+    if count <= 0:
+        return "none"
+    if count >= 3:
+        return "complete"
+    return "partial"
+
+
+def _download_external_file(url: str, *, max_bytes: int) -> tuple[bytes, str, str]:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported URL scheme for '{url}'.")
+
+    request = Request(url, headers={"User-Agent": "SL-Recruitment-Ingest/1.0"})
+    try:
+        with urlopen(request, timeout=25) as response:
+            content_type = (response.headers.get_content_type() or "application/octet-stream").strip().lower()
+            data = response.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"File from '{url}' exceeds max allowed size.",
+                )
+    except HTTPException:
+        raise
+    except HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not download file '{url}' (HTTP {exc.code}).",
+        )
+    except URLError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not download file '{url}' ({exc.reason}).",
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not download file '{url}' ({exc}).",
+        )
+
+    raw_name = unquote(Path(parsed.path or "").name or "document")
+    filename = sanitize_filename(raw_name, default="document")
+    if "." not in filename:
+        guessed_ext = mimetypes.guess_extension(content_type or "") or ""
+        if guessed_ext:
+            filename = f"{filename}{guessed_ext}"
+
+    return data, filename, content_type or "application/octet-stream"
+
+
+def _validate_external_document(kind: str, filename: str, content_type: str) -> str:
+    ext = Path(filename).suffix.lower()
+    if kind == "portfolio":
+        allowed_extensions = SPRINT_EXTENSIONS
+        allowed_mime_types = SPRINT_MIME_TYPES
+    else:
+        allowed_extensions = DOC_EXTENSIONS
+        allowed_mime_types = DOC_MIME_TYPES
+    if ext and ext not in allowed_extensions:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported {kind} file type.")
+
+    normalized_type = (content_type or "").split(";", 1)[0].strip().lower()
+    if normalized_type and normalized_type not in allowed_mime_types and normalized_type not in {"application/octet-stream", "binary/octet-stream"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported {kind} content type.")
+    return sanitize_filename(filename, default=f"{kind}.pdf")
+
+
+async def _upload_external_document(
+    session: AsyncSession,
+    *,
+    candidate: RecCandidate,
+    kind: str,
+    source_url: str,
+    drive_folder_id: str,
+    drive_folder_url: str | None,
+    performed_by_person_id_platform: int | None,
+) -> str:
+    max_bytes = EXTERNAL_DOC_MAX_BYTES_PORTFOLIO if kind == "portfolio" else EXTERNAL_DOC_MAX_BYTES_DOC
+    data, filename, content_type = await anyio.to_thread.run_sync(
+        lambda: _download_external_file(source_url, max_bytes=max_bytes)
+    )
+    safe_name = _validate_external_document(kind, filename, content_type)
+    stored_name = f"{candidate.candidate_code}-{kind}-{safe_name}"
+    _, file_url = await anyio.to_thread.run_sync(
+        lambda: upload_application_doc(
+            drive_folder_id,
+            filename=stored_name,
+            content_type=content_type or "application/octet-stream",
+            data=data,
+        )
+    )
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type=f"{kind}_uploaded",
+        performed_by_person_id_platform=performed_by_person_id_platform,
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={
+            "source_url": source_url,
+            "file_url": file_url,
+            "drive_folder_id": drive_folder_id,
+            "drive_folder_url": drive_folder_url,
+        },
+    )
+    return file_url
+
+
+class GoogleSheetCandidateRow(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    applied_at: str | datetime | None = Field(
+        default=None,
+        validation_alias=AliasChoices("applied_at", "date", "Date", "Timestamp", "timestamp"),
+    )
+    row_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("row_key", "row", "Row", "Row ID", "row_id"),
+    )
+    opening_code: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("opening_code", "job_id", "Job ID", "Job Id", "job id"),
+    )
+    applying_for: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("applying_for", "Applying For", "Applying for", "applying for"),
+    )
+    first_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("first_name", "First name", "First Name"),
+    )
+    last_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("last_name", "Last name", "Last Name"),
+    )
+    email: EmailStr = Field(validation_alias=AliasChoices("email", "Email"))
+    phone: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("phone", "contact_number", "Contact number", "Contact Number"),
+    )
+    educational_qualification: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("educational_qualification", "Educational Qualification"),
+    )
+    years_of_experience: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("years_of_experience", "Years of experience", "Years of Exp"),
+    )
+    city: str | None = Field(default=None, validation_alias=AliasChoices("city", "City"))
+    willing_to_relocate: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("willing_to_relocate", "Willing to Relocate?", "Willing to relocate"),
+    )
+    terms: str | bool | None = Field(default=None, validation_alias=AliasChoices("terms", "Terms"))
+    portfolio_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("portfolio_url", "portfolio", "Portfolio"),
+    )
+    cv_url: str | None = Field(default=None, validation_alias=AliasChoices("cv_url", "cv", "CV"))
+    resume_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("resume_url", "resume", "Resume"),
+    )
+    source_channel: str | None = None
+    external_source_ref: str | None = None
+
+    @field_validator(
+        "row_key",
+        "opening_code",
+        "applying_for",
+        "first_name",
+        "last_name",
+        "phone",
+        "educational_qualification",
+        "city",
+        "willing_to_relocate",
+        "portfolio_url",
+        "cv_url",
+        "resume_url",
+        "source_channel",
+        "external_source_ref",
+    )
+    @classmethod
+    def _strip_optional_fields(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+    @field_validator("opening_code")
+    @classmethod
+    def _normalize_opening_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip().upper()
+        return cleaned
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def _normalize_name_parts(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned
+
+    @field_validator("years_of_experience")
+    @classmethod
+    def _validate_years_of_experience(cls, value: float | None) -> float | None:
+        if value is None:
+            return None
+        if value < 0:
+            raise ValueError("years_of_experience cannot be negative.")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_required_fields(self):
+        if not self.opening_code and not self.applying_for:
+            raise ValueError("Either opening_code/job_id or applying_for is required.")
+        if not self.first_name:
+            raise ValueError("first_name is required.")
+        if not self.last_name:
+            raise ValueError("last_name is required.")
+        terms_consent = _parse_yes_no(self.terms)
+        if terms_consent is not True:
+            raise ValueError("terms consent must be accepted.")
+        if not self.portfolio_url:
+            raise ValueError("portfolio_url is required.")
+        return self
+
+
+class GoogleSheetIngestIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    batch_id: str | None = None
+    sheet_id: str | None = None
+    sheet_name: str | None = None
+    rows: list[dict[str, object]]
+
+    @field_validator("batch_id", "sheet_id", "sheet_name")
+    @classmethod
+    def _strip_batch_fields(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
 
 
 def _candidate_code(candidate_id: int) -> str:
@@ -80,6 +412,320 @@ def _clean_person_id_platform(raw: str | None) -> str | None:
         return None
     value = raw.strip()
     return value or None
+
+
+def _normalize_source_channel(source_channel: str | None, *, fallback: str) -> str:
+    cleaned = _strip_optional(source_channel)
+    return cleaned or fallback
+
+
+def _caf_expired_for_candidate(candidate: RecCandidate, *, now: datetime | None = None) -> bool:
+    if candidate.caf_submitted_at is not None:
+        return False
+    if candidate.caf_sent_at is None:
+        return False
+    expiry_days = max(int(settings.caf_expiry_days or 0), 0)
+    if expiry_days == 0:
+        return False
+    current = now or datetime.utcnow()
+    return current > (candidate.caf_sent_at + timedelta(days=expiry_days))
+
+
+def _is_recent_google_sheet_duplicate(candidate: RecCandidate, *, now: datetime) -> bool:
+    marker = candidate.created_at or candidate.updated_at
+    if marker is None:
+        return True
+    return marker >= (now - GOOGLE_SHEET_DUPLICATE_WINDOW)
+
+
+def _require_sheet_ingest_token(token: str | None) -> None:
+    configured = (settings.sheet_ingest_token or "").strip()
+    if not configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google Sheet ingestion is not configured.",
+        )
+    supplied = (token or "").strip()
+    if not supplied or not hmac.compare_digest(supplied, configured):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid sheet ingest token.")
+
+
+def _event_meta_to_dict(meta_json: str | dict | None) -> dict:
+    if meta_json is None:
+        return {}
+    if isinstance(meta_json, dict):
+        return meta_json
+    if isinstance(meta_json, str):
+        raw = meta_json.strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+async def _latest_email_meta(
+    session: AsyncSession,
+    *,
+    candidate_id: int,
+    email_type: str | None = None,
+) -> dict | None:
+    rows = (
+        await session.execute(
+            select(RecCandidateEvent.meta_json)
+            .where(
+                RecCandidateEvent.candidate_id == candidate_id,
+                RecCandidateEvent.action_type == "email_sent",
+            )
+            .order_by(RecCandidateEvent.candidate_event_id.desc())
+            .limit(10)
+        )
+    ).scalars().all()
+
+    for raw_meta in rows:
+        meta = _event_meta_to_dict(raw_meta)
+        if not meta:
+            continue
+        if email_type:
+            current_type = str(meta.get("email_type") or "").strip().lower()
+            if current_type != email_type.strip().lower():
+                continue
+        return meta
+    return None
+
+
+async def _create_candidate_with_automation(
+    session: AsyncSession,
+    *,
+    first_name: str,
+    last_name: str | None,
+    email: str,
+    phone: str | None,
+    opening_id: int | None,
+    source_channel: str | None,
+    source_origin: str,
+    external_source_ref: str | None = None,
+    cv_url: str | None = None,
+    portfolio_url: str | None = None,
+    resume_url: str | None = None,
+    educational_qualification: str | None = None,
+    years_of_experience: float | None = None,
+    city: str | None = None,
+    terms_consent: bool | None = None,
+    willing_to_relocate: bool | None = None,
+    created_at_override: datetime | None = None,
+    link_sent_at_override: datetime | None = None,
+    ingest_remote_documents: bool = False,
+    l2_owner_email: str | None = None,
+    l2_owner_name: str | None = None,
+    performed_by_person_id_platform: int | None = None,
+    performed_by_email: str | None = None,
+    user: UserContext | None = None,
+    event_source: str = "candidate_create",
+) -> RecCandidate:
+    created_at = created_at_override or datetime.utcnow()
+    if created_at.tzinfo is not None:
+        created_at = created_at.replace(tzinfo=None)
+    link_sent_at = link_sent_at_override or created_at
+    if link_sent_at.tzinfo is not None:
+        link_sent_at = link_sent_at.replace(tzinfo=None)
+    full_name = _compose_full_name(first_name, last_name)
+    application_docs_status = _application_docs_status(cv_url=cv_url, portfolio_url=portfolio_url, resume_url=resume_url)
+
+    candidate = RecCandidate(
+        candidate_code=uuid4().hex[:8].upper(),
+        first_name=first_name,
+        last_name=last_name,
+        full_name=full_name,
+        email=email.lower(),
+        phone=phone,
+        opening_id=opening_id,
+        source_channel=source_channel,
+        source_origin=source_origin,
+        external_source_ref=external_source_ref,
+        educational_qualification=educational_qualification,
+        years_of_experience=years_of_experience,
+        city=city,
+        current_location=city,
+        terms_consent=bool(terms_consent),
+        terms_consent_at=created_at if terms_consent else None,
+        l2_owner_email=l2_owner_email.lower() if l2_owner_email else None,
+        l2_owner_name=l2_owner_name,
+        status="enquiry",
+        cv_url=cv_url,
+        portfolio_url=portfolio_url,
+        resume_url=resume_url,
+        caf_token=uuid4().hex,
+        caf_sent_at=link_sent_at,
+        application_docs_status=application_docs_status,
+        joining_docs_status="none",
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    session.add(candidate)
+    await session.flush()
+
+    candidate.candidate_code = _candidate_code(candidate.candidate_id)
+    await session.flush()
+
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type="candidate_created",
+        performed_by_person_id_platform=performed_by_person_id_platform,
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={
+            "candidate_code": candidate.candidate_code,
+            "source_channel": candidate.source_channel,
+            "source_origin": candidate.source_origin,
+            "external_source_ref": candidate.external_source_ref,
+            "opening_id": candidate.opening_id,
+            "city": candidate.city,
+            "educational_qualification": candidate.educational_qualification,
+            "years_of_experience": candidate.years_of_experience,
+            "terms_consent": candidate.terms_consent,
+            "performed_by_email": performed_by_email,
+        },
+    )
+
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type="caf_link_generated",
+        performed_by_person_id_platform=performed_by_person_id_platform,
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={"caf_token": candidate.caf_token},
+    )
+
+    caf_link = build_public_link(f"/caf/{candidate.caf_token}")
+
+    assessment = RecCandidateAssessment(
+        candidate_id=candidate.candidate_id,
+        assessment_token=uuid4().hex,
+        assessment_sent_at=link_sent_at,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    session.add(assessment)
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type="assessment_link_generated",
+        performed_by_person_id_platform=performed_by_person_id_platform,
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={"assessment_token": assessment.assessment_token},
+    )
+
+    assessment_link = build_public_link(f"/assessment/{assessment.assessment_token}")
+    await send_email(
+        session,
+        candidate_id=candidate.candidate_id,
+        to_emails=[candidate.email],
+        subject="Your Studio Lotus application links",
+        template_name="application_links",
+        context={
+            "candidate_name": candidate.full_name,
+            "candidate_code": candidate.candidate_code,
+            "caf_link": caf_link,
+            "assessment_link": assessment_link,
+            "candidate_email": candidate.email,
+            "candidate_phone": candidate.phone or "—",
+            "willing_to_relocate": "—",
+        },
+        email_type="application_links",
+        meta_extra={"caf_token": candidate.caf_token, "assessment_token": assessment.assessment_token},
+    )
+
+    folder_id, folder_url = await anyio.to_thread.run_sync(
+        create_candidate_folder, candidate.candidate_code, candidate.full_name
+    )
+    candidate.drive_folder_id = folder_id
+    candidate.drive_folder_url = folder_url
+
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type="drive_folder_created",
+        performed_by_person_id_platform=performed_by_person_id_platform,
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={"drive_folder_id": folder_id, "drive_folder_url": folder_url},
+    )
+
+    if ingest_remote_documents:
+        if cv_url:
+            candidate.cv_url = await _upload_external_document(
+                session,
+                candidate=candidate,
+                kind="cv",
+                source_url=cv_url,
+                drive_folder_id=folder_id,
+                drive_folder_url=folder_url,
+                performed_by_person_id_platform=performed_by_person_id_platform,
+            )
+        if portfolio_url:
+            candidate.portfolio_url = await _upload_external_document(
+                session,
+                candidate=candidate,
+                kind="portfolio",
+                source_url=portfolio_url,
+                drive_folder_id=folder_id,
+                drive_folder_url=folder_url,
+                performed_by_person_id_platform=performed_by_person_id_platform,
+            )
+            candidate.portfolio_not_uploaded_reason = None
+        if resume_url:
+            candidate.resume_url = await _upload_external_document(
+                session,
+                candidate=candidate,
+                kind="resume",
+                source_url=resume_url,
+                drive_folder_id=folder_id,
+                drive_folder_url=folder_url,
+                performed_by_person_id_platform=performed_by_person_id_platform,
+            )
+        candidate.application_docs_status = _application_docs_status(
+            cv_url=candidate.cv_url,
+            portfolio_url=candidate.portfolio_url,
+            resume_url=candidate.resume_url,
+        )
+
+    if willing_to_relocate is not None:
+        screening = (
+            await session.execute(
+                select(RecCandidateScreening).where(RecCandidateScreening.candidate_id == candidate.candidate_id)
+            )
+        ).scalars().first()
+        if screening is None:
+            screening = RecCandidateScreening(
+                candidate_id=candidate.candidate_id,
+                created_at=created_at,
+                updated_at=created_at,
+            )
+            session.add(screening)
+        screening.willing_to_relocate = willing_to_relocate
+        screening.updated_at = created_at
+        decision = evaluate_screening(ScreeningUpsertIn(willing_to_relocate=willing_to_relocate), get_opening_config(candidate.opening_id))
+        screening.screening_result = decision
+        candidate.needs_hr_review = decision == "amber"
+
+    await apply_stage_transition(
+        session,
+        candidate=candidate,
+        to_stage="enquiry",
+        reason="system_init",
+        note="system_init",
+        user=user,
+        source=event_source,
+    )
+
+    return candidate
 
 
 async def _assert_candidate_access(session: AsyncSession, candidate_id: int, user: UserContext) -> None:
@@ -132,13 +778,6 @@ def _decode_letter_overrides(raw: str | None) -> dict[str, str]:
             continue
         cleaned[key] = str(value)
     return cleaned
-
-
-def _label_yes_no(value: bool | None) -> str:
-    if value is None:
-        return "—"
-    return "Yes" if value else "No"
-
 
 
 async def _ensure_offer_token(session: AsyncSession, offer: RecCandidateOffer) -> None:
@@ -235,145 +874,37 @@ async def create_candidate(
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
-    now = datetime.utcnow()
-    first_name, last_name = _split_name(payload.name)
+    first_name = (payload.first_name or "").strip()
+    last_name = (payload.last_name or "").strip() or None
+    if not first_name:
+        parsed_first, parsed_last = _split_name((payload.name or "").strip())
+        first_name = parsed_first
+        last_name = last_name or parsed_last
+    if not first_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="First name is required.")
 
-    application_docs_status = "partial" if payload.cv_url else "none"
-    temp_candidate_code = uuid4().hex[:8].upper()
-    candidate = RecCandidate(
-        candidate_code=temp_candidate_code,
+    candidate = await _create_candidate_with_automation(
+        session,
         first_name=first_name,
         last_name=last_name,
-        full_name=payload.name,
-        email=str(payload.email).lower(),
+        email=str(payload.email),
         phone=payload.phone,
         opening_id=payload.opening_id,
-        source_channel=payload.source_channel,
-        l2_owner_email=str(payload.l2_owner_email).lower() if payload.l2_owner_email else None,
-        l2_owner_name=payload.l2_owner_name,
-        status="enquiry",
+        source_channel=_normalize_source_channel(payload.source_channel, fallback="ui_manual"),
+        source_origin=SOURCE_ORIGIN_UI,
         cv_url=payload.cv_url,
-        caf_token=uuid4().hex,
-        caf_sent_at=now,
-        application_docs_status=application_docs_status,
-        joining_docs_status="none",
-        created_at=now,
-        updated_at=now,
-    )
-    session.add(candidate)
-    await session.flush()
-
-    candidate.candidate_code = _candidate_code(candidate.candidate_id)
-    await session.flush()
-
-    # Initial stage row: enquiry (pending)
-    enquiry = RecCandidateStage(
-        candidate_id=candidate.candidate_id,
-        stage_name="enquiry",
-        stage_status="pending",
-        started_at=now,
-        created_at=now,
-    )
-    session.add(enquiry)
-
-    await log_event(
-        session,
-        candidate_id=candidate.candidate_id,
-        action_type="candidate_created",
+        portfolio_url=payload.portfolio_url,
+        resume_url=payload.resume_url,
+        educational_qualification=payload.educational_qualification,
+        years_of_experience=payload.years_of_experience,
+        city=payload.city,
+        terms_consent=payload.terms_consent,
+        l2_owner_email=str(payload.l2_owner_email) if payload.l2_owner_email else None,
+        l2_owner_name=payload.l2_owner_name,
         performed_by_person_id_platform=_platform_person_id(user),
-        related_entity_type="candidate",
-        related_entity_id=candidate.candidate_id,
-        meta_json={
-            "candidate_code": candidate.candidate_code,
-            "source_channel": payload.source_channel,
-            "opening_id": payload.opening_id,
-            "performed_by_email": user.email,
-        },
-    )
-
-    await log_event(
-        session,
-        candidate_id=candidate.candidate_id,
-        action_type="caf_link_generated",
-        performed_by_person_id_platform=_platform_person_id(user),
-        related_entity_type="candidate",
-        related_entity_id=candidate.candidate_id,
-        meta_json={"caf_token": candidate.caf_token},
-    )
-
-    caf_link = build_public_link(f"/caf/{candidate.caf_token}")
-
-    assessment = RecCandidateAssessment(
-        candidate_id=candidate.candidate_id,
-        assessment_token=uuid4().hex,
-        assessment_sent_at=now,
-        created_at=now,
-        updated_at=now,
-    )
-    session.add(assessment)
-    await log_event(
-        session,
-        candidate_id=candidate.candidate_id,
-        action_type="assessment_link_generated",
-        performed_by_person_id_platform=_platform_person_id(user),
-        related_entity_type="candidate",
-        related_entity_id=candidate.candidate_id,
-        meta_json={"assessment_token": assessment.assessment_token},
-    )
-
-    assessment_link = build_public_link(f"/assessment/{assessment.assessment_token}")
-
-    screening = (
-        await session.execute(
-            select(RecCandidateScreening).where(RecCandidateScreening.candidate_id == candidate.candidate_id)
-        )
-    ).scalars().first()
-    await send_email(
-        session,
-        candidate_id=candidate.candidate_id,
-        to_emails=[candidate.email],
-        subject="Your Studio Lotus application links",
-        template_name="application_links",
-        context={
-            "candidate_name": candidate.full_name,
-            "candidate_code": candidate.candidate_code,
-            "caf_link": caf_link,
-            "assessment_link": assessment_link,
-            "candidate_email": candidate.email,
-            "candidate_phone": candidate.phone or "—",
-            "willing_to_relocate": _label_yes_no(screening.willing_to_relocate) if screening else "—",
-        },
-        email_type="application_links",
-        meta_extra={"caf_token": candidate.caf_token, "assessment_token": assessment.assessment_token},
-    )
-
-    # Drive folder creation
-    folder_id, folder_url = await anyio.to_thread.run_sync(
-        create_candidate_folder, candidate.candidate_code, candidate.full_name
-    )
-    candidate.drive_folder_id = folder_id
-    candidate.drive_folder_url = folder_url
-
-    await log_event(
-        session,
-        candidate_id=candidate.candidate_id,
-        action_type="drive_folder_created",
-        performed_by_person_id_platform=_platform_person_id(user),
-        related_entity_type="candidate",
-        related_entity_id=candidate.candidate_id,
-        meta_json={"drive_folder_id": folder_id, "drive_folder_url": folder_url},
-    )
-
-    await log_event(
-        session,
-        candidate_id=candidate.candidate_id,
-        action_type="stage_change",
-        performed_by_person_id_platform=_platform_person_id(user),
-        related_entity_type="candidate",
-        related_entity_id=candidate.candidate_id,
-        from_status=None,
-        to_status="enquiry",
-        meta_json={"from_stage": None, "to_stage": "enquiry", "reason": "system_init", "performed_by_email": user.email},
+        performed_by_email=user.email,
+        user=user,
+        event_source="candidate_create",
     )
 
     await session.commit()
@@ -388,17 +919,28 @@ async def create_candidate(
         candidate_id=candidate.candidate_id,
         candidate_code=candidate.candidate_code,
         name=candidate.full_name,
+        first_name=candidate.first_name,
+        last_name=candidate.last_name,
         email=candidate.email,
         phone=candidate.phone,
         opening_id=candidate.opening_id,
         opening_title=opening_title,
         l2_owner_email=candidate.l2_owner_email,
         l2_owner_name=candidate.l2_owner_name,
+        source_channel=candidate.source_channel,
+        source_origin=candidate.source_origin,
+        external_source_ref=candidate.external_source_ref,
+        educational_qualification=candidate.educational_qualification,
+        years_of_experience=candidate.years_of_experience,
+        city=candidate.city,
+        terms_consent=candidate.terms_consent,
+        terms_consent_at=candidate.terms_consent_at,
         status=candidate.status,
         current_stage="enquiry",
         final_decision=candidate.final_decision,
         hired_person_id_platform=candidate.hired_person_id_platform,
         cv_url=candidate.cv_url,
+        resume_url=candidate.resume_url,
         portfolio_url=candidate.portfolio_url,
         portfolio_not_uploaded_reason=candidate.portfolio_not_uploaded_reason,
         questions_from_candidate=candidate.questions_from_candidate,
@@ -411,6 +953,267 @@ async def create_candidate(
         created_at=candidate.created_at,
         updated_at=candidate.updated_at,
     )
+
+
+@router.post("/import/google-sheet", status_code=status.HTTP_200_OK)
+async def import_candidates_from_google_sheet(
+    payload: GoogleSheetIngestIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    x_sheet_ingest_token: str | None = Header(default=None, alias="x-sheet-ingest-token"),
+):
+    _require_sheet_ingest_token(x_sheet_ingest_token)
+    if not payload.rows:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No rows provided.")
+
+    max_rows = int(settings.sheet_ingest_max_rows or 0)
+    if max_rows > 0 and len(payload.rows) > max_rows:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Payload too large. Maximum {max_rows} rows per request.",
+        )
+
+    results: list[dict] = []
+    created_count = 0
+    duplicate_count = 0
+    failed_count = 0
+    processed_at = datetime.utcnow().isoformat()
+
+    for idx, raw_row in enumerate(payload.rows, start=1):
+        row_key = _extract_row_key(raw_row, idx)
+        row_now = datetime.utcnow()
+        try:
+            row = GoogleSheetCandidateRow.model_validate(raw_row)
+        except ValidationError as exc:
+            failed_count += 1
+            message = "; ".join(error.get("msg", "invalid row") for error in exc.errors()) or "Invalid row payload."
+            results.append({"row_key": row_key, "status": "error", "message": message})
+            continue
+
+        email_normalized = str(row.email).strip().lower()
+        opening_id_for_dedupe: int | None = None
+        try:
+            opening: RecOpening | None = None
+            opening_code = (row.opening_code or "").strip().upper()
+            applying_for = (row.applying_for or "").strip()
+            if opening_code:
+                opening = (
+                    await session.execute(
+                        select(RecOpening).where(RecOpening.opening_code == opening_code).limit(1)
+                    )
+                ).scalars().first()
+                if not opening:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Opening not found for code '{opening_code}'.",
+                    )
+                if applying_for:
+                    opening_title = (opening.title or "").strip().lower()
+                    if opening_title and opening_title != applying_for.lower():
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=(
+                                f"Opening title mismatch for code '{opening_code}'. "
+                                f"Expected '{opening.title}', got '{applying_for}'."
+                            ),
+                        )
+            else:
+                candidates_for_title = (
+                    await session.execute(
+                        select(RecOpening)
+                        .where(func.lower(RecOpening.title) == applying_for.lower())
+                        .order_by(RecOpening.updated_at.desc(), RecOpening.opening_id.desc())
+                    )
+                ).scalars().all()
+                active_openings = [item for item in candidates_for_title if bool(item.is_active)]
+                if len(active_openings) > 1:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Multiple active openings found for title '{applying_for}'. Provide Job ID/opening_code.",
+                    )
+                if active_openings:
+                    opening = active_openings[0]
+                elif candidates_for_title:
+                    opening = candidates_for_title[0]
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Opening not found for title '{applying_for}'.",
+                    )
+
+            if not opening:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Opening not found for row.",
+                )
+            if not bool(opening.is_active):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Opening '{opening.opening_code or opening.opening_id}' is inactive.",
+                )
+            opening_id_for_dedupe = opening.opening_id
+
+            terms_consent = _parse_yes_no(row.terms)
+            if terms_consent is not True:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Terms consent must be accepted for every row.",
+                )
+
+            willing_to_relocate = _parse_yes_no(row.willing_to_relocate)
+            if row.willing_to_relocate is not None and willing_to_relocate is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid willing_to_relocate value '{row.willing_to_relocate}'. Use Yes/No.",
+                )
+            applied_at_override = _parse_optional_datetime(row.applied_at)
+
+            external_source_ref = row.external_source_ref or f"{payload.sheet_id or 'sheet'}:{payload.sheet_name or 'default'}:{row_key}"
+
+            existing_candidate = (
+                await session.execute(
+                    select(RecCandidate)
+                    .where(
+                        RecCandidate.opening_id == opening.opening_id,
+                        func.lower(RecCandidate.email) == email_normalized,
+                    )
+                    .order_by(RecCandidate.candidate_id.desc())
+                    .limit(1)
+                )
+            ).scalars().first()
+            if existing_candidate and _is_recent_google_sheet_duplicate(existing_candidate, now=row_now):
+                duplicate_count += 1
+                if not existing_candidate.source_origin:
+                    existing_candidate.source_origin = SOURCE_ORIGIN_GOOGLE_SHEET
+                if not existing_candidate.source_channel:
+                    existing_candidate.source_channel = _normalize_source_channel(
+                        row.source_channel,
+                        fallback=SOURCE_ORIGIN_GOOGLE_SHEET,
+                    )
+                if not existing_candidate.external_source_ref:
+                    existing_candidate.external_source_ref = external_source_ref
+                existing_candidate.updated_at = datetime.utcnow()
+                await session.commit()
+                results.append(
+                    {
+                        "row_key": row_key,
+                        "status": "duplicate",
+                        "candidate_id": existing_candidate.candidate_id,
+                        "candidate_code": existing_candidate.candidate_code,
+                        "message": "Candidate already exists for this opening/email within last 24 hours.",
+                    }
+                )
+                continue
+
+            candidate = await _create_candidate_with_automation(
+                session,
+                first_name=row.first_name or "",
+                last_name=row.last_name,
+                email=email_normalized,
+                phone=row.phone,
+                opening_id=opening.opening_id,
+                source_channel=_normalize_source_channel(row.source_channel, fallback=SOURCE_ORIGIN_GOOGLE_SHEET),
+                source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                external_source_ref=external_source_ref,
+                cv_url=row.cv_url,
+                portfolio_url=row.portfolio_url,
+                resume_url=row.resume_url,
+                educational_qualification=row.educational_qualification,
+                years_of_experience=row.years_of_experience,
+                city=row.city,
+                terms_consent=terms_consent,
+                willing_to_relocate=willing_to_relocate,
+                created_at_override=applied_at_override,
+                link_sent_at_override=row_now,
+                ingest_remote_documents=True,
+                performed_by_person_id_platform=None,
+                performed_by_email="google-sheet-import@internal",
+                user=None,
+                event_source="google_sheet_import",
+            )
+            await session.commit()
+            created_count += 1
+            result_payload = {
+                "row_key": row_key,
+                "status": "created",
+                "candidate_id": candidate.candidate_id,
+                "candidate_code": candidate.candidate_code,
+            }
+            email_meta = await _latest_email_meta(
+                session,
+                candidate_id=candidate.candidate_id,
+                email_type="application_links",
+            )
+            if email_meta:
+                email_status = _strip_optional(str(email_meta.get("status") or ""))
+                email_error = _strip_optional(str(email_meta.get("error") or ""))
+                if email_status:
+                    result_payload["email_status"] = email_status
+                    if email_status == "sent":
+                        result_payload["message"] = "Candidate created and application links email sent."
+                    elif email_status == "failed":
+                        result_payload["message"] = "Candidate created, but application links email failed."
+                    elif email_status == "skipped":
+                        result_payload["message"] = "Candidate created, but application links email was skipped."
+                if email_error:
+                    result_payload["email_error"] = email_error
+            results.append(result_payload)
+        except IntegrityError:
+            await session.rollback()
+            dedupe_filters = [func.lower(RecCandidate.email) == email_normalized]
+            if opening_id_for_dedupe is not None:
+                dedupe_filters.append(RecCandidate.opening_id == opening_id_for_dedupe)
+            existing_candidate = (
+                await session.execute(
+                    select(RecCandidate)
+                    .where(*dedupe_filters)
+                    .order_by(RecCandidate.candidate_id.desc())
+                    .limit(1)
+                )
+            ).scalars().first()
+            if existing_candidate and _is_recent_google_sheet_duplicate(existing_candidate, now=row_now):
+                duplicate_count += 1
+                results.append(
+                    {
+                        "row_key": row_key,
+                        "status": "duplicate",
+                        "candidate_id": existing_candidate.candidate_id,
+                        "candidate_code": existing_candidate.candidate_code,
+                        "message": "Candidate already exists for this opening/email within last 24 hours.",
+                    }
+                )
+            else:
+                failed_count += 1
+                results.append(
+                    {
+                        "row_key": row_key,
+                        "status": "error",
+                        "message": "Candidate could not be imported due to an integrity error.",
+                    }
+                )
+        except HTTPException as exc:
+            await session.rollback()
+            failed_count += 1
+            results.append({"row_key": row_key, "status": "error", "message": str(exc.detail)})
+        except Exception as exc:
+            await session.rollback()
+            failed_count += 1
+            logger.exception("Google sheet import failed for row %s: %s", row_key, exc)
+            detail = "Candidate import failed."
+            if settings.environment != "production":
+                detail = f"Candidate import failed: {exc}"
+            results.append({"row_key": row_key, "status": "error", "message": detail})
+
+    return {
+        "batch_id": payload.batch_id,
+        "sheet_id": payload.sheet_id,
+        "sheet_name": payload.sheet_name,
+        "processed_at": processed_at,
+        "requested_rows": len(payload.rows),
+        "created_count": created_count,
+        "duplicate_count": duplicate_count,
+        "failed_count": failed_count,
+        "results": results,
+    }
 
 
 @router.get("", response_model=list[CandidateListItem])
@@ -481,6 +1284,9 @@ async def list_candidates(
             RecCandidate.opening_id.label("opening_id"),
             RecCandidate.l2_owner_email.label("l2_owner_email"),
             RecCandidate.l2_owner_name.label("l2_owner_name"),
+            RecCandidate.source_channel.label("source_channel"),
+            RecCandidate.source_origin.label("source_origin"),
+            RecCandidate.external_source_ref.label("external_source_ref"),
             RecCandidate.created_at.label("created_at"),
             RecCandidate.caf_sent_at.label("caf_sent_at"),
             RecCandidate.caf_submitted_at.label("caf_submitted_at"),
@@ -547,6 +1353,9 @@ async def list_candidates(
             opening_title=row.opening_title,
             l2_owner_email=row.l2_owner_email,
             l2_owner_name=row.l2_owner_name,
+            source_channel=row.source_channel,
+            source_origin=row.source_origin,
+            external_source_ref=row.external_source_ref,
             current_stage=row.current_stage,
             status=row.status,
             ageing_days=int(row.ageing_days or 0),
@@ -587,17 +1396,28 @@ async def get_candidate(
         candidate_id=candidate.candidate_id,
         candidate_code=candidate.candidate_code or _candidate_code(candidate.candidate_id),
         name=candidate.full_name,
+        first_name=candidate.first_name,
+        last_name=candidate.last_name,
         email=candidate.email,
         phone=candidate.phone,
         opening_id=candidate.opening_id,
         opening_title=opening_title,
         l2_owner_email=candidate.l2_owner_email,
         l2_owner_name=candidate.l2_owner_name,
+        source_channel=candidate.source_channel,
+        source_origin=candidate.source_origin,
+        external_source_ref=candidate.external_source_ref,
+        educational_qualification=candidate.educational_qualification,
+        years_of_experience=candidate.years_of_experience,
+        city=candidate.city,
+        terms_consent=candidate.terms_consent,
+        terms_consent_at=candidate.terms_consent_at,
         status=candidate.status,
         current_stage=current_stage,
         final_decision=candidate.final_decision,
         hired_person_id_platform=candidate.hired_person_id_platform,
         cv_url=candidate.cv_url,
+        resume_url=candidate.resume_url,
         portfolio_url=candidate.portfolio_url,
         portfolio_not_uploaded_reason=candidate.portfolio_not_uploaded_reason,
         drive_folder_url=candidate.drive_folder_url,
@@ -619,14 +1439,19 @@ async def download_candidate_application_document(
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
     normalized = (kind or "").strip().lower()
-    if normalized not in {"cv", "portfolio"}:
+    if normalized not in {"cv", "portfolio", "resume"}:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
 
-    url = candidate.cv_url if normalized == "cv" else candidate.portfolio_url
+    if normalized == "cv":
+        url = candidate.cv_url
+    elif normalized == "resume":
+        url = candidate.resume_url
+    else:
+        url = candidate.portfolio_url
     if not url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     if url.startswith("/"):
@@ -762,8 +1587,26 @@ async def get_candidate_caf_link(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    now = datetime.utcnow()
+    refreshed = False
     if not candidate.caf_token:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CAF token not generated")
+        candidate.caf_token = uuid4().hex
+        refreshed = True
+    if candidate.caf_submitted_at is None and (candidate.caf_sent_at is None or _caf_expired_for_candidate(candidate, now=now)):
+        candidate.caf_sent_at = now
+        refreshed = True
+    if refreshed:
+        candidate.updated_at = now
+        await log_event(
+            session,
+            candidate_id=candidate.candidate_id,
+            action_type="caf_link_generated",
+            performed_by_person_id_platform=_platform_person_id(user),
+            related_entity_type="candidate",
+            related_entity_id=candidate.candidate_id,
+            meta_json={"caf_token": candidate.caf_token, "reason": "manual_link_refresh"},
+        )
+        await session.commit()
     return {"caf_token": candidate.caf_token, "caf_url": build_public_path(f"/caf/{candidate.caf_token}")}
 
 
@@ -836,14 +1679,52 @@ async def update_candidate(
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
 
+    now = datetime.utcnow()
     updates = payload.model_dump(exclude_none=True)
-    if "name" in updates:
-        candidate.full_name = updates.pop("name")
+    name_update = updates.pop("name", None)
+    first_name_update = updates.pop("first_name", None)
+    last_name_update = updates.pop("last_name", None)
+
+    if name_update is not None:
+        normalized_name = (name_update or "").strip()
+        if not normalized_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name cannot be empty.")
+        candidate.full_name = normalized_name
+        if first_name_update is None and last_name_update is None:
+            parsed_first, parsed_last = _split_name(normalized_name)
+            if parsed_first:
+                candidate.first_name = parsed_first
+            candidate.last_name = parsed_last
+
+    if first_name_update is not None:
+        normalized_first = (first_name_update or "").strip()
+        if not normalized_first:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="First name cannot be empty.")
+        candidate.first_name = normalized_first
+    if last_name_update is not None:
+        normalized_last = (last_name_update or "").strip()
+        candidate.last_name = normalized_last or None
+    if first_name_update is not None or last_name_update is not None:
+        candidate.full_name = _compose_full_name(candidate.first_name or "", candidate.last_name)
+
     if "l2_owner_email" in updates:
         updates["l2_owner_email"] = str(updates["l2_owner_email"]).lower()
+    if "city" in updates:
+        updates["city"] = _strip_optional(updates["city"])
+        updates["current_location"] = updates["city"]
+    if "terms_consent" in updates:
+        accepted = bool(updates["terms_consent"])
+        updates["terms_consent"] = accepted
+        updates["terms_consent_at"] = now if accepted else None
     for key, value in updates.items():
         setattr(candidate, key, value)
-    candidate.updated_at = datetime.utcnow()
+    if any(key in updates for key in {"cv_url", "portfolio_url", "resume_url"}):
+        candidate.application_docs_status = _application_docs_status(
+            cv_url=candidate.cv_url,
+            portfolio_url=candidate.portfolio_url,
+            resume_url=candidate.resume_url,
+        )
+    candidate.updated_at = now
 
     await log_event(
         session,
@@ -1023,78 +1904,25 @@ async def transition_stage(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
-    if (payload.decision or "").lower() == "skip" or (payload.note or "").lower() == "superadmin_skip":
-        if (user.platform_role_id or None) != 2:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Skip is restricted to Superadmin.")
-    if candidate.caf_submitted_at is None and payload.to_stage not in {"enquiry", "hr_screening", "caf"}:
-        if (user.platform_role_id or None) != 2:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="CAF must be submitted before advancing to further rounds.",
-            )
-    if payload.to_stage == "hr_screening" and not candidate.l2_owner_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assign GL/L2 email before moving to HR screening.",
-        )
 
-    now = datetime.utcnow()
-    current_stage_row = (
-        await session.execute(
-            select(RecCandidateStage)
-            .where(RecCandidateStage.candidate_id == candidate_id, RecCandidateStage.stage_status == "pending")
-            .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
-            .limit(1)
-        )
-    ).scalars().first()
-
-    from_stage = None
-    if current_stage_row:
-        from_stage = current_stage_row.stage_name
-        await session.execute(
-            update(RecCandidateStage)
-            .where(RecCandidateStage.candidate_id == candidate_id, RecCandidateStage.stage_status == "pending")
-            .values(stage_status="completed", ended_at=now)
-        )
-
-    new_stage = RecCandidateStage(
-        candidate_id=candidate_id,
-        stage_name=payload.to_stage,
-        stage_status="pending",
-        started_at=now,
-        created_at=now,
-    )
-    session.add(new_stage)
-
-    if payload.to_stage in {"rejected", "hired", "declined"}:
-        candidate.status = payload.to_stage
-    elif payload.to_stage == "joining_documents":
-        candidate.status = "offer"
-    else:
-        candidate.status = "in_process"
-    candidate.updated_at = now
-
-    await log_event(
+    result = await apply_stage_transition(
         session,
-        candidate_id=candidate_id,
-        action_type="stage_change",
-        performed_by_person_id_platform=_platform_person_id(user),
-        related_entity_type="candidate",
-        related_entity_id=candidate_id,
-        from_status=from_stage,
-        to_status=payload.to_stage,
-        meta_json={
-            "from_stage": from_stage,
-            "to_stage": payload.to_stage,
-            "decision": payload.decision,
-            "reason": payload.reason or payload.decision,
-            "note": payload.note,
-            "performed_by_email": user.email,
-        },
+        candidate=candidate,
+        to_stage=payload.to_stage,
+        decision=payload.decision,
+        reason=payload.reason,
+        note=payload.note,
+        user=user,
+        source="candidate_transition",
     )
 
     await session.commit()
-    return {"candidate_id": candidate_id, "from_stage": from_stage, "to_stage": payload.to_stage, "status": candidate.status}
+    return {
+        "candidate_id": candidate_id,
+        "from_stage": result.from_stage,
+        "to_stage": result.to_stage,
+        "status": candidate.status,
+    }
 
 
 @router.post("/{candidate_id}/convert", status_code=status.HTTP_200_OK)

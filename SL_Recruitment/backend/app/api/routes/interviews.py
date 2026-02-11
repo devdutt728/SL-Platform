@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from app.api import deps
-from app.api.routes.candidates import transition_stage
 from app.core.auth import require_roles, require_superadmin
 from app.core.config import settings
 from app.core.roles import Role
@@ -25,10 +24,8 @@ from app.models.interview_slot import RecCandidateInterviewSlot
 from app.models.opening import RecOpening
 from app.models.platform_person import DimPerson
 from app.models.platform_role import DimRole
-from app.models.stage import RecCandidateStage
 from app.schemas.interview import InterviewCancel, InterviewCreate, InterviewOut, InterviewReschedule, InterviewUpdate
 from app.schemas.interview_slots import InterviewSlotOut, InterviewSlotPreviewOut, InterviewSlotProposalIn
-from app.schemas.stage import StageTransitionRequest
 from app.schemas.user import UserContext
 from app.services.platform_identity import active_status_filter
 from app.services.calendar import create_calendar_event, delete_calendar_event, query_freebusy, update_calendar_event
@@ -36,6 +33,13 @@ from app.services.calendar import list_calendar_events, list_calendar_list_detai
 from app.services.email import render_template, send_email
 from app.services.public_links import build_public_link
 from app.services.events import log_event
+from app.services.operation_queue import (
+    OP_CALENDAR_CREATE_EVENT,
+    OP_CALENDAR_DELETE_EVENT,
+    OP_CALENDAR_UPDATE_EVENT,
+    enqueue_operation,
+)
+from app.services.stage_transitions import apply_stage_transition
 from app.services.interview_slots import (
     build_selection_token,
     build_signed_selection_token,
@@ -78,25 +82,6 @@ def _normalize_person_id_int(raw: int | str | None) -> int | None:
 
 def _normalize_round(raw: str | None) -> str:
     return (raw or "").strip().lower()
-
-
-async def _get_current_stage_name(session: AsyncSession, *, candidate_id: int) -> str | None:
-    pending = await session.execute(
-        select(RecCandidateStage.stage_name)
-        .where(RecCandidateStage.candidate_id == candidate_id, RecCandidateStage.stage_status == "pending")
-        .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
-        .limit(1)
-    )
-    stage = pending.scalar_one_or_none()
-    if stage:
-        return stage
-    latest = await session.execute(
-        select(RecCandidateStage.stage_name)
-        .where(RecCandidateStage.candidate_id == candidate_id)
-        .order_by(RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
-        .limit(1)
-    )
-    return latest.scalar_one_or_none()
 
 
 def _round_to_transition(round_type: str, decision: str) -> str | None:
@@ -597,6 +582,24 @@ async def create_interview(
             related_entity_type="interview",
             related_entity_id=interview.candidate_interview_id,
             meta_json={"error": str(exc)},
+        )
+        await enqueue_operation(
+            session,
+            operation_type=OP_CALENDAR_CREATE_EVENT,
+            payload={
+                "interview_id": interview.candidate_interview_id,
+                "summary": f"Interview - {candidate.full_name} - {(opening.title if opening else '')}".strip(),
+                "description": "Candidate interview",
+                "start_at": start_at.isoformat(),
+                "end_at": end_at.isoformat(),
+                "attendees": [email for email in [interviewer_email, candidate.email] if email],
+                "calendar_id": interviewer_email or settings.calendar_id or "primary",
+                "subject_email": interviewer_email,
+            },
+            candidate_id=candidate_id,
+            related_entity_type="interview",
+            related_entity_id=interview.candidate_interview_id,
+            idempotency_key=f"calendar_create_interview:{interview.candidate_interview_id}",
         )
 
     await log_event(
@@ -1286,6 +1289,24 @@ async def select_interview_slot(
             related_entity_id=interview.candidate_interview_id,
             meta_json={"error": str(exc)},
         )
+        await enqueue_operation(
+            session,
+            operation_type=OP_CALENDAR_CREATE_EVENT,
+            payload={
+                "interview_id": interview.candidate_interview_id,
+                "summary": f"Interview - {candidate.full_name} - {(opening.title if opening else '')}".strip(),
+                "description": "Candidate interview",
+                "start_at": slot.slot_start_at.isoformat(),
+                "end_at": slot.slot_end_at.isoformat(),
+                "attendees": [email for email in [interviewer_email, candidate.email] if email],
+                "calendar_id": interviewer_email or settings.calendar_id or "primary",
+                "subject_email": interviewer_email,
+            },
+            candidate_id=slot.candidate_id,
+            related_entity_type="interview",
+            related_entity_id=interview.candidate_interview_id,
+            idempotency_key=f"calendar_create_interview:{interview.candidate_interview_id}",
+        )
 
     slot.status = "confirmed"
     slot.booked_interview_id = interview.candidate_interview_id
@@ -1392,15 +1413,42 @@ async def cancel_interview(
         _clean_platform_person_id(interview.interviewer_person_id_platform) or "", {}
     )
     interviewer_email = (interviewer_meta or {}).get("email")
+    calendar_id = interviewer_email or settings.calendar_id or "primary"
     if interview.calendar_event_id:
         try:
             delete_calendar_event(
                 event_id=interview.calendar_event_id,
-                calendar_id=interviewer_email or settings.calendar_id or "primary",
+                calendar_id=calendar_id,
                 subject_email=interviewer_email,
             )
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            await log_event(
+                session,
+                candidate_id=interview.candidate_id,
+                action_type="calendar_event_failed",
+                performed_by_person_id_platform=_platform_person_id_int(user),
+                related_entity_type="interview",
+                related_entity_id=interview.candidate_interview_id,
+                meta_json={
+                    "operation": "delete",
+                    "calendar_event_id": interview.calendar_event_id,
+                    "error": str(exc),
+                },
+            )
+            await enqueue_operation(
+                session,
+                operation_type=OP_CALENDAR_DELETE_EVENT,
+                payload={
+                    "interview_id": interview.candidate_interview_id,
+                    "event_id": interview.calendar_event_id,
+                    "calendar_id": calendar_id,
+                    "subject_email": interviewer_email,
+                },
+                candidate_id=interview.candidate_id,
+                related_entity_type="interview",
+                related_entity_id=interview.candidate_interview_id,
+                idempotency_key=f"calendar_delete_interview:{interview.candidate_interview_id}:{interview.calendar_event_id}",
+            )
     await session.execute(
         delete(RecCandidateInterviewSlot).where(
             RecCandidateInterviewSlot.candidate_id == interview.candidate_id,
@@ -1513,39 +1561,104 @@ async def reschedule_interview(
     if candidate and candidate.opening_id is not None:
         opening = (await session.execute(select(RecOpening).where(RecOpening.opening_id == candidate.opening_id))).scalars().first()
 
+    summary = f"Interview - {candidate.full_name} - {(opening.title if opening else '')}".strip()
+    description = "Candidate interview"
+    attendees = [email for email in [interviewer_email, candidate.email if candidate else None] if email]
+    calendar_id = interviewer_email or settings.calendar_id or "primary"
+
     if interview.calendar_event_id:
         try:
             cal_resp = update_calendar_event(
                 event_id=interview.calendar_event_id,
-                summary=f"Interview - {candidate.full_name} - {(opening.title if opening else '')}".strip(),
-                description="Candidate interview",
+                summary=summary,
+                description=description,
                 start_at=start_at,
                 end_at=end_at,
-                attendees=[email for email in [interviewer_email, candidate.email if candidate else None] if email],
-                calendar_id=interviewer_email or settings.calendar_id or "primary",
+                attendees=attendees,
+                calendar_id=calendar_id,
                 subject_email=interviewer_email,
             )
             if cal_resp.get("meeting_link"):
                 interview.meeting_link = cal_resp.get("meeting_link")
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            await log_event(
+                session,
+                candidate_id=interview.candidate_id,
+                action_type="calendar_event_failed",
+                performed_by_person_id_platform=_platform_person_id_int(user),
+                related_entity_type="interview",
+                related_entity_id=interview.candidate_interview_id,
+                meta_json={
+                    "operation": "update",
+                    "calendar_event_id": interview.calendar_event_id,
+                    "error": str(exc),
+                },
+            )
+            await enqueue_operation(
+                session,
+                operation_type=OP_CALENDAR_UPDATE_EVENT,
+                payload={
+                    "interview_id": interview.candidate_interview_id,
+                    "event_id": interview.calendar_event_id,
+                    "summary": summary,
+                    "description": description,
+                    "start_at": start_at.isoformat(),
+                    "end_at": end_at.isoformat(),
+                    "attendees": attendees,
+                    "calendar_id": calendar_id,
+                    "subject_email": interviewer_email,
+                },
+                candidate_id=interview.candidate_id,
+                related_entity_type="interview",
+                related_entity_id=interview.candidate_interview_id,
+                idempotency_key=f"calendar_update_interview:{interview.candidate_interview_id}:{interview.calendar_event_id}",
+            )
     else:
         try:
             cal_resp = create_calendar_event(
-                summary=f"Interview - {candidate.full_name} - {(opening.title if opening else '')}".strip(),
-                description="Candidate interview",
+                summary=summary,
+                description=description,
                 start_at=start_at,
                 end_at=end_at,
-                attendees=[email for email in [interviewer_email, candidate.email if candidate else None] if email],
-                calendar_id=interviewer_email or settings.calendar_id or "primary",
+                attendees=attendees,
+                calendar_id=calendar_id,
                 subject_email=interviewer_email,
             )
             if cal_resp.get("event_id"):
                 interview.calendar_event_id = cal_resp.get("event_id")
             if cal_resp.get("meeting_link"):
                 interview.meeting_link = cal_resp.get("meeting_link")
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            await log_event(
+                session,
+                candidate_id=interview.candidate_id,
+                action_type="calendar_event_failed",
+                performed_by_person_id_platform=_platform_person_id_int(user),
+                related_entity_type="interview",
+                related_entity_id=interview.candidate_interview_id,
+                meta_json={
+                    "operation": "create",
+                    "error": str(exc),
+                },
+            )
+            await enqueue_operation(
+                session,
+                operation_type=OP_CALENDAR_CREATE_EVENT,
+                payload={
+                    "interview_id": interview.candidate_interview_id,
+                    "summary": summary,
+                    "description": description,
+                    "start_at": start_at.isoformat(),
+                    "end_at": end_at.isoformat(),
+                    "attendees": attendees,
+                    "calendar_id": calendar_id,
+                    "subject_email": interviewer_email,
+                },
+                candidate_id=interview.candidate_id,
+                related_entity_type="interview",
+                related_entity_id=interview.candidate_interview_id,
+                idempotency_key=f"calendar_create_interview:{interview.candidate_interview_id}",
+            )
 
     interview.scheduled_start_at = start_at
     interview.scheduled_end_at = end_at
@@ -1785,14 +1898,20 @@ async def update_interview(
         to_stage = _round_to_transition(interview.round_type, payload.decision)
 
     if to_stage:
-        await transition_stage(
-            interview.candidate_id,
-            StageTransitionRequest(to_stage=to_stage, decision=payload.decision, note="interview_feedback"),
+        candidate_for_transition = await session.get(RecCandidate, interview.candidate_id)
+        if not candidate_for_transition:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+        await apply_stage_transition(
             session,
-            user,
+            candidate=candidate_for_transition,
+            to_stage=to_stage,
+            decision=payload.decision,
+            note="interview_feedback",
+            user=user,
+            source="interview_feedback",
+            allow_noop=True,
         )
-    else:
-        await session.commit()
+    await session.commit()
 
     await session.refresh(interview)
     candidate = await session.get(RecCandidate, interview.candidate_id)
@@ -1869,16 +1988,17 @@ async def mark_interview_status(
         candidate = await session.get(RecCandidate, interview.candidate_id)
         if not candidate:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
-        current_stage = await _get_current_stage_name(session, candidate_id=interview.candidate_id)
-        if current_stage != to_stage:
-            await transition_stage(
-                interview.candidate_id,
-                StageTransitionRequest(to_stage=to_stage, decision="taken", note="interview_taken"),
-                session,
-                user,
-            )
-        else:
-            await session.commit()
+        await apply_stage_transition(
+            session,
+            candidate=candidate,
+            to_stage=to_stage,
+            decision="taken",
+            note="interview_taken",
+            user=user,
+            source="interview_status",
+            allow_noop=True,
+        )
+        await session.commit()
     else:
         await session.execute(
             delete(RecCandidateInterviewAssessment).where(

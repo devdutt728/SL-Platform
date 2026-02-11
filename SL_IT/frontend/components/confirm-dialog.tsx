@@ -33,7 +33,7 @@ export function ConfirmDialog({
               Cancel
             </Dialog.Close>
             <button
-              className={cn("px-4 py-2 rounded-full text-sm font-semibold bg-ink text-white")}
+              className={cn("px-4 py-2 rounded-full text-sm font-semibold bg-brand text-white")}
               onClick={onConfirm}
               type="button"
             >

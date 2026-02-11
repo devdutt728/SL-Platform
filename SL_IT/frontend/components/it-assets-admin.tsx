@@ -215,7 +215,7 @@ export function ItAssetsAdmin() {
             </label>
             <button
               type="button"
-              className="rounded-full border border-black/10 bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              className="rounded-full border border-black/10 bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               disabled={busy || !csvFile}
               onClick={() => csvFile && void uploadCsv(csvFile)}
             >
@@ -281,7 +281,7 @@ export function ItAssetsAdmin() {
             type="button"
             disabled={busy || !form.asset_tag.trim()}
             onClick={() => void submit()}
-            className="rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
+            className="rounded-xl bg-brand px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
           >
             Save asset
           </button>
@@ -342,3 +342,4 @@ export function ItAssetsAdmin() {
     </div>
   );
 }
+

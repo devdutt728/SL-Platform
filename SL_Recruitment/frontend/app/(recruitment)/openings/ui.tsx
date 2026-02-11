@@ -39,8 +39,8 @@ export function OpeningsClient({ initialOpenings }: Props) {
 
   const isSuperadmin = useMemo(() => platformRoleId === 2 || (platformRoleId == null && !!roles?.includes("hr_admin")), [platformRoleId, roles]);
   const isHr = useMemo(() => platformRoleId === 5 || (platformRoleId == null && !!roles?.includes("hr_exec")), [platformRoleId, roles]);
-  const canCreateOpenings = useMemo(() => isSuperadmin || isHr, [isSuperadmin, isHr]);
-  const canDeactivateOpenings = useMemo(() => isSuperadmin || isHr, [isSuperadmin, isHr]);
+  const canCreateOpenings = useMemo(() => isSuperadmin, [isSuperadmin]);
+  const canToggleOpenings = useMemo(() => isSuperadmin || isHr, [isSuperadmin, isHr]);
   const canEditOpenings = useMemo(() => isSuperadmin, [isSuperadmin]);
   const canDeleteOpenings = useMemo(() => isSuperadmin, [isSuperadmin]);
 
@@ -222,11 +222,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
   }
 
   async function setOpeningActive(openingId: number, isActive: boolean) {
-    if (!canDeactivateOpenings) {
-      setError("Action not available.");
-      return;
-    }
-    if (!canEditOpenings && isActive) {
+    if (!canToggleOpenings) {
       setError("Action not available.");
       return;
     }
@@ -319,7 +315,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-tight text-slate-500">Create opening</p>
-              <p className="text-sm text-slate-500">Opening codes are generated automatically. Use Edit on an existing role to update it.</p>
+              <p className="text-sm text-slate-500">Superadmin only. Opening codes are generated automatically and are immutable.</p>
             </div>
             <button
               className="rounded-full bg-teal-600 px-4 py-2 text-xs font-semibold text-white shadow-card hover:bg-teal-700 disabled:opacity-60"
@@ -518,7 +514,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
                         Edit
                       </button>
                     ) : null}
-                    {canEditOpenings && !opening.is_active ? (
+                    {canToggleOpenings && !opening.is_active ? (
                       <button
                         className="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 text-[11px] font-semibold leading-5 text-slate-700 hover:bg-white/80"
                         onClick={() => void setOpeningActive(opening.opening_id, true)}
@@ -527,7 +523,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
                         Activate
                       </button>
                     ) : null}
-                    {canDeactivateOpenings && opening.is_active ? (
+                    {canToggleOpenings && opening.is_active ? (
                       <button
                         className="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 text-[11px] font-semibold leading-5 text-slate-700 hover:bg-white/80"
                         onClick={() => void setOpeningActive(opening.opening_id, false)}
@@ -552,7 +548,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
             {openings.length === 0 && (
               <tr>
                 <td className="px-3 py-10 text-center text-sm text-slate-500" colSpan={7}>
-                  No openings yet. Create one above, then share `/apply/&lt;opening_code&gt;`.
+                  No openings yet.
                 </td>
               </tr>
             )}

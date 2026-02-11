@@ -132,7 +132,7 @@ export function TicketDetailView({ ticketId }: { ticketId: string }) {
         )}
         <button
           type="button"
-          className="mt-4 px-5 py-2 rounded-full bg-ink text-white font-semibold"
+          className="mt-4 px-5 py-2 rounded-full bg-brand text-white font-semibold"
           onClick={submitComment}
         >
           Post comment

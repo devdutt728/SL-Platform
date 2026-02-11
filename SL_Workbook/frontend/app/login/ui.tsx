@@ -27,10 +27,10 @@ export function EmployeeLoginPanel({ clientId, errorCode, detail }: { clientId: 
       </div>
 
       {error && (
-        <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-left text-sm text-rose-700">
+        <div className="mt-5 rounded-2xl border border-[#E74011]/30 bg-[#E74011]/10 px-4 py-4 text-left text-sm text-[#5D5552]">
           <p className="font-semibold">Access restricted</p>
           <p className="mt-1">{error}</p>
-          {detail ? <p className="mt-2 text-xs text-rose-600">Reason: {detail}</p> : null}
+          {detail ? <p className="mt-2 text-xs text-[#5D5552]/85">Reason: {detail}</p> : null}
           <div className="mt-3 flex flex-wrap gap-2">
             <a href="/api/auth/google/start" className="public-button public-button--primary">
               Retry sign in
@@ -55,7 +55,7 @@ export function EmployeeLoginPanel({ clientId, errorCode, detail }: { clientId: 
       </div>
 
       {!clientId && (
-        <p className="mt-4 text-sm text-rose-500">
+        <p className="mt-4 text-sm text-[#E74011]">
           Missing Google client_id (check `secrets/Oauth SL_Platform.json`).
         </p>
       )}

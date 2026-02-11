@@ -20,7 +20,7 @@ export function QueueTabs() {
           <Tabs.Trigger
             key={tab.value}
             value={tab.value}
-            className="rounded-full border border-white/60 bg-white/70 px-4 py-2 text-sm font-semibold data-[state=active]:bg-ink data-[state=active]:text-white"
+            className="rounded-full border border-white/60 bg-white/70 px-4 py-2 text-sm font-semibold data-[state=active]:bg-brand data-[state=active]:text-white"
           >
             {tab.label}
           </Tabs.Trigger>
