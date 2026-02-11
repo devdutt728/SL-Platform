@@ -1,3 +1,5 @@
+import Image from "next/image";
+import { CheckCircle2, ShieldCheck } from "lucide-react";
 import { internalUrl } from "@/lib/internal";
 import { CafPrefill, Screening } from "@/lib/types";
 import { CafForm } from "./ui";
@@ -14,101 +16,153 @@ async function fetchScreening(token: string) {
   return (await res.json()) as Screening;
 }
 
+function BackgroundLayer() {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-0">
+      <div className="absolute inset-0 bg-[linear-gradient(96deg,rgba(255,255,255,0.96)_0%,rgba(231,64,17,0.09)_52%,rgba(255,255,255,0.96)_100%)]" />
+      <div className="absolute inset-0 opacity-15 [background-image:linear-gradient(rgba(93,85,82,0.11)_1px,transparent_1px),linear-gradient(90deg,rgba(93,85,82,0.11)_1px,transparent_1px)] [background-size:28px_28px]" />
+      <div className="absolute -top-24 left-[2%] h-72 w-72 rounded-full bg-[var(--brand-color)]/14 blur-3xl" />
+      <div className="absolute -right-20 top-[18%] h-72 w-72 rounded-full bg-[rgba(93,85,82,0.12)] blur-3xl" />
+    </div>
+  );
+}
+
+function TopBar({
+  logoSrc,
+  shellClass,
+}: {
+  logoSrc: string;
+  shellClass: string;
+}) {
+  return (
+    <header className="fixed inset-x-0 top-0 z-30 border-b border-[var(--accessible-components--dark-grey)] bg-white/94 backdrop-blur-xl">
+      <div className={`${shellClass} flex h-[68px] items-center justify-between gap-4`}>
+        <div className="flex items-center gap-3">
+          <div className="rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-1.5 shadow-[var(--shadow-soft)]">
+            <div className="relative h-7 w-28">
+              <Image
+                src={logoSrc}
+                alt="Studio Lotus"
+                fill
+                sizes="112px"
+                className="object-contain object-left"
+                priority
+                unoptimized
+              />
+            </div>
+          </div>
+          <div className="hidden sm:block">
+            <p className="text-[10px] uppercase tracking-[0.3em] text-[rgba(93,85,82,0.55)]">Candidate Portal</p>
+            <p className="text-[13px] font-semibold text-[var(--dim-grey)]">Application details</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-[11px] text-[var(--dim-grey)]">
+          <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-1">
+            <ShieldCheck className="h-3.5 w-3.5 text-[var(--brand-color)]" />
+            Secure
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-1">
+            <CheckCircle2 className="h-3.5 w-3.5 text-[var(--brand-color)]" />
+            Read-only
+          </span>
+        </div>
+      </div>
+    </header>
+  );
+}
+
 export default async function CafPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
+  const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
+  const shellClass = "mx-auto w-full max-w-[1320px] px-4 sm:px-6 lg:px-7";
   const prefill = await fetchPrefill(token);
 
   if (!prefill) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 px-4 py-10">
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-strong)]/70 p-6 shadow-card">
-          <p className="text-xs uppercase tracking-tight text-[var(--text-secondary)]">CAF</p>
-          <h1 className="text-2xl font-semibold">Invalid or expired link</h1>
-          <p className="text-sm text-[var(--text-secondary)]">Please check the URL or contact HR.</p>
+      <main className="apply-font-override relative isolate min-h-screen overflow-hidden bg-[var(--surface-base)] text-[var(--dim-grey)]">
+        <BackgroundLayer />
+        <TopBar logoSrc={logoSrc} shellClass={shellClass} />
+        <div className={`${shellClass} relative z-10 pb-14 pt-24`}>
+          <div className="rounded-[28px] border border-[var(--accessible-components--dark-grey)] bg-white p-7 shadow-[var(--shadow-soft)]">
+            <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">CAF</p>
+            <h1 className="mt-2 text-xl font-semibold text-[var(--dim-grey)]">Invalid or expired link</h1>
+            <p className="mt-2 max-w-2xl text-[13px] text-[var(--dim-grey)]">
+              Please check the URL or contact HR.
+            </p>
+          </div>
         </div>
       </main>
     );
   }
 
   const screening = await fetchScreening(token);
-
-  if (prefill.caf_submitted_at) {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 px-4 py-10">
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-strong)]/70 p-6 shadow-card">
-          <p className="text-xs uppercase tracking-tight text-[var(--text-secondary)]">CAF</p>
-          <h1 className="text-2xl font-semibold">{prefill.opening_title || "Studio Lotus"}</h1>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">This CAF has already been submitted and is now read-only.</p>
-
-          <div className="mt-4 grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] p-4">
-            <div className="flex flex-col gap-1">
-              <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Candidate</p>
-              <p className="text-sm font-semibold">{prefill.name}</p>
-              <p className="text-xs text-[var(--text-secondary)]">{prefill.candidate_code}</p>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)]/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Email</p>
-                <p className="mt-1 truncate text-sm font-semibold">{prefill.email}</p>
-              </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)]/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Phone</p>
-                <p className="mt-1 truncate text-sm font-semibold">{prefill.phone || "—"}</p>
-              </div>
-            </div>
-            {prefill.cv_url ? (
-              <a
-                href={prefill.cv_url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-cyan-600 to-violet-600 px-4 py-2 text-xs font-semibold text-white shadow-card hover:from-cyan-700 hover:to-violet-700"
-              >
-                Open uploaded CV
-              </a>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-strong)]/70 p-6 shadow-card">
-          <p className="text-xs uppercase tracking-tight text-[var(--text-secondary)]">Submitted data</p>
-          {screening ? (
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)]/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Relocate</p>
-                <p className="mt-1 text-sm font-semibold">
-                  {screening.willing_to_relocate == null ? "—" : screening.willing_to_relocate ? "Yes" : "No"}
-                </p>
-              </div>
-              <div className="sm:col-span-2 rounded-xl border border-[var(--border)] bg-[var(--surface-strong)]/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Notes</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">{screening.screening_notes || "—"}</p>
-              </div>
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-[var(--text-secondary)]">No screening details found.</p>
-          )}
-        </div>
-      </main>
-    );
-  }
+  const submitted = Boolean(prefill.caf_submitted_at);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 px-4 py-10">
-      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-strong)]/70 p-6 shadow-card">
-        <p className="text-xs uppercase tracking-tight text-[var(--text-secondary)]">Candidate Application Form</p>
-        <h1 className="text-2xl font-semibold">{prefill.opening_title || "Studio Lotus"}</h1>
-        <p className="text-sm text-[var(--text-secondary)]">
-          This helps us quickly understand fit and schedule the next steps.
-        </p>
-        {prefill.opening_description ? (
-          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] p-4">
-            <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Role description</p>
-            <p className="mt-2 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">{prefill.opening_description}</p>
-          </div>
-        ) : null}
-      </div>
+    <main className="apply-font-override relative isolate min-h-screen overflow-hidden bg-[var(--surface-base)] text-[var(--dim-grey)]">
+      <BackgroundLayer />
+      <TopBar logoSrc={logoSrc} shellClass={shellClass} />
 
-      <CafForm token={token} prefill={prefill} screening={screening} />
+      <div className={`${shellClass} relative z-10 pb-12 pt-24 text-[13px]`}>
+        <div className="grid items-start gap-5 xl:grid-cols-[350px_minmax(0,1fr)]">
+          <section className="hidden xl:block">
+            <div className="sticky top-[88px] space-y-4 rounded-[28px] border border-[var(--accessible-components--dark-grey)] bg-white p-5 shadow-[var(--shadow-soft)]">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Role Overview</p>
+                <p className="mt-2 text-lg font-semibold text-[var(--dim-grey)]">{prefill.opening_title || "Studio Lotus"}</p>
+                <p className="mt-2 text-[13px] text-[var(--dim-grey)]">
+                  Candidate code: <span className="font-semibold text-[var(--dim-grey)]">{prefill.candidate_code}</span>
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white p-4">
+                <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Link Status</p>
+                <div className="mt-3 space-y-2">
+                  <div className="inline-flex items-center rounded-full border border-[var(--accessible-components--dark-grey)] bg-slate-100 px-3 py-1 text-[11px] font-semibold text-[var(--dim-grey)]">
+                    {submitted ? "Submitted" : "Active"}
+                  </div>
+                  <p className="text-[12px] text-[var(--dim-grey)]">
+                    Details shown on this page are read-only.
+                  </p>
+                </div>
+              </div>
+
+              {prefill.opening_description ? (
+                <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white p-4">
+                  <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Role Description</p>
+                  <p className="mt-3 whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--dim-grey)]">
+                    {prefill.opening_description}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="min-w-0 xl:max-w-[910px] xl:justify-self-end">
+            <div className="xl:hidden">
+              <div className="mb-4 rounded-[26px] border border-[var(--accessible-components--dark-grey)] bg-white p-5 shadow-[var(--shadow-soft)]">
+                <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Role Overview</p>
+                <p className="mt-2 text-base font-semibold text-[var(--dim-grey)]">{prefill.opening_title || "Studio Lotus"}</p>
+                <p className="mt-2 text-[12px] text-[var(--dim-grey)]">
+                  Candidate code: <span className="font-semibold text-[var(--dim-grey)]">{prefill.candidate_code}</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-4 rounded-[26px] border border-[var(--accessible-components--dark-grey)] bg-white p-5 shadow-[var(--shadow-soft)]">
+              <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Candidate Application Form</p>
+              <h1 className="mt-2 text-[22px] font-semibold text-[var(--dim-grey)]">{prefill.opening_title || "Studio Lotus"}</h1>
+              <p className="mt-2 text-[13px] text-[var(--dim-grey)]">
+                This page displays the submitted candidate details in read-only mode.
+              </p>
+            </div>
+
+            <CafForm prefill={prefill} screening={screening} />
+          </section>
+        </div>
+      </div>
     </main>
   );
 }

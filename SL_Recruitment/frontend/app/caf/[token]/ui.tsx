@@ -1,131 +1,52 @@
 "use client";
 
-import { useState } from "react";
 import { CafPrefill, Screening } from "@/lib/types";
 
 type CafFormProps = {
-  token: string;
   prefill: CafPrefill;
   screening?: Screening | null;
 };
 
-export function CafForm({ token, prefill, screening }: CafFormProps) {
-  const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-  const runtimeBasePath =
-    typeof window !== "undefined" && window.location.pathname.startsWith("/recruitment") ? "/recruitment" : "";
-  const apiBase = basePath || runtimeBasePath;
-  const readOnlyMode = Boolean(
-    prefill.caf_submitted_at ||
-      screening?.screening_notes
-  );
-  const readonlyFieldClass = readOnlyMode
-    ? "bg-slate-100/70 text-slate-500 cursor-not-allowed"
-    : "bg-transparent";
+const readOnlyCardClass =
+  "rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-slate-100/85 px-4 py-3";
 
-  async function onSubmit(formData: FormData) {
-    setSubmitting(true);
-    setError(null);
-
-    const payload = {
-      screening_notes: stringOrNull(formData.get("screening_notes")),
-    };
-
-    const res = await fetch(`${apiBase}/api/caf/${token}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      setError(text || "CAF submission failed");
-      setSubmitting(false);
-      return;
-    }
-
-    setSubmitted(true);
-    setSubmitting(false);
-  }
-
-  if (submitted) {
-    return (
-      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-strong)]/70 p-6 shadow-card">
-        <h2 className="text-xl font-semibold">Application Submitted Successfully</h2>
-        <p className="mt-2 text-sm text-[var(--text-secondary)]">Thank you for your interest in this opportunity.</p>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">Your application has been received and is currently under review.</p>
-        <p className="mt-4 text-sm text-[var(--text-secondary)]">You can expect to hear from us within 24–48 business hours.</p>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">Please do not submit another application for the same role.</p>
-      </div>
-    );
-  }
+export function CafForm({ prefill, screening }: CafFormProps) {
+  const willingToRelocate =
+    screening?.willing_to_relocate == null ? "—" : screening.willing_to_relocate ? "Yes" : "No";
 
   return (
-    <form
-      className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-strong)]/70 p-6 shadow-card"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void onSubmit(new FormData(e.currentTarget));
-      }}
-    >
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] p-3">
-        <p className="text-sm font-semibold">{prefill.name}</p>
-        <p className="text-xs text-[var(--text-secondary)]">{prefill.email}</p>
-        <p className="text-xs text-[var(--text-secondary)]">{prefill.phone || "—"}</p>
+    <section className="overflow-hidden rounded-[30px] border border-[var(--accessible-components--dark-grey)] bg-white shadow-[var(--shadow-soft)]">
+      <div className="border-b border-[var(--accessible-components--dark-grey)] bg-[rgba(231,64,17,0.06)] px-5 py-4 sm:px-6 sm:py-5">
+        <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Submitted Form Details</p>
+        <p className="mt-1 text-[15px] font-semibold text-[var(--dim-grey)]">
+          Read-only snapshot from your submitted application
+        </p>
       </div>
 
-      <section className="space-y-3">
-        <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Availability</p>
-        <div className="grid gap-4 md:grid-cols-2">
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Notes</p>
-        <Field label="Screening notes">
-          <textarea
-            name="screening_notes"
-            defaultValue={screening?.screening_notes || ""}
-            disabled={readOnlyMode}
-            className={`min-h-24 w-full rounded-xl border border-[var(--border)] px-3 py-2 ${readonlyFieldClass}`}
-            placeholder="Notes for HR review"
-          />
-        </Field>
-      </section>
-
-      {error && !readOnlyMode && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-          {error}
-        </div>
-      )}
-
-      {!readOnlyMode ? (
-        <button
-          className="w-full rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-teal-700 disabled:opacity-60"
-          type="submit"
-          disabled={submitting}
-        >
-          {submitting ? "Submitting..." : "Submit CAF"}
-        </button>
-      ) : null}
-    </form>
+      <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 lg:p-6">
+        <ReadOnlyField label="First Name" value={(prefill.first_name || "").trim() || prefill.name} />
+        <ReadOnlyField label="Last Name" value={(prefill.last_name || "").trim() || "—"} />
+        <ReadOnlyField label="Email" value={prefill.email} />
+        <ReadOnlyField label="Phone" value={prefill.phone || "—"} />
+        <ReadOnlyField label="Years of Exp" value={formatYears(prefill.years_of_experience)} />
+        <ReadOnlyField label="City" value={prefill.city || "—"} />
+        <ReadOnlyField label="Willing to Relocate" value={willingToRelocate} />
+        <ReadOnlyField label="Candidate Code" value={prefill.candidate_code} />
+      </div>
+    </section>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
   return (
-    <label className="space-y-1">
-      <span className="text-sm text-[var(--text-secondary)]">{label}</span>
-      {children}
-    </label>
+    <div className={readOnlyCardClass}>
+      <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--light-grey)]">{label}</p>
+      <p className="mt-1 text-[13px] font-semibold text-[var(--dim-grey)]">{value}</p>
+    </div>
   );
 }
 
-function stringOrNull(value: FormDataEntryValue | null) {
-  if (value === null) return null;
-  const s = String(value).trim();
-  return s ? s : null;
+function formatYears(value: number | null | undefined) {
+  if (value == null) return "—";
+  return Number.isInteger(value) ? String(value) : String(value);
 }
-

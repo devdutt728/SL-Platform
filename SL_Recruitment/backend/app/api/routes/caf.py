@@ -18,15 +18,24 @@ from app.services.stage_transitions import apply_stage_transition
 router = APIRouter(prefix="/caf", tags=["caf"])
 
 
+def _caf_expiry_window() -> timedelta | None:
+    hours = max(int(settings.caf_expiry_hours or 0), 0)
+    if hours <= 0:
+        hours = max(int(settings.caf_expiry_days or 0), 0) * 24
+    if hours <= 0:
+        return None
+    return timedelta(hours=hours)
+
+
 def _caf_expired(candidate: RecCandidate) -> bool:
     if candidate.caf_submitted_at is not None:
         return False
     if candidate.caf_sent_at is None:
         return False
-    expiry_days = max(int(settings.caf_expiry_days or 0), 0)
-    if expiry_days == 0:
+    window = _caf_expiry_window()
+    if window is None:
         return False
-    return datetime.utcnow() > (candidate.caf_sent_at + timedelta(days=expiry_days))
+    return datetime.utcnow() > (candidate.caf_sent_at + window)
 
 
 @router.get("/{token}", response_model=CafPrefillOut)
@@ -57,9 +66,13 @@ async def get_caf_prefill(
     return CafPrefillOut(
         candidate_id=candidate.candidate_id,
         candidate_code=candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}",
-        name=candidate.full_name,
+        name=(candidate.full_name or " ".join([part for part in [candidate.first_name, candidate.last_name] if part]).strip() or candidate.email),
+        first_name=candidate.first_name,
+        last_name=candidate.last_name,
         email=candidate.email,
         phone=candidate.phone,
+        years_of_experience=candidate.years_of_experience,
+        city=candidate.city,
         cv_url=candidate.cv_url,
         caf_sent_at=candidate.caf_sent_at,
         caf_submitted_at=candidate.caf_submitted_at,
@@ -79,8 +92,6 @@ async def get_caf_screening(
     ).scalars().first()
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid CAF token")
-    if _caf_expired(candidate):
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="CAF link expired")
 
     screening = (
         await session.execute(

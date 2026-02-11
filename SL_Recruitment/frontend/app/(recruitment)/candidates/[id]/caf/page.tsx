@@ -171,8 +171,10 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
               {labelValue("Personal email", valueOrDash(assessment.personal_email))}
               {labelValue("Contact", valueOrDash(assessment.contact_number))}
               {labelValue("Employment status", valueOrDash(assessment.current_employment_status))}
-              {labelValue("Notice / joining", valueOrDash(assessment.notice_period_or_joining_time))}
-              {labelValue("Notice (days)", valueOrDash(assessment.notice_period_days))}
+              {labelValue(
+                "Notice period",
+                valueOrDash(assessment.notice_period_days ?? assessment.notice_period_or_joining_time)
+              )}
               {labelValue("Current CTC", valueOrDash(assessment.current_ctc_annual))}
               {labelValue("Expected CTC", valueOrDash(assessment.expected_ctc_annual))}
               {labelValue("Current location", valueOrDash(assessment.current_location))}

@@ -126,8 +126,12 @@ export type CafPrefill = {
   candidate_id: number;
   candidate_code: string;
   name: string;
+  first_name?: string | null;
+  last_name?: string | null;
   email: string;
   phone?: string | null;
+  years_of_experience?: number | null;
+  city?: string | null;
   cv_url?: string | null;
   caf_sent_at?: string | null;
   caf_submitted_at?: string | null;

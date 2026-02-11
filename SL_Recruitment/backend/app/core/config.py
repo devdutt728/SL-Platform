@@ -56,7 +56,9 @@ class Settings(BaseSettings):
     public_link_ttl_hours: int = 168
     public_link_signing_key: str = ""
     public_link_skip_signature: bool = False
+    caf_expiry_hours: int = 72
     caf_expiry_days: int = 7
+    assessment_expiry_hours: int = 72
     caf_reminder_days: int = 3
     feedback_reminder_hours: int = 24
     feedback_escalation_hours: int = 48

@@ -39,8 +39,12 @@ class CafPrefillOut(BaseModel):
     candidate_id: int
     candidate_code: str
     name: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     email: str
     phone: Optional[str] = None
+    years_of_experience: Optional[float] = None
+    city: Optional[str] = None
     cv_url: Optional[str] = None
     caf_sent_at: Optional[datetime] = None
     caf_submitted_at: Optional[datetime] = None

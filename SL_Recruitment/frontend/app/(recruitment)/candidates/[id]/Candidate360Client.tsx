@@ -728,7 +728,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }, [candidate.name]);
   const currentStageKey = normalizeStage(candidate.current_stage);
   const cafLocked = !candidate.caf_submitted_at;
-  const cafExpiryDays = 7;
+  const cafExpiryDays = 3;
   const cafSentAt = candidate.caf_sent_at ? new Date(candidate.caf_sent_at) : null;
   const cafExpiresAt = cafSentAt ? new Date(cafSentAt.getTime() + cafExpiryDays * 24 * 60 * 60 * 1000) : null;
   const cafDaysLeft =
@@ -2689,8 +2689,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                         <Metric label="Personal email" value={valueOrDash(assessment.personal_email)} />
                         <Metric label="Contact" value={valueOrDash(assessment.contact_number)} />
                         <Metric label="Employment status" value={valueOrDash(assessment.current_employment_status)} />
-                        <Metric label="Notice / joining" value={valueOrDash(assessment.notice_period_or_joining_time)} />
-                        <Metric label="Notice (days)" value={valueOrDash(assessment.notice_period_days)} />
+                        <Metric
+                          label="Notice period"
+                          value={valueOrDash(assessment.notice_period_days ?? assessment.notice_period_or_joining_time)}
+                        />
                         <Metric label="Current CTC" value={valueOrDash(assessment.current_ctc_annual)} />
                         <Metric label="Expected CTC" value={valueOrDash(assessment.expected_ctc_annual)} />
                         <Metric label="Current location" value={valueOrDash(assessment.current_location)} />

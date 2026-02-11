@@ -32,7 +32,6 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
       contact_number: stringOrNull(formData.get("contact_number")),
       current_employment_status: stringOrNull(formData.get("current_employment_status")),
       interviewer_name: stringOrNull(formData.get("interviewer_name")),
-      notice_period_or_joining_time: stringOrNull(formData.get("notice_period_or_joining_time")),
       notice_period_days: intOrNull(formData.get("notice_period_days")),
       current_ctc_annual: numberOrNull(formData.get("current_ctc_annual")),
       expected_ctc_annual: numberOrNull(formData.get("expected_ctc_annual")),
@@ -150,25 +149,25 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
 
   if (submitted) {
     return (
-      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-strong)]/70 p-6 shadow-card">
-        <h2 className="text-xl font-semibold">CAF submitted successfully</h2>
-        <p className="mt-2 text-sm text-[var(--text-secondary)]">Thank you for completing the assessment.</p>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">Our HR team will review your submission and reach out shortly.</p>
+      <div className="rounded-[28px] border border-[var(--accessible-components--dark-grey)] bg-white p-6 shadow-[var(--shadow-soft)]">
+        <h2 className="text-xl font-semibold text-[var(--dim-grey)]">CAF submitted successfully</h2>
+        <p className="mt-2 text-sm text-[var(--dim-grey)]">Thank you for completing the assessment.</p>
+        <p className="mt-1 text-sm text-[var(--dim-grey)]">Our HR team will review your submission and reach out shortly.</p>
       </div>
     );
   }
 
   return (
     <form
-      className="space-y-5 rounded-2xl border border-[var(--border)] bg-[var(--surface-strong)]/70 p-6 shadow-card"
+      className="space-y-5 rounded-[30px] border border-[var(--accessible-components--dark-grey)] bg-white p-6 shadow-[var(--shadow-soft)]"
       onSubmit={(e) => {
         e.preventDefault();
         void onSubmit(new FormData(e.currentTarget));
       }}
     >
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] p-3">
-        <p className="text-sm font-semibold">{prefill.name}</p>
-        <p className="text-xs text-[var(--text-secondary)]">{prefill.email}</p>
+      <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-slate-100/80 p-3">
+        <p className="text-sm font-semibold text-[var(--dim-grey)]">{prefill.name}</p>
+        <p className="text-xs text-[var(--dim-grey)]">{prefill.email}</p>
       </div>
       <Section title="Personal details">
         <div className="grid gap-4 md:grid-cols-2">
@@ -231,18 +230,11 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
               placeholder="Employed / On notice / Freelancer"
             />
           </Field>
-          <Field label="Notice period / joining time">
-            <input
-              name="notice_period_or_joining_time"
-              required
-              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
-              placeholder="30 days"
-            />
-          </Field>
           <Field label="Notice period (days)">
             <input
               name="notice_period_days"
               type="number"
+              required
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
               placeholder="30"
             />
@@ -712,17 +704,17 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
       </Section>
 
       {error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+        <div className="rounded-2xl border border-[rgba(231,64,17,0.35)] bg-[rgba(231,64,17,0.1)] p-3 text-sm text-[var(--brand-color)]">
           {error}
         </div>
       )}
 
       <button
-        className="w-full rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-teal-700 disabled:opacity-60"
+        className="w-full rounded-full bg-[var(--brand-color)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_16px_30px_-20px_rgba(231,64,17,0.9)] transition hover:-translate-y-0.5 hover:brightness-95 disabled:opacity-60"
         type="submit"
         disabled={submitting}
       >
-        {submitting ? "Submitting..." : "Submit CAF"}
+        {submitting ? "Submitting..." : "Submit assessment"}
       </button>
     </form>
   );
@@ -730,8 +722,11 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="space-y-3">
-      <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">{title}</p>
+    <section className="space-y-3 rounded-[22px] border border-[var(--accessible-components--dark-grey)] bg-white p-4 sm:p-5">
+      <div className="mb-1 flex items-center gap-3">
+        <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">{title}</p>
+        <span className="h-px flex-1 bg-gradient-to-r from-[rgba(231,64,17,0.35)] via-[rgba(209,209,209,0.7)] to-transparent" />
+      </div>
       {children}
     </section>
   );
@@ -740,7 +735,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="space-y-1">
-      <span className="text-sm text-[var(--text-secondary)]">{label}</span>
+      <span className="text-sm text-[var(--dim-grey)]">{label}</span>
       {children}
     </label>
   );

@@ -424,11 +424,13 @@ def _caf_expired_for_candidate(candidate: RecCandidate, *, now: datetime | None 
         return False
     if candidate.caf_sent_at is None:
         return False
-    expiry_days = max(int(settings.caf_expiry_days or 0), 0)
-    if expiry_days == 0:
+    expiry_hours = max(int(settings.caf_expiry_hours or 0), 0)
+    if expiry_hours <= 0:
+        expiry_hours = max(int(settings.caf_expiry_days or 0), 0) * 24
+    if expiry_hours <= 0:
         return False
     current = now or datetime.utcnow()
-    return current > (candidate.caf_sent_at + timedelta(days=expiry_days))
+    return current > (candidate.caf_sent_at + timedelta(hours=expiry_hours))
 
 
 def _is_recent_google_sheet_duplicate(candidate: RecCandidate, *, now: datetime) -> bool:

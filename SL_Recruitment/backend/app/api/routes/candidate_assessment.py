@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -12,8 +12,24 @@ from app.schemas.candidate_assessment import CandidateAssessmentOut, CandidateAs
 from app.services.email import send_email
 from app.services.events import log_event
 from app.services.stage_transitions import apply_stage_transition
+from app.core.config import settings
 
 router = APIRouter(prefix="/assessment", tags=["candidate-assessment"])
+
+
+def _assessment_expired(assessment: RecCandidateAssessment) -> bool:
+    if assessment.assessment_submitted_at is not None:
+        return False
+    if assessment.assessment_sent_at is None:
+        return False
+    expiry_hours = max(int(settings.assessment_expiry_hours or 0), 0)
+    if expiry_hours <= 0:
+        expiry_hours = max(int(settings.caf_expiry_hours or 0), 0)
+    if expiry_hours <= 0:
+        expiry_hours = max(int(settings.caf_expiry_days or 0), 0) * 24
+    if expiry_hours <= 0:
+        return False
+    return datetime.utcnow() > (assessment.assessment_sent_at + timedelta(hours=expiry_hours))
 
 
 @router.get("/{token}", response_model=CandidateAssessmentPrefillOut)
@@ -28,6 +44,8 @@ async def get_candidate_assessment_prefill(
     ).scalars().first()
     if not assessment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid assessment token")
+    if _assessment_expired(assessment):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Assessment link expired")
 
     candidate = await session.get(RecCandidate, assessment.candidate_id)
     if not candidate:
@@ -77,6 +95,8 @@ async def submit_candidate_assessment(
     ).scalars().first()
     if not assessment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid assessment token")
+    if _assessment_expired(assessment):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Assessment link expired")
     if assessment.assessment_submitted_at is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Assessment already submitted")
 
