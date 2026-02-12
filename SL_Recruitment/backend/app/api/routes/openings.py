@@ -49,6 +49,41 @@ def _generate_opening_code(title: str) -> str:
     return f"{letters}-{unique}"
 
 
+def _normalize_role_token(value: object) -> str:
+    token = str(value or "").strip().lower()
+    if not token:
+        return ""
+    return token.replace("-", "_").replace(" ", "_")
+
+
+def _is_hr_actor(user: UserContext) -> bool:
+    roles = set(user.roles or [])
+    if Role.HR_ADMIN in roles or Role.HR_EXEC in roles:
+        return True
+
+    role_tokens = set()
+    for value in (user.platform_role_codes or []):
+        normalized = _normalize_role_token(value)
+        if normalized:
+            role_tokens.add(normalized)
+    for value in (user.platform_role_names or []):
+        normalized = _normalize_role_token(value)
+        if normalized:
+            role_tokens.add(normalized)
+    for value in [user.platform_role_code, user.platform_role_name]:
+        normalized = _normalize_role_token(value)
+        if normalized:
+            role_tokens.add(normalized)
+
+    for token in role_tokens:
+        compact = token.replace("_", "")
+        if token == "hr" or token.startswith("hr_") or token.startswith("hr"):
+            return True
+        if "humanresource" in compact:
+            return True
+    return False
+
+
 @router.get("", response_model=list[OpeningListItem])
 async def list_openings(
     is_active: bool | None = Query(default=None),
@@ -377,7 +412,9 @@ async def update_opening(
     opening_id: int,
     payload: OpeningUpdate,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+    user: UserContext = Depends(
+        require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])
+    ),
 ):
     opening = await session.get(RecOpening, opening_id)
     if not opening:
@@ -387,6 +424,13 @@ async def update_opening(
     if "opening_code" in updates:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Opening code cannot be edited.")
     is_superadmin = (user.platform_role_id or None) == 2
+    is_hr_actor = _is_hr_actor(user)
+
+    if not is_superadmin and not is_hr_actor:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only HR roles or Superadmin can change opening status.",
+        )
 
     # HR can only toggle active/inactive state. All other edits are superadmin-only.
     if not is_superadmin:

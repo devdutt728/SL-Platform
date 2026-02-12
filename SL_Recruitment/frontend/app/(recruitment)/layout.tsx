@@ -37,7 +37,7 @@ export default async function RecruitmentLayout({ children }: { children: ReactN
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="recruitment-theme apply-font-override min-h-screen bg-[var(--surface-base)] text-[var(--dim-grey)]">
       <Sidebar />
       <Topbar />
 

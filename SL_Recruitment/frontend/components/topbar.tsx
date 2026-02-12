@@ -98,32 +98,32 @@ export function Topbar() {
     <header className="glass-panel fixed left-4 right-4 top-4 z-20 hidden h-16 overflow-visible rounded-2xl md:flex md:left-72">
       <div className="page-shell flex h-full items-center justify-between">
         <div className="flex items-center gap-3">
-          <Sparkles className="h-4 w-4 text-emerald-500" />
-          <span className="text-sm font-semibold text-slate-800">Recruitment</span>
-          <span className="rounded-full border border-white/60 bg-white/30 px-3 py-1 text-xs font-semibold text-slate-700">
+          <Sparkles className="h-4 w-4 text-[var(--brand-color)]" />
+          <span className="text-sm font-semibold text-[var(--dim-grey)]">Recruitment</span>
+          <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-1 text-xs font-semibold text-[var(--dim-grey)]">
             Beta
           </span>
-          <span className="text-xs font-semibold text-slate-500">
+          <span className="text-xs font-semibold text-[var(--dim-grey)]">
             / {sectionLabel}
           </span>
         </div>
 
         <div className="flex items-center gap-3">
           <details className="relative">
-            <summary className="cursor-pointer list-none rounded-xl border border-white/60 bg-white/30 px-3 py-2 text-xs font-semibold text-slate-800 backdrop-blur">
+            <summary className="cursor-pointer list-none rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 text-xs font-semibold text-[var(--dim-grey)] backdrop-blur">
               Apps
             </summary>
-            <div className="absolute right-0 mt-2 w-44 rounded-xl border border-slate-200 bg-white/95 p-2 text-xs font-semibold text-slate-700 shadow-lg">
-              <a href="/" className="block rounded-lg px-2 py-2 hover:bg-slate-50">
+            <div className="absolute right-0 mt-2 w-44 rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/95 p-2 text-xs font-semibold text-[var(--dim-grey)] shadow-lg">
+              <a href="/" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
                 Public portal
               </a>
-              <a href="/employee" className="block rounded-lg px-2 py-2 hover:bg-slate-50">
+              <a href="/employee" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
                 Workbook
               </a>
-              <a href="/recruitment/dashboard" className="block rounded-lg px-2 py-2 hover:bg-slate-50">
+              <a href="/recruitment/dashboard" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
                 Recruitment
               </a>
-              <a href="/it" className="block rounded-lg px-2 py-2 hover:bg-slate-50">
+              <a href="/it" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
                 IT Helpdesk
               </a>
             </div>
@@ -131,17 +131,17 @@ export function Topbar() {
           {loading ? (
             <div className="h-10 w-52 animate-pulse rounded-xl bg-white/20" />
           ) : me ? (
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white/75 px-3 py-2 text-sm font-medium text-slate-800 shadow-sm">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+            <div className="flex items-center gap-2 rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/75 px-3 py-2 text-sm font-medium text-[var(--dim-grey)] shadow-sm">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[rgba(231,64,17,0.1)] text-[var(--brand-color)]">
                 <User className="h-4 w-4" />
               </div>
               <div className="leading-tight">
-                <p className="text-xs tracking-tight text-slate-500">{firstName(me)}</p>
-                <p className="text-sm text-slate-800">{displayRoles.join(", ")}</p>
+                <p className="text-xs tracking-tight text-[var(--dim-grey)]">{firstName(me)}</p>
+                <p className="text-sm text-[var(--dim-grey)]">{displayRoles.join(", ")}</p>
               </div>
               <button
                 onClick={signOut}
-                className="ml-2 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                className="ml-2 inline-flex items-center gap-1 rounded-lg border border-[var(--accessible-components--dark-grey)] bg-white px-2 py-1 text-xs font-semibold text-[var(--dim-grey)] hover:bg-[var(--surface-card)]"
                 title="Sign out"
               >
                 <LogOut className="h-3.5 w-3.5" />
@@ -151,7 +151,7 @@ export function Topbar() {
           ) : (
             <Link
               href="/login"
-              className="rounded-xl border border-white/60 bg-white/30 px-3 py-2 text-sm font-semibold text-slate-800 backdrop-blur"
+              className="rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 text-sm font-semibold text-[var(--dim-grey)] backdrop-blur"
             >
               Sign in
             </Link>

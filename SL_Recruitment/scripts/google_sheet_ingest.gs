@@ -25,6 +25,8 @@ const INGEST_ONE_TIME_SETUP = {
 const INGEST_CONFIG = {
   sheetName: "Master Data",
   fallbackSheetNames: ["Website - Candidates", "Sheet 1", "Sheet1"],
+  archiveSheetName: "Ingest Archive",
+  archiveStatuses: ["created", "duplicate"],
   requiredHeaderHints: ["Job ID", "First name", "Last name", "Email", "Terms"],
   statusColumn: "ingest_status",
   codeColumn: "candidate_code",
@@ -32,19 +34,23 @@ const INGEST_CONFIG = {
   emailStatusColumn: "email_status",
   emailErrorColumn: "email_error",
   ingestedAtColumn: "ingested_at",
+  retryCountColumn: "retry_count",
+  lastAttemptAtColumn: "last_attempt_at",
   batchSize: 50,
   requestTimeoutMs: 120000,
-  skipStatuses: ["created", "duplicate", "processing"],
+  maxRetries: 5,
+  skipStatuses: ["created", "duplicate", "processing", "failed_permanent"],
   duplicateCooldownHours: 24,
-  editTriggerHandler: "handleIngestSheetEdit",
-  changeTriggerHandler: "handleIngestSheetChange"
+  changeTriggerHandler: "handleIngestSheetChange",
+  scheduledTriggerHandler: "runScheduledIngest",
+  scheduledEveryMinutes: 5
 };
 
 /**
  * Run once manually to create/refresh installable triggers.
  * Creates:
- * - onEdit trigger (any edit in target sheet)
  * - onChange trigger (row insert in workbook)
+ * - time-driven trigger (retry safety net)
  */
 function setupIngestTriggers() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -53,21 +59,22 @@ function setupIngestTriggers() {
   allTriggers.forEach((trigger) => {
     const handler = trigger.getHandlerFunction();
     if (
-      handler === INGEST_CONFIG.editTriggerHandler ||
-      handler === INGEST_CONFIG.changeTriggerHandler
+      handler === INGEST_CONFIG.changeTriggerHandler ||
+      handler === INGEST_CONFIG.scheduledTriggerHandler ||
+      handler === "handleIngestSheetEdit"
     ) {
       ScriptApp.deleteTrigger(trigger);
     }
   });
 
-  ScriptApp.newTrigger(INGEST_CONFIG.editTriggerHandler)
-    .forSpreadsheet(ss)
-    .onEdit()
-    .create();
-
   ScriptApp.newTrigger(INGEST_CONFIG.changeTriggerHandler)
     .forSpreadsheet(ss)
     .onChange()
+    .create();
+
+  ScriptApp.newTrigger(INGEST_CONFIG.scheduledTriggerHandler)
+    .timeBased()
+    .everyMinutes(INGEST_CONFIG.scheduledEveryMinutes)
     .create();
 
   Logger.log("Ingest triggers installed/refreshed.");
@@ -96,23 +103,6 @@ function bootstrapIngest() {
 }
 
 /**
- * Installable onEdit trigger handler.
- */
-function handleIngestSheetEdit(e) {
-  try {
-    if (!e || !e.range) return;
-    const sheet = e.range.getSheet();
-    const ss = e.source || SpreadsheetApp.getActiveSpreadsheet();
-    const targetSheet = _resolveTargetSheet(ss);
-    if (!targetSheet || !sheet || sheet.getSheetId() !== targetSheet.getSheetId()) return;
-    if (e.range.getRow() <= 1) return; // Ignore header edits.
-    pushCandidatesToRecruitment();
-  } catch (err) {
-    Logger.log(`handleIngestSheetEdit failed: ${err}`);
-  }
-}
-
-/**
  * Installable onChange trigger handler.
  * Runs ingest when rows are inserted.
  */
@@ -123,6 +113,18 @@ function handleIngestSheetChange(e) {
     pushCandidatesToRecruitment();
   } catch (err) {
     Logger.log(`handleIngestSheetChange failed: ${err}`);
+  }
+}
+
+/**
+ * Installable time-driven trigger handler.
+ * Retries rows missed by onChange or failed due transient errors.
+ */
+function runScheduledIngest() {
+  try {
+    pushCandidatesToRecruitment();
+  } catch (err) {
+    Logger.log(`runScheduledIngest failed: ${err}`);
   }
 }
 
@@ -163,6 +165,7 @@ function pushCandidatesToRecruitment() {
     const pending = _collectPendingRows(rows, richRows, headerIndex);
     if (!pending.length) {
       Logger.log("No pending rows to ingest.");
+      _archiveSuccessfulRows(ss, sheet, headers);
       return;
     }
 
@@ -250,6 +253,8 @@ function pushCandidatesToRecruitment() {
         );
       });
     }
+
+    _archiveSuccessfulRows(ss, sheet, headers);
   } finally {
     lock.releaseLock();
   }
@@ -364,6 +369,12 @@ function _shouldSkipRowForStatus(status, row, headerIndex) {
   const normalized = String(status || "").trim().toLowerCase();
   if (!normalized) return false;
 
+  if (normalized === "error") {
+    const retries = _readInt(row, headerIndex, INGEST_CONFIG.retryCountColumn);
+    const maxRetries = Number(INGEST_CONFIG.maxRetries || 0);
+    if (Number.isFinite(maxRetries) && maxRetries > 0 && retries >= maxRetries) return true;
+  }
+
   if (normalized !== "duplicate") {
     return INGEST_CONFIG.skipStatuses.includes(normalized);
   }
@@ -444,9 +455,28 @@ function _writeRowStatus(
   emailStatus,
   emailError
 ) {
-  sheet.getRange(rowNumber, headerIndex[INGEST_CONFIG.statusColumn] + 1).setValue(status || "");
+  const statusRaw = String(status || "").trim().toLowerCase();
+  let finalStatus = statusRaw;
+  let finalMessage = message || "";
+
+  if (statusRaw === "error") {
+    const retries = _readIntFromSheetCell(sheet, rowNumber, headerIndex, INGEST_CONFIG.retryCountColumn);
+    const maxRetries = Number(INGEST_CONFIG.maxRetries || 0);
+    if (Number.isFinite(maxRetries) && maxRetries > 0 && retries >= maxRetries) {
+      finalStatus = "failed_permanent";
+      finalMessage = finalMessage
+        ? `[Max retries reached] ${finalMessage}`
+        : "Max retries reached for this row.";
+    }
+  }
+
+  if (statusRaw === "processing") {
+    _recordAttempt(sheet, rowNumber, headerIndex, ingestedAt);
+  }
+
+  sheet.getRange(rowNumber, headerIndex[INGEST_CONFIG.statusColumn] + 1).setValue(finalStatus);
   sheet.getRange(rowNumber, headerIndex[INGEST_CONFIG.codeColumn] + 1).setValue(code || "");
-  sheet.getRange(rowNumber, headerIndex[INGEST_CONFIG.messageColumn] + 1).setValue(message || "");
+  sheet.getRange(rowNumber, headerIndex[INGEST_CONFIG.messageColumn] + 1).setValue(finalMessage);
   sheet.getRange(rowNumber, headerIndex[INGEST_CONFIG.emailStatusColumn] + 1).setValue(
     emailStatus || ""
   );
@@ -463,7 +493,9 @@ function _ensureOpsColumns(sheet, headers, headerIndex) {
     INGEST_CONFIG.messageColumn,
     INGEST_CONFIG.emailStatusColumn,
     INGEST_CONFIG.emailErrorColumn,
-    INGEST_CONFIG.ingestedAtColumn
+    INGEST_CONFIG.ingestedAtColumn,
+    INGEST_CONFIG.retryCountColumn,
+    INGEST_CONFIG.lastAttemptAtColumn
   ];
 
   let changed = false;
@@ -477,6 +509,129 @@ function _ensureOpsColumns(sheet, headers, headerIndex) {
   if (changed) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   }
+}
+
+function _archiveSuccessfulRows(ss, sourceSheet, sourceHeaders) {
+  const statusColumnName = INGEST_CONFIG.statusColumn;
+  const data = sourceSheet.getDataRange().getValues();
+  if (!data || data.length <= 1) return;
+
+  const headers = data[0].map((h) => String(h || "").trim());
+  const headerIndex = _buildHeaderIndex(headers);
+  const statusIdx = headerIndex[statusColumnName];
+  if (statusIdx == null || statusIdx < 0) return;
+
+  const sourceRowsToArchive = [];
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const status = String(row[statusIdx] || "").trim().toLowerCase();
+    if (!INGEST_CONFIG.archiveStatuses.includes(status)) continue;
+    sourceRowsToArchive.push({ rowNumber: i + 1, row, status });
+  }
+
+  if (!sourceRowsToArchive.length) return;
+
+  const archiveSheet = _getOrCreateArchiveSheet(ss);
+  const archiveHeaders = _ensureArchiveHeaders(archiveSheet, sourceHeaders || headers);
+  const nowIso = new Date().toISOString();
+  const sourceHeaderIndex = _buildHeaderIndex(headers);
+
+  const archiveRows = sourceRowsToArchive.map((entry) => {
+    const output = [];
+    for (let i = 0; i < archiveHeaders.length; i++) {
+      const col = archiveHeaders[i];
+      if (col === "archived_at") {
+        output.push(nowIso);
+        continue;
+      }
+      if (col === "archive_status") {
+        output.push(entry.status);
+        continue;
+      }
+      const srcIdx = sourceHeaderIndex[col];
+      output.push(srcIdx == null ? "" : entry.row[srcIdx]);
+    }
+    return output;
+  });
+
+  const startRow = archiveSheet.getLastRow() + 1;
+  archiveSheet
+    .getRange(startRow, 1, archiveRows.length, archiveHeaders.length)
+    .setValues(archiveRows);
+
+  const rowNumbers = sourceRowsToArchive.map((item) => item.rowNumber);
+  _deleteRowsInDescendingBatches(sourceSheet, rowNumbers);
+  Logger.log(
+    `Archived ${sourceRowsToArchive.length} row(s) to "${archiveSheet.getName()}".`
+  );
+}
+
+function _getOrCreateArchiveSheet(ss) {
+  const name = _normalizeName(INGEST_CONFIG.archiveSheetName) || "Ingest Archive";
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+  }
+  return sheet;
+}
+
+function _ensureArchiveHeaders(archiveSheet, sourceHeaders) {
+  const baseHeaders = (sourceHeaders || []).map((h) => String(h || "").trim());
+  const metaHeaders = ["archived_at", "archive_status"];
+  const desired = baseHeaders.slice();
+  metaHeaders.forEach((h) => {
+    if (!desired.includes(h)) desired.push(h);
+  });
+
+  const lastCol = archiveSheet.getLastColumn();
+  if (lastCol <= 0 || archiveSheet.getLastRow() === 0) {
+    archiveSheet.getRange(1, 1, 1, desired.length).setValues([desired]);
+    return desired;
+  }
+
+  const current = archiveSheet
+    .getRange(1, 1, 1, lastCol)
+    .getValues()[0]
+    .map((h) => String(h || "").trim());
+
+  let changed = false;
+  desired.forEach((header) => {
+    if (current.includes(header)) return;
+    current.push(header);
+    changed = true;
+  });
+
+  if (changed) {
+    archiveSheet.getRange(1, 1, 1, current.length).setValues([current]);
+  }
+
+  return current;
+}
+
+function _deleteRowsInDescendingBatches(sheet, rowNumbers) {
+  if (!rowNumbers || !rowNumbers.length) return;
+  const desc = rowNumbers
+    .filter((n) => Number.isFinite(n) && n > 1)
+    .map((n) => Math.floor(n))
+    .sort((a, b) => b - a);
+  if (!desc.length) return;
+
+  let groupTop = desc[0];
+  let groupCount = 1;
+
+  for (let i = 1; i < desc.length; i++) {
+    const current = desc[i];
+    const previous = desc[i - 1];
+    if (current === previous - 1) {
+      groupCount += 1;
+      continue;
+    }
+    sheet.deleteRows(groupTop - groupCount + 1, groupCount);
+    groupTop = current;
+    groupCount = 1;
+  }
+
+  sheet.deleteRows(groupTop - groupCount + 1, groupCount);
 }
 
 function _buildHeaderIndex(headers) {
@@ -503,6 +658,38 @@ function _readNumber(row, headerIndex, headerName) {
   if (!raw) return null;
   const num = Number(raw);
   return Number.isFinite(num) ? num : null;
+}
+
+function _readInt(row, headerIndex, headerName) {
+  const num = _readNumber(row, headerIndex, headerName);
+  if (!Number.isFinite(num)) return 0;
+  if (num < 0) return 0;
+  return Math.floor(num);
+}
+
+function _readIntFromSheetCell(sheet, rowNumber, headerIndex, headerName) {
+  const idx = headerIndex[headerName];
+  if (idx == null || idx < 0) return 0;
+  const raw = sheet.getRange(rowNumber, idx + 1).getValue();
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return 0;
+  if (num < 0) return 0;
+  return Math.floor(num);
+}
+
+function _recordAttempt(sheet, rowNumber, headerIndex, nowIso) {
+  const retryIdx = headerIndex[INGEST_CONFIG.retryCountColumn];
+  if (retryIdx != null && retryIdx >= 0) {
+    const retryCell = sheet.getRange(rowNumber, retryIdx + 1);
+    const current = Number(retryCell.getValue());
+    const next = Number.isFinite(current) && current >= 0 ? Math.floor(current) + 1 : 1;
+    retryCell.setValue(next);
+  }
+
+  const lastAttemptIdx = headerIndex[INGEST_CONFIG.lastAttemptAtColumn];
+  if (lastAttemptIdx != null && lastAttemptIdx >= 0) {
+    sheet.getRange(rowNumber, lastAttemptIdx + 1).setValue(nowIso || new Date().toISOString());
+  }
 }
 
 function _requiredProp(name) {

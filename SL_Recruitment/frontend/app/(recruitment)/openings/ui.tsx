@@ -12,12 +12,32 @@ type Props = {
   initialOpenings: OpeningListItem[];
 };
 
+function normalizeRoleToken(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function isHrRoleToken(value: unknown): boolean {
+  const token = normalizeRoleToken(value);
+  if (!token) return false;
+  const compact = token.replace(/_/g, "");
+  if (token === "hr" || token.startsWith("hr_") || token.startsWith("hr")) return true;
+  return compact.includes("humanresource");
+}
+
 export function OpeningsClient({ initialOpenings }: Props) {
   const [openings, setOpenings] = useState<OpeningListItem[]>(initialOpenings);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [roles, setRoles] = useState<string[] | null>(null);
   const [platformRoleId, setPlatformRoleId] = useState<number | null>(null);
+  const [platformRoleIds, setPlatformRoleIds] = useState<Array<number | string>>([]);
+  const [platformRoleName, setPlatformRoleName] = useState<string | null>(null);
+  const [platformRoleNames, setPlatformRoleNames] = useState<string[]>([]);
+  const [platformRoleCode, setPlatformRoleCode] = useState<string | null>(null);
+  const [platformRoleCodes, setPlatformRoleCodes] = useState<string[]>([]);
   const [requestedByTooltip, setRequestedByTooltip] = useState<{ opening: OpeningListItem; rect: DOMRect } | null>(null);
   const [requestedByTooltipPos, setRequestedByTooltipPos] = useState<{ left: number; top: number } | null>(null);
   const requestedByTooltipRef = useRef<HTMLDivElement | null>(null);
@@ -37,8 +57,39 @@ export function OpeningsClient({ initialOpenings }: Props) {
 
   const activeCount = useMemo(() => openings.filter((o) => o.is_active).length, [openings]);
 
-  const isSuperadmin = useMemo(() => platformRoleId === 2 || (platformRoleId == null && !!roles?.includes("hr_admin")), [platformRoleId, roles]);
-  const isHr = useMemo(() => platformRoleId === 5 || (platformRoleId == null && !!roles?.includes("hr_exec")), [platformRoleId, roles]);
+  const normalizedRoles = useMemo(
+    () => (roles || []).map((role) => normalizeRoleToken(role)).filter(Boolean),
+    [roles]
+  );
+  const normalizedRoleCodes = useMemo(
+    () => [...platformRoleCodes, platformRoleCode || ""].map((code) => normalizeRoleToken(code)).filter(Boolean),
+    [platformRoleCode, platformRoleCodes]
+  );
+  const normalizedRoleNames = useMemo(
+    () => [...platformRoleNames, platformRoleName || ""].map((name) => normalizeRoleToken(name)).filter(Boolean),
+    [platformRoleName, platformRoleNames]
+  );
+  const allRoleIds = useMemo(() => {
+    const numeric = [platformRoleId, ...(platformRoleIds || [])]
+      .map((id) => (typeof id === "number" ? id : Number(id)))
+      .filter((id) => Number.isFinite(id));
+    return Array.from(new Set(numeric));
+  }, [platformRoleId, platformRoleIds]);
+
+  const isSuperadmin = useMemo(
+    () =>
+      allRoleIds.includes(2) ||
+      normalizedRoleCodes.some((code) => ["2", "superadmin", "s_admin", "super_admin"].includes(code)),
+    [allRoleIds, normalizedRoleCodes]
+  );
+  const isHr = useMemo(
+    () =>
+      allRoleIds.includes(5) ||
+      normalizedRoles.some((token) => isHrRoleToken(token)) ||
+      normalizedRoleCodes.some((token) => isHrRoleToken(token)) ||
+      normalizedRoleNames.some((token) => isHrRoleToken(token)),
+    [allRoleIds, normalizedRoleCodes, normalizedRoleNames, normalizedRoles]
+  );
   const canCreateOpenings = useMemo(() => isSuperadmin, [isSuperadmin]);
   const canToggleOpenings = useMemo(() => isSuperadmin || isHr, [isSuperadmin, isHr]);
   const canEditOpenings = useMemo(() => isSuperadmin, [isSuperadmin]);
@@ -58,10 +109,25 @@ export function OpeningsClient({ initialOpenings }: Props) {
           return;
         }
         if (!res.ok) return;
-        const me = (await res.json()) as { roles?: string[]; platform_role_id?: number | null };
+        const me = (await res.json()) as {
+          roles?: string[] | null;
+          platform_role_id?: number | string | null;
+          platform_role_ids?: Array<number | string> | null;
+          platform_role_name?: string | null;
+          platform_role_names?: string[] | null;
+          platform_role_code?: string | null;
+          platform_role_codes?: string[] | null;
+        };
         if (cancelled) return;
         setRoles(me.roles || []);
-        setPlatformRoleId(me.platform_role_id ?? null);
+        const roleIdRaw = me.platform_role_id ?? null;
+        const roleIdNum = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
+        setPlatformRoleId(Number.isFinite(roleIdNum) ? roleIdNum : null);
+        setPlatformRoleIds((me.platform_role_ids || []) as Array<number | string>);
+        setPlatformRoleName(me.platform_role_name ?? null);
+        setPlatformRoleNames((me.platform_role_names || []).map((name) => String(name || "")));
+        setPlatformRoleCode(me.platform_role_code ?? null);
+        setPlatformRoleCodes((me.platform_role_codes || []).map((code) => String(code || "")));
       } catch {
         // ignore
       }

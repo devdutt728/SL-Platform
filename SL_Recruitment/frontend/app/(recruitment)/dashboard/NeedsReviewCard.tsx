@@ -12,10 +12,10 @@ export default function NeedsReviewCard({ initialMetrics }: Props) {
     <div className="section-card motion-fade-up motion-delay-6 space-y-3 p-4">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <AlarmClock className="h-4 w-4 text-amber-500" />
-          <p className="text-sm font-semibold">Needs review</p>
+          <AlarmClock className="h-4 w-4 text-[var(--brand-color)]" />
+          <p className="text-sm font-semibold text-[var(--dim-grey)]">Needs review</p>
         </div>
-        <span className="rounded-full border border-white/70 bg-white/70 px-2.5 py-1 text-[10px] font-semibold text-slate-700">
+        <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white/70 px-2.5 py-1 text-[10px] font-semibold text-[var(--dim-grey)]">
           Compact
         </span>
       </div>
@@ -67,14 +67,14 @@ export default function NeedsReviewCard({ initialMetrics }: Props) {
           <Link
             key={item.label}
             href={item.href}
-            className="group rounded-xl border border-white/60 bg-white/40 px-3 py-2 shadow-sm transition hover:bg-white/60"
+            className="group rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 shadow-sm transition hover:bg-[var(--surface-card)]"
           >
             <div className="flex items-center justify-between gap-2">
               <div>
-                <p className="text-[12px] font-semibold text-slate-800">{item.label}</p>
-                <p className="text-[11px] text-slate-500">{item.note}</p>
+                <p className="text-[12px] font-semibold text-[var(--dim-grey)]">{item.label}</p>
+                <p className="text-[11px] text-[var(--light-grey)]">{item.note}</p>
               </div>
-              <span className="rounded-full bg-white/60 px-2.5 py-1 text-[11px] font-semibold text-slate-800">
+              <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--dim-grey)]">
                 {item.value}
               </span>
             </div>

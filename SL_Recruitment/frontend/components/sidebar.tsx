@@ -90,10 +90,10 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={clsx(
-                "flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-700 transition",
+                "flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-[var(--dim-grey)] transition",
                 active
-                  ? "bg-white/60 text-slate-900 shadow-md ring-1 ring-white/70"
-                  : "hover:bg-white/40 hover:text-slate-900"
+                  ? "bg-[rgba(231,64,17,0.1)] text-[var(--dim-grey)] shadow-md ring-1 ring-[rgba(231,64,17,0.25)]"
+                  : "hover:bg-white/40 hover:text-[var(--dim-grey)]"
               )}
             >
               <Icon className="h-4 w-4" />
@@ -105,10 +105,10 @@ export function Sidebar() {
           <Link
             href="/superadmin"
             className={clsx(
-              "flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-700 transition",
+              "flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-[var(--dim-grey)] transition",
               normalizedPath.startsWith("/superadmin")
-                ? "bg-white/60 text-slate-900 shadow-md ring-1 ring-white/70"
-                : "hover:bg-white/40 hover:text-slate-900"
+                ? "bg-[rgba(231,64,17,0.1)] text-[var(--dim-grey)] shadow-md ring-1 ring-[rgba(231,64,17,0.25)]"
+                : "hover:bg-white/40 hover:text-[var(--dim-grey)]"
             )}
           >
             <Shield className="h-4 w-4" />

@@ -196,34 +196,34 @@ export default function DashboardClient({
   return (
     <main className="content-pad space-y-6">
       <section className="grid gap-3 lg:grid-cols-3">
-        <div className="section-card motion-fade-up motion-delay-1 relative overflow-hidden border border-slate-200/70 bg-white/75 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(15,118,110,0.18),_transparent_60%)]" />
-          <div className="pointer-events-none absolute -right-16 top-0 h-28 w-28 rounded-full bg-emerald-400/20 blur-2xl" />
+        <div className="section-card motion-fade-up motion-delay-1 relative overflow-hidden border border-[var(--border-soft)] bg-white/75 p-4">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(231,64,17,0.14),_transparent_60%)]" />
+          <div className="pointer-events-none absolute -right-16 top-0 h-28 w-28 rounded-full bg-[rgba(93,85,82,0.14)] blur-2xl" />
           <div className="relative flex items-center justify-between gap-3 pb-1">
             <div>
-              <p className="text-[11px] uppercase tracking-[0.26em] text-slate-500">Snapshot</p>
-              <p className="text-sm font-semibold text-slate-900">Recruitment pulse</p>
+              <p className="text-[11px] uppercase tracking-[0.26em] text-[var(--light-grey)]">Snapshot</p>
+              <p className="text-sm font-semibold text-[var(--dim-grey)]">Recruitment pulse</p>
             </div>
-            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Live</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--light-grey)]">Live</span>
           </div>
           <div className="relative mt-3 grid gap-3 sm:grid-cols-3">
             {[
               {
                 label: "Total applications",
                 value: metrics?.total_applications_received ?? "--",
-                bg: "linear-gradient(135deg, rgba(167, 243, 208, 0.9), rgba(191, 219, 254, 0.7), rgba(255, 255, 255, 0.9))",
+                bg: "linear-gradient(135deg, rgba(231, 64, 17, 0.16), rgba(255, 255, 255, 0.92), rgba(93, 85, 82, 0.08))",
                 href: "/candidates?status_view=all",
               },
               {
                 label: "Active candidates",
                 value: metrics?.total_active_candidates ?? "--",
-                bg: "linear-gradient(135deg, rgba(221, 214, 254, 0.85), rgba(254, 240, 138, 0.65), rgba(255, 255, 255, 0.9))",
+                bg: "linear-gradient(135deg, rgba(93, 85, 82, 0.13), rgba(255, 255, 255, 0.94), rgba(231, 64, 17, 0.12))",
                 href: "/candidates?status_view=active",
               },
               {
                 label: "CAF today",
                 value: metrics?.caf_submitted_today ?? "--",
-                bg: "linear-gradient(135deg, rgba(186, 230, 253, 0.85), rgba(187, 247, 208, 0.65), rgba(255, 255, 255, 0.9))",
+                bg: "linear-gradient(135deg, rgba(231, 64, 17, 0.12), rgba(255, 255, 255, 0.93), rgba(93, 85, 82, 0.1))",
                 href: "/candidates?status_view=all&caf_today=1",
               },
             ].map((item, idx) => (
@@ -238,8 +238,8 @@ export default function DashboardClient({
                   <Link
                     href={item.href}
                     className={clsx(
-                      "group relative block w-full min-h-[132px] overflow-hidden rounded-2xl px-4 py-3 shadow-[0_12px_26px_rgba(15,23,42,0.08)] transition-all duration-200",
-                      "hover:-translate-y-0.5 hover:shadow-[0_18px_36px_rgba(15,23,42,0.12)]"
+                      "group relative block w-full min-h-[132px] overflow-hidden rounded-2xl px-4 py-3 shadow-sm transition-all duration-200",
+                      "hover:-translate-y-0.5 hover:shadow-[var(--shadow-soft-hover)]"
                     )}
                   >
                     <div
@@ -252,17 +252,17 @@ export default function DashboardClient({
                     />
                     <div className="pointer-events-none absolute inset-0 bg-white/35" />
                     <div className="relative flex items-center justify-between">
-                      <p className="max-w-[75%] text-[9px] sm:text-[10px] lg:text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600 leading-snug">
+                      <p className="max-w-[75%] text-[9px] sm:text-[10px] lg:text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--dim-grey)] leading-snug">
                         {item.label}
                       </p>
-                      <span className="text-[9px] sm:text-[10px] lg:text-[11px] font-semibold text-slate-500">tap</span>
+                      <span className="text-[9px] sm:text-[10px] lg:text-[11px] font-semibold text-[var(--light-grey)]">tap</span>
                     </div>
                     <div className="relative mt-3 flex items-baseline justify-between">
-                      <p className="text-[22px] sm:text-[24px] lg:text-[28px] font-semibold text-slate-900">{item.value}</p>
+                      <p className="text-[22px] sm:text-[24px] lg:text-[28px] font-semibold text-[var(--dim-grey)]">{item.value}</p>
                     </div>
                   </Link>
                 ) : (
-                  <div className="group relative min-h-[132px] overflow-hidden rounded-2xl px-4 py-3 shadow-[0_12px_26px_rgba(15,23,42,0.08)] transition-all duration-200">
+                  <div className="group relative min-h-[132px] overflow-hidden rounded-2xl px-4 py-3 shadow-sm transition-all duration-200">
                     <div
                       className="pointer-events-none absolute inset-0"
                       style={{
@@ -273,12 +273,12 @@ export default function DashboardClient({
                     />
                     <div className="pointer-events-none absolute inset-0 bg-white/35" />
                     <div className="relative flex items-center justify-between">
-                      <p className="max-w-[75%] text-[9px] sm:text-[10px] lg:text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600 leading-snug">
+                      <p className="max-w-[75%] text-[9px] sm:text-[10px] lg:text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--dim-grey)] leading-snug">
                         {item.label}
                       </p>
                     </div>
                     <div className="relative mt-3 flex items-baseline justify-between">
-                      <p className="text-[22px] sm:text-[24px] lg:text-[28px] font-semibold text-slate-900">{item.value}</p>
+                      <p className="text-[22px] sm:text-[24px] lg:text-[28px] font-semibold text-[var(--dim-grey)]">{item.value}</p>
                     </div>
                   </div>
                 )}
@@ -286,59 +286,59 @@ export default function DashboardClient({
             ))}
           </div>
         </div>
-        <div className="section-card motion-fade-up motion-delay-2 relative overflow-hidden border border-slate-200/70 bg-white/75 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(2,132,199,0.16),_transparent_60%)]" />
+        <div className="section-card motion-fade-up motion-delay-2 relative overflow-hidden border border-[var(--border-soft)] bg-white/75 p-4">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(231,64,17,0.1),_transparent_60%)]" />
           <div className="relative flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Briefcase className="h-4 w-4 text-slate-800" />
-              <p className="text-sm font-semibold text-slate-900">Openings overview</p>
+              <Briefcase className="h-4 w-4 text-[var(--dim-grey)]" />
+              <p className="text-sm font-semibold text-[var(--dim-grey)]">Openings overview</p>
             </div>
             {canNavigate ? (
-              <Link href="/openings" className="text-xs font-semibold text-slate-600 hover:text-slate-900">
+              <Link href="/openings" className="text-xs font-semibold text-[var(--dim-grey)] hover:text-[var(--brand-color)]">
                 View openings
               </Link>
             ) : (
-              <span className="text-xs font-semibold text-slate-700">View openings</span>
+              <span className="text-xs font-semibold text-[var(--dim-grey)]">View openings</span>
             )}
           </div>
           {canNavigate ? (
             <Link
               href="/openings"
-              className="relative mt-3 flex items-center justify-between rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 shadow-sm transition hover:bg-white hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]"
+              className="relative mt-3 flex items-center justify-between rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-4 py-3 shadow-sm transition hover:bg-[var(--surface-card)]"
             >
               <div>
-                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Active openings</p>
-                <p className="mt-1 text-xs text-slate-600">Roles currently accepting candidates.</p>
+                <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--light-grey)]">Active openings</p>
+                <p className="mt-1 text-xs text-[var(--dim-grey)]">Roles currently accepting candidates.</p>
               </div>
-              <div className="rounded-2xl border border-slate-200/80 bg-slate-50 px-3 py-2 text-2xl font-semibold text-slate-900">
+              <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-2 text-2xl font-semibold text-[var(--dim-grey)]">
                 {metrics?.openings_count ?? "--"}
               </div>
             </Link>
           ) : (
-            <div className="relative mt-3 flex items-center justify-between rounded-2xl border border-slate-200/70 bg-white/70 px-4 py-3 shadow-sm transition">
+            <div className="relative mt-3 flex items-center justify-between rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-4 py-3 shadow-sm transition">
               <div>
-                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Active openings</p>
-                <p className="mt-1 text-xs text-slate-600">Roles currently accepting candidates.</p>
+                <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--light-grey)]">Active openings</p>
+                <p className="mt-1 text-xs text-[var(--dim-grey)]">Roles currently accepting candidates.</p>
               </div>
-              <div className="rounded-2xl border border-slate-200/80 bg-slate-50 px-3 py-2 text-2xl font-semibold text-slate-900">
+              <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-2 text-2xl font-semibold text-[var(--dim-grey)]">
                 {metrics?.openings_count ?? "--"}
               </div>
             </div>
           )}
         </div>
-        <div className="section-card motion-fade-up motion-delay-3 relative overflow-hidden border border-slate-200/70 bg-white/75 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(14,116,144,0.18),_transparent_60%)]" />
+        <div className="section-card motion-fade-up motion-delay-3 relative overflow-hidden border border-[var(--border-soft)] bg-white/75 p-4">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(231,64,17,0.1),_transparent_60%)]" />
           <div className="relative flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <UsersRound className="h-4 w-4 text-slate-800" />
-              <p className="text-sm font-semibold text-slate-900">Offers summary</p>
+              <UsersRound className="h-4 w-4 text-[var(--dim-grey)]" />
+              <p className="text-sm font-semibold text-[var(--dim-grey)]">Offers summary</p>
             </div>
             {canNavigate ? (
-              <Link href="/offers" className="text-xs font-semibold text-slate-600 hover:text-slate-900">
+              <Link href="/offers" className="text-xs font-semibold text-[var(--dim-grey)] hover:text-[var(--brand-color)]">
                 View offers
               </Link>
             ) : (
-              <span className="text-xs font-semibold text-slate-700">View offers</span>
+              <span className="text-xs font-semibold text-[var(--dim-grey)]">View offers</span>
             )}
           </div>
           <div className="relative mt-3 grid gap-2 md:grid-cols-2">
@@ -352,17 +352,17 @@ export default function DashboardClient({
                 {canNavigate ? (
                   <Link
                     href={`/offers?status=${key}`}
-                    className="flex items-center justify-between rounded-xl border border-slate-200/70 bg-white/70 px-3 py-2 shadow-sm transition hover:bg-white hover:shadow-[0_8px_18px_rgba(15,23,42,0.08)]"
+                    className="flex items-center justify-between rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 shadow-sm transition hover:bg-[var(--surface-card)]"
                   >
-                    <p className="text-[12px] font-semibold text-slate-700">{label}</p>
-                    <span className="rounded-full border border-slate-200/70 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-800">
+                    <p className="text-[12px] font-semibold text-[var(--dim-grey)]">{label}</p>
+                    <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--dim-grey)]">
                       {offerSummary[key] ?? 0}
                     </span>
                   </Link>
                 ) : (
-                  <div className="flex items-center justify-between rounded-xl border border-slate-200/70 bg-white/70 px-3 py-2 shadow-sm transition">
-                    <p className="text-[12px] font-semibold text-slate-700">{label}</p>
-                    <span className="rounded-full border border-slate-200/70 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-800">
+                  <div className="flex items-center justify-between rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 shadow-sm transition">
+                    <p className="text-[12px] font-semibold text-[var(--dim-grey)]">{label}</p>
+                    <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--dim-grey)]">
                       {offerSummary[key] ?? 0}
                     </span>
                   </div>
@@ -374,18 +374,18 @@ export default function DashboardClient({
       </section>
 
       <section className="grid gap-3 lg:grid-cols-3">
-        <div className="section-card motion-fade-up motion-delay-5 lg:col-span-2 border border-slate-200/70 bg-white/75 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
+        <div className="section-card motion-fade-up motion-delay-5 lg:col-span-2 border border-[var(--border-soft)] bg-white/75 p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <LayoutPanelLeft className="h-4 w-4 text-slate-800" />
-              <p className="text-sm font-semibold text-slate-900">Pipeline</p>
+              <LayoutPanelLeft className="h-4 w-4 text-[var(--dim-grey)]" />
+              <p className="text-sm font-semibold text-[var(--dim-grey)]">Pipeline</p>
             </div>
             {canNavigatePipeline ? (
-              <Link href="/candidates" className="text-xs font-semibold text-slate-600 hover:text-slate-900">
+              <Link href="/candidates" className="text-xs font-semibold text-[var(--dim-grey)] hover:text-[var(--brand-color)]">
                 Open candidates
               </Link>
             ) : (
-              <span className="text-xs font-semibold text-slate-700">Open candidates</span>
+              <span className="text-xs font-semibold text-[var(--dim-grey)]">Open candidates</span>
             )}
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
@@ -397,22 +397,22 @@ export default function DashboardClient({
                   key={stage.key}
                   href={`/candidates?status_view=${statusView}&stage=${encodeURIComponent(stage.key)}`}
                   className={clsx(
-                    "group relative overflow-hidden rounded-2xl border border-slate-200/70 bg-white/70 p-3 shadow-sm transition-all duration-200",
-                    canNavigatePipeline ? "hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]" : ""
+                    "group relative overflow-hidden rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/70 p-3 shadow-sm transition-all duration-200",
+                    canNavigatePipeline ? "hover:-translate-y-0.5 hover:bg-[var(--surface-card)] hover:shadow-[var(--shadow-soft-hover)]" : ""
                   )}
                 >
                   <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(15,23,42,0.06),_transparent_55%)] opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
                   <div className="relative flex items-center justify-between gap-3">
-                    <p className="text-[11px] font-semibold text-slate-600">{stage.label}</p>
-                    <span className="text-[10px] font-semibold text-slate-400">{pct}%</span>
+                    <p className="text-[11px] font-semibold text-[var(--dim-grey)]">{stage.label}</p>
+                    <span className="text-[10px] font-semibold text-[var(--light-grey)]">{pct}%</span>
                   </div>
                   <div className="relative mt-2 flex items-baseline justify-between">
-                    <p className="text-2xl font-semibold text-slate-900">{stage.count}</p>
-                    <span className="text-[10px] text-slate-400">applicants</span>
+                    <p className="text-2xl font-semibold text-[var(--dim-grey)]">{stage.count}</p>
+                    <span className="text-[10px] text-[var(--light-grey)]">applicants</span>
                   </div>
                   <div className="relative mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100">
                     <div
-                      className="h-full rounded-full bg-gradient-to-r from-slate-900 via-slate-700 to-slate-500 transition-all duration-300"
+                      className="h-full rounded-full bg-gradient-to-r from-[var(--brand-color)] via-[rgba(231,64,17,0.72)] to-[rgba(93,85,82,0.8)] transition-all duration-300"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -421,28 +421,28 @@ export default function DashboardClient({
             })}
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-3">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Post-offer</p>
+            <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/70 p-3">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--light-grey)]">Post-offer</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {postOfferList.map((stage) => (
                   <PipelineItem
                     key={stage.key}
                     href={`/candidates?status_view=active&stage=${encodeURIComponent(stage.key)}`}
                     className={clsx(
-                      "inline-flex items-center gap-2 rounded-full border border-emerald-200/70 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800",
-                      canNavigatePipeline ? "hover:bg-emerald-100" : ""
+                      "inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800",
+                      canNavigatePipeline ? "hover:bg-amber-100" : ""
                     )}
                   >
                     <span>{stage.label}</span>
-                    <span className="rounded-full border border-emerald-200/70 bg-white px-2 py-0.5 text-[10px] font-semibold text-emerald-900">
+                    <span className="rounded-full border border-amber-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-amber-900">
                       {stage.count}
                     </span>
                   </PipelineItem>
                 ))}
               </div>
             </div>
-            <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-3">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Outcomes</p>
+            <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/70 p-3">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--light-grey)]">Outcomes</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {outcomeList.map((stage) => {
                   const statusView = stage.key === "hired" ? "hired" : "rejected";
@@ -452,14 +452,14 @@ export default function DashboardClient({
                       href={`/candidates?status_view=${statusView}&stage=${encodeURIComponent(stage.key)}`}
                       className={clsx(
                         "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold",
-                        canNavigatePipeline ? "hover:opacity-90" : "",
+                        canNavigatePipeline ? "hover:opacity-95" : "",
                         stage.key === "hired"
-                          ? "border-emerald-200/70 bg-emerald-50 text-emerald-800"
-                          : "border-rose-200/70 bg-rose-50 text-rose-800"
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                          : "border-rose-200 bg-rose-50 text-rose-800"
                       )}
                     >
                       <span>{stage.label}</span>
-                      <span className="rounded-full border border-slate-200/70 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-900">
+                      <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-2 py-0.5 text-[10px] font-semibold text-[var(--dim-grey)]">
                         {stage.count}
                       </span>
                     </PipelineItem>
@@ -476,26 +476,26 @@ export default function DashboardClient({
       <section className="grid gap-3 lg:grid-cols-3">
         {!hideActivityClient ? <RecentActivityCard events={events} /> : null}
 
-        <div className="section-card motion-fade-up motion-delay-8 border border-slate-200/70 bg-white/75 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
+        <div className="section-card motion-fade-up motion-delay-8 border border-[var(--border-soft)] bg-white/75 p-4">
           <div className="flex items-center gap-2">
-            <UsersRound className="h-4 w-4 text-slate-800" />
-            <p className="text-sm font-semibold text-slate-900">Quick links</p>
+            <UsersRound className="h-4 w-4 text-[var(--brand-color)]" />
+            <p className="text-sm font-semibold text-[var(--dim-grey)]">Quick links</p>
           </div>
           {canNavigate ? (
-            <ul className="mt-3 space-y-2 text-sm text-slate-700">
+            <ul className="mt-3 space-y-2 text-sm text-[var(--dim-grey)]">
               <li>
-                <Link href="/candidates" className="font-semibold text-slate-700 hover:text-slate-900">
+                <Link href="/candidates" className="font-semibold text-[var(--dim-grey)] hover:text-[var(--brand-color)]">
                   Candidates control panel
                 </Link>
               </li>
               <li>
-                <Link href="/openings" className="font-semibold text-slate-700 hover:text-slate-900">
+                <Link href="/openings" className="font-semibold text-[var(--dim-grey)] hover:text-[var(--brand-color)]">
                   Openings
                 </Link>
               </li>
             </ul>
           ) : (
-            <p className="mt-3 text-sm text-slate-600">Quick links are disabled for this role.</p>
+            <p className="mt-3 text-sm text-[var(--dim-grey)]">Quick links are disabled for this role.</p>
           )}
         </div>
       </section>
