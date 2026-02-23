@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
@@ -26,18 +26,85 @@ from app.services.event_bus import event_bus
 router = APIRouter(prefix="/rec", tags=["dashboard"])
 
 
+def _normalize_role_token(value: object) -> str:
+    token = str(value or "").strip().lower()
+    if not token:
+        return ""
+    return token.replace("-", "_").replace(" ", "_")
+
+
+def _is_hr_actor(user: UserContext) -> bool:
+    roles = set(user.roles or [])
+    if Role.HR_ADMIN in roles or Role.HR_EXEC in roles:
+        return True
+
+    role_tokens = set()
+    for value in (user.platform_role_codes or []):
+        normalized = _normalize_role_token(value)
+        if normalized:
+            role_tokens.add(normalized)
+    for value in (user.platform_role_names or []):
+        normalized = _normalize_role_token(value)
+        if normalized:
+            role_tokens.add(normalized)
+    for value in [user.platform_role_code, user.platform_role_name]:
+        normalized = _normalize_role_token(value)
+        if normalized:
+            role_tokens.add(normalized)
+
+    for token in role_tokens:
+        compact = token.replace("_", "")
+        if token == "hr" or token.startswith("hr_") or token.startswith("hr"):
+            return True
+        if "humanresource" in compact:
+            return True
+    return False
+
+
+def _is_superadmin_actor(user: UserContext) -> bool:
+    if (user.platform_role_id or None) == 2:
+        return True
+    if user.platform_role_ids and 2 in user.platform_role_ids:
+        return True
+
+    role_tokens = set()
+    for value in (user.platform_role_codes or []):
+        normalized = _normalize_role_token(value)
+        if normalized:
+            role_tokens.add(normalized)
+    for value in (user.platform_role_names or []):
+        normalized = _normalize_role_token(value)
+        if normalized:
+            role_tokens.add(normalized)
+    for value in [user.platform_role_code, user.platform_role_name]:
+        normalized = _normalize_role_token(value)
+        if normalized:
+            role_tokens.add(normalized)
+
+    return bool({"2", "superadmin", "super_admin", "s_admin"} & role_tokens)
+
+
+def _can_view_dashboard(user: UserContext) -> bool:
+    if _is_superadmin_actor(user) or _is_hr_actor(user):
+        return True
+    roles = set(user.roles or [])
+    return bool({Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER} & roles)
+
+
 @router.get("/dashboard", response_model=DashboardMetricsOut)
 async def get_dashboard_metrics(
     stuck_days: int = Query(default=5, ge=1, le=60),
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(deps.get_user),
 ):
+    if not _can_view_dashboard(user):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     today = func.curdate()
     now = func.now()
 
     roles = set(user.roles or [])
-    is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
-    is_superadmin = (user.platform_role_id or None) == 2
+    is_hr = _is_hr_actor(user)
+    is_superadmin = _is_superadmin_actor(user)
     is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
     is_role6 = (user.platform_role_id or None) == 6 or (user.platform_role_code or "").strip() == "6"
     interviewer_id = (user.person_id_platform or "").strip()
@@ -264,11 +331,13 @@ async def list_recent_events(
     limit: int = Query(default=15, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(deps.get_user),
 ):
-    is_superadmin = (user.platform_role_id or None) == 2 or Role.HR_ADMIN in user.roles
+    if not _can_view_dashboard(user):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    is_superadmin = _is_superadmin_actor(user) or Role.HR_ADMIN in user.roles
     roles = set(user.roles or [])
-    is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
+    is_hr = _is_hr_actor(user)
     is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
     is_role6 = (user.platform_role_id or None) == 6 or (user.platform_role_code or "").strip() == "6"
     interviewer_id = (user.person_id_platform or "").strip()

@@ -109,19 +109,51 @@ def _is_hr_actor(user: UserContext) -> bool:
     return False
 
 
+def _is_superadmin_actor(user: UserContext) -> bool:
+    if (user.platform_role_id or None) == 2:
+        return True
+    if user.platform_role_ids and 2 in user.platform_role_ids:
+        return True
+
+    role_tokens = set()
+    for value in (user.platform_role_codes or []):
+        normalized = _normalize_role_token(value)
+        if normalized:
+            role_tokens.add(normalized)
+    for value in (user.platform_role_names or []):
+        normalized = _normalize_role_token(value)
+        if normalized:
+            role_tokens.add(normalized)
+    for value in [user.platform_role_code, user.platform_role_name]:
+        normalized = _normalize_role_token(value)
+        if normalized:
+            role_tokens.add(normalized)
+
+    return bool({"2", "superadmin", "super_admin", "s_admin"} & role_tokens)
+
+
+def _can_view_openings(user: UserContext) -> bool:
+    if _is_superadmin_actor(user) or _is_hr_actor(user):
+        return True
+    roles = set(user.roles or [])
+    return bool({Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER} & roles)
+
+
 @router.get("", response_model=list[OpeningListItem])
 async def list_openings(
     is_active: bool | None = Query(default=None),
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(deps.get_user),
 ):
+    if not _can_view_openings(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     # MySQL doesn't support NULLS LAST; emulate by ordering NULLs first flag, then desc.
     query = select(RecOpening).order_by(RecOpening.updated_at.is_(None), RecOpening.updated_at.desc(), RecOpening.opening_id.desc())
     if is_active is not None:
         query = query.where(RecOpening.is_active == (1 if is_active else 0))
     roles = set(user.roles or [])
-    is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
-    is_superadmin = (user.platform_role_id or None) == 2
+    is_hr = _is_hr_actor(user)
+    is_superadmin = _is_superadmin_actor(user)
     # Keep interviewer/GL restricted to their own openings; hiring managers should
     # still be able to view portal openings they need to hire against.
     is_restricted_view = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles
@@ -222,16 +254,18 @@ async def list_openings(
 async def get_opening_by_code(
     opening_code: str,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(deps.get_user),
 ):
+    if not _can_view_openings(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     opening = (
         await session.execute(select(RecOpening).where(RecOpening.opening_code == opening_code).limit(1))
     ).scalars().first()
     if not opening:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opening not found")
     roles = set(user.roles or [])
-    is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
-    is_superadmin = (user.platform_role_id or None) == 2
+    is_hr = _is_hr_actor(user)
+    is_superadmin = _is_superadmin_actor(user)
     is_restricted_view = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles
     if is_restricted_view and not is_hr and not is_superadmin:
         requested_by = _clean_platform_person_id(user.person_id_platform)
@@ -421,14 +455,16 @@ async def create_opening_request(
 async def get_opening(
     opening_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(deps.get_user),
 ):
+    if not _can_view_openings(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     opening = await session.get(RecOpening, opening_id)
     if not opening:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opening not found")
     roles = set(user.roles or [])
-    is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
-    is_superadmin = (user.platform_role_id or None) == 2
+    is_hr = _is_hr_actor(user)
+    is_superadmin = _is_superadmin_actor(user)
     is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
     if is_interviewer and not is_hr and not is_superadmin:
         requested_by = _clean_platform_person_id(user.person_id_platform)

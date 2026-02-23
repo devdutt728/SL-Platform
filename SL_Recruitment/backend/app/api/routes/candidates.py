@@ -445,9 +445,16 @@ async def _send_assessment_link_for_l2_shortlist(
     *,
     candidate: RecCandidate,
     user: UserContext,
-) -> None:
+    force_resend: bool = False,
+    trigger_source: str = "l2_shortlist",
+) -> dict[str, str | bool | None]:
     if not candidate.email:
-        return
+        return {
+            "attempted": False,
+            "status": "skipped",
+            "reason": "missing_recipient",
+            "assessment_token": None,
+        }
 
     assessment = (
         await session.execute(
@@ -471,14 +478,32 @@ async def _send_assessment_link_for_l2_shortlist(
     if not assessment.assessment_token:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Assessment token unavailable")
 
-    # Send only once on first L2-shortlist issuance.
-    if assessment.assessment_sent_at is not None:
-        return
     if assessment.assessment_submitted_at is not None:
-        return
+        return {
+            "attempted": False,
+            "status": "skipped",
+            "reason": "already_submitted",
+            "assessment_token": assessment.assessment_token,
+        }
 
-    assessment.assessment_sent_at = now
-    assessment.updated_at = now
+    latest_email_meta = await _latest_email_meta(
+        session,
+        candidate_id=candidate.candidate_id,
+        email_type="assessment_link",
+    )
+    latest_status = _strip_optional(str((latest_email_meta or {}).get("status") or ""))
+
+    should_send = force_resend or assessment.assessment_sent_at is None
+    # Optional auto-retry: if an earlier assessment email failed, retry on next L2 transition.
+    if not should_send and latest_status == "failed":
+        should_send = True
+    if not should_send:
+        return {
+            "attempted": False,
+            "status": "skipped",
+            "reason": "already_sent",
+            "assessment_token": assessment.assessment_token,
+        }
 
     await log_event(
         session,
@@ -487,11 +512,14 @@ async def _send_assessment_link_for_l2_shortlist(
         performed_by_person_id_platform=_platform_person_id(user),
         related_entity_type="candidate",
         related_entity_id=candidate.candidate_id,
-        meta_json={"assessment_token": assessment.assessment_token, "reason": "l2_shortlist"},
+        meta_json={
+            "assessment_token": assessment.assessment_token,
+            "reason": "l2_shortlist" if trigger_source == "l2_shortlist" else trigger_source,
+        },
     )
 
     assessment_link = build_public_link(f"/assessment/{assessment.assessment_token}")
-    await send_email(
+    email_meta = await send_email(
         session,
         candidate_id=candidate.candidate_id,
         to_emails=[candidate.email],
@@ -505,9 +533,21 @@ async def _send_assessment_link_for_l2_shortlist(
         email_type="assessment_link",
         meta_extra={
             "assessment_token": assessment.assessment_token,
-            "trigger_stage": "l2_shortlist",
+            "trigger_stage": trigger_source,
         },
     )
+    email_status = _strip_optional(str(email_meta.get("status") or "")) or "unknown"
+    if email_status != "failed":
+        assessment.assessment_sent_at = now
+        assessment.updated_at = now
+
+    return {
+        "attempted": True,
+        "status": email_status,
+        "reason": None,
+        "assessment_token": assessment.assessment_token,
+        "error": _strip_optional(str(email_meta.get("error") or "")),
+    }
 
 
 def _require_sheet_ingest_token(token: str | None) -> None:
@@ -1683,7 +1723,6 @@ async def get_candidate_assessment_link(
         assessment = RecCandidateAssessment(
             candidate_id=candidate_id,
             assessment_token=uuid4().hex,
-            assessment_sent_at=now,
             created_at=now,
             updated_at=now,
         )
@@ -1691,12 +1730,8 @@ async def get_candidate_assessment_link(
         generated = True
     elif not assessment.assessment_token:
         assessment.assessment_token = uuid4().hex
-        assessment.assessment_sent_at = now
         assessment.updated_at = now
         generated = True
-    elif assessment.assessment_sent_at is None:
-        assessment.assessment_sent_at = now
-        assessment.updated_at = now
 
     if not assessment.assessment_token:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Assessment token unavailable")
@@ -1717,6 +1752,43 @@ async def get_candidate_assessment_link(
         "assessment_token": assessment.assessment_token,
         "assessment_url": build_public_path(f"/assessment/{assessment.assessment_token}"),
     }
+
+
+@router.post("/{candidate_id}/assessment-link/resend")
+async def resend_candidate_assessment_link(
+    candidate_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+
+    send_result = await _send_assessment_link_for_l2_shortlist(
+        session,
+        candidate=candidate,
+        user=user,
+        force_resend=True,
+        trigger_source="manual_resend",
+    )
+    await session.commit()
+
+    assessment_token = _strip_optional(str(send_result.get("assessment_token") or ""))
+    payload = {
+        "candidate_id": candidate_id,
+        "attempted": bool(send_result.get("attempted")),
+        "email_status": _strip_optional(str(send_result.get("status") or "")) or "unknown",
+    }
+    if assessment_token:
+        payload["assessment_token"] = assessment_token
+        payload["assessment_url"] = build_public_path(f"/assessment/{assessment_token}")
+    reason = _strip_optional(str(send_result.get("reason") or ""))
+    if reason:
+        payload["reason"] = reason
+    error = _strip_optional(str(send_result.get("error") or ""))
+    if error:
+        payload["email_error"] = error
+    return payload
 
 
 @router.patch("/{candidate_id}", response_model=CandidateDetailOut)

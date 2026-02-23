@@ -120,6 +120,10 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
   };
 
   useEffect(() => {
+    void refreshOpenings();
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     let inFlight = false;
     let pending = false;
