@@ -720,6 +720,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   });
 
   const candidate = data.candidate;
+  const assessment = data.assessment as CandidateAssessment | null | undefined;
   const candidateInitials = useMemo(() => {
     const parts = (candidate.name || "").trim().split(/\s+/).filter(Boolean);
     const first = parts[0]?.[0] || "";
@@ -727,9 +728,12 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     return (first + second).toUpperCase() || "C";
   }, [candidate.name]);
   const currentStageKey = normalizeStage(candidate.current_stage);
-  const cafLocked = !candidate.caf_submitted_at;
+  const cafAssessmentSentAt = assessment?.assessment_sent_at || null;
+  const cafAssessmentSubmittedAt = assessment?.assessment_submitted_at || candidate.caf_submitted_at || null;
+  const cafGateActive = !!cafAssessmentSentAt;
+  const cafLocked = cafGateActive && !cafAssessmentSubmittedAt;
   const cafExpiryDays = 3;
-  const cafSentAt = candidate.caf_sent_at ? new Date(candidate.caf_sent_at) : null;
+  const cafSentAt = cafAssessmentSentAt ? new Date(cafAssessmentSentAt) : null;
   const cafExpiresAt = cafSentAt ? new Date(cafSentAt.getTime() + cafExpiryDays * 24 * 60 * 60 * 1000) : null;
   const cafDaysLeft =
     cafExpiresAt && cafSentAt
@@ -773,12 +777,12 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }, [searchParams, autoRescheduleOpened]);
 
   const cafState = useMemo(() => {
-    const generated = !!candidate.caf_sent_at || !!cafLink?.caf_token;
-    const submitted = !!candidate.caf_submitted_at;
+    const generated = cafGateActive;
+    const submitted = !!cafAssessmentSubmittedAt;
     if (submitted) return { label: "CAF submitted", tone: chipTone("green") };
     if (generated) return { label: "CAF pending", tone: chipTone("amber") };
-    return { label: "CAF not sent", tone: chipTone("neutral") };
-  }, [candidate.caf_sent_at, candidate.caf_submitted_at, cafLink?.caf_token]);
+    return { label: "CAF not shared", tone: chipTone("neutral") };
+  }, [cafAssessmentSubmittedAt, cafGateActive]);
   const l2FeedbackEvent = useMemo(() => {
     const list = interviews || [];
     const submitted = list
@@ -1867,7 +1871,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       return [
         {
           label: "Reject (CAF pending)",
-          tone: "bg-rose-600 hover:bg-rose-700",
+          tone: "btn-action-danger",
           icon: <XCircle className="h-4 w-4" />,
           intent: "reject",
           action: () => handleTransition("rejected", "reject"),
@@ -1878,21 +1882,21 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       return [
         {
           label: "Advance to L2 shortlist",
-          tone: "bg-emerald-600 hover:bg-emerald-700",
+          tone: "btn-action-success",
           icon: <CheckCircle2 className="h-4 w-4" />,
           intent: "advance",
           action: () => handleTransition("l2_shortlist", "advance"),
         },
         {
           label: "Reject after HR screening",
-          tone: "bg-rose-600 hover:bg-rose-700",
+          tone: "btn-action-danger",
           icon: <XCircle className="h-4 w-4" />,
           intent: "reject",
           action: () => handleTransition("rejected", "reject"),
         },
         {
           label: "Review screening",
-          tone: "bg-slate-900 hover:bg-slate-800",
+          tone: "btn-action-neutral",
           icon: <Layers className="h-4 w-4" />,
           intent: "review",
           action: () => focusSection("screening", screeningRef),
@@ -1903,7 +1907,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       return [
         {
           label: "Move to HR screening",
-          tone: "bg-emerald-600 hover:bg-emerald-700",
+          tone: "btn-action-success",
           icon: <CheckCircle2 className="h-4 w-4" />,
           intent: "advance",
           disabled: !candidate.l2_owner_email,
@@ -1911,7 +1915,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         },
         {
           label: "Reject",
-          tone: "bg-rose-600 hover:bg-rose-700",
+          tone: "btn-action-danger",
           icon: <XCircle className="h-4 w-4" />,
           intent: "reject",
           action: () => handleTransition("rejected", "reject"),
@@ -1922,7 +1926,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       const actions = [];
       actions.push({
         label: "Advance to L2 interview",
-        tone: "bg-emerald-600 hover:bg-emerald-700",
+        tone: "btn-action-success",
         icon: <CheckCircle2 className="h-4 w-4" />,
         intent: "advance",
         action: () => handleTransition("l2_interview", "advance"),
@@ -1930,7 +1934,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       if (canSchedule) {
         actions.push({
           label: "Schedule L2 interview",
-          tone: "bg-slate-900 hover:bg-slate-800",
+          tone: "btn-action-neutral",
           icon: <CheckCircle2 className="h-4 w-4" />,
           intent: "review",
           action: () => {
@@ -1944,7 +1948,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       }
       actions.push({
         label: "Go to interviews",
-        tone: "bg-slate-900 hover:bg-slate-800",
+        tone: "btn-action-neutral",
         icon: <Layers className="h-4 w-4" />,
         intent: "review",
         action: () => focusSection("interviews", interviewsRef),
@@ -1956,7 +1960,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       if (canSchedule) {
         actions.push({
           label: "Schedule L2 interview",
-          tone: "bg-emerald-600 hover:bg-emerald-700",
+          tone: "btn-action-success",
           icon: <CheckCircle2 className="h-4 w-4" />,
           intent: "advance",
           action: () => {
@@ -1967,7 +1971,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       }
       actions.push({
         label: "Go to interviews",
-        tone: "bg-slate-900 hover:bg-slate-800",
+        tone: "btn-action-neutral",
         icon: <Layers className="h-4 w-4" />,
         intent: "review",
         action: () => focusSection("interviews", interviewsRef),
@@ -1978,21 +1982,21 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       return [
         {
           label: "Advance to sprint",
-          tone: "bg-emerald-600 hover:bg-emerald-700",
+          tone: "btn-action-success",
           icon: <CheckCircle2 className="h-4 w-4" />,
           intent: "advance",
           action: () => handleTransition("sprint", "advance"),
         },
         {
           label: "Reject after L2 feedback",
-          tone: "bg-rose-600 hover:bg-rose-700",
+          tone: "btn-action-danger",
           icon: <XCircle className="h-4 w-4" />,
           intent: "reject",
           action: () => handleTransition("rejected", "reject"),
         },
         {
           label: "Go to interviews",
-          tone: "bg-slate-900 hover:bg-slate-800",
+          tone: "btn-action-neutral",
           icon: <Layers className="h-4 w-4" />,
           intent: "review",
           action: () => focusSection("interviews", interviewsRef),
@@ -2004,7 +2008,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       if (canSchedule) {
         actions.push({
           label: "Schedule L1 interview",
-          tone: "bg-emerald-600 hover:bg-emerald-700",
+          tone: "btn-action-success",
           icon: <CheckCircle2 className="h-4 w-4" />,
           intent: "advance",
           action: () => {
@@ -2015,7 +2019,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       }
       actions.push({
         label: "Go to interviews",
-        tone: "bg-slate-900 hover:bg-slate-800",
+        tone: "btn-action-neutral",
         icon: <Layers className="h-4 w-4" />,
         intent: "review",
         action: () => focusSection("interviews", interviewsRef),
@@ -2026,7 +2030,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       const actions = [];
       actions.push({
         label: "Advance to L1 interview",
-        tone: "bg-emerald-600 hover:bg-emerald-700",
+        tone: "btn-action-success",
         icon: <CheckCircle2 className="h-4 w-4" />,
         intent: "advance",
         action: () => handleTransition("l1_interview", "advance"),
@@ -2034,7 +2038,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       if (canSchedule) {
         actions.push({
           label: "Schedule L1 interview",
-          tone: "bg-slate-900 hover:bg-slate-800",
+          tone: "btn-action-neutral",
           icon: <CheckCircle2 className="h-4 w-4" />,
           intent: "review",
           action: () => {
@@ -2048,7 +2052,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       }
       actions.push({
         label: "Go to interviews",
-        tone: "bg-slate-900 hover:bg-slate-800",
+        tone: "btn-action-neutral",
         icon: <Layers className="h-4 w-4" />,
         intent: "review",
         action: () => focusSection("interviews", interviewsRef),
@@ -2059,21 +2063,21 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       return [
         {
           label: "Advance to offer",
-          tone: "bg-emerald-600 hover:bg-emerald-700",
+          tone: "btn-action-success",
           icon: <CheckCircle2 className="h-4 w-4" />,
           intent: "advance",
           action: () => handleTransition("offer", "advance"),
         },
         {
           label: "Reject after L1 feedback",
-          tone: "bg-rose-600 hover:bg-rose-700",
+          tone: "btn-action-danger",
           icon: <XCircle className="h-4 w-4" />,
           intent: "reject",
           action: () => handleTransition("rejected", "reject"),
         },
         {
           label: "Go to interviews",
-          tone: "bg-slate-900 hover:bg-slate-800",
+          tone: "btn-action-neutral",
           icon: <Layers className="h-4 w-4" />,
           intent: "review",
           action: () => focusSection("interviews", interviewsRef),
@@ -2085,7 +2089,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       if (hasSubmittedSprint) {
         actions.push({
           label: "Advance to L1 shortlist",
-          tone: "bg-emerald-600 hover:bg-emerald-700",
+          tone: "btn-action-success",
           icon: <CheckCircle2 className="h-4 w-4" />,
           intent: "advance",
           action: () => handleTransition("l1_shortlist", "advance"),
@@ -2094,7 +2098,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       actions.push(
         {
           label: "Assign sprint",
-          tone: "bg-emerald-600 hover:bg-emerald-700",
+          tone: "btn-action-success",
           icon: <CheckCircle2 className="h-4 w-4" />,
           intent: "advance",
           disabled: sprintAssignDisabled,
@@ -2105,7 +2109,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
         },
         {
           label: "Go to sprint",
-          tone: "bg-slate-900 hover:bg-slate-800",
+          tone: "btn-action-neutral",
           icon: <Layers className="h-4 w-4" />,
           intent: "review",
           action: () => focusSection("sprint", sprintRef),
@@ -2117,7 +2121,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       return [
         {
           label: "Go to offer",
-          tone: "bg-slate-900 hover:bg-slate-800",
+          tone: "btn-action-neutral",
           icon: <Layers className="h-4 w-4" />,
           intent: "review",
           action: () => focusSection("offer", offerRef),
@@ -2128,7 +2132,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       return [
         {
           label: "Go to documents",
-          tone: "bg-slate-900 hover:bg-slate-800",
+          tone: "btn-action-neutral",
           icon: <Layers className="h-4 w-4" />,
           intent: "review",
           action: () => focusSection("documents", documentsRef),
@@ -2139,7 +2143,6 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef, cafLocked, candidate.l2_owner_email, sprintAssignDisabled, hasSubmittedSprint]);
 
   const screening = data.screening as Screening | null | undefined;
-  const assessment = data.assessment as CandidateAssessment | null | undefined;
   const interviewUpcoming = useMemo(() => {
     if (!interviews) return [] as Interview[];
     const now = new Date();
@@ -2281,10 +2284,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
 
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <Chip className={cafState.tone}>{cafState.label}</Chip>
-              {candidate.caf_submitted_at ? (
-                <span className="text-xs text-slate-600">Submitted: {formatDateTime(candidate.caf_submitted_at)}</span>
-              ) : candidate.caf_sent_at ? (
-                <span className="text-xs text-slate-600">Sent: {formatDateTime(candidate.caf_sent_at)}</span>
+              {cafAssessmentSubmittedAt ? (
+                <span className="text-xs text-slate-600">Submitted: {formatDateTime(cafAssessmentSubmittedAt)}</span>
+              ) : cafAssessmentSentAt ? (
+                <span className="text-xs text-slate-600">Sent: {formatDateTime(cafAssessmentSentAt)}</span>
               ) : null}
             </div>
             {l2FeedbackEvent ? (
@@ -2313,8 +2316,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
               <Link
                 href={`/candidates/${encodeURIComponent(candidateId)}/caf`}
                 className={clsx(
-                  "inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold",
-                  "bg-teal-600 text-white hover:bg-teal-700"
+                  "btn-action-neutral inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-white shadow-card"
                 )}
               >
                 <ExternalLink className="h-4 w-4" />
@@ -2372,7 +2374,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                         </p>
                       </div>
                       <div className="text-right text-xs text-slate-600">
-                        {cafSentAt ? <p>Sent: {formatDateTime(candidate.caf_sent_at)}</p> : null}
+                        {cafAssessmentSentAt ? <p>Sent: {formatDateTime(cafAssessmentSentAt)}</p> : null}
                         {cafExpiresAt ? <p>Expires: {formatDate(cafExpiresAt.toISOString())}</p> : null}
                         {cafDaysLeft != null ? <p>{cafDaysLeft} days left</p> : null}
                       </div>
@@ -3289,14 +3291,12 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                                           </div>
                                         ) : null}
                                         {item.round_type.toLowerCase().includes("l1") || item.round_type.toLowerCase().includes("l2") ? (
-                                          <a
+                                          <Link
                                             className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
-                                            href={`${process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment"}/interviews/${encodeURIComponent(
-                                              String(item.candidate_interview_id),
-                                            )}`}
+                                            href={`/interviews/${encodeURIComponent(String(item.candidate_interview_id))}`}
                                           >
                                             {item.round_type.toLowerCase().includes("l1") ? "Open L1 assessment" : "Open L2 assessment"}
-                                          </a>
+                                          </Link>
                                         ) : null}
                                       </div>
                                     ) : null}
@@ -3816,14 +3816,14 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                               <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Links</p>
                               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-700">
                                 {sprint.public_token && sprint.status !== "submitted" ? (
-                                  <a
+                                  <Link
                                     className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
-                                    href={`${basePath}/sprint/${encodeURIComponent(sprint.public_token)}`}
+                                    href={`/sprint/${encodeURIComponent(sprint.public_token)}`}
                                     target="_blank"
                                     rel="noreferrer"
                                   >
                                     <ExternalLink className="h-3.5 w-3.5" /> Open sprint page
-                                  </a>
+                                  </Link>
                                 ) : sprint.status === "submitted" ? (
                                   <span className="text-xs text-slate-500">Public sprint link expired after submission.</span>
                                 ) : null}
@@ -4317,3 +4317,4 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     </main>
   );
 }
+

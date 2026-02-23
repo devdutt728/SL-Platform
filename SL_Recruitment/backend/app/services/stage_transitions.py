@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.stage_machine import (
@@ -14,16 +15,18 @@ from app.core.stage_machine import (
     HIRED,
     HR_SCREENING,
     JOINING_DOCUMENTS,
+    L2_SHORTLIST,
     REJECTED,
     can_transition,
     normalize_stage_name,
 )
+from app.models.candidate_assessment import RecCandidateAssessment
 from app.models.candidate import RecCandidate
 from app.models.stage import RecCandidateStage
 from app.schemas.user import UserContext
 from app.services.events import log_event
 
-_CAF_BYPASS_STAGES = {ENQUIRY, HR_SCREENING}
+_CAF_BYPASS_STAGES = {ENQUIRY, HR_SCREENING, L2_SHORTLIST}
 _TERMINAL_STATUS_STAGES = {REJECTED, HIRED, DECLINED}
 
 
@@ -73,6 +76,24 @@ async def _current_stage_row(session: AsyncSession, *, candidate_id: int) -> Rec
     ).scalars().first()
 
 
+async def _assessment_gate_state(session: AsyncSession, *, candidate_id: int) -> tuple[bool, bool]:
+    try:
+        assessment = (
+            await session.execute(
+                select(RecCandidateAssessment)
+                .where(RecCandidateAssessment.candidate_id == candidate_id)
+                .limit(1)
+            )
+        ).scalars().first()
+    except OperationalError:
+        return False, False
+    except SQLAlchemyError:
+        return False, False
+    if not assessment:
+        return False, False
+    return assessment.assessment_sent_at is not None, assessment.assessment_submitted_at is not None
+
+
 async def apply_stage_transition(
     session: AsyncSession,
     *,
@@ -104,8 +125,13 @@ async def apply_stage_transition(
     if skip_flag and skip_requires_superadmin and not is_superadmin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Skip is restricted to Superadmin.")
 
-    if enforce_caf_gate and candidate.caf_submitted_at is None and normalized_to_stage not in _CAF_BYPASS_STAGES:
-        if not is_superadmin:
+    if enforce_caf_gate and normalized_to_stage not in _CAF_BYPASS_STAGES and not is_superadmin:
+        assessment_shared, assessment_submitted = await _assessment_gate_state(
+            session,
+            candidate_id=candidate.candidate_id,
+        )
+        caf_submitted = candidate.caf_submitted_at is not None or assessment_submitted
+        if assessment_shared and not caf_submitted:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="CAF must be submitted before advancing to further rounds.",

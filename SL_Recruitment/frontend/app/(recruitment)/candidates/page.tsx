@@ -4,6 +4,7 @@ import { internalUrl } from "@/lib/internal";
 import { OpeningListItem } from "@/lib/types";
 import { CandidatesClient } from "./CandidatesClient";
 import { redirect } from "next/navigation";
+import { getAuthMe } from "@/lib/auth-me";
 
 async function fetchCandidates() {
   const url = new URL(await internalUrl("/api/rec/candidates"));
@@ -31,25 +32,15 @@ async function fetchOpenings() {
   }
 }
 
-async function fetchMe() {
-  const url = await internalUrl("/api/auth/me");
-  const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return null;
-  try {
-    return (await res.json()) as { roles?: string[] | null; platform_role_id?: number | null; platform_role_code?: string | null };
-  } catch {
-    return null;
-  }
-}
-
 export default async function CandidatesPage({}: {}) {
-  const me = await fetchMe();
+  const me = await getAuthMe();
   const roles = (me?.roles || []).map((role) => String(role).toLowerCase());
-  const isHr = roles.includes("hr_admin") || roles.includes("hr_exec") || (me?.platform_role_id ?? null) === 2;
+  const roleIdRaw = me?.platform_role_id ?? null;
+  const roleIdNum = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
+  const roleCode = (me?.platform_role_code ?? "").trim();
+  const isHr = roles.includes("hr_admin") || roles.includes("hr_exec") || roleIdNum === 2;
   const isInterviewer = roles.includes("interviewer") || roles.includes("gl") || roles.includes("hiring_manager");
-  const roleId = me?.platform_role_id ?? null;
-  const isRole6 = roleId === 6 || (me?.platform_role_code ?? "").trim() === "6";
+  const isRole6 = roleIdNum === 6 || roleCode === "6";
   if (isInterviewer && !isHr && !isRole6) {
     redirect("/interviewer");
   }

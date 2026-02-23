@@ -4,9 +4,10 @@ import { notFound } from "next/navigation";
 import { CandidateAssessment, CandidateFull } from "@/lib/types";
 import { internalUrl } from "@/lib/internal";
 import { parseDateUtc } from "@/lib/datetime";
+import { getAuthMe } from "@/lib/auth-me";
 
 type Me = {
-  platform_role_id?: number | null;
+  platform_role_id?: number | string | null;
   platform_role_code?: string | null;
 };
 
@@ -16,18 +17,6 @@ async function fetchCandidateFull(id: string): Promise<CandidateFull | null> {
   const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
   if (!res.ok) return null;
   return (await res.json()) as CandidateFull;
-}
-
-async function fetchMe(): Promise<Me | null> {
-  const url = await internalUrl("/api/auth/me");
-  const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return null;
-  try {
-    return (await res.json()) as Me;
-  } catch {
-    return null;
-  }
 }
 
 function labelValue(label: string, value: string) {
@@ -57,13 +46,15 @@ function formatDate(raw?: string | null) {
 
 export default async function CandidateCafPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [full, me] = await Promise.all([fetchCandidateFull(id), fetchMe()]);
+  const [full, me] = await Promise.all([fetchCandidateFull(id), getAuthMe() as Promise<Me | null>]);
   if (!full) notFound();
 
   const candidate = full.candidate;
   const screening = full.screening;
   const assessment = (full.assessment || null) as CandidateAssessment | null;
-  const canDelete = (me?.platform_role_id ?? null) === 2 || (me?.platform_role_code ?? "").trim() === "2";
+  const roleIdRaw = me?.platform_role_id ?? null;
+  const roleId = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
+  const canDelete = roleId === 2 || (me?.platform_role_code ?? "").trim() === "2";
 
   return (
     <main className="content-pad space-y-4">
@@ -78,7 +69,7 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/candidates/${encodeURIComponent(id)}`}
+              href={`/candidates/${encodeURIComponent(id)}`}
               className="rounded-full border border-slate-200 bg-white/70 px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-white"
             >
               Back

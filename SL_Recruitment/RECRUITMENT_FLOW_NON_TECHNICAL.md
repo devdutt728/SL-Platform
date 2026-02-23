@@ -258,7 +258,8 @@ At finalization:
 ## 14. Automatic emails and reminders sent by system
 
 Typical automated communication:
-- application links email (CAF + assessment)
+- candidate creation email (CAF link)
+- assessment form email (sent when moved to L2 shortlist)
 - CAF reminder
 - sprint assignment email
 - sprint reminder / sprint overdue reminder

@@ -4,12 +4,19 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { OpeningDetail, OpeningListItem, PlatformPersonSuggestion } from "@/lib/types";
 import { redirectToLogin } from "@/lib/auth-client";
-
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-
+import { fetchDeduped } from "@/lib/fetch-deduped";
 
 type Props = {
   initialOpenings: OpeningListItem[];
+  initialMe: {
+    roles?: string[] | null;
+    platform_role_id?: number | string | null;
+    platform_role_ids?: Array<number | string> | null;
+    platform_role_name?: string | null;
+    platform_role_names?: string[] | null;
+    platform_role_code?: string | null;
+    platform_role_codes?: string[] | null;
+  } | null;
 };
 
 function normalizeRoleToken(value: unknown): string {
@@ -27,17 +34,10 @@ function isHrRoleToken(value: unknown): boolean {
   return compact.includes("humanresource");
 }
 
-export function OpeningsClient({ initialOpenings }: Props) {
+export function OpeningsClient({ initialOpenings, initialMe }: Props) {
   const [openings, setOpenings] = useState<OpeningListItem[]>(initialOpenings);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [roles, setRoles] = useState<string[] | null>(null);
-  const [platformRoleId, setPlatformRoleId] = useState<number | null>(null);
-  const [platformRoleIds, setPlatformRoleIds] = useState<Array<number | string>>([]);
-  const [platformRoleName, setPlatformRoleName] = useState<string | null>(null);
-  const [platformRoleNames, setPlatformRoleNames] = useState<string[]>([]);
-  const [platformRoleCode, setPlatformRoleCode] = useState<string | null>(null);
-  const [platformRoleCodes, setPlatformRoleCodes] = useState<string[]>([]);
   const [requestedByTooltip, setRequestedByTooltip] = useState<{ opening: OpeningListItem; rect: DOMRect } | null>(null);
   const [requestedByTooltipPos, setRequestedByTooltipPos] = useState<{ left: number; top: number } | null>(null);
   const requestedByTooltipRef = useRef<HTMLDivElement | null>(null);
@@ -54,6 +54,15 @@ export function OpeningsClient({ initialOpenings }: Props) {
   const [city, setCity] = useState("Delhi");
   const [country, setCountry] = useState("India");
   const [headcount, setHeadcount] = useState(1);
+  const roleIdRaw = initialMe?.platform_role_id ?? null;
+  const roleIdNum = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
+  const platformRoleId = Number.isFinite(roleIdNum) ? roleIdNum : null;
+  const platformRoleIds = (initialMe?.platform_role_ids || []) as Array<number | string>;
+  const platformRoleName = initialMe?.platform_role_name ?? null;
+  const platformRoleNames = (initialMe?.platform_role_names || []).map((name) => String(name || ""));
+  const platformRoleCode = initialMe?.platform_role_code ?? null;
+  const platformRoleCodes = (initialMe?.platform_role_codes || []).map((code) => String(code || ""));
+  const roles = (initialMe?.roles || []).map((role) => String(role || ""));
 
   const activeCount = useMemo(() => openings.filter((o) => o.is_active).length, [openings]);
 
@@ -99,47 +108,9 @@ export function OpeningsClient({ initialOpenings }: Props) {
     setIsMounted(true);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${basePath}/api/auth/me`, { cache: "no-store" });
-        if (res.status === 401) {
-          redirectToLogin();
-          return;
-        }
-        if (!res.ok) return;
-        const me = (await res.json()) as {
-          roles?: string[] | null;
-          platform_role_id?: number | string | null;
-          platform_role_ids?: Array<number | string> | null;
-          platform_role_name?: string | null;
-          platform_role_names?: string[] | null;
-          platform_role_code?: string | null;
-          platform_role_codes?: string[] | null;
-        };
-        if (cancelled) return;
-        setRoles(me.roles || []);
-        const roleIdRaw = me.platform_role_id ?? null;
-        const roleIdNum = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
-        setPlatformRoleId(Number.isFinite(roleIdNum) ? roleIdNum : null);
-        setPlatformRoleIds((me.platform_role_ids || []) as Array<number | string>);
-        setPlatformRoleName(me.platform_role_name ?? null);
-        setPlatformRoleNames((me.platform_role_names || []).map((name) => String(name || "")));
-        setPlatformRoleCode(me.platform_role_code ?? null);
-        setPlatformRoleCodes((me.platform_role_codes || []).map((code) => String(code || "")));
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const refreshOpenings = async () => {
     try {
-      const res = await fetch("/api/rec/openings", { cache: "no-store" });
+      const res = await fetchDeduped("/api/rec/openings", { cache: "no-store" });
       if (!res.ok) return;
       const data = (await res.json()) as OpeningListItem[];
       setOpenings(data);
@@ -147,10 +118,6 @@ export function OpeningsClient({ initialOpenings }: Props) {
       // ignore
     }
   };
-
-  useEffect(() => {
-    void refreshOpenings();
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -194,7 +161,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
       (async () => {
         setRequestedByLoading(true);
         try {
-          const res = await fetch(`/api/platform/people?q=${encodeURIComponent(q)}&limit=10`, { cache: "no-store" });
+          const res = await fetchDeduped(`/api/platform/people?q=${encodeURIComponent(q)}&limit=10`, { cache: "no-store" });
           if (!res.ok) return;
           const data = (await res.json()) as PlatformPersonSuggestion[];
           if (!cancelled) setRequestedByOptions(data);
@@ -336,7 +303,7 @@ export function OpeningsClient({ initialOpenings }: Props) {
     if (!canEditOpenings) return;
     setError(null);
     try {
-      const res = await fetch(`/api/rec/openings/${openingId}`, { cache: "no-store" });
+      const res = await fetchDeduped(`/api/rec/openings/${openingId}`, { cache: "no-store" });
       if (!res.ok) {
         setError(await formatApiError(res));
         return;

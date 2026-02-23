@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { OfferPublic } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
@@ -150,12 +151,12 @@ export function OfferPublicClient({ token }: Props) {
             </div>
           )}
           {offer.offer_status === "accepted" ? (
-            <a
-              href={`${basePath}/joining/${encodeURIComponent(token)}`}
+            <Link
+              href={`/joining/${encodeURIComponent(token)}`}
               className="inline-flex items-center justify-center rounded-xl border border-white/60 bg-white/60 px-4 py-2 text-sm font-semibold text-slate-800 backdrop-blur"
             >
               Upload joining documents
-            </a>
+            </Link>
           ) : null}
         </div>
       ) : null}

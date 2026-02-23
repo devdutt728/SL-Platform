@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { LogOut, Sparkles, User } from "lucide-react";
 
 type Me = {
-  email: string;
+  email?: string;
   full_name?: string | null;
-  roles: string[];
+  roles?: string[] | null;
   platform_role_code?: string | null;
   platform_role_name?: string | null;
   platform_role_codes?: string[] | null;
@@ -25,17 +25,16 @@ const roleLabel: Record<string, string> = {
 };
 
 function firstName(me: Me) {
-  const source = (me.full_name || "").trim() || me.email;
+  const source = (me.full_name || "").trim() || (me.email || "");
   const token = source.split(/\s+/)[0] || source;
   const cleaned = token.split("@")[0];
   return cleaned ? cleaned[0].toUpperCase() + cleaned.slice(1) : "User";
 }
 
-export function Topbar() {
+export function Topbar({ initialMe }: { initialMe: Me | null }) {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const pathname = usePathname();
-  const [me, setMe] = useState<Me | null>(null);
-  const [loading, setLoading] = useState(true);
+  const me = initialMe;
 
   const displayRoles = useMemo(() => {
     if (!me) return [];
@@ -48,29 +47,6 @@ export function Topbar() {
     const labels = Array.from(combined).map((role) => roleLabel[role] || role).filter(Boolean);
     return labels.length ? labels : [me.platform_role_name || "Viewer"];
   }, [me]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${basePath}/api/auth/me`, { cache: "no-store" });
-        if (!res.ok) {
-          if (!cancelled) setMe(null);
-          if (res.status === 401 && typeof window !== "undefined") {
-            window.location.href = `${basePath}/login`;
-          }
-          return;
-        }
-        const data = (await res.json()) as Me;
-        if (!cancelled) setMe(data);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const sectionLabel = useMemo(() => {
     const normalized = basePath && pathname.startsWith(basePath) ? pathname.slice(basePath.length) || "/" : pathname;
@@ -120,7 +96,7 @@ export function Topbar() {
               <a href="/employee" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
                 Workbook
               </a>
-              <a href="/recruitment/dashboard" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
+              <a href="/dashboard" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
                 Recruitment
               </a>
               <a href="/it" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
@@ -128,9 +104,7 @@ export function Topbar() {
               </a>
             </div>
           </details>
-          {loading ? (
-            <div className="h-10 w-52 animate-pulse rounded-xl bg-white/20" />
-          ) : me ? (
+          {me ? (
             <div className="flex items-center gap-2 rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/75 px-3 py-2 text-sm font-medium text-[var(--dim-grey)] shadow-sm">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[rgba(231,64,17,0.1)] text-[var(--brand-color)]">
                 <User className="h-4 w-4" />

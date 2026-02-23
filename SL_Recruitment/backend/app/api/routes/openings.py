@@ -1,6 +1,7 @@
 from datetime import datetime
 
 import anyio
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, delete, text
@@ -28,6 +29,20 @@ from app.services.operation_queue import OP_DRIVE_DELETE_ITEM, enqueue_operation
 from app.services.platform_identity import active_status_filter
 
 router = APIRouter(prefix="/rec/openings", tags=["openings"])
+logger = logging.getLogger("slr.openings")
+
+_FIXED_OPENING_CODES_BY_TITLE: dict[str, str] = {
+    "others": "OTHR-8299BF",
+    "intern": "INTR-8299B8",
+    "communications intern": "CMIN-8299B0",
+    "interior designer": "INDS-8299A4",
+    "architect": "ARCH-82999A",
+    "sr designer": "SRDS-829990",
+    "sr architect": "SRAR-829986",
+    "project designer": "PRDS-82997A",
+    "associate": "ASSO-82996A",
+    "group leader": "GRPL-829955",
+}
 
 
 def _platform_person_id(user: UserContext) -> str | None:
@@ -42,7 +57,17 @@ def _clean_platform_person_id(raw: str | None) -> str | None:
     return val or None
 
 
+def _normalize_title_key(raw: str | None) -> str:
+    if not raw:
+        return ""
+    compact = " ".join(raw.strip().lower().split())
+    return compact.replace(".", "")
+
+
 def _generate_opening_code(title: str) -> str:
+    fixed = _FIXED_OPENING_CODES_BY_TITLE.get(_normalize_title_key(title))
+    if fixed:
+        return fixed
     base = (title or "OPEN").strip().upper()
     letters = "".join(ch for ch in base if ch.isalpha())[:4] or "OPEN"
     unique = uuid4().hex[:4].upper()
@@ -97,13 +122,31 @@ async def list_openings(
     roles = set(user.roles or [])
     is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
     is_superadmin = (user.platform_role_id or None) == 2
-    is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
-    if is_interviewer and not is_hr and not is_superadmin:
+    # Keep interviewer/GL restricted to their own openings; hiring managers should
+    # still be able to view portal openings they need to hire against.
+    is_restricted_view = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles
+    scoped_to_requester = False
+    if is_restricted_view and not is_hr and not is_superadmin:
         requested_by = _clean_platform_person_id(user.person_id_platform)
         if not requested_by:
+            logger.info(
+                "openings_list_empty_no_requester person_id=%s roles=%s platform_role_id=%s",
+                user.person_id_platform,
+                [r.value for r in (user.roles or [])],
+                user.platform_role_id,
+            )
             return []
         query = query.where(RecOpening.reporting_person_id_platform == requested_by)
+        scoped_to_requester = True
     rows = (await session.execute(query)).scalars().all()
+    logger.info(
+        "openings_list_result count=%s scoped=%s person_id=%s roles=%s platform_role_id=%s",
+        len(rows),
+        scoped_to_requester,
+        user.person_id_platform,
+        [r.value for r in (user.roles or [])],
+        user.platform_role_id,
+    )
 
     # Enrich requested_by names from platform DB
     requested_ids = {_clean_platform_person_id(r.reporting_person_id_platform) for r in rows}
@@ -189,8 +232,8 @@ async def get_opening_by_code(
     roles = set(user.roles or [])
     is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
     is_superadmin = (user.platform_role_id or None) == 2
-    is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
-    if is_interviewer and not is_hr and not is_superadmin:
+    is_restricted_view = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles
+    if is_restricted_view and not is_hr and not is_superadmin:
         requested_by = _clean_platform_person_id(user.person_id_platform)
         if not requested_by or requested_by != _clean_platform_person_id(opening.reporting_person_id_platform):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")

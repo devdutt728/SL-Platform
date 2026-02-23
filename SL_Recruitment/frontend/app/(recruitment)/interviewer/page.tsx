@@ -1,10 +1,11 @@
 import { cookieHeader } from "@/lib/cookie-header";
-import { internalUrl } from "@/lib/internal";
 import { CandidateListItem, Interview } from "@/lib/types";
 import { InterviewerClient } from "./InterviewerClient";
+import { getAuthMe } from "@/lib/auth-me";
+import { internalUrl } from "@/lib/internal";
 
 type Me = {
-  platform_role_id?: number | null;
+  platform_role_id?: number | string | null;
   platform_role_code?: string | null;
   roles?: string[] | null;
 };
@@ -23,16 +24,12 @@ async function fetchInterviews(params: Record<string, string>) {
 }
 
 export default async function InterviewerPage() {
-  const cookieValue = await cookieHeader();
-  const meRes = await fetch(await internalUrl("/api/auth/me"), {
-    cache: "no-store",
-    headers: cookieValue ? { cookie: cookieValue } : undefined,
-  });
-  const me = (meRes.ok ? ((await meRes.json()) as Me) : null) || null;
+  const me = (await getAuthMe()) as Me | null;
   const roles = (me?.roles || []).map((role) => String(role).toLowerCase());
   const useMeFilter = (roles.includes("interviewer") || roles.includes("gl")) && !roles.includes("hr_admin") && !roles.includes("hr_exec");
   const canAssignReviewer = roles.includes("hr_admin") || roles.includes("hr_exec");
-  const roleId = me?.platform_role_id ?? null;
+  const roleIdRaw = me?.platform_role_id ?? null;
+  const roleId = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
   const roleCode = (me?.platform_role_code ?? "").trim();
   const isInterviewerRole6 = roleId === 6 || roleCode === "6";
   const canManageInterviews = !isInterviewerRole6;

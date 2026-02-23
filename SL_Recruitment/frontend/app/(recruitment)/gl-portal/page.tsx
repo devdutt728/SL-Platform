@@ -1,11 +1,12 @@
 import { cookieHeader } from "@/lib/cookie-header";
-import { internalUrl } from "@/lib/internal";
 import { notFound } from "next/navigation";
 import { Interview } from "@/lib/types";
 import { GLPortalClient } from "./GLPortalClient";
+import { getAuthMe } from "@/lib/auth-me";
+import { internalUrl } from "@/lib/internal";
 
 type Me = {
-  platform_role_id?: number | null;
+  platform_role_id?: number | string | null;
   roles?: string[] | null;
 };
 
@@ -23,12 +24,7 @@ async function fetchInterviews(params: Record<string, string>) {
 }
 
 export default async function GLPortalPage() {
-  const cookieValue = await cookieHeader();
-  const meRes = await fetch(await internalUrl("/api/auth/me"), {
-    cache: "no-store",
-    headers: cookieValue ? { cookie: cookieValue } : undefined,
-  });
-  const me = (meRes.ok ? ((await meRes.json()) as Me) : null) || null;
+  const me = (await getAuthMe()) as Me | null;
   const roles = (me?.roles || []).map((role) => String(role).toLowerCase());
   const isAllowed = roles.some((role) => ["gl", "interviewer", "hr_admin", "hr_exec"].includes(role));
 

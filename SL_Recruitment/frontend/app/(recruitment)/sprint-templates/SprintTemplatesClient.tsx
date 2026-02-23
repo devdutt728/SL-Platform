@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { SprintTemplate, SprintTemplateAttachment } from "@/lib/types";
 import { redirectToLogin } from "@/lib/auth-client";
-
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-
+import { fetchDeduped } from "@/lib/fetch-deduped";
 
 type Props = {
   initialTemplates: SprintTemplate[];
+  initialIsSuperadmin: boolean;
 };
 
 type TemplateForm = {
@@ -20,10 +19,8 @@ type TemplateForm = {
   is_active: boolean;
 };
 
-export function SprintTemplatesClient({ initialTemplates }: Props) {
+export function SprintTemplatesClient({ initialTemplates, initialIsSuperadmin }: Props) {
   const [templates, setTemplates] = useState<SprintTemplate[]>(initialTemplates);
-  const [roles, setRoles] = useState<string[] | null>(null);
-  const [platformRoleId, setPlatformRoleId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
@@ -47,33 +44,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
   const [previewOpeningTitle, setPreviewOpeningTitle] = useState("");
   const [previewBody, setPreviewBody] = useState<string | null>(null);
 
-  const isSuperadmin = useMemo(
-    () => platformRoleId === 2 || (platformRoleId == null && !!roles?.includes("hr_admin")),
-    [platformRoleId, roles]
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${basePath}/api/auth/me`, { cache: "no-store" });
-        if (res.status === 401) {
-          redirectToLogin();
-          return;
-        }
-        if (!res.ok) return;
-        const me = (await res.json()) as { roles?: string[]; platform_role_id?: number | null };
-        if (cancelled) return;
-        setRoles(me.roles || []);
-        setPlatformRoleId(me.platform_role_id ?? null);
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const isSuperadmin = initialIsSuperadmin;
 
   useEffect(() => {
     if (!selectedTemplateId) {
@@ -115,7 +86,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
     }
     (async () => {
       try {
-        const res = await fetch(`/api/rec/sprint-templates/${encodeURIComponent(attachmentTemplateId)}/attachments`, { cache: "no-store" });
+        const res = await fetchDeduped(`/api/rec/sprint-templates/${encodeURIComponent(attachmentTemplateId)}/attachments`, { cache: "no-store" });
         if (!res.ok) return;
         const data = (await res.json()) as SprintTemplateAttachment[];
         if (!cancelled) setAttachments(data);
@@ -130,7 +101,7 @@ export function SprintTemplatesClient({ initialTemplates }: Props) {
 
   async function refreshTemplates() {
     try {
-      const res = await fetch("/api/rec/sprint-templates?include_inactive=1", { cache: "no-store" });
+      const res = await fetchDeduped("/api/rec/sprint-templates?include_inactive=1", { cache: "no-store" });
       if (!res.ok) return;
       const data = (await res.json()) as SprintTemplate[];
       setTemplates(data);

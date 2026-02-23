@@ -40,7 +40,7 @@ export function DeleteCandidateButton({ candidateId }: { candidateId: number }) 
       <button
         onClick={handleDelete}
         disabled={busy}
-        className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-red-600 disabled:opacity-60"
+        className="btn-action-danger rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-60"
       >
         {busy ? "Deleting..." : "Delete candidate"}
       </button>

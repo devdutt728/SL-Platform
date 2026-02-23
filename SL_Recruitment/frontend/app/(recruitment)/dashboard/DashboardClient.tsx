@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { clsx } from "clsx";
 import type { CandidateEvent, CandidateOffer, DashboardMetrics } from "@/lib/types";
 import { LayoutPanelLeft, UsersRound, Briefcase } from "lucide-react";
+import { fetchDeduped } from "@/lib/fetch-deduped";
 import NeedsReviewCard from "./NeedsReviewCard";
 import RecentActivityCard from "./RecentActivityCard";
 
@@ -76,7 +77,7 @@ export default function DashboardClient({
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(initialMetrics);
   const [events, setEvents] = useState<CandidateEvent[]>(initialEvents);
   const [offers, setOffers] = useState<CandidateOffer[]>(initialOffers);
-  const [hideActivityClient, setHideActivityClient] = useState(hideActivity);
+  const [hideActivityClient] = useState(hideActivity);
 
   const PipelineItem = ({
     href,
@@ -129,30 +130,6 @@ export default function DashboardClient({
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch("/api/auth/me", { cache: "no-store" });
-        if (!res.ok) return;
-        const me = (await res.json()) as {
-          platform_role_id?: number | string | null;
-          platform_role_ids?: Array<number | string> | null;
-        };
-        if (cancelled) return;
-        const roleIdRaw = me.platform_role_id ?? null;
-        const roleIdNum = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
-        const roleIdsRaw = (me.platform_role_ids || []) as Array<number | string>;
-        const roleIds = roleIdsRaw
-          .map((id) => (typeof id === "number" ? id : Number(id)))
-          .filter((id) => Number.isFinite(id));
-        const isRole6 =
-          roleIdNum === 6 ||
-          roleIds.includes(6) ||
-          roleIdsRaw.map((id) => String(id).trim()).includes("6");
-        if (isRole6) setHideActivityClient(true);
-      } catch {
-        // ignore
-      }
-    })();
     let inFlight = false;
     let pending = false;
     const source = new EventSource("/api/rec/events/stream");
@@ -165,9 +142,9 @@ export default function DashboardClient({
       inFlight = true;
       try {
         const [metricsRes, eventsRes, offersRes] = await Promise.all([
-          fetch("/api/rec/dashboard?stuck_days=5", { cache: "no-store" }),
-          fetch("/api/rec/events?limit=10", { cache: "no-store" }),
-          fetch("/api/rec/offers", { cache: "no-store" }),
+          fetchDeduped("/api/rec/dashboard?stuck_days=5", { cache: "no-store" }),
+          fetchDeduped("/api/rec/events?limit=10", { cache: "no-store" }),
+          fetchDeduped("/api/rec/offers", { cache: "no-store" }),
         ]);
         if (!cancelled && metricsRes.ok) setMetrics((await metricsRes.json()) as DashboardMetrics);
         if (!cancelled && eventsRes.ok) setEvents((await eventsRes.json()) as CandidateEvent[]);

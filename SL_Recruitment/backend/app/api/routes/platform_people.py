@@ -525,24 +525,55 @@ def _parse_bool_int(value: object) -> int | None:
 
 
 def _parse_date(value: object, field: str) -> date | None:
-  if value is None:
-    return None
-  if isinstance(value, date) and not isinstance(value, datetime):
-    return value
-  if isinstance(value, str):
-    raw = value.strip()
-    if not raw:
-      return None
-    try:
-      return date.fromisoformat(raw)
-    except ValueError:
-      for fmt in ("%d-%b-%y", "%d-%b-%Y", "%d-%m-%y", "%d-%m-%Y", "%d/%m/%y", "%d/%m/%Y"):
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
         try:
-          return datetime.strptime(raw, fmt).date()
+            return date.fromisoformat(raw)
         except ValueError:
-          continue
-      raise
-  raise ValueError(f"Invalid {field}")
+            pass
+        for fmt in (
+            "%d-%b-%y",
+            "%d-%b-%Y",
+            "%d-%m-%y",
+            "%d-%m-%Y",
+            "%Y/%m/%d",
+        ):
+            try:
+                return datetime.strptime(raw, fmt).date()
+            except ValueError:
+                continue
+        slash_match = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", raw)
+        if slash_match:
+            first = int(slash_match.group(1))
+            second = int(slash_match.group(2))
+            year = slash_match.group(3)
+            if first > 12:
+                fmts = ("%d/%m/%Y", "%d/%m/%y")
+            elif second > 12:
+                fmts = ("%m/%d/%Y", "%m/%d/%y")
+            else:
+                # Ambiguous `x/y/yyyy`: prefer month/day for Excel exports used in this flow.
+                fmts = ("%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y", "%d/%m/%y")
+            for fmt in fmts:
+                if len(year) == 2 and not fmt.endswith("%y"):
+                    continue
+                if len(year) == 4 and not fmt.endswith("%Y"):
+                    continue
+                try:
+                    return datetime.strptime(raw, fmt).date()
+                except ValueError:
+                    continue
+        try:
+            return _parse_datetime(raw, field).date()
+        except ValueError as exc:
+            raise ValueError(f"Invalid {field}: {raw}") from exc
+    raise ValueError(f"Invalid {field}")
 
 
 def _parse_datetime(value: object, field: str) -> datetime | None:
@@ -551,7 +582,26 @@ def _parse_datetime(value: object, field: str) -> datetime | None:
     if isinstance(value, datetime):
         return value
     if isinstance(value, str):
-        return datetime.fromisoformat(value)
+        raw = value.strip()
+        if not raw:
+            return None
+        normalized = raw.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            pass
+        for fmt in (
+            "%m/%d/%YT%I:%M:%S %p",
+            "%m/%d/%Y %I:%M:%S %p",
+            "%m/%d/%YT%H:%M:%S",
+            "%m/%d/%Y %H:%M:%S",
+            "%m/%d/%Y",
+        ):
+            try:
+                return datetime.strptime(raw, fmt)
+            except ValueError:
+                continue
+        raise ValueError(f"Invalid {field}: {raw}")
     raise ValueError(f"Invalid {field}")
 
 

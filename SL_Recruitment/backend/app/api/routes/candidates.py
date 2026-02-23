@@ -440,6 +440,76 @@ def _is_recent_google_sheet_duplicate(candidate: RecCandidate, *, now: datetime)
     return marker >= (now - GOOGLE_SHEET_DUPLICATE_WINDOW)
 
 
+async def _send_assessment_link_for_l2_shortlist(
+    session: AsyncSession,
+    *,
+    candidate: RecCandidate,
+    user: UserContext,
+) -> None:
+    if not candidate.email:
+        return
+
+    assessment = (
+        await session.execute(
+            select(RecCandidateAssessment).where(RecCandidateAssessment.candidate_id == candidate.candidate_id)
+        )
+    ).scalars().first()
+
+    now = datetime.utcnow()
+    if assessment is None:
+        assessment = RecCandidateAssessment(
+            candidate_id=candidate.candidate_id,
+            assessment_token=uuid4().hex,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(assessment)
+    elif not assessment.assessment_token:
+        assessment.assessment_token = uuid4().hex
+        assessment.updated_at = now
+
+    if not assessment.assessment_token:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Assessment token unavailable")
+
+    # Send only once on first L2-shortlist issuance.
+    if assessment.assessment_sent_at is not None:
+        return
+    if assessment.assessment_submitted_at is not None:
+        return
+
+    assessment.assessment_sent_at = now
+    assessment.updated_at = now
+
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type="assessment_link_generated",
+        performed_by_person_id_platform=_platform_person_id(user),
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={"assessment_token": assessment.assessment_token, "reason": "l2_shortlist"},
+    )
+
+    assessment_link = build_public_link(f"/assessment/{assessment.assessment_token}")
+    await send_email(
+        session,
+        candidate_id=candidate.candidate_id,
+        to_emails=[candidate.email],
+        subject="Your Studio Lotus assessment form",
+        template_name="assessment_link",
+        context={
+            "candidate_name": candidate.full_name,
+            "candidate_code": candidate.candidate_code,
+            "assessment_link": assessment_link,
+        },
+        email_type="assessment_link",
+        meta_extra={
+            "assessment_token": assessment.assessment_token,
+            "trigger_stage": "l2_shortlist",
+        },
+    )
+
+
 def _require_sheet_ingest_token(token: str | None) -> None:
     configured = (settings.sheet_ingest_token or "").strip()
     if not configured:
@@ -605,26 +675,6 @@ async def _create_candidate_with_automation(
     )
 
     caf_link = build_public_link(f"/caf/{candidate.caf_token}")
-
-    assessment = RecCandidateAssessment(
-        candidate_id=candidate.candidate_id,
-        assessment_token=uuid4().hex,
-        assessment_sent_at=link_sent_at,
-        created_at=created_at,
-        updated_at=created_at,
-    )
-    session.add(assessment)
-    await log_event(
-        session,
-        candidate_id=candidate.candidate_id,
-        action_type="assessment_link_generated",
-        performed_by_person_id_platform=performed_by_person_id_platform,
-        related_entity_type="candidate",
-        related_entity_id=candidate.candidate_id,
-        meta_json={"assessment_token": assessment.assessment_token},
-    )
-
-    assessment_link = build_public_link(f"/assessment/{assessment.assessment_token}")
     await send_email(
         session,
         candidate_id=candidate.candidate_id,
@@ -635,13 +685,12 @@ async def _create_candidate_with_automation(
             "candidate_name": candidate.full_name,
             "candidate_code": candidate.candidate_code,
             "caf_link": caf_link,
-            "assessment_link": assessment_link,
             "candidate_email": candidate.email,
             "candidate_phone": candidate.phone or "—",
             "willing_to_relocate": "—",
         },
         email_type="application_links",
-        meta_extra={"caf_token": candidate.caf_token, "assessment_token": assessment.assessment_token},
+        meta_extra={"caf_token": candidate.caf_token},
     )
 
     folder_id, folder_url = await anyio.to_thread.run_sync(
@@ -1917,6 +1966,9 @@ async def transition_stage(
         user=user,
         source="candidate_transition",
     )
+
+    if result.changed and result.to_stage == "l2_shortlist":
+        await _send_assessment_link_for_l2_shortlist(session, candidate=candidate, user=user)
 
     await session.commit()
     return {

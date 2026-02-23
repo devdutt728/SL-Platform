@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReportMeta, ReportPreview } from "@/lib/types";
 import { redirectToLogin } from "@/lib/auth-client";
+import { fetchDeduped } from "@/lib/fetch-deduped";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -24,7 +25,7 @@ const defaultFilters: FiltersState = {
   limit: "50",
 };
 
-export default function ReportsClient() {
+export default function ReportsClient({ canAccess }: { canAccess: boolean }) {
   const [reports, setReports] = useState<ReportMeta[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string>("");
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set());
@@ -34,7 +35,6 @@ export default function ReportsClient() {
   const [loading, setLoading] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [accessDenied, setAccessDenied] = useState(false);
 
   const activeReport = useMemo(
     () => reports.find((report) => report.report_id === selectedReportId) || null,
@@ -48,37 +48,13 @@ export default function ReportsClient() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${basePath}/api/auth/me`, { cache: "no-store" });
-        if (res.status === 401) {
-          redirectToLogin();
-          return;
-        }
-        if (!res.ok) return;
-        const me = (await res.json()) as { roles?: string[]; platform_role_id?: number | null };
-        const roles = me.roles || [];
-        const platformRoleId = me.platform_role_id ?? null;
-        const canAccess = platformRoleId === 2 || roles.includes("hr_admin");
-        if (!cancelled) setAccessDenied(!canAccess);
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (accessDenied) {
+    if (!canAccess) {
       setLoadingMeta(false);
       return;
     }
     (async () => {
       try {
-        const res = await fetch(`${basePath}/api/rec/reports`, { cache: "no-store" });
+        const res = await fetchDeduped(`${basePath}/api/rec/reports`, { cache: "no-store" });
         if (!res.ok) {
           if (!cancelled) setError(await formatApiError(res));
           return;
@@ -97,7 +73,7 @@ export default function ReportsClient() {
     return () => {
       cancelled = true;
     };
-  }, [accessDenied]);
+  }, [canAccess]);
 
   useEffect(() => {
     if (!activeReport) return;
@@ -161,7 +137,7 @@ export default function ReportsClient() {
         window.location.origin
       );
       params.forEach((value, key) => url.searchParams.set(key, value));
-      const res = await fetch(url.toString(), { cache: "no-store" });
+      const res = await fetchDeduped(url.toString(), { cache: "no-store" });
       if (!res.ok) {
         setError(await formatApiError(res));
         return;
@@ -186,7 +162,7 @@ export default function ReportsClient() {
     window.location.href = url.toString();
   }
 
-  if (accessDenied) return null;
+  if (!canAccess) return null;
 
   return (
     <main className="content-pad space-y-4">

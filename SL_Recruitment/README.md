@@ -82,6 +82,7 @@ Apply in order to `sl_recruitment`:
 - `backend/migrations/0029_operation_retry_queue.sql`
 - `backend/migrations/0030_candidate_source_bifurcation.sql`
 - `backend/migrations/0031_candidate_intake_fields.sql`
+- `backend/migrations/0032_seed_designation_openings_devdutt.sql`
 
 ### Drive setup
 Required for candidate creation and public apply uploads:

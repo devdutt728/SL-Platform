@@ -1,23 +1,19 @@
-import { cookieHeader } from "@/lib/cookie-header";
-import { internalUrl } from "@/lib/internal";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { SuperAdminRolesClient } from "./SuperAdminRolesClient";
 import { SuperAdminPeopleClient } from "./SuperAdminPeopleClient";
+import { getAuthMe } from "@/lib/auth-me";
 
 type Me = {
-  platform_role_id?: number | null;
+  platform_role_id?: number | string | null;
   platform_role_code?: string | null;
 };
 
 export default async function SuperAdminPage() {
-  const cookieValue = await cookieHeader();
-  const meRes = await fetch(await internalUrl("/api/auth/me"), {
-    cache: "no-store",
-    headers: cookieValue ? { cookie: cookieValue } : undefined,
-  });
-  const me = (meRes.ok ? ((await meRes.json()) as Me) : null) || null;
-  const isSuperadmin = (me?.platform_role_id ?? null) === 2 || (me?.platform_role_code ?? "").trim() === "2";
+  const me = (await getAuthMe()) as Me | null;
+  const roleIdRaw = me?.platform_role_id ?? null;
+  const roleId = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
+  const isSuperadmin = roleId === 2 || (me?.platform_role_code ?? "").trim() === "2";
 
   if (!isSuperadmin) {
     notFound();

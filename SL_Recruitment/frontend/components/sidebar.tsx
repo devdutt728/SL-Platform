@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
 import { Home, Users, Briefcase, LayoutDashboard, CalendarClock, FileSignature, BarChart3, Shield } from "lucide-react";
@@ -17,42 +17,28 @@ const navItems = [
   { href: "/", label: "Home", icon: Home, guard: "all" },
 ];
 
-export function Sidebar() {
+type SidebarMe = {
+  platform_role_id?: number | string | null;
+  platform_role_code?: string | null;
+  roles?: string[] | null;
+  platform_role_codes?: string[] | null;
+};
+
+export function Sidebar({ initialMe }: { initialMe: SidebarMe | null }) {
   const pathname = usePathname();
-  const [isSuperadmin, setIsSuperadmin] = useState(false);
-  const [roles, setRoles] = useState<string[]>([]);
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
   const normalizedPath = basePath && pathname.startsWith(basePath) ? pathname.slice(basePath.length) || "/" : pathname;
   const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${basePath}/api/auth/me`, { cache: "no-store" });
-        if (!res.ok) return;
-        const me = (await res.json()) as {
-          platform_role_id?: number | null;
-          platform_role_code?: string | null;
-          roles?: string[];
-          platform_role_codes?: string[] | null;
-        };
-        if (cancelled) return;
-        const superadmin = (me.platform_role_id ?? null) === 2 || (me.platform_role_code ?? "").trim() === "2";
-        setIsSuperadmin(superadmin);
-        const roleSet = new Set<string>();
-        (me.roles || []).forEach((role) => roleSet.add(String(role)));
-        (me.platform_role_codes || []).forEach((role) => roleSet.add(String(role)));
-        if (me.platform_role_code) roleSet.add(String(me.platform_role_code));
-        setRoles(Array.from(roleSet));
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const roleIdRaw = initialMe?.platform_role_id ?? null;
+  const roleId = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
+  const isSuperadmin = roleId === 2 || (initialMe?.platform_role_code ?? "").trim() === "2";
+  const roles = useMemo(() => {
+    const roleSet = new Set<string>();
+    (initialMe?.roles || []).forEach((role) => roleSet.add(String(role)));
+    (initialMe?.platform_role_codes || []).forEach((role) => roleSet.add(String(role)));
+    if (initialMe?.platform_role_code) roleSet.add(String(initialMe.platform_role_code));
+    return Array.from(roleSet);
+  }, [initialMe]);
 
   const guards = useMemo(() => {
     const normalized = roles.map((role) => role.toLowerCase());

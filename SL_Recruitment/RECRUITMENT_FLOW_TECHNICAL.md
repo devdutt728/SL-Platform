@@ -220,8 +220,9 @@ Common side effects:
 - create candidate row
 - assign `candidate_code` like `SLR-0001`
 - create initial `enquiry` stage
-- generate CAF token + assessment token
-- send application links email
+- generate CAF token
+- send candidate creation email with CAF link
+- generate/send assessment link email later when candidate is moved to `l2_shortlist`
 - attempt Drive folder creation
 - write event log records
 

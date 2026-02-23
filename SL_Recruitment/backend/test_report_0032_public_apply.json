@@ -1,0 +1,201 @@
+{
+  "timestamp_utc": "2026-02-20T10:13:11.777585Z",
+  "db": {
+    "seed_integrity": [
+      {
+        "title": "Group Leader",
+        "expected_code": "GRPL-829955",
+        "status": "PASS",
+        "issues": []
+      },
+      {
+        "title": "Associate",
+        "expected_code": "ASSO-82996A",
+        "status": "PASS",
+        "issues": []
+      },
+      {
+        "title": "Project Designer",
+        "expected_code": "PRDS-82997A",
+        "status": "PASS",
+        "issues": []
+      },
+      {
+        "title": "Sr. Architect",
+        "expected_code": "SRAR-829986",
+        "status": "PASS",
+        "issues": []
+      },
+      {
+        "title": "Sr. Designer",
+        "expected_code": "SRDS-829990",
+        "status": "PASS",
+        "issues": []
+      },
+      {
+        "title": "Architect",
+        "expected_code": "ARCH-82999A",
+        "status": "PASS",
+        "issues": []
+      },
+      {
+        "title": "Interior Designer",
+        "expected_code": "INDS-8299A4",
+        "status": "PASS",
+        "issues": []
+      },
+      {
+        "title": "Communications Intern",
+        "expected_code": "CMIN-8299B0",
+        "status": "PASS",
+        "issues": []
+      },
+      {
+        "title": "Intern",
+        "expected_code": "INTR-8299B8",
+        "status": "PASS",
+        "issues": []
+      },
+      {
+        "title": "Others",
+        "expected_code": "OTHR-8299BF",
+        "status": "PASS",
+        "issues": []
+      }
+    ],
+    "duplicates": [],
+    "migration_idempotency": {
+      "executed": true,
+      "rowcounts": [
+        {
+          "statement_no": 1,
+          "rowcount": 0
+        },
+        {
+          "statement_no": 2,
+          "rowcount": 0
+        },
+        {
+          "statement_no": 3,
+          "rowcount": 0
+        },
+        {
+          "statement_no": 4,
+          "rowcount": 0
+        },
+        {
+          "statement_no": 5,
+          "rowcount": 0
+        },
+        {
+          "statement_no": 6,
+          "rowcount": 0
+        },
+        {
+          "statement_no": 7,
+          "rowcount": 0
+        },
+        {
+          "statement_no": 8,
+          "rowcount": 0
+        },
+        {
+          "statement_no": 9,
+          "rowcount": 0
+        },
+        {
+          "statement_no": 10,
+          "rowcount": 0
+        }
+      ],
+      "total_inserted_if_committed": 0,
+      "error": null
+    }
+  },
+  "api": [
+    {
+      "name": "GET /apply returns 200",
+      "status": "PASS",
+      "actual": 200,
+      "expected": 200
+    },
+    {
+      "name": "Public openings include all 10 seeded codes",
+      "status": "PASS",
+      "actual": "all present",
+      "expected": "all 10 present"
+    },
+    {
+      "name": "GET /apply/GRPL-829955 active prefill",
+      "status": "PASS",
+      "actual": 200,
+      "expected": 200
+    },
+    {
+      "name": "GET /apply/NOPE-000000 unknown code",
+      "status": "PASS",
+      "actual": 404,
+      "expected": 404
+    },
+    {
+      "name": "POST /apply missing Idempotency-Key",
+      "status": "PASS",
+      "actual": {
+        "status": 400,
+        "detail": "Missing Idempotency-Key header."
+      },
+      "expected": {
+        "status": 400,
+        "detail_contains": "Idempotency-Key"
+      }
+    },
+    {
+      "name": "POST /apply portfolio mandatory",
+      "status": "PASS",
+      "actual": {
+        "status": 400,
+        "detail": "Portfolio is mandatory. Upload a portfolio or provide a valid URL."
+      },
+      "expected": {
+        "status": 400,
+        "detail_contains": "Portfolio is mandatory"
+      }
+    },
+    {
+      "name": "POST /apply requires first+last name",
+      "status": "PASS",
+      "actual": {
+        "status": 400,
+        "detail": "First name and last name are required."
+      },
+      "expected": {
+        "status": 400,
+        "detail_contains": "First name and last name are required"
+      }
+    },
+    {
+      "name": "POST /apply consent mandatory",
+      "status": "PASS",
+      "actual": {
+        "status": 400,
+        "detail": "Please accept the recruitment data consent terms."
+      },
+      "expected": {
+        "status": 400,
+        "detail_contains": "consent"
+      }
+    },
+    {
+      "name": "POST /apply years_of_experience numeric validation",
+      "status": "PASS",
+      "actual": {
+        "status": 400,
+        "detail": "Years of experience must be a number."
+      },
+      "expected": {
+        "status": 400,
+        "detail_contains": "Years of experience must be a number"
+      }
+    }
+  ]
+}

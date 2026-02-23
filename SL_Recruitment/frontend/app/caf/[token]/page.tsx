@@ -152,7 +152,7 @@ export default async function CafPage({ params }: { params: Promise<{ token: str
             </div>
 
             <div className="mb-4 rounded-[26px] border border-[var(--accessible-components--dark-grey)] bg-white p-5 shadow-[var(--shadow-soft)]">
-              <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Candidate Application Form</p>
+              <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Submitted Form Details</p>
               <h1 className="mt-2 text-[22px] font-semibold text-[var(--dim-grey)]">{prefill.opening_title || "Studio Lotus"}</h1>
               <p className="mt-2 text-[13px] text-[var(--dim-grey)]">
                 This page displays the submitted candidate details in read-only mode.

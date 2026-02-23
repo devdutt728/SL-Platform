@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import deps
 from app.models.apply_idempotency import RecApplyIdempotency
 from app.models.candidate import RecCandidate
-from app.models.candidate_assessment import RecCandidateAssessment
 from app.models.opening import RecOpening
 from app.models.screening import RecCandidateScreening
 from app.services.drive import create_candidate_folder, upload_application_doc
@@ -619,26 +618,6 @@ async def apply_for_opening(
 
     caf_link = build_public_link(f"/caf/{caf_token}")
 
-    assessment = RecCandidateAssessment(
-        candidate_id=candidate.candidate_id,
-        assessment_token=uuid4().hex,
-        assessment_sent_at=now,
-        created_at=now,
-        updated_at=now,
-    )
-    session.add(assessment)
-    await log_event(
-        session,
-        candidate_id=candidate.candidate_id,
-        action_type="assessment_link_generated",
-        performed_by_person_id_platform=None,
-        related_entity_type="candidate",
-        related_entity_id=candidate.candidate_id,
-        meta_json={"assessment_token": assessment.assessment_token},
-    )
-
-    assessment_link = build_public_link(f"/assessment/{assessment.assessment_token}")
-
     # Drive folder creation (required)
     drive_folder_id: str | None = None
     drive_folder_url: str | None = None
@@ -872,13 +851,12 @@ async def apply_for_opening(
             "candidate_name": candidate.full_name,
             "candidate_code": candidate.candidate_code,
             "caf_link": caf_link,
-            "assessment_link": assessment_link,
             "candidate_email": candidate.email,
             "candidate_phone": candidate.phone or "—",
             "willing_to_relocate": _label_yes_no(screening_data.get("willing_to_relocate")),
         },
         email_type="application_links",
-        meta_extra={"caf_token": caf_token, "assessment_token": assessment.assessment_token},
+        meta_extra={"caf_token": caf_token},
     )
 
     idem.status_code = status.HTTP_201_CREATED

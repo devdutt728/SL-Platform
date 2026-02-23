@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CalendarClock, Clock, Mail, Workflow } from "lucide-react";
 import type { CandidateEvent } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
+import { fetchDeduped } from "@/lib/fetch-deduped";
 
 type ContextPanelProps = {
   title?: string;
@@ -42,7 +43,7 @@ export function ContextPanel({ title = "Live activity", className }: ContextPane
 
   const loadEvents = async () => {
     try {
-      const res = await fetch("/api/rec/events?limit=10", { cache: "no-store" });
+      const res = await fetchDeduped("/api/rec/events?limit=10", { cache: "no-store" });
       if (!res.ok) return;
       const data = (await res.json()) as CandidateEvent[];
       setEvents(data);

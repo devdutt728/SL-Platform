@@ -4,9 +4,10 @@ import { CandidateFull } from "@/lib/types";
 import { internalUrl } from "@/lib/internal";
 import { Candidate360Client } from "./Candidate360Client";
 import { redirect } from "next/navigation";
+import { getAuthMe } from "@/lib/auth-me";
 
 type Me = {
-  platform_role_id?: number | null;
+  platform_role_id?: number | string | null;
   platform_role_code?: string | null;
   platform_role_name?: string | null;
   platform_role_ids?: number[] | null;
@@ -23,23 +24,12 @@ async function fetchCandidateFull(id: string): Promise<CandidateFull | null> {
   return (await res.json()) as CandidateFull;
 }
 
-async function fetchMe(): Promise<Me | null> {
-  const url = await internalUrl("/api/auth/me");
-  const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return null;
-  try {
-    return (await res.json()) as Me;
-  } catch {
-    return null;
-  }
-}
-
 export default async function CandidateDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [full, me] = await Promise.all([fetchCandidateFull(id), fetchMe()]);
+  const [full, me] = await Promise.all([fetchCandidateFull(id), getAuthMe() as Promise<Me | null>]);
   if (!full) notFound();
-  const roleId = me?.platform_role_id ?? null;
+  const roleIdRaw = me?.platform_role_id ?? null;
+  const roleId = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
   const roleCode = (me?.platform_role_code ?? "").trim();
   const roleName = (me?.platform_role_name ?? "").trim().toLowerCase();
   const roleCodes = (me?.platform_role_codes || []).map((code) => String(code).trim().toLowerCase());
@@ -61,14 +51,14 @@ export default async function CandidateDetailPage({ params }: { params: Promise<
     roles.includes("hr_admin") ||
     roles.includes("hr_exec") ||
     isSuperadmin ||
-    (me?.platform_role_id ?? null) === 5 ||
+    roleId === 5 ||
     ["2", "5"].includes((me?.platform_role_code ?? "").trim());
   const canSkip = isSuperadmin;
   const canCancelInterview =
     canSkip ||
     roles.includes("hr_admin") ||
     roles.includes("hr_exec") ||
-    (me?.platform_role_id ?? null) === 5 ||
+    roleId === 5 ||
     ["5"].includes((me?.platform_role_code ?? "").trim());
   const canUploadJoiningDocs =
     roles.includes("hr_admin") ||

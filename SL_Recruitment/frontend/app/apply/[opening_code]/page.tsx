@@ -87,7 +87,7 @@ function TopBar({
 export default async function ApplyPage({ params }: { params: Promise<{ opening_code: string }> }) {
   const { opening_code } = await params;
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
-  const backHref = `${basePath}/apply`;
+  const backHref = "/apply";
   const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
   const opening = await fetchOpening(opening_code);
   const shellClass = "mx-auto w-full max-w-[1320px] px-4 sm:px-6 lg:px-7";

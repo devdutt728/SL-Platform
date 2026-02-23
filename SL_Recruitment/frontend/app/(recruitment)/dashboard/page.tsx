@@ -1,5 +1,6 @@
 import { cookieHeader } from "@/lib/cookie-header";
 import { internalUrl } from "@/lib/internal";
+import { getAuthMe } from "@/lib/auth-me";
 import type { CandidateEvent, CandidateOffer, DashboardMetrics } from "@/lib/types";
 import DashboardClient from "./DashboardClient";
 
@@ -28,21 +29,7 @@ async function fetchOffers() {
 }
 
 export default async function DashboardPage() {
-  const cookieValue = await cookieHeader();
-  const meRes = await fetch(await internalUrl("/api/auth/me"), {
-    cache: "no-store",
-    headers: cookieValue ? { cookie: cookieValue } : undefined,
-  });
-  const me =
-    (meRes.ok
-      ? ((await meRes.json()) as {
-          roles?: string[] | null;
-          platform_role_id?: number | null;
-          platform_role_code?: string | null;
-          platform_role_ids?: number[] | null;
-          platform_role_codes?: string[] | null;
-        })
-      : null) || null;
+  const me = await getAuthMe();
   const roles = (me?.roles || []).map((role) => (role || "").toLowerCase());
   const isHr = roles.includes("hr_admin") || roles.includes("hr_exec");
   const isInterviewer = roles.includes("interviewer") || roles.includes("gl") || roles.includes("hiring_manager");

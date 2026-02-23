@@ -340,6 +340,39 @@ a {
   outline-offset: 2px;
 }
 
+.recruitment-theme .btn-action-success {
+  background: #0f9f6e;
+  color: #ffffff;
+  border: 1px solid #0d8a60;
+  box-shadow: 0 10px 22px -14px rgba(15, 159, 110, 0.85);
+}
+
+.recruitment-theme .btn-action-success:hover {
+  background: #0c885e;
+}
+
+.recruitment-theme .btn-action-danger {
+  background: #d13f4d;
+  color: #ffffff;
+  border: 1px solid #b53341;
+  box-shadow: 0 10px 22px -14px rgba(209, 63, 77, 0.9);
+}
+
+.recruitment-theme .btn-action-danger:hover {
+  background: #b73340;
+}
+
+.recruitment-theme .btn-action-neutral {
+  background: #243447;
+  color: #ffffff;
+  border: 1px solid #1b2939;
+  box-shadow: 0 10px 22px -14px rgba(36, 52, 71, 0.9);
+}
+
+.recruitment-theme .btn-action-neutral:hover {
+  background: #1b2939;
+}
+
 @keyframes fade-up {
   from {
     opacity: 0;
