@@ -62,9 +62,14 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
   const [country, setCountry] = useState("India");
   const [headcount, setHeadcount] = useState(1);
   const roleIdRaw = initialMe?.platform_role_id ?? null;
-  const roleIdNum = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
+  const roleIdNum =
+    roleIdRaw === null || roleIdRaw === undefined || String(roleIdRaw).trim() === ""
+      ? NaN
+      : typeof roleIdRaw === "number"
+        ? roleIdRaw
+        : Number(roleIdRaw);
   const platformRoleId = Number.isFinite(roleIdNum) ? roleIdNum : null;
-  const platformRoleIds = (initialMe?.platform_role_ids || []) as Array<number | string>;
+  const platformRoleIds = initialMe?.platform_role_ids as Array<number | string> | null | undefined;
   const platformRoleName = initialMe?.platform_role_name ?? null;
   const platformRoleNames = (initialMe?.platform_role_names || []).map((name) => String(name || ""));
   const platformRoleCode = initialMe?.platform_role_code ?? null;
@@ -87,37 +92,56 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
   );
   const allRoleIds = useMemo(() => {
     const numeric = [platformRoleId, ...(platformRoleIds || [])]
-      .map((id) => (typeof id === "number" ? id : Number(id)))
+      .map((id) => {
+        if (id === null || id === undefined || String(id).trim() === "") return NaN;
+        return typeof id === "number" ? id : Number(id);
+      })
       .filter((id) => Number.isFinite(id));
     return Array.from(new Set(numeric));
   }, [platformRoleId, platformRoleIds]);
+  const hasPlatformRoleMeta = useMemo(
+    () => allRoleIds.length > 0 || normalizedRoleCodes.length > 0 || normalizedRoleNames.length > 0,
+    [allRoleIds, normalizedRoleCodes, normalizedRoleNames]
+  );
 
   const isSuperadmin = useMemo(
     () =>
       allRoleIds.includes(2) ||
-      normalizedRoleCodes.some((code) => ["2", "superadmin", "s_admin", "super_admin"].includes(code)),
-    [allRoleIds, normalizedRoleCodes]
+      normalizedRoleCodes.some((code) => ["2", "superadmin", "s_admin", "super_admin"].includes(code)) ||
+      normalizedRoleNames.some((name) => ["2", "superadmin", "s_admin", "super_admin"].includes(name)),
+    [allRoleIds, normalizedRoleCodes, normalizedRoleNames]
   );
   const isHr = useMemo(
-    () =>
-      allRoleIds.includes(5) ||
-      normalizedRoles.some((token) => isHrRoleToken(token)) ||
-      normalizedRoleCodes.some((token) => isHrRoleToken(token)) ||
-      normalizedRoleNames.some((token) => isHrRoleToken(token)),
-    [allRoleIds, normalizedRoleCodes, normalizedRoleNames, normalizedRoles]
+    () => {
+      if (isSuperadmin) return true;
+      if (hasPlatformRoleMeta) {
+        return normalizedRoleCodes.some((token) => isHrRoleToken(token)) || normalizedRoleNames.some((token) => isHrRoleToken(token));
+      }
+      return normalizedRoles.some((token) => token === "hr_admin" || token === "hr_exec" || isHrRoleToken(token));
+    },
+    [hasPlatformRoleMeta, isSuperadmin, normalizedRoleCodes, normalizedRoleNames, normalizedRoles]
   );
   const isGl = useMemo(
-    () =>
-      normalizedRoles.some((token) => isGlRoleToken(token)) ||
-      normalizedRoleCodes.some((token) => isGlRoleToken(token)) ||
-      normalizedRoleNames.some((token) => isGlRoleToken(token)),
-    [normalizedRoleCodes, normalizedRoleNames, normalizedRoles]
+    () => {
+      if (hasPlatformRoleMeta) {
+        return (
+          allRoleIds.includes(5) ||
+          allRoleIds.includes(6) ||
+          normalizedRoleCodes.some((token) => isGlRoleToken(token)) ||
+          normalizedRoleNames.some((token) => isGlRoleToken(token))
+        );
+      }
+      return normalizedRoles.some((token) => isGlRoleToken(token));
+    },
+    [allRoleIds, hasPlatformRoleMeta, normalizedRoleCodes, normalizedRoleNames, normalizedRoles]
   );
+  const isRoleFiveOrSix = useMemo(() => allRoleIds.includes(5) || allRoleIds.includes(6), [allRoleIds]);
   const canCreateOpenings = useMemo(() => isSuperadmin, [isSuperadmin]);
   const canToggleOpenings = useMemo(() => isSuperadmin || isHr, [isSuperadmin, isHr]);
   const canEditOpenings = useMemo(() => isSuperadmin, [isSuperadmin]);
   const canDeleteOpenings = useMemo(() => isSuperadmin, [isSuperadmin]);
-  const canRaiseOpeningRequests = useMemo(() => isSuperadmin || isHr || isGl, [isGl, isHr, isSuperadmin]);
+  const canRaiseOpeningRequests = useMemo(() => isSuperadmin || isHr || isRoleFiveOrSix, [isHr, isRoleFiveOrSix, isSuperadmin]);
+  const canRaiseNewOpeningRequests = useMemo(() => isSuperadmin || isHr, [isHr, isSuperadmin]);
   const canApproveOpeningRequests = useMemo(() => isSuperadmin || isHr, [isHr, isSuperadmin]);
 
   useEffect(() => {
@@ -356,7 +380,9 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
       <OpeningRequestsPanel
         openings={openings}
         canRaise={canRaiseOpeningRequests}
+        canRaiseNew={canRaiseNewOpeningRequests}
         canApprove={canApproveOpeningRequests}
+        canManage={isSuperadmin}
         isHr={isHr}
         isGl={isGl}
         onError={setError}

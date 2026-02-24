@@ -12,11 +12,13 @@ import { parseDateUtc } from "@/lib/datetime";
 type Props = {
   candidateId: string;
   initial: CandidateFull;
+  canManageCandidate360: boolean;
   canDelete: boolean;
   canSchedule: boolean;
   canSkip: boolean;
   canCancelInterview: boolean;
   canUploadJoiningDocs: boolean;
+  canAccessOffers: boolean;
 };
 
 type SlotPreview = {
@@ -575,7 +577,17 @@ function cleanLetterOverrides(raw: Record<string, string>) {
   return cleaned;
 }
 
-export function Candidate360Client({ candidateId, initial, canDelete, canSchedule, canSkip, canCancelInterview, canUploadJoiningDocs }: Props) {
+export function Candidate360Client({
+  candidateId,
+  initial,
+  canManageCandidate360,
+  canDelete,
+  canSchedule,
+  canSkip,
+  canCancelInterview,
+  canUploadJoiningDocs,
+  canAccessOffers,
+}: Props) {
   const searchParams = useSearchParams();
   const [data, setData] = useState<CandidateFull>(initial);
   const [busy, setBusy] = useState(false);
@@ -766,6 +778,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }, [candidate.l2_owner_email, candidate.l2_owner_name]);
 
   useEffect(() => {
+    if (!canSchedule) return;
     if (!searchParams || autoRescheduleOpened) return;
     const rescheduleId = searchParams.get("reschedule_interview_id");
     if (!rescheduleId) return;
@@ -774,7 +787,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
     const round = searchParams.get("round") || "L2";
     setAutoRescheduleOpened(true);
     openSchedule(round, parsedId);
-  }, [searchParams, autoRescheduleOpened]);
+  }, [searchParams, autoRescheduleOpened, canSchedule]);
 
   const cafState = useMemo(() => {
     const generated = cafGateActive;
@@ -954,6 +967,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }
 
   async function handleSaveL2Owner() {
+    if (!canManageCandidate360) {
+      setL2OwnerError("Candidate 360 actions are restricted for your role.");
+      return;
+    }
     const email = (l2OwnerSelected?.email || l2OwnerQuery || "").trim().toLowerCase();
     const name = (l2OwnerSelected?.full_name || "").trim() || undefined;
     if (!email || !email.includes("@")) {
@@ -984,6 +1001,10 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }
 
   async function handleTransition(toStage: string, decision: string, reasonOverride?: string) {
+    if (!canManageCandidate360) {
+      setError("Candidate 360 actions are restricted for your role.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -1745,10 +1766,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }, [activeSprints, lastSprintNotice]);
 
   useEffect(() => {
+    if (!canAccessOffers) return;
     if (candidateOffers === null) {
       void refreshOffers();
     }
-  }, [candidateOffers]);
+  }, [canAccessOffers, candidateOffers]);
 
   useEffect(() => {
     if (joiningDocs === null) {
@@ -1866,6 +1888,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
   }, [scheduleRound]);
 
   const stageButtons = useMemo<StageButton[]>(() => {
+    if (!canManageCandidate360) return [];
     const current = currentStageKey;
     if (cafLocked && current && current !== "rejected" && current !== "declined" && current !== "hired") {
       return [
@@ -2140,7 +2163,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       ];
     }
     return [];
-  }, [currentStageKey, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef, cafLocked, candidate.l2_owner_email, sprintAssignDisabled, hasSubmittedSprint]);
+  }, [currentStageKey, canManageCandidate360, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef, cafLocked, candidate.l2_owner_email, sprintAssignDisabled, hasSubmittedSprint]);
 
   const screening = data.screening as Screening | null | undefined;
   const interviewUpcoming = useMemo(() => {
@@ -2238,6 +2261,11 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
       </div>
 
       {error ? <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
+      {!canManageCandidate360 ? (
+        <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-800">
+          Candidate 360 is view-only for your role. You can view data but cannot perform lifecycle actions.
+        </div>
+      ) : null}
 
       <div className="grid gap-3 xl:grid-cols-[360px_1fr]">
         <aside className="section-card space-y-3">
@@ -2308,7 +2336,7 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                 className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-white"
                 onClick={() => void handleCopyCafLink()}
                 onMouseEnter={() => void initCafLinkIfNeeded()}
-                disabled={busy}
+                disabled={busy || !canManageCandidate360}
               >
                 <Copy className="h-4 w-4" />
                 Copy CAF link
@@ -2401,18 +2429,23 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                             : l2OwnerQuery
                         }
                         onChange={(e) => {
+                          if (!canManageCandidate360) return;
                           setL2OwnerSelected(null);
                           setL2OwnerQuery(e.target.value);
                         }}
-                        onFocus={() => setL2OwnerOpen(true)}
+                        onFocus={() => {
+                          if (!canManageCandidate360) return;
+                          setL2OwnerOpen(true);
+                        }}
                         onBlur={() => window.setTimeout(() => setL2OwnerOpen(false), 150)}
                         className="w-full rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/20"
                         placeholder="Type name or email"
+                        disabled={!canManageCandidate360}
                       />
                       {l2OwnerLoading ? (
                         <div className="absolute right-3 top-2 text-xs text-slate-500">Searching…</div>
                       ) : null}
-                      {!l2OwnerSelected && l2OwnerOpen && l2OwnerOptions.length > 0 ? (
+                      {!l2OwnerSelected && canManageCandidate360 && l2OwnerOpen && l2OwnerOptions.length > 0 ? (
                         <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
                           {l2OwnerOptions.map((person) => (
                             <button
@@ -2438,9 +2471,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                       type="button"
                       className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-60"
                       onClick={() => void handleSaveL2Owner()}
-                      disabled={l2OwnerSaving}
+                      disabled={!canManageCandidate360 || l2OwnerSaving}
                     >
-                      {l2OwnerSaving ? "Saving..." : "Save"}
+                      {l2OwnerSaving ? "Saving..." : canManageCandidate360 ? "Save" : "View only"}
                     </button>
                   </div>
                   {l2OwnerSelected ? (
@@ -2454,6 +2487,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                   ) : null}
                   {l2OwnerError ? (
                     <p className="mt-2 text-xs text-rose-700">{l2OwnerError}</p>
+                  ) : null}
+                  {!canManageCandidate360 ? (
+                    <p className="mt-2 text-xs text-slate-500">GL / L2 owner updates are available only to HR or Superadmin.</p>
                   ) : null}
                 </div>
                 <div>
@@ -2538,7 +2574,9 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                         ))}
                       </div>
                 ) : (
-                  <p className="mt-3 text-sm text-slate-600">Use the action buttons above to jump into the next step.</p>
+                  <p className="mt-3 text-sm text-slate-600">
+                    {canManageCandidate360 ? "Use the action buttons above to jump into the next step." : "Stage actions are locked for your role."}
+                  </p>
                 )}
                     {!candidate.l2_owner_email && currentStageKey === "enquiry" ? (
                       <p className="mt-2 text-xs text-amber-700">Assign GL/L2 email to unlock HR screening.</p>
@@ -3931,7 +3969,8 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
             )}
           </div>
 
-          <div ref={offerRef} className="section-card">
+          {canAccessOffers ? (
+            <div ref={offerRef} className="section-card">
             <div className="flex items-center justify-between">
               <p className="text-xs uppercase tracking-tight text-slate-500">Offer</p>
               <button
@@ -4269,7 +4308,8 @@ export function Candidate360Client({ candidateId, initial, canDelete, canSchedul
                 )}
               </div>
             )}
-          </div>
+            </div>
+          ) : null}
         </section>
       </div>
       {scheduleEmailPreviewOpen ? (

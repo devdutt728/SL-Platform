@@ -6,22 +6,7 @@ import { requireAuth } from "@/lib/require-auth";
 
 export default async function RecruitmentLayout({ children }: { children: ReactNode }) {
   const me = await requireAuth();
-  let hideContextPanel = false;
-  try {
-    const roleIdRaw = me?.platform_role_id ?? null;
-    const roleIdNum = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
-    const roleIdsRaw = (me?.platform_role_ids || []) as Array<number | string>;
-    const roleIds = roleIdsRaw
-      .map((id) => (typeof id === "number" ? id : Number(id)))
-      .filter((id) => Number.isFinite(id));
-    const isRole6 =
-      roleIdNum === 6 ||
-      roleIds.includes(6) ||
-      roleIdsRaw.map((id) => String(id).trim()).includes("6");
-    if (isRole6) hideContextPanel = true;
-  } catch {
-    // ignore lookup errors
-  }
+  const hideContextPanel = false;
 
   return (
     <div className="recruitment-theme apply-font-override min-h-screen bg-[var(--surface-base)] text-[var(--dim-grey)]">

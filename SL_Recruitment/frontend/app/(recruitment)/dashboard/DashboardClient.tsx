@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { clsx } from "clsx";
-import type { CandidateEvent, CandidateListItem, CandidateOffer, DashboardMetrics, OpeningListItem } from "@/lib/types";
-import { LayoutPanelLeft, UsersRound, Briefcase } from "lucide-react";
+import type { CandidateEvent, CandidateListItem, CandidateOffer, DashboardMetrics, OpeningListItem, OpeningRequest } from "@/lib/types";
+import { Bell, Briefcase, LayoutPanelLeft, UsersRound } from "lucide-react";
 import { fetchDeduped } from "@/lib/fetch-deduped";
 import NeedsReviewCard from "./NeedsReviewCard";
 import RecentActivityCard from "./RecentActivityCard";
@@ -16,6 +16,9 @@ type Props = {
   initialOffers: CandidateOffer[];
   initialOpenings: OpeningListItem[];
   initialCandidates: CandidateListItem[];
+  initialOpeningRequests: OpeningRequest[];
+  canViewOffers?: boolean;
+  canViewOpeningRequestNotifications?: boolean;
   canNavigate?: boolean;
   canNavigatePipeline?: boolean;
   hideActivity?: boolean;
@@ -69,12 +72,28 @@ function stageLabel(raw?: string | null) {
   return stageOrder.find((s) => s.key === key)?.label || key.replace(/_/g, " ");
 }
 
+function formatRequestTime(raw?: string | null) {
+  if (!raw) return "-";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toLocaleString("en-IN", {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+  });
+}
+
 export default function DashboardClient({
   initialMetrics,
   initialEvents,
   initialOffers,
   initialOpenings,
   initialCandidates,
+  initialOpeningRequests,
+  canViewOffers = false,
+  canViewOpeningRequestNotifications = false,
   canNavigate = true,
   canNavigatePipeline = canNavigate,
   hideActivity = false,
@@ -84,9 +103,12 @@ export default function DashboardClient({
   const [offers, setOffers] = useState<CandidateOffer[]>(initialOffers);
   const [openings, setOpenings] = useState<OpeningListItem[]>(initialOpenings);
   const [candidates, setCandidates] = useState<CandidateListItem[]>(initialCandidates);
+  const [openingRequests, setOpeningRequests] = useState<OpeningRequest[]>(initialOpeningRequests);
   const [hoveredOpeningId, setHoveredOpeningId] = useState<number | null>(null);
   const [hoverPanelLeft, setHoverPanelLeft] = useState(8);
   const stripRef = useRef<HTMLDivElement | null>(null);
+  const requestBellRef = useRef<HTMLDivElement | null>(null);
+  const [requestBellOpen, setRequestBellOpen] = useState(false);
   const [hideActivityClient] = useState(hideActivity);
 
   const PipelineItem = ({
@@ -117,6 +139,10 @@ export default function DashboardClient({
       {} as Record<string, number>
     );
   }, [offers]);
+  const pendingOpeningRequests = useMemo(
+    () => openingRequests.filter((request) => request.status === "pending_hr_approval"),
+    [openingRequests]
+  );
 
   const perStage = metrics?.candidates_per_stage || [];
   const stageCounts = new Map(perStage.map((row) => [normalizeStage(row.stage), row.count]));
@@ -203,18 +229,26 @@ export default function DashboardClient({
       }
       inFlight = true;
       try {
-        const [metricsRes, eventsRes, offersRes, openingsRes, candidatesRes] = await Promise.all([
+        const offersRequest = canViewOffers
+          ? fetchDeduped("/api/rec/offers", { cache: "no-store" })
+          : Promise.resolve(null);
+        const requestsRequest = canViewOpeningRequestNotifications
+          ? fetchDeduped("/api/rec/openings/requests?status=pending_hr_approval", { cache: "no-store" })
+          : Promise.resolve(null);
+        const [metricsRes, eventsRes, offersRes, openingsRes, candidatesRes, requestsRes] = await Promise.all([
           fetchDeduped("/api/rec/dashboard?stuck_days=5", { cache: "no-store" }),
           fetchDeduped("/api/rec/events?limit=10", { cache: "no-store" }),
-          fetchDeduped("/api/rec/offers", { cache: "no-store" }),
+          offersRequest,
           fetchDeduped("/api/rec/openings", { cache: "no-store" }),
           fetchDeduped("/api/rec/candidates", { cache: "no-store" }),
+          requestsRequest,
         ]);
         if (!cancelled && metricsRes.ok) setMetrics((await metricsRes.json()) as DashboardMetrics);
         if (!cancelled && eventsRes.ok) setEvents((await eventsRes.json()) as CandidateEvent[]);
-        if (!cancelled && offersRes.ok) setOffers((await offersRes.json()) as CandidateOffer[]);
+        if (!cancelled && offersRes && offersRes.ok) setOffers((await offersRes.json()) as CandidateOffer[]);
         if (!cancelled && openingsRes.ok) setOpenings((await openingsRes.json()) as OpeningListItem[]);
         if (!cancelled && candidatesRes.ok) setCandidates((await candidatesRes.json()) as CandidateListItem[]);
+        if (!cancelled && requestsRes && requestsRes.ok) setOpeningRequests((await requestsRes.json()) as OpeningRequest[]);
       } catch {
         // ignore live refresh failures
       } finally {
@@ -234,10 +268,72 @@ export default function DashboardClient({
       cancelled = true;
       source.close();
     };
-  }, []);
+  }, [canViewOffers, canViewOpeningRequestNotifications]);
+
+  useEffect(() => {
+    if (!requestBellOpen) return;
+    function onClickOutside(event: MouseEvent) {
+      if (!requestBellRef.current) return;
+      if (event.target instanceof Node && !requestBellRef.current.contains(event.target)) {
+        setRequestBellOpen(false);
+      }
+    }
+    window.addEventListener("mousedown", onClickOutside);
+    return () => window.removeEventListener("mousedown", onClickOutside);
+  }, [requestBellOpen]);
 
   return (
     <main className="content-pad space-y-6">
+      <section className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.14em] text-[var(--light-grey)]">Recruitment</p>
+          <h1 className="text-2xl font-semibold text-[var(--dim-grey)]">Dashboard</h1>
+        </div>
+        {canViewOpeningRequestNotifications ? (
+          <div ref={requestBellRef} className="relative">
+            <button
+              type="button"
+              className="relative inline-flex items-center gap-2 rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-4 py-2 text-xs font-semibold text-[var(--dim-grey)] shadow-sm hover:bg-[var(--surface-card)]"
+              onClick={() => setRequestBellOpen((prev) => !prev)}
+            >
+              <Bell className="h-4 w-4" />
+              Opening requests
+              <span className="rounded-full bg-[var(--brand-color)] px-2 py-0.5 text-[10px] font-semibold text-white">
+                {pendingOpeningRequests.length}
+              </span>
+            </button>
+            {requestBellOpen ? (
+              <div className="absolute right-0 top-[calc(100%+10px)] z-[220] w-[360px] max-w-[90vw] rounded-2xl border border-[var(--border-soft)] bg-white p-3 shadow-[0_24px_45px_-25px_rgba(15,23,42,0.45)]">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-[var(--dim-grey)]">Pending opening requests</p>
+                  <Link href="/openings" className="text-xs font-semibold text-[var(--brand-color)]">
+                    Open queue
+                  </Link>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {pendingOpeningRequests.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-[var(--accessible-components--dark-grey)] bg-[var(--surface-card)] px-3 py-5 text-center text-xs text-[var(--light-grey)]">
+                      No pending requests.
+                    </div>
+                  ) : (
+                    pendingOpeningRequests.slice(0, 6).map((request) => (
+                      <div key={request.opening_request_id} className="rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-2">
+                        <p className="text-xs font-semibold text-[var(--dim-grey)]">
+                          #{request.opening_request_id} • {request.opening_title || request.opening_code || "Opening request"}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-[var(--light-grey)]">
+                          Delta {request.headcount_delta} • {formatRequestTime(request.created_at)}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+
       <section className="section-card motion-fade-up motion-delay-1 relative z-[90] overflow-visible border border-[var(--border-soft)] bg-white/80 p-3">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(231,64,17,0.08),_transparent_40%)]" />
         <div className="relative flex items-center justify-between">
@@ -520,51 +616,53 @@ export default function DashboardClient({
             </div>
           )}
         </div>
-        <div className="section-card motion-fade-up motion-delay-3 relative overflow-hidden border border-[var(--border-soft)] bg-white/75 p-4">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(231,64,17,0.1),_transparent_60%)]" />
-          <div className="relative flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <UsersRound className="h-4 w-4 text-[var(--dim-grey)]" />
-              <p className="text-sm font-semibold text-[var(--dim-grey)]">Offers summary</p>
-            </div>
-            {canNavigate ? (
-              <Link href="/offers" className="text-xs font-semibold text-[var(--dim-grey)] hover:text-[var(--brand-color)]">
-                View offers
-              </Link>
-            ) : (
-              <span className="text-xs font-semibold text-[var(--dim-grey)]">View offers</span>
-            )}
-          </div>
-          <div className="relative mt-3 grid gap-2 md:grid-cols-2">
-            {[
-              ["pending_approval", "Pending approval"],
-              ["sent", "Sent"],
-              ["accepted", "Accepted"],
-              ["declined", "Declined"],
-            ].map(([key, label]) => (
-              <div key={key}>
-                {canNavigate ? (
-                  <Link
-                    href={`/offers?status=${key}`}
-                    className="flex items-center justify-between rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 shadow-sm transition hover:bg-[var(--surface-card)]"
-                  >
-                    <p className="text-[12px] font-semibold text-[var(--dim-grey)]">{label}</p>
-                    <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--dim-grey)]">
-                      {offerSummary[key] ?? 0}
-                    </span>
-                  </Link>
-                ) : (
-                  <div className="flex items-center justify-between rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 shadow-sm transition">
-                    <p className="text-[12px] font-semibold text-[var(--dim-grey)]">{label}</p>
-                    <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--dim-grey)]">
-                      {offerSummary[key] ?? 0}
-                    </span>
-                  </div>
-                )}
+        {canViewOffers ? (
+          <div className="section-card motion-fade-up motion-delay-3 relative overflow-hidden border border-[var(--border-soft)] bg-white/75 p-4">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(231,64,17,0.1),_transparent_60%)]" />
+            <div className="relative flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <UsersRound className="h-4 w-4 text-[var(--dim-grey)]" />
+                <p className="text-sm font-semibold text-[var(--dim-grey)]">Offers summary</p>
               </div>
-            ))}
+              {canNavigate ? (
+                <Link href="/offers" className="text-xs font-semibold text-[var(--dim-grey)] hover:text-[var(--brand-color)]">
+                  View offers
+                </Link>
+              ) : (
+                <span className="text-xs font-semibold text-[var(--dim-grey)]">View offers</span>
+              )}
+            </div>
+            <div className="relative mt-3 grid gap-2 md:grid-cols-2">
+              {[
+                ["pending_approval", "Pending approval"],
+                ["sent", "Sent"],
+                ["accepted", "Accepted"],
+                ["declined", "Declined"],
+              ].map(([key, label]) => (
+                <div key={key}>
+                  {canNavigate ? (
+                    <Link
+                      href={`/offers?status=${key}`}
+                      className="flex items-center justify-between rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 shadow-sm transition hover:bg-[var(--surface-card)]"
+                    >
+                      <p className="text-[12px] font-semibold text-[var(--dim-grey)]">{label}</p>
+                      <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--dim-grey)]">
+                        {offerSummary[key] ?? 0}
+                      </span>
+                    </Link>
+                  ) : (
+                    <div className="flex items-center justify-between rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 shadow-sm transition">
+                      <p className="text-[12px] font-semibold text-[var(--dim-grey)]">{label}</p>
+                      <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--dim-grey)]">
+                        {offerSummary[key] ?? 0}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : null}
       </section>
 
       <section className="grid gap-3 lg:grid-cols-3">
@@ -664,7 +762,7 @@ export default function DashboardClient({
           </div>
         </div>
 
-        <NeedsReviewCard initialMetrics={metrics} />
+        <NeedsReviewCard initialMetrics={metrics} canViewOffers={canViewOffers} />
       </section>
 
       <section className="grid gap-3 lg:grid-cols-3">

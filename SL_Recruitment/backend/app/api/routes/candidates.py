@@ -398,13 +398,48 @@ def _platform_person_id(user: UserContext) -> int | None:
         return None
 
 
+def _actor_role_ids(user: UserContext) -> set[int]:
+    values: list[object] = []
+    if user.platform_role_id is not None:
+        values.append(user.platform_role_id)
+    values.extend(user.platform_role_ids or [])
+    role_ids: set[int] = set()
+    for value in values:
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        try:
+            role_ids.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return role_ids
+
+
+def _is_role_5_or_6_actor(user: UserContext) -> bool:
+    role_ids = _actor_role_ids(user)
+    return 5 in role_ids or 6 in role_ids
+
+
 def _is_interviewer_scope(user: UserContext) -> bool:
     roles = set(user.roles or [])
     is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
-    is_superadmin = (user.platform_role_id or None) == 2
+    role_ids = _actor_role_ids(user)
+    is_superadmin = 2 in role_ids
+    is_role_5_or_6 = 5 in role_ids or 6 in role_ids
     is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
-    is_role6 = (user.platform_role_id or None) == 6 or (user.platform_role_code or "").strip() == "6"
-    return (is_interviewer or is_role6) and not is_hr and not is_superadmin
+    return (is_role_5_or_6 or is_interviewer) and not is_hr and not is_superadmin
+
+
+def _can_manage_candidate_360(user: UserContext) -> bool:
+    roles = set(user.roles or [])
+    if Role.HR_ADMIN in roles or Role.HR_EXEC in roles:
+        return True
+    role_ids = _actor_role_ids(user)
+    if 2 in role_ids:
+        return True
+    if 5 in role_ids or 6 in role_ids:
+        return False
+    return True
 
 
 def _clean_person_id_platform(raw: str | None) -> str | None:
@@ -1559,8 +1594,9 @@ async def get_candidate_full(
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
-    if (user.platform_role_id or None) == 6 or (user.platform_role_code or "").strip() == "6":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 is not available for interviewer role")
+    if not _can_manage_candidate_360(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 is not available for this role.")
+
     candidate = await get_candidate(candidate_id, session, user)  # type: ignore[arg-type]
 
     stages = await list_candidate_stages(candidate_id, session, user)  # type: ignore[arg-type]
@@ -1961,7 +1997,7 @@ async def list_candidate_events(
 async def list_candidate_offers(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
     await _assert_candidate_access(session, candidate_id, _user)
     rows = (
@@ -2027,6 +2063,8 @@ async def transition_stage(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    if not _can_manage_candidate_360(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 actions are restricted for this role.")
 
     result = await apply_stage_transition(
         session,

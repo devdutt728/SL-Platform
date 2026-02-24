@@ -19,10 +19,29 @@ const navItems = [
 
 type SidebarMe = {
   platform_role_id?: number | string | null;
+  platform_role_ids?: Array<number | string> | null;
   platform_role_code?: string | null;
-  roles?: string[] | null;
   platform_role_codes?: string[] | null;
+  platform_role_name?: string | null;
+  platform_role_names?: string[] | null;
+  roles?: string[] | null;
 };
+
+function normalizeRole(value: unknown) {
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function isHrRole(value: string) {
+  if (!value) return false;
+  const compact = value.replace(/_/g, "");
+  if (value === "hr" || value.startsWith("hr_") || value.startsWith("hr")) return true;
+  return compact.includes("humanresource");
+}
+
+function isGlRole(value: string) {
+  if (!value) return false;
+  return value === "gl" || value === "group_lead" || value === "grouplead" || value === "hiring_manager";
+}
 
 export function Sidebar({ initialMe }: { initialMe: SidebarMe | null }) {
   const pathname = usePathname();
@@ -30,35 +49,53 @@ export function Sidebar({ initialMe }: { initialMe: SidebarMe | null }) {
   const normalizedPath = basePath && pathname.startsWith(basePath) ? pathname.slice(basePath.length) || "/" : pathname;
   const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
   const roleIdRaw = initialMe?.platform_role_id ?? null;
-  const roleId = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
-  const isSuperadmin = roleId === 2 || (initialMe?.platform_role_code ?? "").trim() === "2";
-  const roles = useMemo(() => {
-    const roleSet = new Set<string>();
-    (initialMe?.roles || []).forEach((role) => roleSet.add(String(role)));
-    (initialMe?.platform_role_codes || []).forEach((role) => roleSet.add(String(role)));
-    if (initialMe?.platform_role_code) roleSet.add(String(initialMe.platform_role_code));
-    return Array.from(roleSet);
-  }, [initialMe]);
+  const parsedRoleId =
+    roleIdRaw === null || roleIdRaw === undefined || String(roleIdRaw).trim() === ""
+      ? NaN
+      : typeof roleIdRaw === "number"
+        ? roleIdRaw
+        : Number(roleIdRaw);
+  const roleId = Number.isFinite(parsedRoleId) ? parsedRoleId : null;
+  const roleIds = useMemo(() => {
+    const all = [roleId, ...((initialMe?.platform_role_ids || []).map((id) => {
+      if (id === null || id === undefined || String(id).trim() === "") return NaN;
+      return typeof id === "number" ? id : Number(id);
+    }))];
+    return all.filter((id): id is number => Number.isFinite(id));
+  }, [initialMe?.platform_role_ids, roleId]);
+  const normalizedRoles = useMemo(() => {
+    const combined = [
+      ...(initialMe?.roles || []),
+      ...(initialMe?.platform_role_codes || []),
+      ...(initialMe?.platform_role_names || []),
+      initialMe?.platform_role_code || "",
+      initialMe?.platform_role_name || "",
+    ];
+    return combined.map((role) => normalizeRole(role)).filter(Boolean);
+  }, [
+    initialMe?.platform_role_code,
+    initialMe?.platform_role_codes,
+    initialMe?.platform_role_name,
+    initialMe?.platform_role_names,
+    initialMe?.roles,
+  ]);
+  const isSuperadmin =
+    roleIds.includes(2) || normalizedRoles.some((role) => ["2", "superadmin", "s_admin", "super_admin"].includes(role));
+  const isRoleFiveOrSix = roleIds.includes(5) || roleIds.includes(6);
+  const isHr = isSuperadmin || normalizedRoles.some((role) => isHrRole(role));
+  const isGl = normalizedRoles.some((role) => isGlRole(role));
+  const isInterviewer = normalizedRoles.includes("interviewer");
 
   const guards = useMemo(() => {
-    const normalized = roles.map((role) => role.toLowerCase());
-    const has = (value: string) => normalized.includes(value);
-    const isHrAdmin = has("hr_admin");
-    const isHr = isHrAdmin || has("hr_exec");
-    const isRole6 = has("6");
-    const isGl = has("hiring_manager") || has("gl") || has("interviewer") || isHr;
-    const isInterviewer = has("interviewer") || isGl || isHr;
-    const canOffers = has("approver") || isHr;
-    const canReports = isHrAdmin;
     return {
       all: true,
-      hr: isHr || isRole6,
-      interviewer: isInterviewer,
-      gl: isGl,
-      offers: canOffers,
-      reports: canReports,
+      hr: isHr || isRoleFiveOrSix,
+      interviewer: isInterviewer || isGl || isRoleFiveOrSix || isHr,
+      gl: isGl || isRoleFiveOrSix || isHr,
+      offers: isHr || isSuperadmin,
+      reports: isSuperadmin || normalizedRoles.includes("hr_admin"),
     };
-  }, [roles]);
+  }, [isGl, isHr, isInterviewer, isRoleFiveOrSix, isSuperadmin, normalizedRoles]);
 
   return (
     <aside className="glass-panel fixed bottom-4 left-4 top-4 z-20 w-56 overflow-hidden rounded-2xl p-4">

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -40,6 +41,15 @@ class OpeningRequestReject(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rejection_reason: str = Field(min_length=3, max_length=2000)
+
+
+class OpeningRequestStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["pending_hr_approval", "rejected", "applied"]
+    rejection_reason: Optional[str] = Field(default=None, min_length=3, max_length=2000)
+    approval_note: Optional[str] = None
+    hiring_manager_person_id_platform: Optional[str] = None
 
 
 class OpeningRequestOut(BaseModel):

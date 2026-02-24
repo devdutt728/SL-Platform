@@ -239,8 +239,10 @@ def _map_platform_roles_to_app_roles(role_ids: list[int], role_codes: list[str])
     normalized_codes = {code.strip().lower() for code in role_codes if code}
     if 2 in role_ids or "s_admin" in normalized_codes or "superadmin" in normalized_codes:
         roles.add(Role.HR_ADMIN)
-    if 5 in role_ids or "hr" in normalized_codes or "hr_exec" in normalized_codes:
+    if "hr" in normalized_codes or "hr_exec" in normalized_codes:
         roles.add(Role.HR_EXEC)
+    if 5 in role_ids or 6 in role_ids:
+        roles.add(Role.GROUP_LEAD)
     if "hr_admin" in normalized_codes:
         roles.add(Role.HR_ADMIN)
     if "hiring_manager" in normalized_codes:

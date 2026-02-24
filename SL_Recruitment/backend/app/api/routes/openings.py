@@ -4,10 +4,10 @@ from datetime import datetime
 import anyio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, delete, func, text
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import select, delete, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import DataError, SQLAlchemyError
+from sqlalchemy.exc import DataError, OperationalError, SQLAlchemyError
 from sqlalchemy.exc import IntegrityError
 
 from app.api import deps
@@ -22,6 +22,7 @@ from app.schemas.opening_request import (
     OpeningRequestCreate,
     OpeningRequestOut,
     OpeningRequestReject,
+    OpeningRequestStatusUpdate,
 )
 from app.db.platform_session import PlatformSessionLocal
 from app.models.platform_person import DimPerson
@@ -92,7 +93,16 @@ def _normalize_role_token(value: object) -> str:
 
 def _is_hr_actor(user: UserContext) -> bool:
     roles = set(user.roles or [])
-    if Role.HR_ADMIN in roles or Role.HR_EXEC in roles:
+    has_platform_role_meta = bool(
+        (user.platform_role_id is not None)
+        or (user.platform_role_code or "").strip()
+        or (user.platform_role_name or "").strip()
+        or (user.platform_role_ids or [])
+        or (user.platform_role_codes or [])
+        or (user.platform_role_names or [])
+    )
+    # In dev-mode (no platform metadata), rely on mapped app roles.
+    if not has_platform_role_meta and (Role.HR_ADMIN in roles or Role.HR_EXEC in roles):
         return True
 
     role_tokens = set()
@@ -141,8 +151,30 @@ def _is_superadmin_actor(user: UserContext) -> bool:
     return bool({"2", "superadmin", "super_admin", "s_admin"} & role_tokens)
 
 
+def _actor_role_ids(user: UserContext) -> set[int]:
+    values: list[object] = []
+    if user.platform_role_id is not None:
+        values.append(user.platform_role_id)
+    values.extend(user.platform_role_ids or [])
+    role_ids: set[int] = set()
+    for value in values:
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        try:
+            role_ids.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return role_ids
+
+
+def _is_role_5_or_6_actor(user: UserContext) -> bool:
+    role_ids = _actor_role_ids(user)
+    return 5 in role_ids or 6 in role_ids
+
+
 def _can_view_openings(user: UserContext) -> bool:
-    if _is_superadmin_actor(user) or _is_hr_actor(user):
+    if _is_superadmin_actor(user) or _is_hr_actor(user) or _is_role_5_or_6_actor(user):
         return True
     roles = set(user.roles or [])
     return bool({Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER} & roles)
@@ -153,6 +185,8 @@ def _actor_role_label(user: UserContext) -> str:
         return "superadmin"
     if _is_hr_actor(user):
         return "hr"
+    if _is_role_5_or_6_actor(user):
+        return "group_lead"
     roles = set(user.roles or [])
     if Role.GROUP_LEAD in roles:
         return "group_lead"
@@ -166,10 +200,7 @@ def _actor_role_label(user: UserContext) -> str:
 
 
 def _can_raise_opening_request(user: UserContext) -> bool:
-    if _is_superadmin_actor(user) or _is_hr_actor(user):
-        return True
-    roles = set(user.roles or [])
-    return bool({Role.GROUP_LEAD} & roles)
+    return _is_superadmin_actor(user) or _is_hr_actor(user) or _is_role_5_or_6_actor(user)
 
 
 def _can_approve_opening_request(user: UserContext) -> bool:
@@ -193,6 +224,29 @@ def _clean_text(raw: str | None) -> str | None:
         return None
     value = raw.strip()
     return value or None
+
+
+def _opening_request_schema_error_detail(exc: OperationalError) -> str:
+    message = str(getattr(exc, "orig", exc)).lower()
+    if "rec_opening_request" in message:
+        if "doesn't exist" in message or "does not exist" in message or "no such table" in message:
+            return (
+                "Opening request table is missing. Apply migrations "
+                "`backend/migrations/0033_opening_requests_workflow.sql` and "
+                "`backend/migrations/0034_opening_request_details_columns.sql`."
+            )
+        if "unknown column" in message or "no such column" in message:
+            if any(token in message for token in ("hiring_manager_email", "gl_details", "l2_details")):
+                return (
+                    "Opening request detail columns are missing. Apply migration "
+                    "`backend/migrations/0034_opening_request_details_columns.sql`."
+                )
+            return (
+                "Opening request schema is outdated. Apply migrations "
+                "`backend/migrations/0033_opening_requests_workflow.sql` and "
+                "`backend/migrations/0034_opening_request_details_columns.sql`."
+            )
+    return f"Opening request operation failed: {getattr(exc, 'orig', exc)}"
 
 
 async def _log_opening_event(
@@ -493,9 +547,9 @@ async def list_openings(
     roles = set(user.roles or [])
     is_hr = _is_hr_actor(user)
     is_superadmin = _is_superadmin_actor(user)
-    # Keep interviewer/GL restricted to their own openings; hiring managers should
-    # still be able to view portal openings they need to hire against.
-    is_restricted_view = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles
+    # Keep interviewer/GL restricted to their own openings in app-role mode;
+    # platform role IDs 5/6 should see standard openings for existing-opening requests.
+    is_restricted_view = (Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles) and not _is_role_5_or_6_actor(user)
     scoped_to_requester = False
     if is_restricted_view and not is_hr and not is_superadmin:
         requested_by = _clean_platform_person_id(user.person_id_platform)
@@ -546,7 +600,7 @@ async def get_opening_by_code(
     roles = set(user.roles or [])
     is_hr = _is_hr_actor(user)
     is_superadmin = _is_superadmin_actor(user)
-    is_restricted_view = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles
+    is_restricted_view = (Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles) and not _is_role_5_or_6_actor(user)
     if is_restricted_view and not is_hr and not is_superadmin:
         requested_by = _clean_platform_person_id(user.person_id_platform)
         if not requested_by or requested_by != _clean_platform_person_id(opening.reporting_person_id_platform):
@@ -668,6 +722,7 @@ async def create_opening(
 @router.get("/requests", response_model=list[OpeningRequestOut])
 async def list_opening_requests(
     status_filter: str | None = Query(default=None, alias="status"),
+    include_seed: bool = Query(default=False, alias="include_seed"),
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(deps.get_user),
 ):
@@ -682,13 +737,39 @@ async def list_opening_requests(
     if status_filter:
         query = query.where(RecOpeningRequest.status == status_filter.strip())
 
+    # Hide migration-seeded baseline records from request dashboards by default.
+    # These are system backfill rows, not user-raised GL/HR request activity.
+    if not include_seed:
+        query = query.where(
+            or_(
+                RecOpeningRequest.source_portal.is_(None),
+                RecOpeningRequest.source_portal != "migration_0032_seed",
+            )
+        ).where(
+            or_(
+                RecOpeningRequest.requested_by_role.is_(None),
+                RecOpeningRequest.requested_by_role != "standard_opening_creation",
+            )
+        )
+
     if not _can_approve_opening_request(user):
         requester = _clean_platform_person_id(user.person_id_platform)
         if not requester:
             return []
         query = query.where(RecOpeningRequest.requested_by_person_id_platform == requester)
 
-    rows = (await session.execute(query)).scalars().all()
+    try:
+        rows = (await session.execute(query)).scalars().all()
+    except OperationalError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_opening_request_schema_error_detail(exc),
+        )
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Opening requests could not be loaded: {exc}",
+        )
     return [_opening_request_to_out(row) for row in rows]
 
 
@@ -696,7 +777,7 @@ async def list_opening_requests(
 async def create_opening_request(
     payload: OpeningRequestCreate,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.GROUP_LEAD])),
+    user: UserContext = Depends(deps.get_user),
 ):
     if not _can_raise_opening_request(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
@@ -707,11 +788,26 @@ async def create_opening_request(
         opening_code=payload.opening_code,
         title=payload.title,
     )
+    is_existing_only_actor = _is_role_5_or_6_actor(user) and not _is_hr_actor(user) and not _is_superadmin_actor(user)
     requester_id = _platform_person_id(user)
     actor_role = _actor_role_label(user)
 
     opening_code = _clean_text(payload.opening_code) or (opening.opening_code if opening else None)
     opening_title = _clean_text(payload.title) or (opening.title if opening else None)
+    if is_existing_only_actor:
+        if not opening_code:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Role is restricted to existing opening requests only.",
+            )
+        if opening is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Opening code not found. Select an existing opening code.",
+            )
+        opening_code = opening.opening_code
+        opening_title = opening.title
+
     if not opening_code and opening_title:
         opening_code = _generate_opening_code(opening_title)
     if opening is None and not opening_title:
@@ -730,7 +826,6 @@ async def create_opening_request(
         headcount_delta = 1
 
     requested_status = "pending_hr_approval"
-    auto_apply = _can_approve_opening_request(user)
 
     request_row = RecOpeningRequest(
         opening_id=opening.opening_id if opening else None,
@@ -767,7 +862,7 @@ async def create_opening_request(
             actor_role=actor_role,
             meta={
                 "request_type": request_type,
-                "status": "auto_apply" if auto_apply else requested_status,
+                "status": requested_status,
                 "headcount_delta": request_row.headcount_delta,
                 "opening_code": request_row.opening_code,
                 "hiring_manager_email": request_row.hiring_manager_email,
@@ -775,19 +870,16 @@ async def create_opening_request(
                 "l2_details": request_row.l2_details,
             },
         )
-
-        if auto_apply:
-            await _apply_opening_request(
-                session,
-                request_row=request_row,
-                approver_person_id_platform=requester_id,
-                approver_role=actor_role,
-                approval_note="Auto-approved for HR/Superadmin actor.",
-            )
         await session.commit()
     except HTTPException:
         await session.rollback()
         raise
+    except OperationalError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_opening_request_schema_error_detail(exc),
+        )
     except DataError as exc:
         await session.rollback()
         message = str(getattr(exc, "orig", exc))
@@ -803,12 +895,139 @@ async def create_opening_request(
     return _opening_request_to_out(request_row)
 
 
+@router.patch("/requests/{opening_request_id}/status", response_model=OpeningRequestOut)
+async def update_opening_request_status(
+    opening_request_id: int,
+    payload: OpeningRequestStatusUpdate,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(deps.get_user),
+):
+    if not _is_superadmin_actor(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Superadmin can change request status.")
+
+    request_row = await session.get(RecOpeningRequest, opening_request_id, with_for_update=True)
+    if not request_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opening request not found")
+
+    now = datetime.utcnow()
+    approver_id = _platform_person_id(user)
+    approver_role = _actor_role_label(user)
+    previous_status = request_row.status
+    target_status = payload.status
+
+    override_hm = _clean_platform_person_id(payload.hiring_manager_person_id_platform)
+    if override_hm:
+        request_row.hiring_manager_person_id_platform = override_hm
+        request_row.updated_at = now
+
+    try:
+        if target_status == "applied":
+            await _apply_opening_request(
+                session,
+                request_row=request_row,
+                approver_person_id_platform=approver_id,
+                approver_role=approver_role,
+                approval_note=_clean_text(payload.approval_note) or "Applied by Superadmin status override.",
+            )
+        elif target_status == "rejected":
+            reason = _clean_text(payload.rejection_reason) or "Rejected by Superadmin."
+            request_row.status = "rejected"
+            request_row.rejected_reason = reason
+            request_row.approved_by_person_id_platform = approver_id
+            request_row.approved_at = now
+            request_row.applied_at = None
+            request_row.updated_at = now
+            await _log_opening_event(
+                session,
+                opening_id=request_row.opening_id,
+                opening_request_id=request_row.opening_request_id,
+                action_type="opening_request_status_admin_override",
+                actor_person_id_platform=approver_id,
+                actor_role=approver_role,
+                meta={"from_status": previous_status, "to_status": target_status, "reason": reason},
+            )
+        elif target_status == "pending_hr_approval":
+            request_row.status = "pending_hr_approval"
+            request_row.rejected_reason = None
+            request_row.approved_by_person_id_platform = None
+            request_row.approved_at = None
+            request_row.applied_at = None
+            request_row.updated_at = now
+            await _log_opening_event(
+                session,
+                opening_id=request_row.opening_id,
+                opening_request_id=request_row.opening_request_id,
+                action_type="opening_request_status_admin_override",
+                actor_person_id_platform=approver_id,
+                actor_role=approver_role,
+                meta={"from_status": previous_status, "to_status": target_status},
+            )
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported status transition.")
+        await session.commit()
+    except HTTPException:
+        await session.rollback()
+        raise
+    except OperationalError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_opening_request_schema_error_detail(exc),
+        )
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Opening request status update failed: {exc}")
+
+    await session.refresh(request_row)
+    return _opening_request_to_out(request_row)
+
+
+@router.delete("/requests/{opening_request_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_opening_request(
+    opening_request_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(deps.get_user),
+):
+    if not _is_superadmin_actor(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Superadmin can delete opening requests.")
+
+    request_row = await session.get(RecOpeningRequest, opening_request_id, with_for_update=True)
+    if not request_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opening request not found")
+
+    approver_id = _platform_person_id(user)
+    approver_role = _actor_role_label(user)
+    try:
+        await _log_opening_event(
+            session,
+            opening_id=request_row.opening_id,
+            opening_request_id=request_row.opening_request_id,
+            action_type="opening_request_deleted_admin",
+            actor_person_id_platform=approver_id,
+            actor_role=approver_role,
+            meta={"deleted_status": request_row.status},
+        )
+        await session.delete(request_row)
+        await session.commit()
+    except OperationalError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_opening_request_schema_error_detail(exc),
+        )
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Opening request delete failed: {exc}")
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/requests/{opening_request_id}/approve", response_model=OpeningRequestOut)
 async def approve_opening_request(
     opening_request_id: int,
     payload: OpeningRequestApprove,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+    user: UserContext = Depends(deps.get_user),
 ):
     if not _can_approve_opening_request(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
@@ -838,6 +1057,12 @@ async def approve_opening_request(
     except HTTPException:
         await session.rollback()
         raise
+    except OperationalError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_opening_request_schema_error_detail(exc),
+        )
     except SQLAlchemyError as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Opening request approval failed: {exc}")
@@ -851,7 +1076,7 @@ async def reject_opening_request(
     opening_request_id: int,
     payload: OpeningRequestReject,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+    user: UserContext = Depends(deps.get_user),
 ):
     if not _can_approve_opening_request(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
@@ -884,6 +1109,12 @@ async def reject_opening_request(
             meta={"reason": request_row.rejected_reason},
         )
         await session.commit()
+    except OperationalError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_opening_request_schema_error_detail(exc),
+        )
     except SQLAlchemyError as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Opening request rejection failed: {exc}")
@@ -906,7 +1137,7 @@ async def get_opening(
     roles = set(user.roles or [])
     is_hr = _is_hr_actor(user)
     is_superadmin = _is_superadmin_actor(user)
-    is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
+    is_interviewer = (Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles) and not _is_role_5_or_6_actor(user)
     if is_interviewer and not is_hr and not is_superadmin:
         requested_by = _clean_platform_person_id(user.person_id_platform)
         if not requested_by or requested_by != _clean_platform_person_id(opening.reporting_person_id_platform):
@@ -944,7 +1175,7 @@ async def update_opening(
     updates = payload.model_dump(exclude_none=True)
     if "opening_code" in updates:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Opening code cannot be edited.")
-    is_superadmin = (user.platform_role_id or None) == 2
+    is_superadmin = _is_superadmin_actor(user)
     is_hr_actor = _is_hr_actor(user)
 
     if not is_superadmin and not is_hr_actor:

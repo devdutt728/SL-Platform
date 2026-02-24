@@ -4,10 +4,56 @@ import type { DashboardMetrics } from "@/lib/types";
 
 type Props = {
   initialMetrics: DashboardMetrics | null;
+  canViewOffers?: boolean;
 };
 
-export default function NeedsReviewCard({ initialMetrics }: Props) {
+export default function NeedsReviewCard({ initialMetrics, canViewOffers = false }: Props) {
   const metrics = initialMetrics;
+  const cards = [
+    {
+      label: "CAF pending > SLA",
+      note: "CAF not submitted in time",
+      value: metrics?.caf_pending_overdue ?? "--",
+      href: "/candidates?status_view=active&stage=hr_screening&needs_attention=1",
+    },
+    {
+      label: "Medium CAFs",
+      note: "Screening level = Medium",
+      value: metrics?.needs_review_amber ?? "--",
+      href: "/candidates?status_view=active&needs_attention=1",
+    },
+    {
+      label: "Stuck > 5 days",
+      note: "Pending stage ageing",
+      value: metrics?.stuck_in_stage_over_days ?? "--",
+      href: "/candidates?status_view=active&needs_attention=1",
+    },
+    {
+      label: "Feedback pending",
+      note: "Interviews missing feedback",
+      value: metrics?.feedback_pending ?? "--",
+      href: "/candidates?status_view=active&stage=l2_feedback&stage=l1_feedback",
+    },
+    {
+      label: "Sprints overdue",
+      note: "Assigned + past due",
+      value: metrics?.sprints_overdue ?? "--",
+      href: "/candidates?status_view=active&stage=sprint",
+    },
+    {
+      label: "Offers awaiting response",
+      note: "Sent, no decision yet",
+      value: metrics?.offers_awaiting_response ?? "--",
+      href: "/offers?status=sent",
+      offerOnly: true,
+    },
+    {
+      label: "New applications",
+      note: "Created today",
+      value: metrics?.new_applications_today ?? "--",
+      href: "/candidates?status_view=all",
+    },
+  ].filter((item) => canViewOffers || !item.offerOnly);
   return (
     <div className="section-card motion-fade-up motion-delay-6 space-y-3 p-4">
       <div className="flex items-center justify-between gap-2">
@@ -20,50 +66,7 @@ export default function NeedsReviewCard({ initialMetrics }: Props) {
         </span>
       </div>
       <div className="grid gap-2 md:grid-cols-2">
-        {[
-          {
-            label: "CAF pending > SLA",
-            note: "CAF not submitted in time",
-            value: metrics?.caf_pending_overdue ?? "--",
-            href: "/candidates?status_view=active&stage=hr_screening&needs_attention=1",
-          },
-          {
-            label: "Medium CAFs",
-            note: "Screening level = Medium",
-            value: metrics?.needs_review_amber ?? "--",
-            href: "/candidates?status_view=active&needs_attention=1",
-          },
-          {
-            label: "Stuck > 5 days",
-            note: "Pending stage ageing",
-            value: metrics?.stuck_in_stage_over_days ?? "--",
-            href: "/candidates?status_view=active&needs_attention=1",
-          },
-          {
-            label: "Feedback pending",
-            note: "Interviews missing feedback",
-            value: metrics?.feedback_pending ?? "--",
-            href: "/candidates?status_view=active&stage=l2_feedback&stage=l1_feedback",
-          },
-          {
-            label: "Sprints overdue",
-            note: "Assigned + past due",
-            value: metrics?.sprints_overdue ?? "--",
-            href: "/candidates?status_view=active&stage=sprint",
-          },
-          {
-            label: "Offers awaiting response",
-            note: "Sent, no decision yet",
-            value: metrics?.offers_awaiting_response ?? "--",
-            href: "/offers?status=sent",
-          },
-          {
-            label: "New applications",
-            note: "Created today",
-            value: metrics?.new_applications_today ?? "--",
-            href: "/candidates?status_view=all",
-          },
-        ].map((item) => (
+        {cards.map((item) => (
           <Link
             key={item.label}
             href={item.href}

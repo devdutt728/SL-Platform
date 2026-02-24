@@ -3,16 +3,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
-import { CalendarCheck2, FileDown, Loader2, UserRound } from "lucide-react";
-import type { CandidateDetail, Interview, L2Assessment, Screening } from "@/lib/types";
+import { BriefcaseBusiness, CalendarCheck2, ClipboardCheck, FileDown, Loader2, UserRound } from "lucide-react";
+import type { CandidateDetail, Interview, L2Assessment, OpeningListItem, Screening } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
+import { OpeningRequestsWorkspace } from "./OpeningRequestsWorkspace";
 
 type Props = {
   initialInterviews: Interview[];
   useMeFilter: boolean;
+  initialOpenings: OpeningListItem[];
+  canRaiseOpeningRequests: boolean;
+  canRaiseNewOpeningRequests: boolean;
+  canApproveOpeningRequests: boolean;
+  canManageOpeningRequests: boolean;
 };
 
 type AssessmentMode = "l1" | "l2";
+type PortalTab = "assessments" | "opening_requests";
 type L1Data = Record<string, any>;
 type L2Data = Record<string, any>;
 
@@ -333,6 +340,12 @@ async function fetchInterviews(params: Record<string, string>) {
   return (await res.json()) as Interview[];
 }
 
+async function fetchOpenings() {
+  const res = await fetch("/api/rec/openings", { cache: "no-store" });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as OpeningListItem[];
+}
+
 async function fetchCandidate(candidateId: number) {
   const res = await fetch(`/api/rec/candidates/${encodeURIComponent(String(candidateId))}`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
@@ -434,8 +447,17 @@ function FieldLabel({ children }: { children: string }) {
   return <p className="text-xs font-semibold text-slate-600">{children}</p>;
 }
 
-export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
+export function GLPortalClient({
+  initialInterviews,
+  useMeFilter,
+  initialOpenings,
+  canRaiseOpeningRequests,
+  canRaiseNewOpeningRequests,
+  canApproveOpeningRequests,
+  canManageOpeningRequests,
+}: Props) {
   const [interviews, setInterviews] = useState<Interview[]>(initialInterviews);
+  const [openings, setOpenings] = useState<OpeningListItem[]>(initialOpenings);
   const [active, setActive] = useState<Interview | null>(null);
   const [candidate, setCandidate] = useState<CandidateDetail | null>(null);
   const [assessment, setAssessment] = useState<L2Assessment | null>(null);
@@ -445,6 +467,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const searchParams = useSearchParams();
+  const [portalTab, setPortalTab] = useState<PortalTab>("assessments");
 
   const l2Interviews = useMemo(() => interviews.filter((item) => item.round_type.toLowerCase().includes("l2")), [interviews]);
   const l1Interviews = useMemo(() => interviews.filter((item) => item.round_type.toLowerCase().includes("l1")), [interviews]);
@@ -474,6 +497,15 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
       setError(e?.message || "Could not refresh interviews.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function refreshOpeningsList() {
+    try {
+      const next = await fetchOpenings();
+      setOpenings(next);
+    } catch {
+      // Ignore opening refresh errors in assessment workflow.
     }
   }
 
@@ -555,6 +587,19 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
     }
   }, [interviews, visibleInterviews, searchParams, active]);
 
+  useEffect(() => {
+    const requestedTab = searchParams?.get("tab");
+    if (!requestedTab) return;
+    const normalized = requestedTab.trim().toLowerCase();
+    if (["opening_requests", "requests", "openings"].includes(normalized)) {
+      setPortalTab("opening_requests");
+      return;
+    }
+    if (["assessments", "assessment"].includes(normalized)) {
+      setPortalTab("assessments");
+    }
+  }, [searchParams]);
+
   const locked = assessment?.locked ?? false;
   const isSubmitted = assessment?.status === "submitted";
   const currentStageKey = (candidate?.current_stage || "").trim().toLowerCase();
@@ -567,6 +612,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
   const scheduledStart = active?.scheduled_start_at ? parseDateUtc(active.scheduled_start_at) : null;
   const hasMeetingStarted = !!scheduledStart && !Number.isNaN(scheduledStart.getTime()) && scheduledStart.getTime() <= Date.now();
   const canUpdateInterviewStatus = !!active && hasMeetingStarted;
+  const canSeeOpeningRequests = canRaiseOpeningRequests || canApproveOpeningRequests;
 
   async function markInterviewStatus(status: "taken" | "not_taken") {
     if (!active || !candidate) return;
@@ -665,11 +711,39 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
   return (
     <main className="content-pad space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <p className="text-xs uppercase tracking-tight text-slate-500">GL / Interviewer</p>
-        <h1 className="text-2xl font-semibold text-slate-900">Assessment Portal</h1>
-      </div>
-        {busy ? <Loader2 className="h-4 w-4 animate-spin text-slate-500" /> : null}
+        <div>
+          <p className="text-xs uppercase tracking-tight text-slate-500">GL / Interviewer</p>
+          <h1 className="text-2xl font-semibold text-slate-900">Assessment Portal</h1>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-full border border-slate-200 bg-white/80 p-1 text-xs font-semibold text-slate-700">
+            <button
+              type="button"
+              className={clsx(
+                "inline-flex items-center gap-1 rounded-full px-3 py-1.5",
+                portalTab === "assessments" ? "bg-slate-900 text-white" : "text-slate-600"
+              )}
+              onClick={() => setPortalTab("assessments")}
+            >
+              <ClipboardCheck className="h-3.5 w-3.5" />
+              Assessments
+            </button>
+            {canSeeOpeningRequests ? (
+              <button
+                type="button"
+                className={clsx(
+                  "inline-flex items-center gap-1 rounded-full px-3 py-1.5",
+                  portalTab === "opening_requests" ? "bg-slate-900 text-white" : "text-slate-600"
+                )}
+                onClick={() => setPortalTab("opening_requests")}
+              >
+                <BriefcaseBusiness className="h-3.5 w-3.5" />
+                Opening Requests
+              </button>
+            ) : null}
+          </div>
+          {busy ? <Loader2 className="h-4 w-4 animate-spin text-slate-500" /> : null}
+        </div>
       </div>
 
       {error ? (
@@ -683,7 +757,24 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
         </div>
       ) : null}
 
-      <section className="grid gap-4 lg:grid-cols-[1fr_2fr]">
+      {portalTab === "opening_requests" ? (
+        canSeeOpeningRequests ? (
+          <OpeningRequestsWorkspace
+            openings={openings}
+            canRaise={canRaiseOpeningRequests}
+            canRaiseNew={canRaiseNewOpeningRequests}
+            canApprove={canApproveOpeningRequests}
+            canManage={canManageOpeningRequests}
+            onOpeningsChanged={refreshOpeningsList}
+          />
+        ) : (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-white/50 p-4 text-sm text-slate-600">
+            Opening requests are not available for your role.
+          </div>
+        )
+      ) : null}
+
+      {portalTab === "assessments" ? <section className="grid gap-4 lg:grid-cols-[1fr_2fr]">
         <div className="section-card">
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold">Assigned interviews</p>
@@ -1047,7 +1138,7 @@ export function GLPortalClient({ initialInterviews, useMeFilter }: Props) {
             </div>
           )}
         </div>
-      </section>
+      </section> : null}
     </main>
   );
 }

@@ -115,7 +115,7 @@ def _offer_base_payload(offer: RecCandidateOffer) -> dict:
 async def list_offers(
     status_filter: list[str] | None = Query(default=None, alias="status"),
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
     query = (
         select(
@@ -158,7 +158,7 @@ async def list_offers(
 async def get_offer(
     offer_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
     row = (
         await session.execute(
@@ -377,7 +377,7 @@ async def send_offer_route(
 async def preview_offer_letter(
     offer_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
     offer = await session.get(RecCandidateOffer, offer_id)
     if not offer:
@@ -404,7 +404,7 @@ async def preview_offer_letter(
 async def preview_offer_email(
     offer_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
     offer = await session.get(RecCandidateOffer, offer_id)
     if not offer:
@@ -431,7 +431,7 @@ async def preview_offer_email(
 async def list_candidate_offers(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
     rows = (
         await session.execute(

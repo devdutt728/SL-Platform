@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import false, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 import asyncio
@@ -33,6 +33,28 @@ def _normalize_role_token(value: object) -> str:
     return token.replace("-", "_").replace(" ", "_")
 
 
+def _actor_role_ids(user: UserContext) -> set[int]:
+    values: list[object] = []
+    if user.platform_role_id is not None:
+        values.append(user.platform_role_id)
+    values.extend(user.platform_role_ids or [])
+    role_ids: set[int] = set()
+    for value in values:
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        try:
+            role_ids.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return role_ids
+
+
+def _is_role_5_or_6_actor(user: UserContext) -> bool:
+    role_ids = _actor_role_ids(user)
+    return 5 in role_ids or 6 in role_ids
+
+
 def _is_hr_actor(user: UserContext) -> bool:
     roles = set(user.roles or [])
     if Role.HR_ADMIN in roles or Role.HR_EXEC in roles:
@@ -62,9 +84,8 @@ def _is_hr_actor(user: UserContext) -> bool:
 
 
 def _is_superadmin_actor(user: UserContext) -> bool:
-    if (user.platform_role_id or None) == 2:
-        return True
-    if user.platform_role_ids and 2 in user.platform_role_ids:
+    role_ids = _actor_role_ids(user)
+    if 2 in role_ids:
         return True
 
     role_tokens = set()
@@ -106,13 +127,14 @@ async def get_dashboard_metrics(
     is_hr = _is_hr_actor(user)
     is_superadmin = _is_superadmin_actor(user)
     is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
-    is_role6 = (user.platform_role_id or None) == 6 or (user.platform_role_code or "").strip() == "6"
+    force_assigned_scope = _is_role_5_or_6_actor(user)
     interviewer_id = (user.person_id_platform or "").strip()
     interviewer_email = (user.email or "").strip().lower()
-    limited = (is_interviewer or is_role6) and not is_hr and not is_superadmin and (interviewer_id or interviewer_email)
+    limited = force_assigned_scope or (is_interviewer and not is_hr and not is_superadmin and (interviewer_id or interviewer_email))
+    scope_to_none = limited and not (interviewer_id or interviewer_email)
 
     assigned_ids = None
-    if limited:
+    if limited and not scope_to_none:
         interview_subq = None
         if interviewer_id:
             interview_subq = (
@@ -139,11 +161,15 @@ async def get_dashboard_metrics(
             assigned_ids = owner_subq
 
     def _candidate_scope(query):
+        if scope_to_none:
+            return query.where(false())
         if assigned_ids is None:
             return query
         return query.where(RecCandidate.candidate_id.in_(select(assigned_ids.c.candidate_id)))
 
     def _candidate_id_scope(query, column):
+        if scope_to_none:
+            return query.where(false())
         if assigned_ids is None:
             return query
         return query.where(column.in_(select(assigned_ids.c.candidate_id)))
@@ -197,7 +223,9 @@ async def get_dashboard_metrics(
         .select_from(RecOpening)
         .where(or_(RecOpening.is_active == 1, RecOpening.is_active == True, RecOpening.is_active.is_(True)))
     )
-    limit_openings = limited and interviewer_id and not is_role6
+    if scope_to_none:
+        openings_query = openings_query.where(false())
+    limit_openings = limited and interviewer_id
     if limit_openings:
         openings_query = openings_query.where(RecOpening.reporting_person_id_platform == interviewer_id)
     openings_count = (await session.execute(openings_query)).scalar_one()
@@ -339,10 +367,10 @@ async def list_recent_events(
     roles = set(user.roles or [])
     is_hr = _is_hr_actor(user)
     is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
-    is_role6 = (user.platform_role_id or None) == 6 or (user.platform_role_code or "").strip() == "6"
+    force_assigned_scope = _is_role_5_or_6_actor(user)
     interviewer_id = (user.person_id_platform or "").strip()
     interviewer_email = (user.email or "").strip().lower()
-    limited = (is_interviewer or is_role6) and not is_hr and not is_superadmin and (interviewer_id or interviewer_email)
+    limited = force_assigned_scope or (is_interviewer and not is_hr and not is_superadmin and (interviewer_id or interviewer_email))
     performer_id: int | None = None
     performer_email = (user.email or "").strip().lower()
     if not is_superadmin:
