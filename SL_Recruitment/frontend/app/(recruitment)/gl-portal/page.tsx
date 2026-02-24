@@ -6,6 +6,9 @@ import { getAuthMe } from "@/lib/auth-me";
 import { internalUrl } from "@/lib/internal";
 
 type Me = {
+  email?: string | null;
+  person_id_platform?: string | null;
+  full_name?: string | null;
   platform_role_id?: number | string | null;
   platform_role_ids?: Array<number | string> | null;
   platform_role_code?: string | null;
@@ -117,6 +120,11 @@ export default async function GLPortalPage() {
       initialInterviews={interviews}
       useMeFilter={useMeFilter}
       initialOpenings={openings}
+      currentUser={{
+        email: me?.email || null,
+        person_id_platform: me?.person_id_platform || null,
+        full_name: me?.full_name || null,
+      }}
       canRaiseOpeningRequests={canRaiseOpeningRequests}
       canRaiseNewOpeningRequests={canRaiseNewOpeningRequests}
       canApproveOpeningRequests={canApproveOpeningRequests}

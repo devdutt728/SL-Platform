@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import { BriefcaseBusiness, CheckCircle2, Clock3, Loader2, RefreshCw, SendHorizontal, Sparkles, XCircle } from "lucide-react";
-import type { OpeningListItem, OpeningRequest } from "@/lib/types";
+import type { OpeningListItem, OpeningRequest, PlatformPersonSuggestion } from "@/lib/types";
 
 type Props = {
   openings: OpeningListItem[];
@@ -11,6 +11,8 @@ type Props = {
   canRaiseNew: boolean;
   canApprove: boolean;
   canManage: boolean;
+  currentUserEmail?: string | null;
+  currentUserPersonId?: string | null;
   onOpeningsChanged?: () => Promise<void> | void;
 };
 
@@ -61,8 +63,19 @@ function formatWhen(raw?: string | null) {
   });
 }
 
-export function OpeningRequestsWorkspace({ openings, canRaise, canRaiseNew, canApprove, canManage, onOpeningsChanged }: Props) {
+export function OpeningRequestsWorkspace({
+  openings,
+  canRaise,
+  canRaiseNew,
+  canApprove,
+  canManage,
+  currentUserEmail,
+  currentUserPersonId,
+  onOpeningsChanged,
+}: Props) {
   const canSee = canRaise || canApprove;
+  const isRoleFiveOrSixActor = canRaise && !canApprove;
+  const isHrOrSuperadminActor = canApprove;
   const [requests, setRequests] = useState<OpeningRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -80,6 +93,10 @@ export function OpeningRequestsWorkspace({ openings, canRaise, canRaiseNew, canA
   const [headcountDelta, setHeadcountDelta] = useState(1);
   const [hmPersonId, setHmPersonId] = useState("");
   const [hmEmail, setHmEmail] = useState("");
+  const [hmSuggestions, setHmSuggestions] = useState<PlatformPersonSuggestion[]>([]);
+  const [hmSuggestionsLoading, setHmSuggestionsLoading] = useState(false);
+  const [hmSuggestionsOpen, setHmSuggestionsOpen] = useState(false);
+  const [hmSelected, setHmSelected] = useState<PlatformPersonSuggestion | null>(null);
   const [glDetails, setGlDetails] = useState("");
   const [l2Details, setL2Details] = useState("");
   const [reason, setReason] = useState("");
@@ -135,6 +152,79 @@ export function OpeningRequestsWorkspace({ openings, canRaise, canRaiseNew, canA
     }
   }, [canRaiseNew, targetMode]);
 
+  const lockedEmail = useMemo(() => String(currentUserEmail || "").trim().toLowerCase(), [currentUserEmail]);
+  const lockedPersonId = useMemo(() => String(currentUserPersonId || "").trim(), [currentUserPersonId]);
+
+  const loadPeopleSuggestions = useCallback(async (query: string, limit = 10) => {
+    const res = await fetch(`/api/platform/people?q=${encodeURIComponent(query)}&limit=${limit}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(await res.text());
+    return (await res.json()) as PlatformPersonSuggestion[];
+  }, []);
+
+  const applySelectedHmPerson = useCallback((person: PlatformPersonSuggestion) => {
+    setHmSelected(person);
+    setHmEmail(String(person.email || "").trim());
+    setHmPersonId(String(person.person_id || "").trim());
+    setHmSuggestions([]);
+  }, []);
+
+  const resolveHmPersonByEmail = useCallback(async (rawEmail: string) => {
+    const email = String(rawEmail || "").trim().toLowerCase();
+    if (!email) {
+      setHmPersonId("");
+      setHmSelected(null);
+      return;
+    }
+    try {
+      const options = await loadPeopleSuggestions(email, 15);
+      const exact = options.find((item) => String(item.email || "").trim().toLowerCase() === email);
+      if (exact) {
+        applySelectedHmPerson(exact);
+        return;
+      }
+      setHmSelected(null);
+      if (!isRoleFiveOrSixActor) setHmPersonId("");
+    } catch {
+      // ignore lookup failures and keep current value
+    }
+  }, [applySelectedHmPerson, isRoleFiveOrSixActor, loadPeopleSuggestions]);
+
+  useEffect(() => {
+    if (!isRoleFiveOrSixActor) return;
+    setHmSuggestions((prev) => (prev.length === 0 ? prev : []));
+    setHmSuggestionsOpen(false);
+    setHmSelected(null);
+    setHmEmail(lockedEmail);
+    setHmPersonId(lockedPersonId);
+    if (lockedEmail && !lockedPersonId) {
+      void resolveHmPersonByEmail(lockedEmail);
+    }
+  }, [isRoleFiveOrSixActor, lockedEmail, lockedPersonId, resolveHmPersonByEmail]);
+
+  useEffect(() => {
+    if (!isHrOrSuperadminActor || !hmSuggestionsOpen) return;
+    let cancelled = false;
+    const query = hmEmail.trim();
+    const handle = window.setTimeout(() => {
+      (async () => {
+        setHmSuggestionsLoading(true);
+        try {
+          const options = await loadPeopleSuggestions(query, 10);
+          if (!cancelled) setHmSuggestions(options);
+        } catch {
+          if (!cancelled) setHmSuggestions([]);
+        } finally {
+          if (!cancelled) setHmSuggestionsLoading(false);
+        }
+      })();
+    }, query.length < 2 ? 0 : 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [isHrOrSuperadminActor, hmSuggestionsOpen, hmEmail, loadPeopleSuggestions]);
+
   if (!canSee) return null;
 
   async function submitRequest() {
@@ -142,6 +232,9 @@ export function OpeningRequestsWorkspace({ openings, canRaise, canRaiseNew, canA
 
     setError(null);
     setNotice(null);
+
+    const resolvedHmEmail = (isRoleFiveOrSixActor ? lockedEmail : hmEmail).trim().toLowerCase();
+    const resolvedHmPersonId = (isRoleFiveOrSixActor ? lockedPersonId : hmPersonId).trim();
 
     if (!canRaiseNew && !openingCode) {
       setError("Select an existing opening code.");
@@ -159,8 +252,16 @@ export function OpeningRequestsWorkspace({ openings, canRaise, canRaiseNew, canA
       setError("Opening title is required for a new opening request.");
       return;
     }
-    if (headcountDelta === 0 && !hmPersonId.trim()) {
+    if (headcountDelta === 0 && !resolvedHmPersonId) {
       setError("Hiring manager person id is required when headcount delta is 0.");
+      return;
+    }
+    if (isRoleFiveOrSixActor && !resolvedHmEmail) {
+      setError("Your login email could not be resolved for this request.");
+      return;
+    }
+    if (isRoleFiveOrSixActor && !resolvedHmPersonId) {
+      setError("Your person id could not be auto-fetched. Please contact HR.");
       return;
     }
 
@@ -175,8 +276,8 @@ export function OpeningRequestsWorkspace({ openings, canRaise, canRaiseNew, canA
         location_city: locationCity.trim() || null,
         location_country: locationCountry.trim() || null,
         headcount_delta: Math.max(0, Number(headcountDelta) || 0),
-        hiring_manager_person_id_platform: hmPersonId.trim() || null,
-        hiring_manager_email: hmEmail.trim() || null,
+        hiring_manager_person_id_platform: resolvedHmPersonId || null,
+        hiring_manager_email: resolvedHmEmail || null,
         gl_details: glDetails.trim() || null,
         l2_details: l2Details.trim() || null,
         request_reason: reason.trim() || null,
@@ -200,8 +301,16 @@ export function OpeningRequestsWorkspace({ openings, canRaise, canRaiseNew, canA
     setLocationCity("Delhi");
     setLocationCountry("India");
     setHeadcountDelta(1);
-    setHmPersonId("");
-    setHmEmail("");
+    if (isRoleFiveOrSixActor) {
+      setHmPersonId(lockedPersonId);
+      setHmEmail(lockedEmail);
+    } else {
+      setHmPersonId("");
+      setHmEmail("");
+    }
+    setHmSuggestions([]);
+    setHmSuggestionsOpen(false);
+    setHmSelected(null);
     setGlDetails("");
     setL2Details("");
     setReason("");
@@ -383,6 +492,12 @@ export function OpeningRequestsWorkspace({ openings, canRaise, canRaiseNew, canA
               {!canRaiseNew ? (
                 <p className="mt-3 text-xs text-slate-500">Your role can raise requests only for existing openings.</p>
               ) : null}
+              {isRoleFiveOrSixActor ? (
+                <p className="mt-2 text-xs text-slate-500">Hiring manager email and person id are locked to your logged-in account.</p>
+              ) : null}
+              {isHrOrSuperadminActor ? (
+                <p className="mt-2 text-xs text-slate-500">Type hiring manager email and select from DB suggestions to auto-fill person id.</p>
+              ) : null}
 
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 <label className="space-y-1 md:col-span-2">
@@ -434,21 +549,79 @@ export function OpeningRequestsWorkspace({ openings, canRaise, canRaiseNew, canA
                   <span className="text-xs font-semibold text-slate-600">Hiring manager person id</span>
                   <input
                     value={hmPersonId}
-                    onChange={(e) => setHmPersonId(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                    placeholder="Platform person id"
+                    onChange={(e) => {
+                      if (isRoleFiveOrSixActor) return;
+                      setHmPersonId(e.target.value);
+                    }}
+                    readOnly={isRoleFiveOrSixActor}
+                    className={clsx(
+                      "w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm",
+                      isRoleFiveOrSixActor ? "cursor-not-allowed bg-slate-100 text-slate-500" : "bg-white text-slate-800"
+                    )}
+                    placeholder={isRoleFiveOrSixActor ? "Auto-fetched from your login" : "Platform person id"}
                   />
                 </label>
 
                 <label className="space-y-1">
                   <span className="text-xs font-semibold text-slate-600">Hiring manager email</span>
-                  <input
-                    type="email"
-                    value={hmEmail}
-                    onChange={(e) => setHmEmail(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                    placeholder="manager@studiolotus.in"
-                  />
+                  <div
+                    className="relative"
+                    onBlur={(e) => {
+                      if (isRoleFiveOrSixActor || !isHrOrSuperadminActor) return;
+                      const nextTarget = e.relatedTarget as Node | null;
+                      if (nextTarget && e.currentTarget.contains(nextTarget)) return;
+                      setHmSuggestionsOpen(false);
+                      void resolveHmPersonByEmail(hmEmail);
+                    }}
+                  >
+                    <input
+                      type="email"
+                      value={hmEmail}
+                      onChange={(e) => {
+                        if (isRoleFiveOrSixActor) return;
+                        const next = e.target.value;
+                        setHmEmail(next);
+                        setHmSelected(null);
+                        if (!next.trim()) setHmPersonId("");
+                      }}
+                      onFocus={() => {
+                        if (!isRoleFiveOrSixActor && isHrOrSuperadminActor) setHmSuggestionsOpen(true);
+                      }}
+                      readOnly={isRoleFiveOrSixActor}
+                      className={clsx(
+                        "w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm",
+                        isRoleFiveOrSixActor ? "cursor-not-allowed bg-slate-100 text-slate-500" : "bg-white text-slate-800"
+                      )}
+                      placeholder={isRoleFiveOrSixActor ? "Auto-fetched from your login" : "Type HM email to fetch person id"}
+                    />
+                    {hmSuggestionsLoading && hmSuggestionsOpen && !isRoleFiveOrSixActor ? (
+                      <div className="absolute right-3 top-2 text-[11px] text-slate-500">Searching...</div>
+                    ) : null}
+                    {!isRoleFiveOrSixActor && hmSuggestionsOpen && hmSuggestions.length > 0 ? (
+                      <div
+                        className="absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-[0_10px_24px_rgba(15,23,42,0.14)]"
+                        onMouseDown={(e) => e.preventDefault()}
+                      >
+                        {hmSuggestions.map((person) => (
+                          <button
+                            key={person.person_id}
+                            type="button"
+                            className="flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                            onClick={() => applySelectedHmPerson(person)}
+                          >
+                            <span className="truncate">
+                              <span className="font-medium text-slate-800">{person.full_name}</span>{" "}
+                              <span className="text-slate-500">({person.email})</span>
+                            </span>
+                            <span className="shrink-0 text-xs text-slate-500">{person.person_id}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  {hmSelected && !isRoleFiveOrSixActor ? (
+                    <p className="text-[11px] text-slate-500">Auto-mapped person id: {hmSelected.person_id}</p>
+                  ) : null}
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs font-semibold text-slate-600">City</span>

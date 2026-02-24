@@ -4,6 +4,7 @@ import { backendUrl } from "@/lib/backend";
 
 export type AuthMe = {
   email?: string;
+  person_id_platform?: string | null;
   full_name?: string | null;
   roles?: string[] | null;
   platform_role_id?: number | string | null;

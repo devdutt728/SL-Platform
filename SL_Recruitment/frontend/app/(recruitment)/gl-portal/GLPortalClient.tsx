@@ -12,6 +12,11 @@ type Props = {
   initialInterviews: Interview[];
   useMeFilter: boolean;
   initialOpenings: OpeningListItem[];
+  currentUser?: {
+    email?: string | null;
+    person_id_platform?: string | null;
+    full_name?: string | null;
+  } | null;
   canRaiseOpeningRequests: boolean;
   canRaiseNewOpeningRequests: boolean;
   canApproveOpeningRequests: boolean;
@@ -451,6 +456,7 @@ export function GLPortalClient({
   initialInterviews,
   useMeFilter,
   initialOpenings,
+  currentUser,
   canRaiseOpeningRequests,
   canRaiseNewOpeningRequests,
   canApproveOpeningRequests,
@@ -765,6 +771,8 @@ export function GLPortalClient({
             canRaiseNew={canRaiseNewOpeningRequests}
             canApprove={canApproveOpeningRequests}
             canManage={canManageOpeningRequests}
+            currentUserEmail={currentUser?.email || null}
+            currentUserPersonId={currentUser?.person_id_platform || null}
             onOpeningsChanged={refreshOpeningsList}
           />
         ) : (

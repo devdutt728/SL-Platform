@@ -112,7 +112,7 @@ export default async function DashboardPage() {
     roleIds.includes(5) ||
     roleIds.includes(6);
   const canViewOffers = isHr || isSuperadmin;
-  const canViewOpeningRequestNotifications = isHr || isSuperadmin || roleIds.includes(5) || roleIds.includes(6);
+  const canViewOpeningRequestNotifications = isHr || isSuperadmin;
 
   const [metrics, events, offers, openings, candidates, openingRequests] = await Promise.all([
     fetchDashboard(),

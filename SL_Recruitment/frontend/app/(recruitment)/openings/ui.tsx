@@ -10,6 +10,9 @@ import { OpeningRequestsPanel } from "./requests-panel";
 type Props = {
   initialOpenings: OpeningListItem[];
   initialMe: {
+    email?: string | null;
+    person_id_platform?: string | null;
+    full_name?: string | null;
     roles?: string[] | null;
     platform_role_id?: number | string | null;
     platform_role_ids?: Array<number | string> | null;
@@ -385,6 +388,8 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
         canManage={isSuperadmin}
         isHr={isHr}
         isGl={isGl}
+        currentUserEmail={initialMe?.email || null}
+        currentUserPersonId={initialMe?.person_id_platform || null}
         onError={setError}
         onOpeningsChanged={refreshOpenings}
       />

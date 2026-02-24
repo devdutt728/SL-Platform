@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import false, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +54,34 @@ def _actor_role_ids(user: UserContext) -> set[int]:
 def _is_role_5_or_6_actor(user: UserContext) -> bool:
     role_ids = _actor_role_ids(user)
     return 5 in role_ids or 6 in role_ids
+
+
+def _build_assigned_candidate_subquery(interviewer_id: str, interviewer_email: str):
+    interview_subq = None
+    if interviewer_id:
+        interview_subq = (
+            select(RecCandidateInterview.candidate_id)
+            .where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
+            .subquery()
+        )
+    owner_subq = None
+    if interviewer_email:
+        owner_subq = (
+            select(RecCandidate.candidate_id)
+            .where(func.lower(RecCandidate.l2_owner_email) == interviewer_email)
+            .subquery()
+        )
+    if interview_subq is not None and owner_subq is not None:
+        return (
+            select(interview_subq.c.candidate_id)
+            .union(select(owner_subq.c.candidate_id))
+            .subquery()
+        )
+    if interview_subq is not None:
+        return interview_subq
+    if owner_subq is not None:
+        return owner_subq
+    return None
 
 
 def _is_hr_actor(user: UserContext) -> bool:
@@ -135,30 +164,7 @@ async def get_dashboard_metrics(
 
     assigned_ids = None
     if limited and not scope_to_none:
-        interview_subq = None
-        if interviewer_id:
-            interview_subq = (
-                select(RecCandidateInterview.candidate_id)
-                .where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
-                .subquery()
-            )
-        owner_subq = None
-        if interviewer_email:
-            owner_subq = (
-                select(RecCandidate.candidate_id)
-                .where(func.lower(RecCandidate.l2_owner_email) == interviewer_email)
-                .subquery()
-            )
-        if interview_subq is not None and owner_subq is not None:
-            assigned_ids = (
-                select(interview_subq.c.candidate_id)
-                .union(select(owner_subq.c.candidate_id))
-                .subquery()
-            )
-        elif interview_subq is not None:
-            assigned_ids = interview_subq
-        elif owner_subq is not None:
-            assigned_ids = owner_subq
+        assigned_ids = _build_assigned_candidate_subquery(interviewer_id, interviewer_email)
 
     def _candidate_scope(query):
         if scope_to_none:
@@ -223,11 +229,12 @@ async def get_dashboard_metrics(
         .select_from(RecOpening)
         .where(or_(RecOpening.is_active == 1, RecOpening.is_active == True, RecOpening.is_active.is_(True)))
     )
-    if scope_to_none:
-        openings_query = openings_query.where(false())
-    limit_openings = limited and interviewer_id
-    if limit_openings:
-        openings_query = openings_query.where(RecOpening.reporting_person_id_platform == interviewer_id)
+    is_restricted_opening_view = (Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles) and not force_assigned_scope
+    if is_restricted_opening_view and not is_hr and not is_superadmin:
+        if interviewer_id:
+            openings_query = openings_query.where(RecOpening.reporting_person_id_platform == interviewer_id)
+        else:
+            openings_query = openings_query.where(false())
     openings_count = (await session.execute(openings_query)).scalar_one()
 
     needs_review_amber = (
@@ -371,6 +378,7 @@ async def list_recent_events(
     interviewer_id = (user.person_id_platform or "").strip()
     interviewer_email = (user.email or "").strip().lower()
     limited = force_assigned_scope or (is_interviewer and not is_hr and not is_superadmin and (interviewer_id or interviewer_email))
+    scope_to_none = limited and not (interviewer_id or interviewer_email)
     performer_id: int | None = None
     performer_email = (user.email or "").strip().lower()
     if not is_superadmin:
@@ -411,32 +419,9 @@ async def list_recent_events(
         )
 
     if limited:
-        interview_subq = None
-        if interviewer_id:
-            interview_subq = (
-                select(RecCandidateInterview.candidate_id)
-                .where(RecCandidateInterview.interviewer_person_id_platform == interviewer_id)
-                .subquery()
-            )
-        owner_subq = None
-        if interviewer_email:
-            owner_subq = (
-                select(RecCandidate.candidate_id)
-                .where(func.lower(RecCandidate.l2_owner_email) == interviewer_email)
-                .subquery()
-            )
-        if interview_subq is not None and owner_subq is not None:
-            assigned_ids = (
-                select(interview_subq.c.candidate_id)
-                .union(select(owner_subq.c.candidate_id))
-                .subquery()
-            )
-        elif interview_subq is not None:
-            assigned_ids = interview_subq
-        elif owner_subq is not None:
-            assigned_ids = owner_subq
-        else:
-            assigned_ids = None
+        if scope_to_none:
+            return []
+        assigned_ids = _build_assigned_candidate_subquery(interviewer_id, interviewer_email)
         if assigned_ids is not None:
             query = query.where(RecCandidateEvent.candidate_id.in_(select(assigned_ids.c.candidate_id)))
 
@@ -450,8 +435,6 @@ async def list_recent_events(
         meta: dict = {}
         if event.meta_json:
             try:
-                import json
-
                 meta = json.loads(event.meta_json) if isinstance(event.meta_json, str) else {}
             except Exception:
                 meta = {}
@@ -477,9 +460,24 @@ async def list_recent_events(
 @router.get("/events/stream")
 async def stream_events(
     request: Request,
-    _session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
+    role_5_or_6_scope = _is_role_5_or_6_actor(user)
+    allowed_candidate_ids: set[int] | None = None
+    if role_5_or_6_scope:
+        interviewer_id = (user.person_id_platform or "").strip()
+        interviewer_email = (user.email or "").strip().lower()
+        if not (interviewer_id or interviewer_email):
+            allowed_candidate_ids = set()
+        else:
+            assigned_ids = _build_assigned_candidate_subquery(interviewer_id, interviewer_email)
+            if assigned_ids is None:
+                allowed_candidate_ids = set()
+            else:
+                rows = (await session.execute(select(assigned_ids.c.candidate_id))).all()
+                allowed_candidate_ids = {int(row[0]) for row in rows if row and row[0] is not None}
+
     queue = await event_bus.subscribe()
 
     async def event_generator():
@@ -489,6 +487,18 @@ async def stream_events(
                     break
                 try:
                     data = await asyncio.wait_for(queue.get(), timeout=15)
+                    if allowed_candidate_ids is not None:
+                        try:
+                            payload = json.loads(data)
+                        except Exception:
+                            continue
+                        candidate_id = payload.get("candidate_id")
+                        try:
+                            candidate_id_int = int(candidate_id)
+                        except (TypeError, ValueError):
+                            continue
+                        if candidate_id_int not in allowed_candidate_ids:
+                            continue
                     yield f"data: {data}\n\n"
                 except asyncio.TimeoutError:
                     yield "event: ping\ndata: {}\n\n"

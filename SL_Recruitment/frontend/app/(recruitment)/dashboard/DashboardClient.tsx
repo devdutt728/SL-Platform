@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { clsx } from "clsx";
 import type { CandidateEvent, CandidateListItem, CandidateOffer, DashboardMetrics, OpeningListItem, OpeningRequest } from "@/lib/types";
-import { Bell, Briefcase, LayoutPanelLeft, UsersRound } from "lucide-react";
+import { Bell, Briefcase, Check, LayoutPanelLeft, UsersRound, X } from "lucide-react";
 import { fetchDeduped } from "@/lib/fetch-deduped";
 import NeedsReviewCard from "./NeedsReviewCard";
 import RecentActivityCard from "./RecentActivityCard";
@@ -85,6 +85,23 @@ function formatRequestTime(raw?: string | null) {
   });
 }
 
+function parseDetail(raw: string): string | null {
+  if (!raw) return null;
+  const text = raw.trim();
+  if (!text) return null;
+  const lower = text.toLowerCase();
+  if (lower.startsWith("<!doctype") || lower.startsWith("<html")) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && "detail" in parsed && typeof (parsed as { detail?: unknown }).detail === "string") {
+      return (parsed as { detail: string }).detail;
+    }
+  } catch {
+    // Ignore parsing errors and fall back to raw payload.
+  }
+  return text.length > 320 ? `${text.slice(0, 320)}...` : text;
+}
+
 export default function DashboardClient({
   initialMetrics,
   initialEvents,
@@ -107,8 +124,13 @@ export default function DashboardClient({
   const [hoveredOpeningId, setHoveredOpeningId] = useState<number | null>(null);
   const [hoverPanelLeft, setHoverPanelLeft] = useState(8);
   const stripRef = useRef<HTMLDivElement | null>(null);
+  const openingHoverCloseTimerRef = useRef<number | null>(null);
   const requestBellRef = useRef<HTMLDivElement | null>(null);
+  const requestBellCloseTimerRef = useRef<number | null>(null);
   const [requestBellOpen, setRequestBellOpen] = useState(false);
+  const [requestActionBusyId, setRequestActionBusyId] = useState<number | null>(null);
+  const [requestActionError, setRequestActionError] = useState<string | null>(null);
+  const [requestActionNotice, setRequestActionNotice] = useState<string | null>(null);
   const [hideActivityClient] = useState(hideActivity);
 
   const PipelineItem = ({
@@ -200,6 +222,89 @@ export default function DashboardClient({
     [openingStripRows, hoveredOpeningId]
   );
 
+  async function refreshPendingOpeningRequests() {
+    if (!canViewOpeningRequestNotifications) {
+      setOpeningRequests([]);
+      return;
+    }
+    try {
+      const res = await fetchDeduped("/api/rec/openings/requests?status=pending_hr_approval", { cache: "no-store" });
+      if (!res.ok) return;
+      setOpeningRequests((await res.json()) as OpeningRequest[]);
+    } catch {
+      // ignore refresh failures
+    }
+  }
+
+  async function decideOpeningRequest(request: OpeningRequest, action: "approve" | "reject") {
+    const requestId = request.opening_request_id;
+    let endpoint = `/api/rec/openings/requests/${requestId}/approve`;
+    let payload: Record<string, string | null> = {
+      hiring_manager_person_id_platform: request.hiring_manager_person_id_platform || null,
+      approval_note: "Approved from dashboard notification",
+    };
+
+    if (action === "reject") {
+      const reason = window.prompt("Rejection reason:", "Insufficient details");
+      if (!reason || !reason.trim()) return;
+      endpoint = `/api/rec/openings/requests/${requestId}/reject`;
+      payload = { rejection_reason: reason.trim() };
+    }
+
+    setRequestActionBusyId(requestId);
+    setRequestActionError(null);
+    setRequestActionNotice(null);
+
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const raw = (await res.text()).trim();
+        setRequestActionError(parseDetail(raw) || `${action === "approve" ? "Approve" : "Reject"} failed (${res.status})`);
+        return;
+      }
+      setRequestActionNotice(`Request #${requestId} ${action === "approve" ? "approved" : "rejected"}.`);
+      await refreshPendingOpeningRequests();
+    } catch {
+      setRequestActionError("Request action failed. Try again.");
+    } finally {
+      setRequestActionBusyId(null);
+    }
+  }
+
+  function clearOpeningHoverCloseTimer() {
+    if (openingHoverCloseTimerRef.current !== null) {
+      window.clearTimeout(openingHoverCloseTimerRef.current);
+      openingHoverCloseTimerRef.current = null;
+    }
+  }
+
+  function scheduleOpeningHoverClose() {
+    clearOpeningHoverCloseTimer();
+    openingHoverCloseTimerRef.current = window.setTimeout(() => {
+      setHoveredOpeningId(null);
+      openingHoverCloseTimerRef.current = null;
+    }, 140);
+  }
+
+  function clearRequestBellCloseTimer() {
+    if (requestBellCloseTimerRef.current !== null) {
+      window.clearTimeout(requestBellCloseTimerRef.current);
+      requestBellCloseTimerRef.current = null;
+    }
+  }
+
+  function scheduleRequestBellClose() {
+    clearRequestBellCloseTimer();
+    requestBellCloseTimerRef.current = window.setTimeout(() => {
+      setRequestBellOpen(false);
+      requestBellCloseTimerRef.current = null;
+    }, 160);
+  }
+
   function handleOpeningHover(openingId: number, event: React.MouseEvent<HTMLDivElement>) {
     const host = stripRef.current;
     if (!host) {
@@ -282,6 +387,19 @@ export default function DashboardClient({
     return () => window.removeEventListener("mousedown", onClickOutside);
   }, [requestBellOpen]);
 
+  useEffect(() => {
+    if (!requestActionNotice) return;
+    const timer = window.setTimeout(() => setRequestActionNotice(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [requestActionNotice]);
+
+  useEffect(() => {
+    return () => {
+      clearOpeningHoverCloseTimer();
+      clearRequestBellCloseTimer();
+    };
+  }, []);
+
   return (
     <main className="content-pad space-y-6">
       <section className="flex flex-wrap items-center justify-between gap-3">
@@ -290,26 +408,42 @@ export default function DashboardClient({
           <h1 className="text-2xl font-semibold text-[var(--dim-grey)]">Dashboard</h1>
         </div>
         {canViewOpeningRequestNotifications ? (
-          <div ref={requestBellRef} className="relative">
+          <div
+            ref={requestBellRef}
+            className="relative"
+            onMouseEnter={() => {
+              clearRequestBellCloseTimer();
+              setRequestBellOpen(true);
+            }}
+            onMouseLeave={() => {
+              scheduleRequestBellClose();
+            }}
+          >
             <button
               type="button"
-              className="relative inline-flex items-center gap-2 rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-4 py-2 text-xs font-semibold text-[var(--dim-grey)] shadow-sm hover:bg-[var(--surface-card)]"
+              aria-label="Opening requests"
+              className="relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--accessible-components--dark-grey)] bg-white text-[var(--dim-grey)] shadow-sm hover:bg-[var(--surface-card)]"
               onClick={() => setRequestBellOpen((prev) => !prev)}
             >
               <Bell className="h-4 w-4" />
-              Opening requests
-              <span className="rounded-full bg-[var(--brand-color)] px-2 py-0.5 text-[10px] font-semibold text-white">
+              <span className="absolute -right-1 -top-1 rounded-full bg-[var(--brand-color)] px-1.5 py-0.5 text-[10px] font-semibold text-white">
                 {pendingOpeningRequests.length}
               </span>
             </button>
             {requestBellOpen ? (
-              <div className="absolute right-0 top-[calc(100%+10px)] z-[220] w-[360px] max-w-[90vw] rounded-2xl border border-[var(--border-soft)] bg-white p-3 shadow-[0_24px_45px_-25px_rgba(15,23,42,0.45)]">
+              <div
+                className="absolute right-0 top-full z-[220] w-[340px] max-w-[90vw] rounded-2xl border border-[var(--border-soft)] bg-white p-3 shadow-[0_24px_45px_-25px_rgba(15,23,42,0.45)]"
+                onMouseEnter={clearRequestBellCloseTimer}
+                onMouseLeave={scheduleRequestBellClose}
+              >
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-[var(--dim-grey)]">Pending opening requests</p>
-                  <Link href="/openings" className="text-xs font-semibold text-[var(--brand-color)]">
-                    Open queue
-                  </Link>
+                  <span className="rounded-full bg-[var(--surface-card)] px-2 py-0.5 text-[10px] font-semibold text-[var(--dim-grey)]">
+                    {pendingOpeningRequests.length}
+                  </span>
                 </div>
+                {requestActionError ? <p className="mt-2 text-[11px] font-medium text-rose-600">{requestActionError}</p> : null}
+                {requestActionNotice ? <p className="mt-2 text-[11px] font-medium text-emerald-600">{requestActionNotice}</p> : null}
                 <div className="mt-3 space-y-2">
                   {pendingOpeningRequests.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-[var(--accessible-components--dark-grey)] bg-[var(--surface-card)] px-3 py-5 text-center text-xs text-[var(--light-grey)]">
@@ -318,12 +452,38 @@ export default function DashboardClient({
                   ) : (
                     pendingOpeningRequests.slice(0, 6).map((request) => (
                       <div key={request.opening_request_id} className="rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-2">
-                        <p className="text-xs font-semibold text-[var(--dim-grey)]">
-                          #{request.opening_request_id} • {request.opening_title || request.opening_code || "Opening request"}
-                        </p>
-                        <p className="mt-0.5 text-[11px] text-[var(--light-grey)]">
-                          Delta {request.headcount_delta} • {formatRequestTime(request.created_at)}
-                        </p>
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-semibold text-[var(--dim-grey)]">
+                              #{request.opening_request_id} • {request.opening_title || request.opening_code || "Opening request"}
+                            </p>
+                            <p className="mt-0.5 text-[11px] text-[var(--light-grey)]">
+                              Delta {request.headcount_delta} • {formatRequestTime(request.created_at)}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              title="Approve"
+                              aria-label={`Approve request ${request.opening_request_id}`}
+                              disabled={requestActionBusyId === request.opening_request_id}
+                              onClick={() => void decideOpeningRequest(request, "approve")}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              title="Reject"
+                              aria-label={`Reject request ${request.opening_request_id}`}
+                              disabled={requestActionBusyId === request.opening_request_id}
+                              onClick={() => void decideOpeningRequest(request, "reject")}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     ))
                   )}
@@ -346,7 +506,8 @@ export default function DashboardClient({
         <div
           ref={stripRef}
           className="relative mt-2 overflow-visible"
-          onMouseLeave={() => setHoveredOpeningId(null)}
+          onMouseEnter={clearOpeningHoverCloseTimer}
+          onMouseLeave={scheduleOpeningHoverClose}
         >
           <div className="overflow-x-auto overflow-y-hidden pb-1">
             <div className="flex min-w-max gap-1.5">
@@ -383,7 +544,10 @@ export default function DashboardClient({
                   <div
                     key={opening.openingId}
                     className="relative shrink-0"
-                    onMouseEnter={(event) => handleOpeningHover(opening.openingId, event)}
+                    onMouseEnter={(event) => {
+                      clearOpeningHoverCloseTimer();
+                      handleOpeningHover(opening.openingId, event);
+                    }}
                   >
                     {canNavigate ? (
                       <Link
@@ -441,9 +605,13 @@ export default function DashboardClient({
 
           {hoveredOpeningId !== null && hoveredOpening ? (
             <div
-              className="absolute top-[calc(100%+6px)] z-[180] w-[280px] rounded-lg border border-[var(--border-soft)] bg-white p-2 shadow-[0_16px_30px_-18px_rgba(93,85,82,0.45)]"
+              className="absolute top-full z-[180] w-[280px] rounded-lg border border-[var(--border-soft)] bg-white p-2 shadow-[0_16px_30px_-18px_rgba(93,85,82,0.45)]"
               style={{ left: `${hoverPanelLeft}px` }}
-              onMouseEnter={() => setHoveredOpeningId(hoveredOpening.openingId)}
+              onMouseEnter={() => {
+                clearOpeningHoverCloseTimer();
+                setHoveredOpeningId(hoveredOpening.openingId);
+              }}
+              onMouseLeave={scheduleOpeningHoverClose}
             >
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <p className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--light-grey)]">{hoveredOpening.title}</p>
