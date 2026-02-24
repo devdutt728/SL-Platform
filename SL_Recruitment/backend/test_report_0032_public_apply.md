@@ -11,6 +11,7 @@
 - Migration idempotency dry-run (transaction rollback): **total inserts = 0**
 - Duplicate seeded titles found: **0**
 - Unit tests: **17/17 PASS** (`python -m unittest discover -s tests -v`)
+- Note: seeded openings are treated as **standard opening creations baseline**, not ad-hoc headcount requests by Devdutt.
 
 ## Seed Integrity Results
 

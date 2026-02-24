@@ -1,7 +1,7 @@
 import { cookieHeader } from "@/lib/cookie-header";
 import { internalUrl } from "@/lib/internal";
 import { getAuthMe } from "@/lib/auth-me";
-import type { CandidateEvent, CandidateOffer, DashboardMetrics } from "@/lib/types";
+import type { CandidateEvent, CandidateListItem, CandidateOffer, DashboardMetrics, OpeningListItem } from "@/lib/types";
 import DashboardClient from "./DashboardClient";
 
 async function fetchDashboard() {
@@ -28,6 +28,30 @@ async function fetchOffers() {
   return (await res.json()) as CandidateOffer[];
 }
 
+async function fetchOpenings() {
+  const url = await internalUrl("/api/rec/openings");
+  const cookieValue = await cookieHeader();
+  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
+  if (!res.ok) return [] as OpeningListItem[];
+  try {
+    return (await res.json()) as OpeningListItem[];
+  } catch {
+    return [] as OpeningListItem[];
+  }
+}
+
+async function fetchCandidates() {
+  const url = await internalUrl("/api/rec/candidates");
+  const cookieValue = await cookieHeader();
+  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
+  if (!res.ok) return [] as CandidateListItem[];
+  try {
+    return (await res.json()) as CandidateListItem[];
+  } catch {
+    return [] as CandidateListItem[];
+  }
+}
+
 export default async function DashboardPage() {
   const me = await getAuthMe();
   const roles = (me?.roles || []).map((role) => (role || "").toLowerCase());
@@ -48,7 +72,13 @@ export default async function DashboardPage() {
     roleIds.includes(6) ||
     roleIdsRaw.map((id) => String(id).trim()).includes("6");
 
-  const [metrics, events, offers] = await Promise.all([fetchDashboard(), fetchRecentEvents(), fetchOffers()]);
+  const [metrics, events, offers, openings, candidates] = await Promise.all([
+    fetchDashboard(),
+    fetchRecentEvents(),
+    fetchOffers(),
+    fetchOpenings(),
+    fetchCandidates(),
+  ]);
   const hideActivity = (isInterviewer && !isHr) || isRole6;
   const canNavigate = !isRole6;
   const canNavigatePipeline = true;
@@ -57,6 +87,8 @@ export default async function DashboardPage() {
       initialMetrics={metrics}
       initialEvents={events}
       initialOffers={offers}
+      initialOpenings={openings}
+      initialCandidates={candidates}
       canNavigate={canNavigate}
       canNavigatePipeline={canNavigatePipeline}
       hideActivity={hideActivity}

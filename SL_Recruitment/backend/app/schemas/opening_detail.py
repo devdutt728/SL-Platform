@@ -13,6 +13,7 @@ class OpeningDetailOut(BaseModel):
     location_country: str | None = None
     is_active: bool | None = None
     requested_by_person_id_platform: str | None = None
+    hiring_manager_person_id_platform: str | None = None
     headcount_required: int | None = None
     headcount_filled: int | None = None
     created_at: Optional[datetime] = None
@@ -20,4 +21,3 @@ class OpeningDetailOut(BaseModel):
 
     class Config:
         from_attributes = True
-

@@ -1,4 +1,5 @@
--- One-time seed: default designation openings requested by Devdutt Kumar (person_id: DK_513)
+-- One-time seed: default designation opening creations mapped to Devdutt Kumar (person_id: DK_513) as hiring manager.
+-- These seeded rows represent standard opening creation baseline, not ad-hoc headcount raise requests by Devdutt.
 -- Keeps defaults aligned with create_opening:
 -- description=NULL, city=Delhi, country=India, headcount_required=1, headcount_filled=0, is_active=1
 -- Uses fixed opening codes for the seeded designation titles.

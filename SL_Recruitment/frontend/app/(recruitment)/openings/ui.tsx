@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { OpeningDetail, OpeningListItem, PlatformPersonSuggestion } from "@/lib/types";
 import { redirectToLogin } from "@/lib/auth-client";
 import { fetchDeduped } from "@/lib/fetch-deduped";
+import { OpeningRequestsPanel } from "./requests-panel";
 
 type Props = {
   initialOpenings: OpeningListItem[];
@@ -32,6 +33,12 @@ function isHrRoleToken(value: unknown): boolean {
   const compact = token.replace(/_/g, "");
   if (token === "hr" || token.startsWith("hr_") || token.startsWith("hr")) return true;
   return compact.includes("humanresource");
+}
+
+function isGlRoleToken(value: unknown): boolean {
+  const token = normalizeRoleToken(value);
+  if (!token) return false;
+  return token === "gl" || token === "group_lead" || token === "grouplead";
 }
 
 export function OpeningsClient({ initialOpenings, initialMe }: Props) {
@@ -99,10 +106,19 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
       normalizedRoleNames.some((token) => isHrRoleToken(token)),
     [allRoleIds, normalizedRoleCodes, normalizedRoleNames, normalizedRoles]
   );
+  const isGl = useMemo(
+    () =>
+      normalizedRoles.some((token) => isGlRoleToken(token)) ||
+      normalizedRoleCodes.some((token) => isGlRoleToken(token)) ||
+      normalizedRoleNames.some((token) => isGlRoleToken(token)),
+    [normalizedRoleCodes, normalizedRoleNames, normalizedRoles]
+  );
   const canCreateOpenings = useMemo(() => isSuperadmin, [isSuperadmin]);
   const canToggleOpenings = useMemo(() => isSuperadmin || isHr, [isSuperadmin, isHr]);
   const canEditOpenings = useMemo(() => isSuperadmin, [isSuperadmin]);
   const canDeleteOpenings = useMemo(() => isSuperadmin, [isSuperadmin]);
+  const canRaiseOpeningRequests = useMemo(() => isSuperadmin || isHr || isGl, [isGl, isHr, isSuperadmin]);
+  const canApproveOpeningRequests = useMemo(() => isSuperadmin || isHr, [isHr, isSuperadmin]);
 
   useEffect(() => {
     setIsMounted(true);
@@ -328,14 +344,24 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
     <main className="content-pad space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs uppercase tracking-tight text-slate-500">Roles</p>
-          <h1 className="text-2xl font-semibold">Roles</h1>
+          <p className="text-xs uppercase tracking-tight text-slate-500">Openings</p>
+          <h1 className="text-2xl font-semibold">Openings</h1>
           <p className="text-sm text-slate-500">{activeCount} active</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-slate-500">Live</span>
         </div>
       </div>
+
+      <OpeningRequestsPanel
+        openings={openings}
+        canRaise={canRaiseOpeningRequests}
+        canApprove={canApproveOpeningRequests}
+        isHr={isHr}
+        isGl={isGl}
+        onError={setError}
+        onOpeningsChanged={refreshOpenings}
+      />
 
       {canCreateOpenings ? (
         <form

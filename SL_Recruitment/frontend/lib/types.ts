@@ -177,7 +177,9 @@ export type OpeningListItem = {
   location_city?: string | null;
   is_active?: boolean | null;
   requested_by_person_id_platform?: string | null;
+  hiring_manager_person_id_platform?: string | null;
   requested_by_name?: string | null;
+  hiring_manager_name?: string | null;
   requested_by_role_name?: string | null;
   requested_by_role_code?: string | null;
   requested_by_person_code?: string | null;
@@ -192,6 +194,33 @@ export type OpeningDetail = OpeningListItem & {
   location_country?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+};
+
+export type OpeningRequest = {
+  opening_request_id: number;
+  opening_id?: number | null;
+  opening_code?: string | null;
+  opening_title?: string | null;
+  opening_description?: string | null;
+  location_city?: string | null;
+  location_country?: string | null;
+  hiring_manager_person_id_platform?: string | null;
+  hiring_manager_email?: string | null;
+  gl_details?: string | null;
+  l2_details?: string | null;
+  request_type: string;
+  headcount_delta: number;
+  request_reason?: string | null;
+  requested_by_person_id_platform?: string | null;
+  requested_by_role?: string | null;
+  source_portal?: string | null;
+  status: string;
+  approved_by_person_id_platform?: string | null;
+  approved_at?: string | null;
+  rejected_reason?: string | null;
+  applied_at?: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type PlatformPersonSuggestion = {

@@ -13,6 +13,7 @@ class OpeningCreate(BaseModel):
     location_city: Optional[str] = None
     location_country: Optional[str] = None
     requested_by_person_id_platform: Optional[str] = None
+    hiring_manager_person_id_platform: Optional[str] = None
     headcount_required: Optional[int] = None
     is_active: bool = True
 
@@ -33,6 +34,7 @@ class OpeningUpdate(BaseModel):
     location_city: Optional[str] = None
     location_country: Optional[str] = None
     requested_by_person_id_platform: Optional[str] = None
+    hiring_manager_person_id_platform: Optional[str] = None
     headcount_required: Optional[int] = None
     headcount_filled: Optional[int] = None
     is_active: Optional[bool] = None
@@ -45,7 +47,9 @@ class OpeningListItem(BaseModel):
     location_city: Optional[str] = None
     is_active: Optional[bool] = None
     requested_by_person_id_platform: Optional[str] = None
+    hiring_manager_person_id_platform: Optional[str] = None
     requested_by_name: Optional[str] = None
+    hiring_manager_name: Optional[str] = None
     requested_by_role_name: Optional[str] = None
     requested_by_role_code: Optional[str] = None
     requested_by_person_code: Optional[str] = None
