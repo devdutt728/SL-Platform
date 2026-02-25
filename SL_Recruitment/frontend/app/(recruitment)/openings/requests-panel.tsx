@@ -26,6 +26,12 @@ function statusPill(status: string) {
   return "bg-slate-100 text-slate-600";
 }
 
+const requestStatusOrder: Record<string, number> = {
+  pending_hr_approval: 0,
+  applied: 1,
+  rejected: 2,
+};
+
 function parseDetail(raw: string): string | null {
   if (!raw) return null;
   const text = raw.trim();
@@ -91,7 +97,15 @@ export function OpeningRequestsPanel({
       const res = await fetch(`/api/rec/openings/requests${query}`, { cache: "no-store" });
       if (!res.ok) return;
       const data = (await res.json()) as OpeningRequest[];
-      setRequests(data);
+      const sorted = [...data].sort((a, b) => {
+        const aRank = requestStatusOrder[String(a.status || "").toLowerCase()] ?? 9;
+        const bRank = requestStatusOrder[String(b.status || "").toLowerCase()] ?? 9;
+        if (aRank !== bRank) return aRank - bRank;
+        const aTs = Date.parse(a.updated_at || a.created_at || "");
+        const bTs = Date.parse(b.updated_at || b.created_at || "");
+        return (Number.isFinite(bTs) ? bTs : 0) - (Number.isFinite(aTs) ? aTs : 0);
+      });
+      setRequests(sorted);
     } catch {
       // ignore
     }
@@ -121,11 +135,6 @@ export function OpeningRequestsPanel({
       setHmPersonId("");
       return;
     }
-    const localExact = hmSuggestions.find((item) => String(item.email || "").trim().toLowerCase() === email);
-    if (localExact) {
-      applySelectedHmPerson(localExact);
-      return;
-    }
     try {
       const options = await loadPeopleSuggestions(email, 15);
       const exact = options.find((item) => String(item.email || "").trim().toLowerCase() === email);
@@ -138,15 +147,15 @@ export function OpeningRequestsPanel({
     } catch {
       // ignore lookup failures
     }
-  }, [applySelectedHmPerson, hmSuggestions, isRoleFiveOrSixActor, loadPeopleSuggestions]);
+  }, [applySelectedHmPerson, isRoleFiveOrSixActor, loadPeopleSuggestions]);
 
   useEffect(() => {
     if (!isRoleFiveOrSixActor) return;
-    setHmSuggestions([]);
+    setHmSuggestions((prev) => (prev.length > 0 ? [] : prev));
     setHmSuggestionsOpen(false);
     setHmSelected(null);
-    setHmEmail(lockedEmail);
-    setHmPersonId(lockedPersonId);
+    setHmEmail((prev) => (prev === lockedEmail ? prev : lockedEmail));
+    setHmPersonId((prev) => (prev === lockedPersonId ? prev : lockedPersonId));
     if (lockedEmail && !lockedPersonId) {
       void resolveHmPersonByEmail(lockedEmail);
     }
@@ -327,7 +336,7 @@ export function OpeningRequestsPanel({
       return;
     }
     setBusyId(null);
-    await refreshRequests();
+    await Promise.all([refreshRequests(), onOpeningsChanged()]);
   }
 
   return (
@@ -437,22 +446,22 @@ export function OpeningRequestsPanel({
         </div>
       ) : null}
 
-      <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200 bg-white/60">
-        <table className="min-w-[980px] w-full table-fixed border-collapse">
-          <thead className="bg-white/30"><tr className="text-xs uppercase tracking-wide text-slate-500"><th className="border-b border-slate-200 px-2 py-2 text-left font-semibold">Req</th><th className="border-b border-slate-200 px-2 py-2 text-left font-semibold">Opening</th><th className="border-b border-slate-200 px-2 py-2 text-left font-semibold">Delta</th><th className="border-b border-slate-200 px-2 py-2 text-left font-semibold">HM</th><th className="border-b border-slate-200 px-2 py-2 text-left font-semibold">GL / L2</th><th className="border-b border-slate-200 px-2 py-2 text-left font-semibold">Status</th><th className="border-b border-slate-200 px-2 py-2 text-left font-semibold">Actions</th></tr></thead>
+      <div className="mt-3 max-h-[360px] overflow-x-auto overflow-y-auto rounded-xl border border-slate-200 bg-white/60">
+        <table className="min-w-[980px] w-full table-fixed border-collapse text-xs">
+          <thead className="sticky top-0 z-10 bg-white/90"><tr className="uppercase tracking-wide text-slate-500"><th className="border-b border-slate-200 px-1.5 py-1.5 text-left font-semibold">Req</th><th className="border-b border-slate-200 px-1.5 py-1.5 text-left font-semibold">Opening</th><th className="border-b border-slate-200 px-1.5 py-1.5 text-left font-semibold">Delta</th><th className="border-b border-slate-200 px-1.5 py-1.5 text-left font-semibold">HM</th><th className="border-b border-slate-200 px-1.5 py-1.5 text-left font-semibold">GL / L2</th><th className="border-b border-slate-200 px-1.5 py-1.5 text-left font-semibold">Status</th><th className="border-b border-slate-200 px-1.5 py-1.5 text-left font-semibold">Actions</th></tr></thead>
           <tbody>
             {requests.map((req) => (
-              <tr key={req.opening_request_id} className="text-sm text-slate-800">
-                <td className="border-b border-slate-200 px-2 py-2 font-semibold">{req.opening_request_id}</td>
-                <td className="border-b border-slate-200 px-2 py-2"><div className="truncate">{req.opening_code || "-"}</div><div className="truncate text-xs text-slate-500">{req.opening_title || "-"}</div></td>
-                <td className="border-b border-slate-200 px-2 py-2 font-semibold">{req.headcount_delta}</td>
-                <td className="border-b border-slate-200 px-2 py-2"><div className="text-xs">{req.hiring_manager_person_id_platform || "-"}</div><div className="text-xs text-slate-500">{req.hiring_manager_email || "-"}</div></td>
-                <td className="border-b border-slate-200 px-2 py-2"><div className="text-xs">{req.gl_details || "-"}</div><div className="text-xs text-slate-500">{req.l2_details || "-"}</div></td>
-                <td className="border-b border-slate-200 px-2 py-2"><span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${statusPill(req.status)}`}>{req.status}</span></td>
-                <td className="border-b border-slate-200 px-2 py-2">
-                  <div className="flex items-center gap-1">
-                    {canApprove && req.status === "pending_hr_approval" ? <><button type="button" disabled={busyId === req.opening_request_id} onClick={() => void approve(req)} className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Approve</button><button type="button" disabled={busyId === req.opening_request_id} onClick={() => void reject(req)} className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700">Reject</button></> : null}
-                    {canManage ? <><button type="button" disabled={busyId === req.opening_request_id} onClick={() => void setStatus(req, "pending_hr_approval")} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">Pending</button><button type="button" disabled={busyId === req.opening_request_id} onClick={() => void setStatus(req, "applied")} className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Applied</button><button type="button" disabled={busyId === req.opening_request_id} onClick={() => void setStatus(req, "rejected")} className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700">Rejected</button><button type="button" disabled={busyId === req.opening_request_id} onClick={() => void deleteReq(req)} className="rounded-full border border-red-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-red-700">Delete</button></> : null}
+              <tr key={req.opening_request_id} className="text-slate-800">
+                <td className="border-b border-slate-200 px-1.5 py-1 font-semibold">{req.opening_request_id}</td>
+                <td className="border-b border-slate-200 px-1.5 py-1"><div className="truncate">{req.opening_code || "-"}</div><div className="truncate text-[11px] text-slate-500">{req.opening_title || "-"}</div></td>
+                <td className="border-b border-slate-200 px-1.5 py-1 font-semibold">{req.headcount_delta}</td>
+                <td className="border-b border-slate-200 px-1.5 py-1"><div className="text-[11px]">{req.hiring_manager_person_id_platform || "-"}</div><div className="text-[11px] text-slate-500">{req.hiring_manager_email || "-"}</div></td>
+                <td className="border-b border-slate-200 px-1.5 py-1"><div className="text-[11px]">{req.gl_details || "-"}</div><div className="text-[11px] text-slate-500">{req.l2_details || "-"}</div></td>
+                <td className="border-b border-slate-200 px-1.5 py-1"><span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${statusPill(req.status)}`}>{req.status}</span></td>
+                <td className="border-b border-slate-200 px-1.5 py-1">
+                  <div className="flex items-center gap-0.5">
+                    {canApprove && req.status === "pending_hr_approval" ? <><button type="button" disabled={busyId === req.opening_request_id} onClick={() => void approve(req)} className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">Approve</button><button type="button" disabled={busyId === req.opening_request_id} onClick={() => void reject(req)} className="rounded-full border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">Reject</button></> : null}
+                    {canManage ? <><button type="button" disabled={busyId === req.opening_request_id} onClick={() => void setStatus(req, "pending_hr_approval")} className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">Pending</button><button type="button" disabled={busyId === req.opening_request_id} onClick={() => void setStatus(req, "applied")} className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">Applied</button><button type="button" disabled={busyId === req.opening_request_id} onClick={() => void setStatus(req, "rejected")} className="rounded-full border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">Rejected</button><button type="button" disabled={busyId === req.opening_request_id} onClick={() => void deleteReq(req)} className="rounded-full border border-red-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-red-700">Delete</button></> : null}
                     {!canApprove && !canManage ? <span className="text-xs text-slate-400">-</span> : null}
                   </div>
                 </td>

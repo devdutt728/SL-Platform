@@ -1,13 +1,14 @@
 from datetime import datetime
 
 import anyio
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.core.auth import require_roles
+from app.core.config import settings
 from app.core.roles import Role
 from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, validate_upload
 from app.models.candidate import RecCandidate
@@ -18,6 +19,7 @@ from app.schemas.joining_docs import JoiningDocOut, JoiningDocPublicOut, Joining
 from app.schemas.user import UserContext
 from app.services.drive import upload_joining_doc
 from app.services.events import log_event
+from app.services.offers import verify_joining_link_signature
 
 router = APIRouter(prefix="/rec/candidates", tags=["joining-docs"])
 public_router = APIRouter(prefix="/joining", tags=["joining-docs-public"])
@@ -40,15 +42,33 @@ REQUIRED_JOINING_DOC_TYPES = {
 }
 
 
-def _normalize_doc_type(raw: str | None) -> str:
+def _canonical_doc_type(raw: str | None) -> str | None:
     value = (raw or "").strip().lower().replace(" ", "_")
     if value == "aadhar":
         value = "aadhaar"
     if value in {"mark_sheets", "mark_sheet"}:
         value = "marksheets"
-    if value in {"salary_slip", "salary_slips"}:
+    if value in {"experience_letter", "experienceletters"}:
+        value = "experience_letters"
+    if value in {"salary_slip", "salaryslip"}:
         value = "salary_slips"
-    if value not in JOINING_DOC_TYPES:
+    if value in JOINING_DOC_TYPES:
+        return value
+    return None
+
+
+def _validate_public_joining_signature(request: Request, token: str) -> None:
+    exp = request.query_params.get("exp")
+    sig = request.query_params.get("sig")
+    has_internal_cookie = bool(request.cookies.get("slr_token"))
+    if settings.environment == "production" or not has_internal_cookie:
+        if not verify_joining_link_signature(token, exp, sig):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired joining link")
+
+
+def _normalize_doc_type(raw: str | None) -> str:
+    value = _canonical_doc_type(raw)
+    if value is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document type.")
     return value
 
@@ -59,7 +79,11 @@ async def _update_joining_docs_status(session: AsyncSession, *, candidate: RecCa
             select(RecCandidateJoiningDoc.doc_type).where(RecCandidateJoiningDoc.candidate_id == candidate.candidate_id)
         )
     ).scalars().all()
-    seen = {str(r).strip().lower() for r in rows if r}
+    seen = {
+        normalized
+        for normalized in (_canonical_doc_type(str(r)) for r in rows if r)
+        if normalized is not None
+    }
     if not seen:
         status_value = "none"
     elif REQUIRED_JOINING_DOC_TYPES.issubset(seen):
@@ -155,6 +179,15 @@ async def list_joining_docs(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    # Heal stale status values (legacy doc_type spellings) whenever docs are fetched.
+    previous_status = (candidate.joining_docs_status or "").strip().lower()
+    current_status = previous_status
+    try:
+        current_status = await _update_joining_docs_status(session, candidate=candidate)
+    except SQLAlchemyError as exc:
+        if "doesn't exist" in str(exc).lower():
+            return []
+        raise
 
     try:
         docs = (
@@ -168,6 +201,8 @@ async def list_joining_docs(
         if "doesn't exist" in str(exc).lower():
             return []
         raise
+    if current_status != previous_status:
+        await session.commit()
     return [JoiningDocOut.model_validate(doc) for doc in docs]
 
 
@@ -198,8 +233,10 @@ async def upload_joining_docs_internal(
 @public_router.get("/{token}", response_model=JoiningDocsPublicContext)
 async def get_public_joining_docs(
     token: str,
+    request: Request,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    _validate_public_joining_signature(request, token)
     offer = (
         await session.execute(
             select(RecCandidateOffer).where(RecCandidateOffer.public_token == token)
@@ -247,10 +284,12 @@ async def get_public_joining_docs(
 @public_router.post("/{token}/upload", response_model=JoiningDocPublicOut)
 async def upload_joining_docs_public(
     token: str,
+    request: Request,
     doc_type: str = Form(...),
     file: UploadFile = File(...),
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    _validate_public_joining_signature(request, token)
     offer = (
         await session.execute(
             select(RecCandidateOffer).where(RecCandidateOffer.public_token == token)

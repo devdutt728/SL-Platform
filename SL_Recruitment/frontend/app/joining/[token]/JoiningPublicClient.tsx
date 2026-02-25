@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { JoiningDocsPublicContext } from "@/lib/types";
 
 type Props = {
@@ -22,6 +23,7 @@ function docTypeLabel(value: string) {
 
 export function JoiningPublicClient({ token }: Props) {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const searchParams = useSearchParams();
   const [context, setContext] = useState<JoiningDocsPublicContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -31,12 +33,17 @@ export function JoiningPublicClient({ token }: Props) {
 
   const requiredSet = useMemo(() => new Set(context?.required_doc_types || []), [context?.required_doc_types]);
   const uploadedTypes = useMemo(() => new Set((context?.docs || []).map((doc) => doc.doc_type)), [context?.docs]);
+  const linkExp = (searchParams.get("exp") || "").trim();
+  const linkSig = (searchParams.get("sig") || "").trim();
+  const signedQuery = linkExp && linkSig
+    ? `?exp=${encodeURIComponent(linkExp)}&sig=${encodeURIComponent(linkSig)}`
+    : "";
 
   const loadContext = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${basePath}/api/joining/${encodeURIComponent(token)}`, { cache: "no-store" });
+      const res = await fetch(`${basePath}/api/joining/${encodeURIComponent(token)}${signedQuery}`, { cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as JoiningDocsPublicContext;
       setContext(data);
@@ -55,7 +62,7 @@ export function JoiningPublicClient({ token }: Props) {
       const form = new FormData();
       form.append("doc_type", selectedType);
       form.append("file", selectedFile);
-      const res = await fetch(`${basePath}/api/joining/${encodeURIComponent(token)}/upload`, {
+      const res = await fetch(`${basePath}/api/joining/${encodeURIComponent(token)}/upload${signedQuery}`, {
         method: "POST",
         body: form,
       });
@@ -71,7 +78,7 @@ export function JoiningPublicClient({ token }: Props) {
 
   useEffect(() => {
     void loadContext();
-  }, []);
+  }, [signedQuery]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 px-4 py-10">

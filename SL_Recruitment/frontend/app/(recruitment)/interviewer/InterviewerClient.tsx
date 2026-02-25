@@ -87,6 +87,31 @@ function interviewReason(item: Interview) {
   return reason || "";
 }
 
+function parseHttpUrl(raw?: string | null) {
+  const value = (raw || "").trim();
+  if (!value) return null;
+  const withProtocol = /^https?:\/\//i.test(value) ? value : value.startsWith("www.") ? `https://${value}` : "";
+  if (!withProtocol) return null;
+  try {
+    return new URL(withProtocol);
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeCandidateFormPath(url: URL) {
+  const path = url.pathname.toLowerCase();
+  return path.includes("/caf/") || path.includes("/assessment/") || path.includes("/apply/");
+}
+
+function resolveInterviewMeetingLink(interview: Interview) {
+  const primary = parseHttpUrl(interview.meeting_link);
+  if (primary && !looksLikeCandidateFormPath(primary)) return primary.toString();
+  const locationUrl = parseHttpUrl(interview.location);
+  if (locationUrl && !looksLikeCandidateFormPath(locationUrl)) return locationUrl.toString();
+  return null;
+}
+
 async function fetchInterviews(params: Record<string, string>) {
   const url = new URL("/api/rec/interviews", window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
@@ -165,6 +190,7 @@ function InterviewCard({
   const role = interview.opening_title || "Opening";
   const feedbackStage = stageLabel(interview.stage_name);
   const interviewer = interview.interviewer_name || "Interviewer";
+  const meetingHref = resolveInterviewMeetingLink(interview);
   return (
     <div
       role="button"
@@ -191,10 +217,17 @@ function InterviewCard({
       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
         <span className="inline-flex items-center gap-1"><CalendarCheck2 className="h-3.5 w-3.5" />{formatDateTime(interview.scheduled_start_at)}</span>
         {interview.location ? <span>{interview.location}</span> : null}
-        {interview.meeting_link ? (
-          <span className="inline-flex items-center gap-1 text-slate-800">
-            <ExternalLink className="h-3.5 w-3.5" /> Meet link
-          </span>
+        {meetingHref ? (
+          <a
+            className="inline-flex items-center gap-1 text-slate-800 underline decoration-dotted underline-offset-2"
+            href={meetingHref}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> Open meet link
+          </a>
         ) : null}
       </div>
       {onCancel || onReschedule ? (
@@ -639,39 +672,44 @@ export function InterviewerClient({ initialUpcoming, initialPast, assignedCandid
                     {pastTaken.length === 0 ? (
                       <p className="text-sm text-slate-600">No interviews marked as taken.</p>
                     ) : (
-                      pastTaken.map((item) => (
-                        <button
-                          key={item.candidate_interview_id}
-                          type="button"
-                          className="w-full rounded-2xl border border-white/60 bg-white/40 px-3 py-2 text-left hover:bg-white/70"
-                          onClick={() => void openAssessment(item)}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
-                            <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
-                            <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("green"))}>Interview taken</span>
-                          </div>
-                          <p className="mt-1 text-xs text-slate-600">
-                            {item.opening_title || "Opening"} - {formatDateTime(item.scheduled_start_at)}
-                          </p>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                            <span>{item.location || "Location TBD"}</span>
-                            {item.meeting_link ? (
-                              <a
-                                className="text-slate-800 underline decoration-dotted underline-offset-2"
-                                href={item.meeting_link}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Meeting link
-                              </a>
+                      pastTaken.map((item) => {
+                        const meetingHref = resolveInterviewMeetingLink(item);
+                        return (
+                          <button
+                            key={item.candidate_interview_id}
+                            type="button"
+                            className="w-full rounded-2xl border border-white/60 bg-white/40 px-3 py-2 text-left hover:bg-white/70"
+                            onClick={() => void openAssessment(item)}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
+                              <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
+                              <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("green"))}>Interview taken</span>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-600">
+                              {item.opening_title || "Opening"} - {formatDateTime(item.scheduled_start_at)}
+                            </p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                              <span>{item.location || "Location TBD"}</span>
+                              {meetingHref ? (
+                                <a
+                                  className="text-slate-800 underline decoration-dotted underline-offset-2"
+                                  href={meetingHref}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(event) => event.stopPropagation()}
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                >
+                                  Open meet link
+                                </a>
+                              ) : null}
+                            </div>
+                            {interviewReason(item) ? (
+                              <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
                             ) : null}
-                          </div>
-                          {interviewReason(item) ? (
-                            <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
-                          ) : null}
-                        </button>
-                      ))
+                          </button>
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -682,39 +720,44 @@ export function InterviewerClient({ initialUpcoming, initialPast, assignedCandid
                     {pastNotTaken.length === 0 ? (
                       <p className="text-sm text-slate-600">No interviews marked as not taken.</p>
                     ) : (
-                      pastNotTaken.map((item) => (
-                        <button
-                          key={item.candidate_interview_id}
-                          type="button"
-                          className="w-full rounded-2xl border border-white/60 bg-white/40 px-3 py-2 text-left hover:bg-white/70"
-                          onClick={() => void openAssessment(item)}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
-                            <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
-                            <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("amber"))}>Interview not taken</span>
-                          </div>
-                          <p className="mt-1 text-xs text-slate-600">
-                            {item.opening_title || "Opening"} - {formatDateTime(item.scheduled_start_at)}
-                          </p>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                            <span>{item.location || "Location TBD"}</span>
-                            {item.meeting_link ? (
-                              <a
-                                className="text-slate-800 underline decoration-dotted underline-offset-2"
-                                href={item.meeting_link}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Meeting link
-                              </a>
+                      pastNotTaken.map((item) => {
+                        const meetingHref = resolveInterviewMeetingLink(item);
+                        return (
+                          <button
+                            key={item.candidate_interview_id}
+                            type="button"
+                            className="w-full rounded-2xl border border-white/60 bg-white/40 px-3 py-2 text-left hover:bg-white/70"
+                            onClick={() => void openAssessment(item)}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
+                              <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
+                              <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("amber"))}>Interview not taken</span>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-600">
+                              {item.opening_title || "Opening"} - {formatDateTime(item.scheduled_start_at)}
+                            </p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                              <span>{item.location || "Location TBD"}</span>
+                              {meetingHref ? (
+                                <a
+                                  className="text-slate-800 underline decoration-dotted underline-offset-2"
+                                  href={meetingHref}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(event) => event.stopPropagation()}
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                >
+                                  Open meet link
+                                </a>
+                              ) : null}
+                            </div>
+                            {interviewReason(item) ? (
+                              <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
                             ) : null}
-                          </div>
-                          {interviewReason(item) ? (
-                            <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
-                          ) : null}
-                        </button>
-                      ))
+                          </button>
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -723,43 +766,48 @@ export function InterviewerClient({ initialUpcoming, initialPast, assignedCandid
                   <div className="mt-4">
                     <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Other past interviews</p>
                     <div className="mt-2 space-y-2">
-                      {pastOther.map((item) => (
-                        <button
-                          key={item.candidate_interview_id}
-                          type="button"
-                          className="w-full rounded-2xl border border-white/60 bg-white/40 px-3 py-2 text-left hover:bg-white/70"
-                          onClick={() => void openAssessment(item)}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
-                            <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
-                            {interviewStatusLabel(item.interview_status) ? (
-                              <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("neutral"))}>
-                                {interviewStatusLabel(item.interview_status)}
-                              </span>
+                      {pastOther.map((item) => {
+                        const meetingHref = resolveInterviewMeetingLink(item);
+                        return (
+                          <button
+                            key={item.candidate_interview_id}
+                            type="button"
+                            className="w-full rounded-2xl border border-white/60 bg-white/40 px-3 py-2 text-left hover:bg-white/70"
+                            onClick={() => void openAssessment(item)}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("blue"))}>{item.round_type}</span>
+                              <p className="text-sm font-medium text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
+                              {interviewStatusLabel(item.interview_status) ? (
+                                <span className={clsx("rounded-full px-2.5 py-1 text-xs font-semibold", chipTone("neutral"))}>
+                                  {interviewStatusLabel(item.interview_status)}
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="mt-1 text-xs text-slate-600">
+                              {item.opening_title || "Opening"} - {formatDateTime(item.scheduled_start_at)}
+                            </p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                              <span>{item.location || "Location TBD"}</span>
+                              {meetingHref ? (
+                                <a
+                                  className="text-slate-800 underline decoration-dotted underline-offset-2"
+                                  href={meetingHref}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(event) => event.stopPropagation()}
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                >
+                                  Open meet link
+                                </a>
+                              ) : null}
+                            </div>
+                            {interviewReason(item) ? (
+                              <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
                             ) : null}
-                          </div>
-                          <p className="mt-1 text-xs text-slate-600">
-                            {item.opening_title || "Opening"} - {formatDateTime(item.scheduled_start_at)}
-                          </p>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                            <span>{item.location || "Location TBD"}</span>
-                            {item.meeting_link ? (
-                              <a
-                                className="text-slate-800 underline decoration-dotted underline-offset-2"
-                                href={item.meeting_link}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Meeting link
-                              </a>
-                            ) : null}
-                          </div>
-                          {interviewReason(item) ? (
-                            <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
-                          ) : null}
-                        </button>
-                      ))}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 ) : null}

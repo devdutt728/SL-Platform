@@ -505,10 +505,22 @@ export type CandidateOffer = {
   generated_at?: string | null;
   approved_by_person_id_platform?: number | null;
   approved_at?: string | null;
+  approval_principal_email?: string | null;
+  approval_requested_by_email?: string | null;
+  approval_requested_at?: string | null;
+  approval_request_expires_at?: string | null;
+  approval_request_used_at?: string | null;
+  approval_decision?: string | null;
+  approval_decision_by_email?: string | null;
+  approval_decision_at?: string | null;
+  approval_rejection_reason?: string | null;
   sent_at?: string | null;
   viewed_at?: string | null;
   accepted_at?: string | null;
   declined_at?: string | null;
+  acceptance_typed_name?: string | null;
+  acceptance_ip?: string | null;
+  acceptance_user_agent?: string | null;
   pdf_url?: string | null;
   pdf_download_url?: string | null;
   notes_internal?: string | null;
@@ -533,7 +545,27 @@ export type OfferPublic = {
   probation_months?: number | null;
   offer_valid_until?: string | null;
   offer_status: string;
+  acceptance_typed_name?: string | null;
   pdf_url?: string | null;
+  pdf_download_url?: string | null;
+  joining_upload_url?: string | null;
+};
+
+export type OfferApprovalPublic = {
+  candidate_name?: string | null;
+  candidate_code?: string | null;
+  opening_title?: string | null;
+  designation_title?: string | null;
+  gross_ctc_annual?: number | null;
+  currency?: string | null;
+  joining_date?: string | null;
+  offer_valid_until?: string | null;
+  offer_status: string;
+  approval_principal_email?: string | null;
+  approval_decision?: string | null;
+  approval_decision_at?: string | null;
+  approval_rejection_reason?: string | null;
+  approval_request_expires_at?: string | null;
   pdf_download_url?: string | null;
 };
 

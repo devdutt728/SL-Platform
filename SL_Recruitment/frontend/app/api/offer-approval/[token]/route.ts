@@ -1,12 +1,11 @@
-import {NextResponse, type NextRequest} from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { backendUrl } from "@/lib/backend";
 
 type Params = { params: Promise<{ token: string }> };
 
 export async function GET(_request: NextRequest, context: Params) {
   const params = await context.params;
-  const search = _request.nextUrl.search || "";
-  const res = await fetch(backendUrl(`/joining/${encodeURIComponent(params.token)}${search}`), { cache: "no-store" });
+  const res = await fetch(backendUrl(`/offer-approval/${encodeURIComponent(params.token)}`), { cache: "no-store" });
   const data = await res.text();
   return new NextResponse(data, {
     status: res.status,

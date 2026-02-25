@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import uuid4
 import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from urllib.parse import urlparse, parse_qs
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
@@ -13,14 +13,27 @@ from app.core.auth import require_roles, require_superadmin
 from app.core.config import settings
 from app.core.roles import Role
 from app.models.candidate import RecCandidate
+from app.models.event import RecCandidateEvent
 from app.models.candidate_offer import RecCandidateOffer
 from app.models.opening import RecOpening
-from app.schemas.offer import OfferCreateIn, OfferDecisionIn, OfferOut, OfferPublicOut, OfferUpdateIn
+from app.schemas.offer import (
+    OfferApprovalDecisionIn,
+    OfferApprovalPublicOut,
+    OfferCreateIn,
+    OfferDecisionIn,
+    OfferOut,
+    OfferPublicOut,
+    OfferUpdateIn,
+)
 from app.schemas.user import UserContext
 from app.services.offers import (
     approve_offer,
     convert_candidate_to_employee,
     create_offer,
+    is_principal_approver_email,
+    normalize_principal_email,
+    offer_approval_public_link,
+    principal_decide_offer,
     record_candidate_response,
     reject_offer,
     _resolve_candidate_address,
@@ -29,11 +42,12 @@ from app.services.offers import (
     _offer_public_link,
     _offer_public_pdf_link,
     offer_pdf_signed_url,
+    joining_public_signed_url,
+    submit_for_approval_with_principal,
     verify_offer_pdf_signature,
     render_offer_letter,
     _render_offer_pdf_bytes,
     send_offer,
-    submit_for_approval,
     update_offer_details,
 )
 from app.services.events import log_event
@@ -44,6 +58,7 @@ from app.services.stage_transitions import apply_stage_transition
 
 router = APIRouter(prefix="/rec/offers", tags=["offers"])
 public_router = APIRouter(prefix="/offer", tags=["offers-public"])
+approval_public_router = APIRouter(prefix="/offer-approval", tags=["offers-public"])
 
 
 async def _ensure_public_token(session: AsyncSession, offer: RecCandidateOffer) -> None:
@@ -101,6 +116,16 @@ def _safe_person_id(raw: str | None) -> int | None:
         return None
 
 
+def _request_ip(request: Request) -> str | None:
+    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if forwarded:
+        return forwarded
+    real_ip = (request.headers.get("x-real-ip") or "").strip()
+    if real_ip:
+        return real_ip
+    return request.client.host if request.client else None
+
+
 def _offer_base_payload(offer: RecCandidateOffer) -> dict:
     data = OfferOut.model_validate(offer).model_dump()
     data.pop("candidate_name", None)
@@ -109,6 +134,85 @@ def _offer_base_payload(offer: RecCandidateOffer) -> dict:
     data.pop("letter_overrides", None)
     data.pop("pdf_download_url", None)
     return data
+
+
+def _joining_public_link(token: str) -> str:
+    return joining_public_signed_url(token)
+
+
+def _format_human_date(value) -> str:
+    if not value:
+        return "-"
+    try:
+        return value.strftime("%d %b %Y")
+    except Exception:
+        return str(value)
+
+
+def _joining_docs_due_date(offer: RecCandidateOffer) -> str:
+    # Keep a practical default while still honoring joining date when it is sufficiently in the future.
+    base_due = datetime.utcnow().date() + timedelta(days=3)
+    joining_date = offer.joining_date
+    if joining_date:
+        target_due = joining_date - timedelta(days=3)
+        if target_due > base_due:
+            return _format_human_date(target_due)
+    return _format_human_date(base_due)
+
+
+async def _joining_docs_email_already_sent(session: AsyncSession, *, offer: RecCandidateOffer) -> bool:
+    count = (
+        await session.execute(
+            select(func.count())
+            .select_from(RecCandidateEvent)
+            .where(
+                RecCandidateEvent.candidate_id == offer.candidate_id,
+                RecCandidateEvent.action_type == "email_sent",
+                RecCandidateEvent.related_entity_type == "offer",
+                RecCandidateEvent.related_entity_id == offer.candidate_offer_id,
+                func.lower(func.coalesce(RecCandidateEvent.meta_json, "")).like('%"email_type":"joining_documents_request"%'),
+            )
+        )
+    ).scalar_one()
+    return bool(count)
+
+
+async def _send_joining_documents_request_email(
+    session: AsyncSession,
+    *,
+    offer: RecCandidateOffer,
+    candidate: RecCandidate | None,
+    opening: RecOpening | None,
+) -> None:
+    if not candidate or not candidate.email:
+        return
+    if await _joining_docs_email_already_sent(session, offer=offer):
+        return
+
+    joining_link = _joining_public_link(offer.public_token)
+    await send_email(
+        session,
+        candidate_id=candidate.candidate_id,
+        to_emails=[candidate.email],
+        subject="Joining documents required",
+        template_name="joining_documents_request",
+        context={
+            "candidate_name": candidate.full_name or candidate.first_name or "",
+            "opening_title": opening.title if opening else (offer.designation_title or ""),
+            "designation_title": offer.designation_title or (opening.title if opening else ""),
+            "joining_date": _format_human_date(offer.joining_date),
+            "due_date": _joining_docs_due_date(offer),
+            "joining_link": joining_link,
+            "sender_name": "Studio Lotus Recruitment Team",
+        },
+        email_type="joining_documents_request",
+        related_entity_type="offer",
+        related_entity_id=offer.candidate_offer_id,
+        meta_extra={
+            "offer_id": offer.candidate_offer_id,
+            "joining_link": joining_link,
+        },
+    )
 
 
 @router.get("", response_model=list[OfferOut])
@@ -202,10 +306,50 @@ async def update_offer(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
     updates = payload.model_dump(exclude_none=True)
     submit = updates.pop("submit_for_approval", None)
+    approval_principal_email = updates.pop("approval_principal_email", None)
     if updates:
         await update_offer_details(session, offer=offer, payload=updates, user=user)
     if submit:
-        await submit_for_approval(session, offer=offer, user=user)
+        if not approval_principal_email:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select a principal approver email.")
+        await submit_for_approval_with_principal(
+            session,
+            offer=offer,
+            user=user,
+            approval_principal_email=approval_principal_email,
+        )
+        candidate = await session.get(RecCandidate, offer.candidate_id)
+        opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
+        principal_email = normalize_principal_email(offer.approval_principal_email)
+        approval_link = offer_approval_public_link(offer.approval_request_token or "")
+        await send_email(
+            session,
+            candidate_id=offer.candidate_id,
+            to_emails=[principal_email] if principal_email else [],
+            subject=f"Offer approval request for {candidate.full_name if candidate else 'Candidate'}",
+            template_name="offer_approval_request_principal",
+            context={
+                "principal_email": principal_email or "",
+                "candidate_name": candidate.full_name if candidate else "",
+                "candidate_code": candidate.candidate_code if candidate else "",
+                "opening_title": opening.title if opening else "",
+                "designation_title": offer.designation_title or "",
+                "joining_date": offer.joining_date or "",
+                "offer_valid_until": offer.offer_valid_until or "",
+                "offer_ctc": offer.gross_ctc_annual or "",
+                "offer_currency": offer.currency or "INR",
+                "approval_link": approval_link,
+                "offer_file_url": offer_pdf_signed_url(offer.public_token),
+                "sender_name": user.full_name or "Studio Lotus Recruitment Team",
+            },
+            email_type="offer_approval_request_principal",
+            related_entity_type="offer",
+            related_entity_id=offer.candidate_offer_id,
+            meta_extra={
+                "offer_id": offer.candidate_offer_id,
+                "approval_principal_email": principal_email,
+            },
+        )
     await session.commit()
     await session.refresh(offer)
     return OfferOut(
@@ -271,7 +415,7 @@ async def delete_offer(
 async def approve_offer_route(
     offer_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN])),
+    user: UserContext = Depends(require_superadmin()),
 ):
     offer = await session.get(RecCandidateOffer, offer_id)
     if not offer:
@@ -290,7 +434,7 @@ async def reject_offer_route(
     offer_id: int,
     payload: OfferDecisionIn | None = None,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN])),
+    user: UserContext = Depends(require_superadmin()),
 ):
     offer = await session.get(RecCandidateOffer, offer_id)
     if not offer:
@@ -324,6 +468,26 @@ async def admin_offer_decision(
         reason=payload.reason,
         allow_override=True,
     )
+    if payload.decision.strip().lower() == "accept":
+        candidate = await session.get(RecCandidate, offer.candidate_id)
+        opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
+        try:
+            await _send_joining_documents_request_email(
+                session,
+                offer=offer,
+                candidate=candidate,
+                opening=opening,
+            )
+        except Exception as exc:  # noqa: BLE001
+            await log_event(
+                session,
+                candidate_id=offer.candidate_id,
+                action_type="joining_docs_request_email_failed",
+                performed_by_person_id_platform=_safe_person_id(user.person_id_platform),
+                related_entity_type="offer",
+                related_entity_id=offer.candidate_offer_id,
+                meta_json={"offer_id": offer.candidate_offer_id, "error": str(exc)},
+            )
     await session.commit()
     await session.refresh(offer)
     return OfferOut(
@@ -346,6 +510,7 @@ async def send_offer_route(
     await send_offer(session, offer=offer, user=user)
 
     if candidate and candidate.email:
+        offer_link = _offer_public_link(offer.public_token)
         await send_email(
             session,
             candidate_id=candidate.candidate_id,
@@ -355,7 +520,9 @@ async def send_offer_route(
             context={
                 "candidate_name": candidate.full_name,
                 "opening_title": opening.title if opening else "",
-                "offer_link": _offer_public_link(offer.public_token),
+                "offer_link": offer_link,
+                "offer_accept_link": f"{offer_link}?decision=accept",
+                "offer_decline_link": f"{offer_link}?decision=decline",
                 "joining_date": offer.joining_date,
                 "offer_file_url": offer_pdf_signed_url(offer.public_token),
                 "sender_name": "Studio Lotus Team",
@@ -419,6 +586,8 @@ async def preview_offer_email(
             "candidate_name": candidate.full_name if candidate else "",
             "opening_title": opening.title if opening else "",
             "offer_link": offer_link,
+            "offer_accept_link": f"{offer_link}?decision=accept",
+            "offer_decline_link": f"{offer_link}?decision=decline",
             "joining_date": offer.joining_date or "",
             "offer_file_url": offer_pdf_link,
             "sender_name": "Studio Lotus Team",
@@ -522,8 +691,10 @@ async def get_public_offer(
         probation_months=offer.probation_months,
         offer_valid_until=offer.offer_valid_until,
         offer_status=offer.offer_status,
+        acceptance_typed_name=offer.acceptance_typed_name,
         pdf_url=offer.pdf_url,
         pdf_download_url=offer_pdf_signed_url(offer.public_token),
+        joining_upload_url=_joining_public_link(offer.public_token) if offer.offer_status == "accepted" else None,
     )
 
 
@@ -596,6 +767,7 @@ async def get_public_offer_pdf(
 async def decide_public_offer(
     token: str,
     payload: OfferDecisionIn,
+    request: Request,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
     offer = (
@@ -603,10 +775,38 @@ async def decide_public_offer(
     ).scalars().first()
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
-    await record_candidate_response(session, offer=offer, decision=payload.decision, reason=payload.reason)
+    await record_candidate_response(
+        session,
+        offer=offer,
+        decision=payload.decision,
+        reason=payload.reason,
+        typed_name=payload.typed_name,
+        actor_ip=_request_ip(request),
+        actor_user_agent=request.headers.get("user-agent"),
+    )
 
     candidate = await session.get(RecCandidate, offer.candidate_id)
-    if candidate and payload.decision.strip().lower() == "decline":
+    opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
+    decision_normalized = payload.decision.strip().lower()
+    if decision_normalized == "accept":
+        try:
+            await _send_joining_documents_request_email(
+                session,
+                offer=offer,
+                candidate=candidate,
+                opening=opening,
+            )
+        except Exception as exc:  # noqa: BLE001
+            await log_event(
+                session,
+                candidate_id=offer.candidate_id,
+                action_type="joining_docs_request_email_failed",
+                performed_by_person_id_platform=None,
+                related_entity_type="offer",
+                related_entity_id=offer.candidate_offer_id,
+                meta_json={"offer_id": offer.candidate_offer_id, "error": str(exc)},
+            )
+    if candidate and decision_normalized == "decline":
         candidate.final_decision = "not_hired"
         candidate.updated_at = datetime.utcnow()
         await apply_stage_transition(
@@ -655,7 +855,6 @@ async def decide_public_offer(
                     idempotency_key=f"drive_move_not_appointed:{candidate.candidate_id}",
                 )
     await session.commit()
-    opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
     return OfferPublicOut(
         candidate_name=candidate.full_name if candidate else None,
         candidate_code=candidate.candidate_code if candidate else None,
@@ -669,6 +868,126 @@ async def decide_public_offer(
         probation_months=offer.probation_months,
         offer_valid_until=offer.offer_valid_until,
         offer_status=offer.offer_status,
+        acceptance_typed_name=offer.acceptance_typed_name,
         pdf_url=offer.pdf_url,
+        pdf_download_url=offer_pdf_signed_url(offer.public_token),
+        joining_upload_url=_joining_public_link(offer.public_token) if offer.offer_status == "accepted" else None,
+    )
+
+
+@approval_public_router.get("/{token}", response_model=OfferApprovalPublicOut)
+async def get_public_offer_approval(
+    token: str,
+    session: AsyncSession = Depends(deps.get_db_session),
+):
+    offer = (
+        await session.execute(select(RecCandidateOffer).where(RecCandidateOffer.approval_request_token == token))
+    ).scalars().first()
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approval request not found")
+    now = datetime.utcnow()
+    if offer.offer_status != "pending_approval":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer is no longer pending approval.")
+    if offer.approval_request_expires_at and offer.approval_request_expires_at < now:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Approval request expired.")
+    candidate = await session.get(RecCandidate, offer.candidate_id)
+    opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
+    return OfferApprovalPublicOut(
+        candidate_name=candidate.full_name if candidate else None,
+        candidate_code=candidate.candidate_code if candidate else None,
+        opening_title=opening.title if opening else None,
+        designation_title=offer.designation_title,
+        gross_ctc_annual=offer.gross_ctc_annual,
+        currency=offer.currency,
+        joining_date=offer.joining_date,
+        offer_valid_until=offer.offer_valid_until,
+        offer_status=offer.offer_status,
+        approval_principal_email=offer.approval_principal_email,
+        approval_decision=offer.approval_decision,
+        approval_decision_at=offer.approval_decision_at,
+        approval_rejection_reason=offer.approval_rejection_reason,
+        approval_request_expires_at=offer.approval_request_expires_at,
+        pdf_download_url=offer_pdf_signed_url(offer.public_token),
+    )
+
+
+@approval_public_router.post("/{token}/decision", response_model=OfferApprovalPublicOut)
+async def decide_public_offer_approval(
+    token: str,
+    payload: OfferApprovalDecisionIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+):
+    offer = (
+        await session.execute(select(RecCandidateOffer).where(RecCandidateOffer.approval_request_token == token))
+    ).scalars().first()
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approval request not found")
+    principal_email = normalize_principal_email(offer.approval_principal_email)
+    if not is_principal_approver_email(principal_email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Principal approver email is not configured.")
+    await principal_decide_offer(
+        session,
+        offer=offer,
+        principal_email=principal_email,
+        decision=payload.decision,
+        reason=payload.reason,
+    )
+
+    candidate = await session.get(RecCandidate, offer.candidate_id)
+    opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
+    hr_recipients: list[str] = []
+    requested_by_email = normalize_principal_email(offer.approval_requested_by_email)
+    if requested_by_email:
+        hr_recipients.append(requested_by_email)
+    sender_email = normalize_principal_email(settings.gmail_sender_email)
+    if sender_email and sender_email not in hr_recipients:
+        hr_recipients.append(sender_email)
+
+    decision_label = "approved" if payload.decision == "approve" else "rejected"
+    await send_email(
+        session,
+        candidate_id=offer.candidate_id,
+        to_emails=hr_recipients,
+        subject=f"Offer approval {decision_label}: {candidate.full_name if candidate else 'Candidate'}",
+        template_name="offer_approval_decision_hr",
+        context={
+            "candidate_name": candidate.full_name if candidate else "",
+            "candidate_code": candidate.candidate_code if candidate else "",
+            "opening_title": opening.title if opening else "",
+            "designation_title": offer.designation_title or "",
+            "decision_label": decision_label.title(),
+            "principal_email": principal_email or "",
+            "reason": (payload.reason or "").strip(),
+            "offer_link": _offer_public_link(offer.public_token),
+            "offer_file_url": offer_pdf_signed_url(offer.public_token),
+            "sender_name": "Studio Lotus Recruitment Team",
+        },
+        email_type="offer_approval_decision_hr",
+        related_entity_type="offer",
+        related_entity_id=offer.candidate_offer_id,
+        meta_extra={
+            "offer_id": offer.candidate_offer_id,
+            "approval_principal_email": principal_email,
+            "decision": payload.decision,
+        },
+    )
+
+    await session.commit()
+    await session.refresh(offer)
+    return OfferApprovalPublicOut(
+        candidate_name=candidate.full_name if candidate else None,
+        candidate_code=candidate.candidate_code if candidate else None,
+        opening_title=opening.title if opening else None,
+        designation_title=offer.designation_title,
+        gross_ctc_annual=offer.gross_ctc_annual,
+        currency=offer.currency,
+        joining_date=offer.joining_date,
+        offer_valid_until=offer.offer_valid_until,
+        offer_status=offer.offer_status,
+        approval_principal_email=offer.approval_principal_email,
+        approval_decision=offer.approval_decision,
+        approval_decision_at=offer.approval_decision_at,
+        approval_rejection_reason=offer.approval_rejection_reason,
+        approval_request_expires_at=offer.approval_request_expires_at,
         pdf_download_url=offer_pdf_signed_url(offer.public_token),
     )

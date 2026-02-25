@@ -101,6 +101,7 @@ export function proxy(request: NextRequest) {
     path.startsWith("/caf") ||
     path.startsWith("/assessment") ||
     path.startsWith("/offer") ||
+    path.startsWith("/joining") ||
     path.startsWith("/schedule") ||
     path.startsWith("/sprint") ||
     path.startsWith("/api/auth") ||
@@ -109,11 +110,13 @@ export function proxy(request: NextRequest) {
     path.startsWith("/api/assessment") ||
     path.startsWith("/api/sprint") ||
     path.startsWith("/api/offer") ||
+    path.startsWith("/api/joining") ||
     path.includes("/api/apply") ||
     path.includes("/api/caf") ||
     path.includes("/api/assessment") ||
     path.includes("/api/sprint") ||
-    path.includes("/api/offer");
+    path.includes("/api/offer") ||
+    path.includes("/api/joining");
 
   if (isFile || pathsToCheck.some(isPublicPath)) {
     return NextResponse.next();

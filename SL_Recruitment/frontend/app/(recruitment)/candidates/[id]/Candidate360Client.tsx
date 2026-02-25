@@ -271,6 +271,17 @@ const joiningDocOptions = [
   { value: "salary_slips", label: "Salary slips" },
   { value: "other", label: "Other documents" },
 ];
+const requiredJoiningDocTypes = ["pan", "aadhaar", "marksheets", "experience_letters", "salary_slips"] as const;
+
+function normalizeJoiningDocType(raw?: string | null): string | null {
+  const value = String(raw || "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (!value) return null;
+  if (value === "aadhar") return "aadhaar";
+  if (value === "mark_sheet" || value === "mark_sheets") return "marksheets";
+  if (value === "experience_letter" || value === "experienceletters") return "experience_letters";
+  if (value === "salary_slip" || value === "salaryslip") return "salary_slips";
+  return value;
+}
 
 function joiningDocLabel(value: string) {
   return joiningDocOptions.find((doc) => doc.value === value)?.label || value.replace(/_/g, " ");
@@ -537,6 +548,13 @@ const offerTemplateOptions = [
   { code: "ID_JUNIOR_STD", label: "Interior junior standard" },
 ];
 
+const principalApproverOptions = [
+  { email: "asha@studiolotus.in", label: "Asha" },
+  { email: "ankur@studiolotus.in", label: "Ankur" },
+  { email: "ambrish@studiolotus.in", label: "Ambrish" },
+  { email: "harsh@studiolotus.in", label: "Harsh" },
+];
+
 const letterOverrideFields = [
   { key: "candidate_address", label: "Candidate address" },
   { key: "unit_name", label: "Unit name" },
@@ -633,6 +651,7 @@ export function Candidate360Client({
   const [joiningDocType, setJoiningDocType] = useState(joiningDocOptions[0]?.value || "pan");
   const [joiningDocFile, setJoiningDocFile] = useState<File | null>(null);
   const [offerTemplateCode, setOfferTemplateCode] = useState("STD_OFFER");
+  const [offerApprovalPrincipal, setOfferApprovalPrincipal] = useState(principalApproverOptions[0]?.email || "");
   const [offerDesignation, setOfferDesignation] = useState("");
   const [offerCurrency, setOfferCurrency] = useState("INR");
   const [offerGross, setOfferGross] = useState("");
@@ -1367,7 +1386,14 @@ export function Candidate360Client({
     setOffersBusy(true);
     setOffersError(null);
     try {
-      await updateOffer(offerId, { submit_for_approval: true });
+      if (!offerApprovalPrincipal) {
+        setOffersError("Select a principal approver before submitting.");
+        return;
+      }
+      await updateOffer(offerId, {
+        submit_for_approval: true,
+        approval_principal_email: offerApprovalPrincipal,
+      });
       await refreshOffers();
     } catch (e: any) {
       setOffersError(e?.message || "Offer submission failed.");
@@ -1887,6 +1913,17 @@ export function Candidate360Client({
     setSelectedSlot(null);
   }, [scheduleRound]);
 
+  const joiningDocsComplete = useMemo(() => {
+    if ((candidate.joining_docs_status || "").toLowerCase() === "complete") return true;
+    if (!joiningDocs || joiningDocs.length === 0) return false;
+    const seen = new Set(
+      joiningDocs
+        .map((doc) => normalizeJoiningDocType(doc.doc_type))
+        .filter((docType): docType is string => Boolean(docType))
+    );
+    return requiredJoiningDocTypes.every((docType) => seen.has(docType));
+  }, [candidate.joining_docs_status, joiningDocs]);
+
   const stageButtons = useMemo<StageButton[]>(() => {
     if (!canManageCandidate360) return [];
     const current = currentStageKey;
@@ -2152,7 +2189,7 @@ export function Candidate360Client({
       ];
     }
     if (current === "joining_documents") {
-      return [
+      const actions: StageButton[] = [
         {
           label: "Go to documents",
           tone: "btn-action-neutral",
@@ -2161,9 +2198,36 @@ export function Candidate360Client({
           action: () => focusSection("documents", documentsRef),
         },
       ];
+      if (canAccessOffers && joiningDocsComplete) {
+        actions.unshift({
+          label: "Mark as joined",
+          tone: "btn-action-success",
+          icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "advance",
+          disabled: offersBusy,
+          action: () => handleConvertCandidate(),
+        });
+      }
+      return actions;
     }
     return [];
-  }, [currentStageKey, canManageCandidate360, canSchedule, focusSection, openSchedule, openAssignSprint, screeningRef, documentsRef, cafLocked, candidate.l2_owner_email, sprintAssignDisabled, hasSubmittedSprint]);
+  }, [
+    currentStageKey,
+    canManageCandidate360,
+    canSchedule,
+    canAccessOffers,
+    focusSection,
+    openSchedule,
+    openAssignSprint,
+    screeningRef,
+    documentsRef,
+    cafLocked,
+    candidate.l2_owner_email,
+    sprintAssignDisabled,
+    hasSubmittedSprint,
+    joiningDocsComplete,
+    offersBusy,
+  ]);
 
   const screening = data.screening as Screening | null | undefined;
   const interviewUpcoming = useMemo(() => {
@@ -2580,6 +2644,11 @@ export function Candidate360Client({
                 )}
                     {!candidate.l2_owner_email && currentStageKey === "enquiry" ? (
                       <p className="mt-2 text-xs text-amber-700">Assign GL/L2 email to unlock HR screening.</p>
+                    ) : null}
+                    {currentStageKey === "joining_documents" && canAccessOffers && !joiningDocsComplete ? (
+                      <p className="mt-2 text-xs text-amber-700">
+                        Upload all mandatory joining documents (PAN, Aadhaar, marksheets, experience letters, salary slips) to unlock Mark as joined.
+                      </p>
                     ) : null}
 
                     {canSkip ? (
@@ -4046,6 +4115,20 @@ export function Candidate360Client({
                       </button>
                       {latestOffer.offer_status === "draft" ? (
                         <>
+                          <label className="min-w-[280px] space-y-1 text-xs text-slate-600">
+                            Principal approver
+                            <select
+                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                              value={offerApprovalPrincipal}
+                              onChange={(e) => setOfferApprovalPrincipal(e.target.value)}
+                            >
+                              {principalApproverOptions.map((opt) => (
+                                <option key={opt.email} value={opt.email}>
+                                  {opt.label} ({opt.email})
+                                </option>
+                              ))}
+                            </select>
+                          </label>
                           <button
                             type="button"
                             className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
@@ -4068,22 +4151,31 @@ export function Candidate360Client({
                       ) : null}
                       {latestOffer.offer_status === "pending_approval" ? (
                         <>
-                          <button
-                            type="button"
-                            className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
-                            onClick={() => void handleApproveOffer(latestOffer.candidate_offer_id)}
-                            disabled={offersBusy}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded-full bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white"
-                            onClick={() => void handleRejectOffer(latestOffer.candidate_offer_id)}
-                            disabled={offersBusy}
-                          >
-                            Request changes
-                          </button>
+                          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            Awaiting principal decision from{" "}
+                            <span className="font-semibold">{latestOffer.approval_principal_email || "selected approver"}</span>.
+                            {latestOffer.approval_request_expires_at ? ` Link expires on ${formatDateTime(latestOffer.approval_request_expires_at)}.` : ""}
+                          </div>
+                          {canSkip ? (
+                            <>
+                              <button
+                                type="button"
+                                className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
+                                onClick={() => void handleApproveOffer(latestOffer.candidate_offer_id)}
+                                disabled={offersBusy}
+                              >
+                                Override approve
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-full bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white"
+                                onClick={() => void handleRejectOffer(latestOffer.candidate_offer_id)}
+                                disabled={offersBusy}
+                              >
+                                Override reject
+                              </button>
+                            </>
+                          ) : null}
                         </>
                       ) : null}
                       {latestOffer.offer_status === "approved" ? (

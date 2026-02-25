@@ -547,7 +547,7 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
               <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">City</th>
               <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">Requested by</th>
               <th className="whitespace-nowrap border-b border-slate-200 px-2 py-2 text-left font-semibold">Status</th>
-              <th className="whitespace-nowrap border-b border-slate-200 px-2 py-2 text-left font-semibold">Openings</th>
+              <th className="whitespace-nowrap border-b border-slate-200 px-2 py-2 text-left font-semibold">Filled / Req</th>
               <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2 text-center font-semibold">Actions</th>
             </tr>
           </thead>
@@ -581,11 +581,13 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
                       opening.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
                     }`}
                   >
-                    {opening.is_active ? "Active" : "Inactive"}
+                    {opening.is_active ? "Active" : "Closed"}
                   </span>
                 </td>
                 <td className="border-b border-slate-200 px-2 py-2 text-left font-semibold">
-                  {opening.headcount_required ?? "-"}
+                  {opening.headcount_required == null
+                    ? "-"
+                    : `${opening.headcount_filled ?? 0} / ${opening.headcount_required}`}
                 </td>
                 <td className="border-b border-slate-200 px-2 py-1">
                   <div className="flex flex-nowrap items-center justify-center gap-1 whitespace-nowrap">
@@ -614,7 +616,7 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
                         onClick={() => void setOpeningActive(opening.opening_id, true)}
                         type="button"
                       >
-                        Activate
+                        Reopen
                       </button>
                     ) : null}
                     {canToggleOpenings && opening.is_active ? (
@@ -623,7 +625,7 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
                         onClick={() => void setOpeningActive(opening.opening_id, false)}
                         type="button"
                       >
-                        Deactivate
+                        Close
                       </button>
                     ) : null}
                     {canDeleteOpenings ? (

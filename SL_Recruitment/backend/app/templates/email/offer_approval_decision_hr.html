@@ -7,44 +7,46 @@
           <table width="640" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
             <tr>
               <td style="padding:24px 28px 8px 28px;font-family:Arial,sans-serif;color:#0f172a;">
-                <div style="font-size:14px;letter-spacing:0.08em;text-transform:uppercase;color:#94a3b8;">Offer Letter</div>
-                <h1 style="margin:10px 0 4px 0;font-size:22px;font-weight:700;">Congratulations, {candidate_name}!</h1>
-                <p style="margin:0;font-size:14px;color:#475569;">Your offer letter for <strong>{opening_title}</strong> is ready.</p>
+                <div style="font-size:14px;letter-spacing:0.08em;text-transform:uppercase;color:#94a3b8;">Offer Approval Decision</div>
+                <h1 style="margin:10px 0 4px 0;font-size:22px;font-weight:700;">Offer has been {decision_label}</h1>
+                <p style="margin:0;font-size:14px;color:#475569;">Principal decision has been recorded for this offer.</p>
               </td>
             </tr>
             <tr>
               <td style="padding:0 28px 16px 28px;font-family:Arial,sans-serif;color:#0f172a;">
-                <p style="margin:12px 0 16px 0;font-size:14px;line-height:1.6;color:#374151;">
-                  Please review the offer letter and confirm your acceptance. You can view the offer online or download the PDF.
-                </p>
-                <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:16px 0;">
+                <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:16px 0;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;">
                   <tr>
-                    <td style="padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;">
-                      <p style="margin:0;font-size:12px;text-transform:uppercase;color:#94a3b8;letter-spacing:0.04em;">Joining date</p>
-                      <p style="margin:4px 0 0 0;font-size:14px;font-weight:600;color:#0f172a;">{joining_date}</p>
-                    </td>
-                    <td style="width:12px;"></td>
-                    <td style="padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;">
-                      <p style="margin:0;font-size:12px;text-transform:uppercase;color:#94a3b8;letter-spacing:0.04em;">Offer letter</p>
-                      <p style="margin:4px 0 0 0;font-size:14px;font-weight:600;color:#0f172a;"><a href="{offer_file_url}" target="_blank" rel="noopener" style="color:#0f172a;text-decoration:none;">Download PDF</a></p>
-                    </td>
+                    <td style="padding:12px 16px;font-size:13px;color:#475569;">Candidate</td>
+                    <td style="padding:12px 16px;font-size:14px;font-weight:600;color:#0f172a;">{candidate_name} ({candidate_code})</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 16px;font-size:13px;color:#475569;border-top:1px solid #e2e8f0;">Role</td>
+                    <td style="padding:12px 16px;font-size:14px;font-weight:600;color:#0f172a;border-top:1px solid #e2e8f0;">{designation_title} - {opening_title}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 16px;font-size:13px;color:#475569;border-top:1px solid #e2e8f0;">Principal</td>
+                    <td style="padding:12px 16px;font-size:14px;font-weight:600;color:#0f172a;border-top:1px solid #e2e8f0;">{principal_email}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 16px;font-size:13px;color:#475569;border-top:1px solid #e2e8f0;">Decision</td>
+                    <td style="padding:12px 16px;font-size:14px;font-weight:600;color:#0f172a;border-top:1px solid #e2e8f0;">{decision_label}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 16px;font-size:13px;color:#475569;border-top:1px solid #e2e8f0;">Reason</td>
+                    <td style="padding:12px 16px;font-size:14px;font-weight:600;color:#0f172a;border-top:1px solid #e2e8f0;">{reason}</td>
                   </tr>
                 </table>
                 <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
                   <tr>
                     <td align="left">
-                      <a href="{offer_link}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 18px;border-radius:999px;background:#0f172a;color:#ffffff;text-decoration:none;font-size:13px;font-weight:600;">View offer</a>
+                      <a href="{offer_link}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 18px;border-radius:999px;background:#0f172a;color:#ffffff;text-decoration:none;font-size:13px;font-weight:600;">Open offer page</a>
                     </td>
                     <td align="right">
-                      <a href="{offer_accept_link}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 18px;border-radius:999px;border:1px solid #e2e8f0;color:#0f172a;text-decoration:none;font-size:13px;font-weight:600;margin-right:8px;">Accept</a>
-                      <a href="{offer_decline_link}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 18px;border-radius:999px;border:1px solid #e2e8f0;color:#0f172a;text-decoration:none;font-size:13px;font-weight:600;">Decline</a>
+                      <a href="{offer_file_url}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 18px;border-radius:999px;border:1px solid #e2e8f0;color:#0f172a;text-decoration:none;font-size:13px;font-weight:600;">Download offer PDF</a>
                     </td>
                   </tr>
                 </table>
-                <p style="margin:16px 0 0 0;font-size:13px;color:#475569;">
-                  If you have any questions, reply to this email and we will help. Please keep a copy of the signed offer letter for your records.
-                </p>
-                <p style="margin:18px 0 0 0;font-size:14px;line-height:1.6;color:#334155;font-family:Arial,sans-serif;">Regards,<br />Studio Lotus Recruitment Team</p>
+                <p style="margin:16px 0 0 0;font-size:14px;line-height:1.6;color:#334155;font-family:Arial,sans-serif;">Regards,<br />{sender_name}</p>
                 <div style="margin-top:14px;">
                   <div style="font-family:arial,sans-serif;">
                     <div style="color:rgb(34,34,34);">

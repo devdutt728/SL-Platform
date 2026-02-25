@@ -562,7 +562,7 @@ async def create_interview(
         )
         if cal_resp.get("event_id"):
             interview.calendar_event_id = cal_resp.get("event_id")
-            if cal_resp.get("meeting_link") and not interview.meeting_link:
+            if cal_resp.get("meeting_link"):
                 interview.meeting_link = cal_resp.get("meeting_link")
             await log_event(
                 session,
@@ -1268,7 +1268,7 @@ async def select_interview_slot(
         )
         if cal_resp.get("event_id"):
             interview.calendar_event_id = cal_resp.get("event_id")
-            if cal_resp.get("meeting_link") and not interview.meeting_link:
+            if cal_resp.get("meeting_link"):
                 interview.meeting_link = cal_resp.get("meeting_link")
             await log_event(
                 session,

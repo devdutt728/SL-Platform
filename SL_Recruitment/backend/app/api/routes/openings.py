@@ -5,7 +5,7 @@ import anyio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import select, delete, func, or_, text
+from sqlalchemy import case, delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import DataError, OperationalError, SQLAlchemyError
 from sqlalchemy.exc import IntegrityError
@@ -729,7 +729,14 @@ async def list_opening_requests(
     if not (_can_raise_opening_request(user) or _can_approve_opening_request(user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
 
+    status_rank = case(
+        (RecOpeningRequest.status == "pending_hr_approval", 0),
+        (RecOpeningRequest.status == "applied", 1),
+        (RecOpeningRequest.status == "rejected", 2),
+        else_=3,
+    )
     query = select(RecOpeningRequest).order_by(
+        status_rank.asc(),
         RecOpeningRequest.updated_at.is_(None),
         RecOpeningRequest.updated_at.desc(),
         RecOpeningRequest.opening_request_id.desc(),
@@ -998,6 +1005,32 @@ async def delete_opening_request(
     approver_id = _platform_person_id(user)
     approver_role = _actor_role_label(user)
     try:
+        opening_adjusted = False
+        opening_adjustment_meta: dict[str, int | bool] | None = None
+        if (
+            request_row.status == "applied"
+            and request_row.request_type == "increase_headcount"
+            and request_row.opening_id is not None
+        ):
+            opening = await session.get(RecOpening, request_row.opening_id, with_for_update=True)
+            if opening:
+                delta = max(0, int(request_row.headcount_delta or 0))
+                if delta > 0:
+                    required_before = int(opening.headcount_required or 0)
+                    filled_now = int(opening.headcount_filled or 0)
+                    required_after = max(filled_now, required_before - delta)
+                    opening.headcount_required = required_after
+                    if required_after <= filled_now:
+                        opening.is_active = 0
+                    opening.updated_at = datetime.utcnow()
+                    opening_adjusted = required_after != required_before
+                    opening_adjustment_meta = {
+                        "headcount_required_before": required_before,
+                        "headcount_required_after": required_after,
+                        "headcount_filled": filled_now,
+                        "is_active_after": bool(opening.is_active),
+                    }
+
         await _log_opening_event(
             session,
             opening_id=request_row.opening_id,
@@ -1005,7 +1038,12 @@ async def delete_opening_request(
             action_type="opening_request_deleted_admin",
             actor_person_id_platform=approver_id,
             actor_role=approver_role,
-            meta={"deleted_status": request_row.status},
+            meta={
+                "deleted_status": request_row.status,
+                "request_type": request_row.request_type,
+                "opening_adjusted": opening_adjusted,
+                "opening_adjustment": opening_adjustment_meta,
+            },
         )
         await session.delete(request_row)
         await session.commit()

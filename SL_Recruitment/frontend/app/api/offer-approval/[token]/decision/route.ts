@@ -1,15 +1,15 @@
-import {NextResponse, type NextRequest} from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { backendUrl } from "@/lib/backend";
 
 type Params = { params: Promise<{ token: string }> };
 
 export async function POST(request: NextRequest, context: Params) {
   const params = await context.params;
-  const form = await request.formData();
-  const search = request.nextUrl.search || "";
-  const res = await fetch(backendUrl(`/joining/${encodeURIComponent(params.token)}/upload${search}`), {
+  const body = await request.text();
+  const res = await fetch(backendUrl(`/offer-approval/${encodeURIComponent(params.token)}/decision`), {
     method: "POST",
-    body: form,
+    headers: { "content-type": "application/json" },
+    body,
   });
   const data = await res.text();
   return new NextResponse(data, {

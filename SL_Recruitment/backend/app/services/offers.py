@@ -9,12 +9,14 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.platform_session import PlatformSessionLocal
 from app.models.candidate import RecCandidate
 from app.models.candidate_offer import RecCandidateOffer
+from app.models.joining_doc import RecCandidateJoiningDoc
+from app.models.opening_event import RecOpeningEvent
 from app.models.opening import RecOpening
 from app.models.platform_person import DimPerson
 from app.schemas.user import UserContext
@@ -24,7 +26,52 @@ from app.services.drive import move_candidate_folder, upload_offer_doc
 from app.services.events import log_event
 from app.services.operation_queue import OP_DRIVE_MOVE_FOLDER, enqueue_operation
 from app.services.platform_identity import active_status_filter
+from app.services.public_links import build_public_link
 from app.services.stage_transitions import apply_stage_transition
+
+PRINCIPAL_APPROVER_EMAILS = (
+    "asha@studiolotus.in",
+    "ankur@studiolotus.in",
+    "ambrish@studiolotus.in",
+    "harsh@studiolotus.in",
+)
+
+REQUIRED_JOINING_DOC_TYPES = {
+    "pan",
+    "aadhaar",
+    "marksheets",
+    "experience_letters",
+    "salary_slips",
+}
+
+
+def _normalize_joining_doc_type(raw: str | None) -> str | None:
+    value = (raw or "").strip().lower().replace(" ", "_")
+    if value == "aadhar":
+        value = "aadhaar"
+    if value in {"mark_sheets", "mark_sheet"}:
+        value = "marksheets"
+    if value in {"experience_letter", "experienceletters"}:
+        value = "experience_letters"
+    if value in {"salary_slip", "salaryslip"}:
+        value = "salary_slips"
+    if value in REQUIRED_JOINING_DOC_TYPES:
+        return value
+    return None
+
+
+async def _candidate_has_required_joining_docs(session: AsyncSession, *, candidate_id: int) -> bool:
+    rows = (
+        await session.execute(
+            select(RecCandidateJoiningDoc.doc_type).where(RecCandidateJoiningDoc.candidate_id == candidate_id)
+        )
+    ).scalars().all()
+    seen = {
+        normalized
+        for normalized in (_normalize_joining_doc_type(str(row)) for row in rows if row)
+        if normalized is not None
+    }
+    return REQUIRED_JOINING_DOC_TYPES.issubset(seen)
 
 
 def _format_date(value) -> str:
@@ -54,30 +101,28 @@ def _logo_data_uri() -> str:
     b64 = base64.b64encode(data).decode("ascii")
     return f"data:image/png;base64,{b64}"
 
-def _public_origin() -> str:
-    if settings.public_app_origin:
-        return settings.public_app_origin.rstrip("/")
-    return ""
-
-def _public_base_path() -> str:
-    base_path = (settings.public_app_base_path or "").strip()
-    if not base_path:
-        return ""
-    if not base_path.startswith("/"):
-        base_path = f"/{base_path}"
-    return base_path.rstrip("/")
-
 def _offer_public_link(token: str) -> str:
-    base = _public_origin()
-    prefix = _public_base_path()
-    path = f"{prefix}/offer/{token}" if prefix else f"/offer/{token}"
-    return f"{base}{path}" if base else path
+    return build_public_link(f"/offer/{token}")
 
 def _offer_public_pdf_link(token: str) -> str:
-    base = _public_origin()
-    prefix = _public_base_path()
-    path = f"{prefix}/api/offer/{token}/pdf" if prefix else f"/api/offer/{token}/pdf"
-    return f"{base}{path}" if base else path
+    return build_public_link(f"/api/offer/{token}/pdf")
+
+
+def offer_approval_public_link(token: str) -> str:
+    return build_public_link(f"/offer-approval/{token}")
+
+
+def normalize_principal_email(email: str | None) -> str | None:
+    value = (email or "").strip().lower()
+    if not value:
+        return None
+    return value
+
+
+def is_principal_approver_email(email: str | None) -> bool:
+    normalized = normalize_principal_email(email)
+    return bool(normalized and normalized in PRINCIPAL_APPROVER_EMAILS)
+
 
 def _offer_pdf_signature(token: str, expires_at: int) -> str:
     signing_key = (settings.public_link_signing_key or settings.secret_key).strip()
@@ -106,6 +151,37 @@ def verify_offer_pdf_signature(token: str, exp: str | None, sig: str | None) -> 
     if datetime.now(timezone.utc).timestamp() > exp_int:
         return False
     expected = _offer_pdf_signature(token, exp_int)
+    return hmac.compare_digest(expected, sig)
+
+
+def _joining_link_signature(token: str, expires_at: int) -> str:
+    signing_key = (settings.public_link_signing_key or settings.secret_key).strip()
+    payload = f"joining:{token}:{int(expires_at)}"
+    digest = hmac.new(
+        signing_key.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def joining_public_signed_url(token: str) -> str:
+    expires_at = int((datetime.now(timezone.utc) + timedelta(hours=settings.public_link_ttl_hours)).timestamp())
+    sig = _joining_link_signature(token, expires_at)
+    base = build_public_link(f"/joining/{token}")
+    return f"{base}?exp={expires_at}&sig={sig}"
+
+
+def verify_joining_link_signature(token: str, exp: str | None, sig: str | None) -> bool:
+    if not exp or not sig:
+        return False
+    try:
+        exp_int = int(exp)
+    except ValueError:
+        return False
+    if datetime.now(timezone.utc).timestamp() > exp_int:
+        return False
+    expected = _joining_link_signature(token, exp_int)
     return hmac.compare_digest(expected, sig)
 
 
@@ -284,6 +360,63 @@ def _event_meta(user: UserContext, extra: dict[str, Any] | None = None) -> dict[
     return meta
 
 
+async def _sync_opening_counts_for_hire(
+    session: AsyncSession,
+    *,
+    opening_id: int | None,
+    user: UserContext,
+) -> None:
+    if opening_id is None:
+        return
+
+    opening = await session.get(RecOpening, opening_id, with_for_update=True)
+    if not opening:
+        return
+
+    filled_before = int(opening.headcount_filled or 0)
+    is_active_before = bool(opening.is_active)
+    required = int(opening.headcount_required or 0)
+
+    filled_now = (
+        await session.execute(
+            select(func.count(RecCandidate.candidate_id)).where(
+                RecCandidate.opening_id == opening_id,
+                RecCandidate.final_decision == "hired",
+                RecCandidate.archived_at.is_(None),
+            )
+        )
+    ).scalar_one()
+    opening.headcount_filled = int(filled_now or 0)
+
+    if required > 0 and opening.headcount_filled >= required:
+        opening.is_active = 0
+    opening.updated_at = datetime.utcnow()
+
+    if filled_before == opening.headcount_filled and is_active_before == bool(opening.is_active):
+        return
+
+    session.add(
+        RecOpeningEvent(
+            opening_id=opening.opening_id,
+            opening_request_id=None,
+            action_type="opening_headcount_synced_on_hire",
+            actor_person_id_platform=(user.person_id_platform or "").strip() or None,
+            actor_role="offer_flow",
+            meta_json=json.dumps(
+                {
+                    "headcount_filled_before": filled_before,
+                    "headcount_filled_after": opening.headcount_filled,
+                    "headcount_required": required,
+                    "is_active_before": is_active_before,
+                    "is_active_after": bool(opening.is_active),
+                },
+                separators=(",", ":"),
+            ),
+            created_at=datetime.utcnow(),
+        )
+    )
+
+
 async def create_offer(session: AsyncSession, *, candidate: RecCandidate, opening: RecOpening | None, payload: dict[str, Any], user: UserContext) -> RecCandidateOffer:
     now = datetime.utcnow()
     letter_overrides = payload.get("letter_overrides")
@@ -360,10 +493,42 @@ async def update_offer_details(session: AsyncSession, *, offer: RecCandidateOffe
 
 
 async def submit_for_approval(session: AsyncSession, *, offer: RecCandidateOffer, user: UserContext) -> RecCandidateOffer:
+    principal_email = normalize_principal_email(offer.approval_principal_email)
+    if not principal_email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select a principal approver email.")
+    return await submit_for_approval_with_principal(
+        session,
+        offer=offer,
+        user=user,
+        approval_principal_email=principal_email,
+    )
+
+
+async def submit_for_approval_with_principal(
+    session: AsyncSession,
+    *,
+    offer: RecCandidateOffer,
+    user: UserContext,
+    approval_principal_email: str,
+) -> RecCandidateOffer:
     if offer.offer_status != "draft":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only draft offers can be submitted.")
+    normalized_principal = normalize_principal_email(approval_principal_email)
+    if not is_principal_approver_email(normalized_principal):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid principal approver email.")
+    now = datetime.utcnow()
     offer.offer_status = "pending_approval"
-    offer.updated_at = datetime.utcnow()
+    offer.approval_principal_email = normalized_principal
+    offer.approval_requested_by_email = (user.email or "").strip().lower()
+    offer.approval_requested_at = now
+    offer.approval_request_token = uuid4().hex
+    offer.approval_request_expires_at = now + timedelta(hours=settings.public_link_ttl_hours)
+    offer.approval_request_used_at = None
+    offer.approval_decision = None
+    offer.approval_decision_by_email = None
+    offer.approval_decision_at = None
+    offer.approval_rejection_reason = None
+    offer.updated_at = now
     await log_event(
         session,
         candidate_id=offer.candidate_id,
@@ -371,7 +536,14 @@ async def submit_for_approval(session: AsyncSession, *, offer: RecCandidateOffer
         performed_by_person_id_platform=_platform_person_id(user),
         related_entity_type="offer",
         related_entity_id=offer.candidate_offer_id,
-        meta_json=_event_meta(user, {"offer_id": offer.candidate_offer_id}),
+        meta_json=_event_meta(
+            user,
+            {
+                "offer_id": offer.candidate_offer_id,
+                "approval_principal_email": normalized_principal,
+                "approval_request_expires_at": offer.approval_request_expires_at.isoformat() if offer.approval_request_expires_at else None,
+            },
+        ),
     )
     return offer
 
@@ -383,6 +555,13 @@ async def approve_offer(session: AsyncSession, *, offer: RecCandidateOffer, user
     offer.offer_status = "approved"
     offer.approved_by_person_id_platform = _platform_person_id(user)
     offer.approved_at = now
+    offer.approval_decision = "approved"
+    offer.approval_decision_by_email = (user.email or "").strip().lower() or None
+    offer.approval_decision_at = now
+    offer.approval_rejection_reason = None
+    offer.approval_request_used_at = now
+    offer.approval_request_token = None
+    offer.approval_request_expires_at = None
     offer.updated_at = now
     await log_event(
         session,
@@ -399,8 +578,16 @@ async def approve_offer(session: AsyncSession, *, offer: RecCandidateOffer, user
 async def reject_offer(session: AsyncSession, *, offer: RecCandidateOffer, user: UserContext, reason: str | None = None) -> RecCandidateOffer:
     if offer.offer_status not in {"pending_approval", "approved"}:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer is not pending approval.")
+    now = datetime.utcnow()
     offer.offer_status = "draft"
-    offer.updated_at = datetime.utcnow()
+    offer.approval_decision = "rejected"
+    offer.approval_decision_by_email = (user.email or "").strip().lower() or None
+    offer.approval_decision_at = now
+    offer.approval_rejection_reason = (reason or "").strip() or None
+    offer.approval_request_used_at = now
+    offer.approval_request_token = None
+    offer.approval_request_expires_at = None
+    offer.updated_at = now
     await log_event(
         session,
         candidate_id=offer.candidate_id,
@@ -409,6 +596,64 @@ async def reject_offer(session: AsyncSession, *, offer: RecCandidateOffer, user:
         related_entity_type="offer",
         related_entity_id=offer.candidate_offer_id,
         meta_json=_event_meta(user, {"offer_id": offer.candidate_offer_id, "reason": reason}),
+    )
+    return offer
+
+
+async def principal_decide_offer(
+    session: AsyncSession,
+    *,
+    offer: RecCandidateOffer,
+    principal_email: str,
+    decision: str,
+    reason: str | None = None,
+) -> RecCandidateOffer:
+    if offer.offer_status != "pending_approval":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer is not pending principal approval.")
+    normalized_principal = normalize_principal_email(principal_email)
+    if not is_principal_approver_email(normalized_principal):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Principal approver is not allowed.")
+    if normalize_principal_email(offer.approval_principal_email) != normalized_principal:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This approval request is not assigned to this principal.")
+    now = datetime.utcnow()
+    if offer.approval_request_expires_at and offer.approval_request_expires_at < now:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Approval request link has expired.")
+
+    normalized = (decision or "").strip().lower()
+    if normalized == "approve":
+        offer.offer_status = "approved"
+        offer.approved_at = now
+        offer.approved_by_person_id_platform = None
+        offer.approval_decision = "approved"
+        offer.approval_rejection_reason = None
+        action_type = "offer_principal_approved"
+    elif normalized == "reject":
+        offer.offer_status = "draft"
+        offer.approval_decision = "rejected"
+        offer.approval_rejection_reason = (reason or "").strip() or None
+        action_type = "offer_principal_rejected"
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Decision must be approve or reject.")
+
+    offer.approval_decision_by_email = normalized_principal
+    offer.approval_decision_at = now
+    offer.approval_request_used_at = now
+    offer.approval_request_token = None
+    offer.approval_request_expires_at = None
+    offer.updated_at = now
+
+    await log_event(
+        session,
+        candidate_id=offer.candidate_id,
+        action_type=action_type,
+        performed_by_person_id_platform=None,
+        related_entity_type="offer",
+        related_entity_id=offer.candidate_offer_id,
+        meta_json={
+            "offer_id": offer.candidate_offer_id,
+            "principal_email": normalized_principal,
+            "reason": offer.approval_rejection_reason,
+        },
     )
     return offer
 
@@ -463,6 +708,9 @@ async def record_candidate_response(
     offer: RecCandidateOffer,
     decision: str,
     reason: str | None = None,
+    typed_name: str | None = None,
+    actor_ip: str | None = None,
+    actor_user_agent: str | None = None,
     allow_override: bool = False,
 ) -> RecCandidateOffer:
     now = datetime.utcnow()
@@ -473,14 +721,20 @@ async def record_candidate_response(
     normalized = decision.strip().lower()
     if normalized not in {"accept", "decline"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Decision must be accept or decline.")
+    typed_name_clean = (typed_name or "").strip()
+    if normalized == "accept" and not allow_override and not typed_name_clean:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Typed name is required to accept the offer.")
     candidate = await session.get(RecCandidate, offer.candidate_id)
     if normalized == "accept":
         offer.offer_status = "accepted"
         offer.accepted_at = now
+        offer.acceptance_typed_name = typed_name_clean or None
+        offer.acceptance_ip = (actor_ip or "").strip() or None
+        offer.acceptance_user_agent = (actor_user_agent or "").strip()[:512] or None
         action = "offer_accepted"
         if candidate:
             candidate.status = "offer"
-            candidate.final_decision = None
+            candidate.final_decision = "pending"
             candidate.updated_at = now
             await apply_stage_transition(
                 session,
@@ -494,6 +748,9 @@ async def record_candidate_response(
     else:
         offer.offer_status = "declined"
         offer.declined_at = now
+        offer.acceptance_typed_name = None
+        offer.acceptance_ip = None
+        offer.acceptance_user_agent = None
         action = "offer_declined"
         if candidate:
             candidate.status = "declined"
@@ -524,8 +781,10 @@ async def record_candidate_response(
 async def convert_candidate_to_employee(session: AsyncSession, *, candidate: RecCandidate, offer: RecCandidateOffer, user: UserContext) -> RecCandidate:
     if offer.offer_status != "accepted":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer must be accepted before conversion.")
-    if candidate.joining_docs_status != "complete":
+    docs_complete = await _candidate_has_required_joining_docs(session, candidate_id=candidate.candidate_id)
+    if not docs_complete:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Joining documents are not complete.")
+    candidate.joining_docs_status = "complete"
 
     person_id = f"REC_{candidate.candidate_id}"
     async with PlatformSessionLocal() as platform_session:
@@ -561,6 +820,8 @@ async def convert_candidate_to_employee(session: AsyncSession, *, candidate: Rec
         user=user,
         source="candidate_convert",
     )
+    await session.flush()
+    await _sync_opening_counts_for_hire(session, opening_id=candidate.opening_id, user=user)
 
     if candidate.drive_folder_id:
         try:

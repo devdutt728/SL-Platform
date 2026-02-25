@@ -98,10 +98,13 @@ export function Sidebar({ initialMe }: { initialMe: SidebarMe | null }) {
   }, [isGl, isHr, isInterviewer, isRoleFiveOrSix, isSuperadmin, normalizedRoles]);
 
   return (
-    <aside className="glass-panel fixed bottom-4 left-4 top-4 z-20 w-56 overflow-hidden rounded-2xl p-4">
-      <div className="px-2 pb-4">
-        <div className="h-12 w-full">
+    <aside className="glass-panel fixed bottom-4 left-4 top-4 z-20 w-16 overflow-hidden rounded-2xl p-2 sm:w-20 sm:p-3 2xl:w-56 2xl:p-4">
+      <div className="px-0.5 pb-3 2xl:px-2">
+        <div className="hidden h-12 w-full 2xl:block">
           <img src={logoSrc} alt="Studio Lotus" className="h-full w-auto object-contain object-left" />
+        </div>
+        <div className="flex h-8 items-center justify-center 2xl:hidden">
+          <img src={logoSrc} alt="Studio Lotus" className="h-8 w-8 object-contain" />
         </div>
       </div>
       <nav className="space-y-1">
@@ -112,30 +115,32 @@ export function Sidebar({ initialMe }: { initialMe: SidebarMe | null }) {
             <Link
               key={item.href}
               href={item.href}
+              title={item.label}
               className={clsx(
-                "flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-[var(--dim-grey)] transition",
+                "flex items-center justify-center gap-3 rounded-xl px-3 py-2 text-sm text-[var(--dim-grey)] transition 2xl:justify-start",
                 active
                   ? "bg-[rgba(231,64,17,0.1)] text-[var(--dim-grey)] shadow-md ring-1 ring-[rgba(231,64,17,0.25)]"
                   : "hover:bg-white/40 hover:text-[var(--dim-grey)]"
               )}
             >
               <Icon className="h-4 w-4" />
-              <span>{item.label}</span>
+              <span className="hidden 2xl:inline">{item.label}</span>
             </Link>
           );
         })}
         {isSuperadmin ? (
           <Link
             href="/superadmin"
+            title="SuperAdmin"
             className={clsx(
-              "flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-[var(--dim-grey)] transition",
+              "flex items-center justify-center gap-3 rounded-xl px-3 py-2 text-sm text-[var(--dim-grey)] transition 2xl:justify-start",
               normalizedPath.startsWith("/superadmin")
                 ? "bg-[rgba(231,64,17,0.1)] text-[var(--dim-grey)] shadow-md ring-1 ring-[rgba(231,64,17,0.25)]"
                 : "hover:bg-white/40 hover:text-[var(--dim-grey)]"
             )}
           >
             <Shield className="h-4 w-4" />
-            <span>SuperAdmin</span>
+            <span className="hidden 2xl:inline">SuperAdmin</span>
           </Link>
         ) : null}
       </nav>

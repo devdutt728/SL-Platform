@@ -654,17 +654,17 @@ export default function DashboardClient({
       </section>
 
       <section className="relative z-0 grid gap-3 lg:grid-cols-3">
-        <div className="section-card motion-fade-up motion-delay-1 relative overflow-hidden border border-[var(--border-soft)] bg-white/75 p-4">
+        <div className="section-card motion-fade-up motion-delay-1 relative overflow-hidden border border-[var(--border-soft)] bg-white/75 p-2.5">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(231,64,17,0.14),_transparent_60%)]" />
           <div className="pointer-events-none absolute -right-16 top-0 h-28 w-28 rounded-full bg-[rgba(93,85,82,0.14)] blur-2xl" />
-          <div className="relative flex items-center justify-between gap-3 pb-1">
+          <div className="relative flex items-center justify-between gap-2 pb-0.5">
             <div>
               <p className="text-[11px] uppercase tracking-[0.26em] text-[var(--light-grey)]">Snapshot</p>
               <p className="text-sm font-semibold text-[var(--dim-grey)]">Recruitment pulse</p>
             </div>
             <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--light-grey)]">Live</span>
           </div>
-          <div className="relative mt-3 grid gap-3 sm:grid-cols-3">
+          <div className="relative mt-1.5 grid gap-1.5 sm:grid-cols-3">
             {[
               {
                 label: "Total applications",
@@ -696,7 +696,7 @@ export default function DashboardClient({
                   <Link
                     href={item.href}
                     className={clsx(
-                      "group relative block w-full min-h-[132px] overflow-hidden rounded-2xl px-4 py-3 shadow-sm transition-all duration-200",
+                      "group relative block w-full min-h-[92px] overflow-hidden rounded-2xl px-2.5 py-2 shadow-sm transition-all duration-200",
                       "hover:-translate-y-0.5 hover:shadow-[var(--shadow-soft-hover)]"
                     )}
                   >
@@ -710,17 +710,17 @@ export default function DashboardClient({
                     />
                     <div className="pointer-events-none absolute inset-0 bg-white/35" />
                     <div className="relative flex items-center justify-between">
-                      <p className="max-w-[75%] text-[9px] sm:text-[10px] lg:text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--dim-grey)] leading-snug">
+                      <p className="max-w-[75%] text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--dim-grey)] leading-snug">
                         {item.label}
                       </p>
-                      <span className="text-[9px] sm:text-[10px] lg:text-[11px] font-semibold text-[var(--light-grey)]">tap</span>
+                      <span className="text-[9px] sm:text-[10px] font-semibold text-[var(--light-grey)]">tap</span>
                     </div>
-                    <div className="relative mt-3 flex items-baseline justify-between">
-                      <p className="text-[22px] sm:text-[24px] lg:text-[28px] font-semibold text-[var(--dim-grey)]">{item.value}</p>
+                    <div className="relative mt-1.5 flex items-baseline justify-between">
+                      <p className="text-[18px] sm:text-[20px] lg:text-[22px] font-semibold text-[var(--dim-grey)]">{item.value}</p>
                     </div>
                   </Link>
                 ) : (
-                  <div className="group relative min-h-[132px] overflow-hidden rounded-2xl px-4 py-3 shadow-sm transition-all duration-200">
+                  <div className="group relative min-h-[92px] overflow-hidden rounded-2xl px-2.5 py-2 shadow-sm transition-all duration-200">
                     <div
                       className="pointer-events-none absolute inset-0"
                       style={{
@@ -731,12 +731,12 @@ export default function DashboardClient({
                     />
                     <div className="pointer-events-none absolute inset-0 bg-white/35" />
                     <div className="relative flex items-center justify-between">
-                      <p className="max-w-[75%] text-[9px] sm:text-[10px] lg:text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--dim-grey)] leading-snug">
+                      <p className="max-w-[75%] text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--dim-grey)] leading-snug">
                         {item.label}
                       </p>
                     </div>
-                    <div className="relative mt-3 flex items-baseline justify-between">
-                      <p className="text-[22px] sm:text-[24px] lg:text-[28px] font-semibold text-[var(--dim-grey)]">{item.value}</p>
+                    <div className="relative mt-1.5 flex items-baseline justify-between">
+                      <p className="text-[18px] sm:text-[20px] lg:text-[22px] font-semibold text-[var(--dim-grey)]">{item.value}</p>
                     </div>
                   </div>
                 )}
@@ -744,7 +744,7 @@ export default function DashboardClient({
             ))}
           </div>
         </div>
-        <div className="section-card motion-fade-up motion-delay-2 relative overflow-hidden border border-[var(--border-soft)] bg-white/75 p-4">
+        <div className="section-card motion-fade-up motion-delay-2 relative overflow-hidden border border-[var(--border-soft)] bg-white/75 p-2.5">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(231,64,17,0.1),_transparent_60%)]" />
           <div className="relative flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -762,30 +762,30 @@ export default function DashboardClient({
           {canNavigate ? (
             <Link
               href="/openings"
-              className="relative mt-3 flex items-center justify-between rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-4 py-3 shadow-sm transition hover:bg-[var(--surface-card)]"
+              className="relative mt-1.5 flex items-center justify-between rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-2.5 py-2 shadow-sm transition hover:bg-[var(--surface-card)]"
             >
               <div>
                 <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--light-grey)]">Active openings</p>
                 <p className="mt-1 text-xs text-[var(--dim-grey)]">Roles currently accepting candidates.</p>
               </div>
-              <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-2 text-2xl font-semibold text-[var(--dim-grey)]">
+              <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white px-2 py-1 text-lg font-semibold text-[var(--dim-grey)]">
                 {metrics?.openings_count ?? "--"}
               </div>
             </Link>
           ) : (
-            <div className="relative mt-3 flex items-center justify-between rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-4 py-3 shadow-sm transition">
+            <div className="relative mt-1.5 flex items-center justify-between rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-2.5 py-2 shadow-sm transition">
               <div>
                 <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--light-grey)]">Active openings</p>
                 <p className="mt-1 text-xs text-[var(--dim-grey)]">Roles currently accepting candidates.</p>
               </div>
-              <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-2 text-2xl font-semibold text-[var(--dim-grey)]">
+              <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white px-2 py-1 text-lg font-semibold text-[var(--dim-grey)]">
                 {metrics?.openings_count ?? "--"}
               </div>
             </div>
           )}
         </div>
         {canViewOffers ? (
-          <div className="section-card motion-fade-up motion-delay-3 relative overflow-hidden border border-[var(--border-soft)] bg-white/75 p-4">
+          <div className="section-card motion-fade-up motion-delay-3 relative overflow-hidden border border-[var(--border-soft)] bg-white/75 p-2.5">
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(231,64,17,0.1),_transparent_60%)]" />
             <div className="relative flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -800,7 +800,7 @@ export default function DashboardClient({
                 <span className="text-xs font-semibold text-[var(--dim-grey)]">View offers</span>
               )}
             </div>
-            <div className="relative mt-3 grid gap-2 md:grid-cols-2">
+            <div className="relative mt-1.5 grid gap-1.5 md:grid-cols-2">
               {[
                 ["pending_approval", "Pending approval"],
                 ["sent", "Sent"],
@@ -811,7 +811,7 @@ export default function DashboardClient({
                   {canNavigate ? (
                     <Link
                       href={`/offers?status=${key}`}
-                      className="flex items-center justify-between rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 shadow-sm transition hover:bg-[var(--surface-card)]"
+                      className="flex items-center justify-between rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-2.5 py-1.5 shadow-sm transition hover:bg-[var(--surface-card)]"
                     >
                       <p className="text-[12px] font-semibold text-[var(--dim-grey)]">{label}</p>
                       <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--dim-grey)]">
@@ -819,7 +819,7 @@ export default function DashboardClient({
                       </span>
                     </Link>
                   ) : (
-                    <div className="flex items-center justify-between rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 shadow-sm transition">
+                    <div className="flex items-center justify-between rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-2.5 py-1.5 shadow-sm transition">
                       <p className="text-[12px] font-semibold text-[var(--dim-grey)]">{label}</p>
                       <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--dim-grey)]">
                         {offerSummary[key] ?? 0}

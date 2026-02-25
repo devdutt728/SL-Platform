@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { OfferPublic } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
 
@@ -28,14 +28,18 @@ function formatDate(raw?: string | null) {
 
 export function OfferPublicClient({ token }: Props) {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const searchParams = useSearchParams();
   const [offer, setOffer] = useState<OfferPublic | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [decision, setDecision] = useState<"accepted" | "declined" | null>(null);
+  const [typedName, setTypedName] = useState("");
+  const decisionIntentRaw = (searchParams.get("decision") || "").trim().toLowerCase();
+  const decisionIntent = decisionIntentRaw === "accept" || decisionIntentRaw === "decline" ? decisionIntentRaw : null;
   const canRespond = offer?.offer_status === "sent" || offer?.offer_status === "viewed";
 
-  const loadOffer = async () => {
+  const loadOffer = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -48,17 +52,21 @@ export function OfferPublicClient({ token }: Props) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [basePath, token]);
 
   const submitDecision = async (value: "accept" | "decline") => {
     if (submitting) return;
+    if (value === "accept" && !typedName.trim()) {
+      setError("Please type your full name to accept the offer.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
       const res = await fetch(`${basePath}/api/offer/${encodeURIComponent(token)}/decision`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision: value }),
+        body: JSON.stringify({ decision: value, typed_name: value === "accept" ? typedName.trim() : undefined }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as OfferPublic;
@@ -73,7 +81,7 @@ export function OfferPublicClient({ token }: Props) {
 
   useEffect(() => {
     void loadOffer();
-  }, []);
+  }, [loadOffer]);
 
   useEffect(() => {
     if (!offer?.offer_status) return;
@@ -90,6 +98,13 @@ export function OfferPublicClient({ token }: Props) {
       </div>
 
       {error ? <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
+      {!decision && canRespond && decisionIntent ? (
+        <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 text-sm text-slate-700">
+          {decisionIntent === "accept"
+            ? "You selected Accept from email. Type your full name below to complete acceptance."
+            : "You selected Decline from email. Click Decline offer below to confirm your decision."}
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="section-card text-sm text-slate-600">Loading offer...</div>
@@ -129,21 +144,32 @@ export function OfferPublicClient({ token }: Props) {
               {decision === "accepted" ? "Thanks! Your acceptance has been recorded." : "We have recorded your decision."}
             </div>
           ) : canRespond ? (
-            <div className="flex gap-2">
-              <button
-                className="flex-1 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow-lg disabled:opacity-60"
-                onClick={() => void submitDecision("accept")}
-                disabled={submitting}
-              >
-                Accept offer
-              </button>
-              <button
-                className="flex-1 rounded-xl border border-white/60 bg-white/40 px-4 py-2 text-sm font-semibold text-slate-800 backdrop-blur disabled:opacity-60"
-                onClick={() => void submitDecision("decline")}
-                disabled={submitting}
-              >
-                Decline offer
-              </button>
+            <div className="space-y-3">
+              <label className="block text-sm font-medium text-slate-700">
+                Digital signature (type full name)
+                <input
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                  value={typedName}
+                  onChange={(event) => setTypedName(event.target.value)}
+                  placeholder="Type your full name"
+                />
+              </label>
+              <div className="flex gap-2">
+                <button
+                  className="flex-1 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow-lg disabled:opacity-60"
+                  onClick={() => void submitDecision("accept")}
+                  disabled={submitting || !typedName.trim()}
+                >
+                  Accept offer
+                </button>
+                <button
+                  className="flex-1 rounded-xl border border-white/60 bg-white/40 px-4 py-2 text-sm font-semibold text-slate-800 backdrop-blur disabled:opacity-60"
+                  onClick={() => void submitDecision("decline")}
+                  disabled={submitting}
+                >
+                  Decline offer
+                </button>
+              </div>
             </div>
           ) : (
             <div className="rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm text-slate-700">
@@ -151,12 +177,12 @@ export function OfferPublicClient({ token }: Props) {
             </div>
           )}
           {offer.offer_status === "accepted" ? (
-            <Link
-              href={`/joining/${encodeURIComponent(token)}`}
+            <a
+              href={offer.joining_upload_url || `${basePath}/joining/${encodeURIComponent(token)}`}
               className="inline-flex items-center justify-center rounded-xl border border-white/60 bg-white/60 px-4 py-2 text-sm font-semibold text-slate-800 backdrop-blur"
             >
               Upload joining documents
-            </Link>
+            </a>
           ) : null}
         </div>
       ) : null}

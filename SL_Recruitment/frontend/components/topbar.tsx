@@ -71,21 +71,21 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
   }
 
   return (
-    <header className="glass-panel fixed left-4 right-4 top-4 z-20 hidden h-16 overflow-visible rounded-2xl md:flex md:left-72">
-      <div className="page-shell flex h-full items-center justify-between">
-        <div className="flex items-center gap-3">
+    <header className="glass-panel fixed top-4 right-4 z-20 hidden h-16 overflow-visible rounded-2xl md:flex md:left-24 2xl:left-72">
+      <div className="page-shell flex h-full items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-3">
           <Sparkles className="h-4 w-4 text-[var(--brand-color)]" />
-          <span className="text-sm font-semibold text-[var(--dim-grey)]">Recruitment</span>
-          <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-1 text-xs font-semibold text-[var(--dim-grey)]">
+          <span className="truncate text-sm font-semibold text-[var(--dim-grey)]">Recruitment</span>
+          <span className="hidden rounded-full border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-1 text-xs font-semibold text-[var(--dim-grey)] lg:inline-flex">
             Beta
           </span>
-          <span className="text-xs font-semibold text-[var(--dim-grey)]">
+          <span className="hidden text-xs font-semibold text-[var(--dim-grey)] xl:inline">
             / {sectionLabel}
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <details className="relative">
+        <div className="flex shrink-0 items-center gap-2">
+          <details className="relative hidden lg:block">
             <summary className="cursor-pointer list-none rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 text-xs font-semibold text-[var(--dim-grey)] backdrop-blur">
               Apps
             </summary>
@@ -105,21 +105,21 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
             </div>
           </details>
           {me ? (
-            <div className="flex items-center gap-2 rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/75 px-3 py-2 text-sm font-medium text-[var(--dim-grey)] shadow-sm">
+            <div className="flex items-center gap-2 rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/75 px-2 py-1.5 text-sm font-medium text-[var(--dim-grey)] shadow-sm xl:px-3 xl:py-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[rgba(231,64,17,0.1)] text-[var(--brand-color)]">
                 <User className="h-4 w-4" />
               </div>
               <div className="leading-tight">
                 <p className="text-xs tracking-tight text-[var(--dim-grey)]">{firstName(me)}</p>
-                <p className="text-sm text-[var(--dim-grey)]">{displayRoles.join(", ")}</p>
+                <p className="hidden text-sm text-[var(--dim-grey)] xl:block">{displayRoles.join(", ")}</p>
               </div>
               <button
                 onClick={signOut}
-                className="ml-2 inline-flex items-center gap-1 rounded-lg border border-[var(--accessible-components--dark-grey)] bg-white px-2 py-1 text-xs font-semibold text-[var(--dim-grey)] hover:bg-[var(--surface-card)]"
+                className="ml-1 inline-flex items-center gap-1 rounded-lg border border-[var(--accessible-components--dark-grey)] bg-white px-2 py-1 text-xs font-semibold text-[var(--dim-grey)] hover:bg-[var(--surface-card)]"
                 title="Sign out"
               >
                 <LogOut className="h-3.5 w-3.5" />
-                Sign out
+                <span className="hidden xl:inline">Sign out</span>
               </button>
             </div>
           ) : (
