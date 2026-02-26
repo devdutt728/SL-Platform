@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.datetime_utils import now_ist_naive
 from app.db.base import Base
 
 
@@ -18,4 +19,4 @@ class RecCandidateJoiningDoc(Base):
     content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     uploaded_by: Mapped[str] = mapped_column(String(20))
     uploaded_by_person_id_platform: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_ist_naive)

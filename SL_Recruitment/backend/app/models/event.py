@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.datetime_utils import now_ist_naive
 from app.db.base import Base
 
 
@@ -26,4 +27,4 @@ class RecCandidateEvent(Base):
     performed_by_person_id_platform: Mapped[int | None] = mapped_column(Integer, nullable=True)
     meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_ist_naive, index=True)

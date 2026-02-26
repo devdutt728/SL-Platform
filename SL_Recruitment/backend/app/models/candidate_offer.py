@@ -3,6 +3,7 @@ from datetime import date, datetime
 from sqlalchemy import Date, DateTime, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.datetime_utils import now_ist_naive
 from app.db.base import Base
 
 
@@ -56,5 +57,5 @@ class RecCandidateOffer(Base):
     notes_internal: Mapped[str | None] = mapped_column(Text, nullable=True)
     offer_letter_overrides: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_ist_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_ist_naive, onupdate=now_ist_naive)

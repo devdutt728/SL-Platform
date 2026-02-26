@@ -20,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError, OperationalError, IntegrityError
 from app.api import deps
 from app.core.auth import require_roles, require_superadmin
 from app.core.config import settings
+from app.core.datetime_utils import now_ist_naive, to_ist_naive
 from app.core.roles import Role
 from app.models.candidate import RecCandidate
 from app.models.candidate_assessment import RecCandidateAssessment
@@ -77,6 +78,12 @@ def _parse_yes_no(value: str | bool | None) -> bool | None:
     return None
 
 
+def _label_yes_no(value: bool | None) -> str:
+    if value is None:
+        return "—"
+    return "Yes" if value else "No"
+
+
 def _parse_optional_datetime(value: str | datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -111,7 +118,7 @@ def _parse_optional_datetime(value: str | datetime | None) -> datetime | None:
                 detail=f"Invalid date value '{value}'. Use ISO format or YYYY-MM-DD HH:MM:SS.",
             )
     if parsed.tzinfo is not None:
-        parsed = parsed.replace(tzinfo=None)
+        parsed = to_ist_naive(parsed)
     return parsed
 
 
@@ -464,7 +471,7 @@ def _caf_expired_for_candidate(candidate: RecCandidate, *, now: datetime | None 
         expiry_hours = max(int(settings.caf_expiry_days or 0), 0) * 24
     if expiry_hours <= 0:
         return False
-    current = now or datetime.utcnow()
+    current = now or now_ist_naive()
     return current > (candidate.caf_sent_at + timedelta(hours=expiry_hours))
 
 
@@ -497,7 +504,7 @@ async def _send_assessment_link_for_l2_shortlist(
         )
     ).scalars().first()
 
-    now = datetime.utcnow()
+    now = now_ist_naive()
     if assessment is None:
         assessment = RecCandidateAssessment(
             candidate_id=candidate.candidate_id,
@@ -673,12 +680,10 @@ async def _create_candidate_with_automation(
     user: UserContext | None = None,
     event_source: str = "candidate_create",
 ) -> RecCandidate:
-    created_at = created_at_override or datetime.utcnow()
-    if created_at.tzinfo is not None:
-        created_at = created_at.replace(tzinfo=None)
+    created_at = to_ist_naive(created_at_override) if created_at_override else now_ist_naive()
     link_sent_at = link_sent_at_override or created_at
     if link_sent_at.tzinfo is not None:
-        link_sent_at = link_sent_at.replace(tzinfo=None)
+        link_sent_at = to_ist_naive(link_sent_at)
     full_name = _compose_full_name(first_name, last_name)
     application_docs_status = _application_docs_status(cv_url=cv_url, portfolio_url=portfolio_url, resume_url=resume_url)
 
@@ -762,7 +767,7 @@ async def _create_candidate_with_automation(
             "caf_link": caf_link,
             "candidate_email": candidate.email,
             "candidate_phone": candidate.phone or "—",
-            "willing_to_relocate": "—",
+            "willing_to_relocate": _label_yes_no(willing_to_relocate),
         },
         email_type="application_links",
         meta_extra={"caf_token": candidate.caf_token},
@@ -910,7 +915,7 @@ async def _ensure_offer_token(session: AsyncSession, offer: RecCandidateOffer) -
     if offer.public_token:
         return
     offer.public_token = uuid4().hex
-    offer.updated_at = datetime.utcnow()
+    offer.updated_at = now_ist_naive()
     await session.flush()
 
 
@@ -1102,11 +1107,11 @@ async def import_candidates_from_google_sheet(
     created_count = 0
     duplicate_count = 0
     failed_count = 0
-    processed_at = datetime.utcnow().isoformat()
+    processed_at = now_ist_naive().isoformat()
 
     for idx, raw_row in enumerate(payload.rows, start=1):
         row_key = _extract_row_key(raw_row, idx)
-        row_now = datetime.utcnow()
+        row_now = now_ist_naive()
         try:
             row = GoogleSheetCandidateRow.model_validate(raw_row)
         except ValidationError as exc:
@@ -1217,7 +1222,7 @@ async def import_candidates_from_google_sheet(
                     )
                 if not existing_candidate.external_source_ref:
                     existing_candidate.external_source_ref = external_source_ref
-                existing_candidate.updated_at = datetime.utcnow()
+                existing_candidate.updated_at = now_ist_naive()
                 await session.commit()
                 results.append(
                     {
@@ -1669,7 +1674,7 @@ async def upsert_candidate_screening(
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
 
-    now = datetime.utcnow()
+    now = now_ist_naive()
     screening = (
         await session.execute(
             select(RecCandidateScreening).where(RecCandidateScreening.candidate_id == candidate_id)
@@ -1714,7 +1719,7 @@ async def get_candidate_caf_link(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
-    now = datetime.utcnow()
+    now = now_ist_naive()
     refreshed = False
     if not candidate.caf_token:
         candidate.caf_token = uuid4().hex
@@ -1753,7 +1758,7 @@ async def get_candidate_assessment_link(
         )
     ).scalars().first()
 
-    now = datetime.utcnow()
+    now = now_ist_naive()
     generated = False
     if not assessment:
         assessment = RecCandidateAssessment(
@@ -1838,7 +1843,7 @@ async def update_candidate(
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
 
-    now = datetime.utcnow()
+    now = now_ist_naive()
     updates = payload.model_dump(exclude_none=True)
     name_update = updates.pop("name", None)
     first_name_update = updates.pop("first_name", None)

@@ -16,13 +16,13 @@ export default async function RecruitmentLayout({ children }: { children: ReactN
       <div className="fixed top-4 right-4 bottom-4 left-24 z-10 hidden flex-col md:flex 2xl:left-72">
         <div className="h-20 shrink-0" aria-hidden="true" />
         <div className="glass-panel flex-1 overflow-auto rounded-3xl">
-          <div className="page-shell py-4">{children}</div>
+          <div className="page-shell h-full min-h-0 py-4">{children}</div>
         </div>
       </div>
 
       <div className="fixed top-3 right-3 bottom-3 left-24 z-10 flex flex-col md:hidden">
         <div className="glass-panel flex-1 overflow-auto rounded-3xl">
-          <div className="page-shell py-4">{children}</div>
+          <div className="page-shell h-full min-h-0 py-4">{children}</div>
         </div>
       </div>
 

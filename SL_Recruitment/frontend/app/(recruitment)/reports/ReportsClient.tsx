@@ -90,6 +90,51 @@ export default function ReportsClient({ canAccess }: { canAccess: boolean }) {
     return activeReport.columns.filter((col) => col.label.toLowerCase().includes(query) || col.key.includes(query));
   }, [activeReport, columnSearch]);
 
+  const previewInsights = useMemo(() => {
+    if (!preview) return [];
+
+    const rows = preview.rows;
+    const statusTop = topValueByKeys(rows, ["status", "offer_status", "decision"]);
+    const decisionTop = topValueByKeys(rows, ["final_decision", "decision", "offer_status"]);
+    const uniqueOpenings = countUniqueByKeys(rows, ["opening_title", "opening_code", "opening_id"]);
+    const withEmail = countRowsWithAnyValue(rows, ["email", "candidate_email"]);
+
+    const insights: Array<{ label: string; value: string; hint?: string }> = [
+      {
+        label: "Preview rows",
+        value: rows.length.toString(),
+        hint: `of ${preview.total} total`,
+      },
+      {
+        label: "Rows with email",
+        value: withEmail.toString(),
+        hint: rows.length > 0 ? `${Math.round((withEmail / rows.length) * 100)}% coverage` : undefined,
+      },
+    ];
+
+    if (uniqueOpenings > 0) {
+      insights.push({
+        label: "Unique openings",
+        value: uniqueOpenings.toString(),
+      });
+    }
+    if (statusTop) {
+      insights.push({
+        label: "Top status",
+        value: statusTop.value,
+        hint: `${statusTop.count} row(s)`,
+      });
+    }
+    if (decisionTop) {
+      insights.push({
+        label: "Top decision",
+        value: decisionTop.value,
+        hint: `${decisionTop.count} row(s)`,
+      });
+    }
+    return insights;
+  }, [preview]);
+
   function toggleColumn(key: string) {
     setSelectedColumns((prev) => {
       const next = new Set(prev);
@@ -165,229 +210,214 @@ export default function ReportsClient({ canAccess }: { canAccess: boolean }) {
   if (!canAccess) return null;
 
   return (
-    <main className="content-pad space-y-4">
-      <section className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm motion-fade-up">
-        <div className="absolute -right-10 top-8 h-40 w-40 rounded-full bg-sky-200/40 blur-3xl" aria-hidden="true" />
-        <div className="absolute -left-8 bottom-6 h-28 w-28 rounded-full bg-cyan-200/40 blur-2xl" aria-hidden="true" />
-        <div className="relative space-y-2">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Recruitment Intelligence</p>
-          <h1 className="text-2xl font-semibold text-slate-900">Reports Studio</h1>
-          <p className="max-w-2xl text-sm text-slate-600">
-            Configure high-fidelity reports, preview live data, and export CSVs in a controlled HR-only space.
-          </p>
+    <main className="content-pad space-y-2 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:gap-2 xl:space-y-0 xl:overflow-hidden">
+      <section className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white/80 p-3 shadow-sm motion-fade-up xl:shrink-0">
+        <div className="absolute -right-10 top-2 h-16 w-16 rounded-full bg-sky-200/20 blur-3xl" aria-hidden="true" />
+        <div className="relative flex flex-wrap items-center justify-between gap-1.5">
+          <h1 className="text-lg font-semibold text-slate-900">Reports Studio</h1>
+          <p className="text-[11px] text-slate-500">High-density reporting workspace</p>
         </div>
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
-        <section className="section-card space-y-4">
-          <div className="space-y-1">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Report library</p>
-            <p className="text-sm text-slate-600">Pick a dataset and tune the columns for export.</p>
-          </div>
-          <div className="grid gap-3">
+      <section className="section-card space-y-2 p-3 xl:shrink-0">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-[260px] flex-1">
+            <p className="text-[11px] uppercase tracking-wide text-slate-500">Report library</p>
             {loadingMeta ? (
-              <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 text-sm text-slate-500">Loading reports...</div>
+              <div className="mt-1 rounded-xl border border-slate-200 bg-white/70 px-3 py-1.5 text-sm text-slate-500">
+                Loading reports...
+              </div>
             ) : reports.length === 0 ? (
-              <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 text-sm text-slate-500">No reports found.</div>
+              <div className="mt-1 rounded-xl border border-slate-200 bg-white/70 px-3 py-1.5 text-sm text-slate-500">
+                No reports found.
+              </div>
             ) : (
-              reports.map((report) => {
-                const active = report.report_id === selectedReportId;
-                return (
-                  <button
-                    key={report.report_id}
-                    type="button"
-                    onClick={() => setSelectedReportId(report.report_id)}
-                    className={`rounded-2xl border px-4 py-3 text-left transition ${
-                      active
-                        ? "border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-900/10"
-                        : "border-slate-200 bg-white/80 text-slate-700 hover:border-slate-300 hover:bg-white"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className={`text-sm font-semibold ${active ? "text-white" : "text-slate-900"}`}>{report.label}</p>
-                        <p className={`text-xs ${active ? "text-slate-200" : "text-slate-500"}`}>{report.description}</p>
-                      </div>
-                      <span className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-wide ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"}`}>
-                        {report.columns.length} cols
-                      </span>
-                    </div>
-                  </button>
-                );
-              })
+              <select
+                value={selectedReportId}
+                onChange={(e) => setSelectedReportId(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-1.5 text-sm text-slate-800"
+              >
+                {reports.map((report) => (
+                  <option key={report.report_id} value={report.report_id}>
+                    {report.label} ({report.columns.length} cols)
+                  </option>
+                ))}
+              </select>
             )}
           </div>
-        </section>
-
-        <section className="section-card space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Configuration</p>
-              <p className="text-sm text-slate-600">Filters, column selection, and CSV download.</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-white"
-                onClick={resetColumns}
-                disabled={!activeReport}
-              >
-                Default columns
-              </button>
-              <button
-                type="button"
-                className="rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-white"
-                onClick={selectAllColumns}
-                disabled={!activeReport}
-              >
-                All columns
-              </button>
-            </div>
+          <div className="min-w-[200px] flex-1 text-xs leading-tight text-slate-600">
+            <p className="font-semibold text-slate-800">{activeReport?.label || "No report selected"}</p>
+            <p className="truncate">{activeReport?.description || "Select a report dataset to begin."}</p>
           </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            <button
+              type="button"
+              className="rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-white"
+              onClick={resetColumns}
+              disabled={!activeReport}
+            >
+              Default columns
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-white"
+              onClick={selectAllColumns}
+              disabled={!activeReport}
+            >
+              All columns
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-slate-200 bg-white/80 px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-white"
+              onClick={() => void loadPreview()}
+              disabled={!activeReport || loading}
+            >
+              {loading ? "Loading..." : "Preview data"}
+            </button>
+            <button
+              type="button"
+              className="rounded-full bg-slate-900 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-950"
+              onClick={downloadCsv}
+              disabled={!activeReport}
+            >
+              Download CSV
+            </button>
+          </div>
+        </div>
+      </section>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="space-y-1">
-              <span className="text-xs text-slate-600">Report filters</span>
-              <div className="rounded-2xl border border-slate-200 bg-white/70 p-3 space-y-3">
-                {activeReport?.filters.date_field ? (
-                  <div className="grid gap-2 md:grid-cols-2">
-                    <label className="space-y-1">
-                      <span className="text-[11px] uppercase tracking-wide text-slate-400">From</span>
-                      <input
-                        type="date"
-                        value={filters.dateFrom}
-                        onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))}
-                        className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm"
-                      />
-                    </label>
-                    <label className="space-y-1">
-                      <span className="text-[11px] uppercase tracking-wide text-slate-400">To</span>
-                      <input
-                        type="date"
-                        value={filters.dateTo}
-                        onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))}
-                        className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm"
-                      />
-                    </label>
-                  </div>
-                ) : null}
-
-                {activeReport?.filters.opening_id ? (
-                  <label className="space-y-1">
-                    <span className="text-[11px] uppercase tracking-wide text-slate-400">Opening ID</span>
+      <section className="section-card space-y-2 p-3 xl:shrink-0">
+        <div className="grid gap-2 xl:grid-cols-[1.85fr_1fr]">
+          <div className="rounded-xl border border-slate-200 bg-white/70 p-2.5">
+            <p className="text-[11px] uppercase tracking-wide text-slate-500">Report filters</p>
+            <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2 xl:grid-cols-5">
+              {activeReport?.filters.date_field ? (
+                <>
+                  <label className="space-y-1 xl:col-span-1">
+                    <span className="text-[11px] uppercase tracking-wide text-slate-400">From</span>
                     <input
-                      value={filters.openingId}
-                      onChange={(e) => setFilters((prev) => ({ ...prev, openingId: e.target.value }))}
+                      type="date"
+                      value={filters.dateFrom}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))}
                       className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm"
-                      placeholder="Optional"
                     />
                   </label>
-                ) : null}
-
-                {activeReport?.filters.status ? (
-                  <label className="space-y-1">
-                    <span className="text-[11px] uppercase tracking-wide text-slate-400">Status / Decision</span>
+                  <label className="space-y-1 xl:col-span-1">
+                    <span className="text-[11px] uppercase tracking-wide text-slate-400">To</span>
                     <input
-                      value={filters.status}
-                      onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
+                      type="date"
+                      value={filters.dateTo}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))}
                       className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm"
-                      placeholder="e.g. in_process, accepted"
                     />
                   </label>
-                ) : null}
+                </>
+              ) : null}
 
-                {activeReport?.filters.is_active ? (
-                  <label className="space-y-1">
-                    <span className="text-[11px] uppercase tracking-wide text-slate-400">Active</span>
-                    <select
-                      value={filters.isActive}
-                      onChange={(e) => setFilters((prev) => ({ ...prev, isActive: e.target.value }))}
-                      className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm"
-                    >
-                      <option value="">All</option>
-                      <option value="1">Active only</option>
-                      <option value="0">Inactive only</option>
-                    </select>
-                  </label>
-                ) : null}
-
-                <label className="space-y-1">
-                  <span className="text-[11px] uppercase tracking-wide text-slate-400">Preview limit</span>
+              {activeReport?.filters.opening_id ? (
+                <label className="space-y-1 xl:col-span-1">
+                  <span className="text-[11px] uppercase tracking-wide text-slate-400">Opening ID</span>
                   <input
-                    type="number"
-                    min={1}
-                    max={200}
-                    value={filters.limit}
-                    onChange={(e) => setFilters((prev) => ({ ...prev, limit: e.target.value }))}
+                    value={filters.openingId}
+                    onChange={(e) => setFilters((prev) => ({ ...prev, openingId: e.target.value }))}
                     className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm"
+                    placeholder="Optional"
                   />
                 </label>
-              </div>
-            </label>
+              ) : null}
 
-            <label className="space-y-1">
-              <span className="text-xs text-slate-600">Columns</span>
-              <div className="rounded-2xl border border-slate-200 bg-white/70 p-3 space-y-3">
+              {activeReport?.filters.status ? (
+                <label className="space-y-1 xl:col-span-1">
+                  <span className="text-[11px] uppercase tracking-wide text-slate-400">Status / Decision</span>
+                  <input
+                    value={filters.status}
+                    onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm"
+                    placeholder="e.g. in_process, accepted"
+                  />
+                </label>
+              ) : null}
+
+              {activeReport?.filters.is_active ? (
+                <label className="space-y-1 xl:col-span-1">
+                  <span className="text-[11px] uppercase tracking-wide text-slate-400">Active</span>
+                  <select
+                    value={filters.isActive}
+                    onChange={(e) => setFilters((prev) => ({ ...prev, isActive: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm"
+                  >
+                    <option value="">All</option>
+                    <option value="1">Active only</option>
+                    <option value="0">Inactive only</option>
+                  </select>
+                </label>
+              ) : null}
+
+              <label className="space-y-1 xl:col-span-1">
+                <span className="text-[11px] uppercase tracking-wide text-slate-400">Preview limit</span>
                 <input
-                  value={columnSearch}
-                  onChange={(e) => setColumnSearch(e.target.value)}
+                  type="number"
+                  min={1}
+                  max={200}
+                  value={filters.limit}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, limit: e.target.value }))}
                   className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2 text-sm"
-                  placeholder="Search columns"
                 />
-                <div className="max-h-64 space-y-2 overflow-auto pr-1">
-                  {filteredColumns.map((col) => (
-                    <label key={col.key} className="flex items-center gap-2 text-xs text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={selectedColumns.has(col.key)}
-                        onChange={() => toggleColumn(col.key)}
-                      />
-                      <span className="truncate">{col.label}</span>
-                      <span className="text-[10px] uppercase tracking-wide text-slate-400">{col.key}</span>
-                    </label>
-                  ))}
-                </div>
-                <p className="text-[11px] text-slate-500">
-                  Selected {selectedColumns.size} / {activeReport?.columns.length || 0}
-                </p>
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white/70 p-2.5">
+            <p className="text-[11px] uppercase tracking-wide text-slate-500">Columns</p>
+            <input
+              value={columnSearch}
+              onChange={(e) => setColumnSearch(e.target.value)}
+              className="mt-1.5 w-full rounded-xl border border-slate-200 bg-transparent px-3 py-1.5 text-sm"
+              placeholder="Search columns"
+            />
+            <div className="mt-1.5 max-h-28 space-y-1 overflow-auto pr-1">
+              {filteredColumns.map((col) => (
+                <label key={col.key} className="flex items-center gap-2 text-xs text-slate-700">
+                  <input type="checkbox" checked={selectedColumns.has(col.key)} onChange={() => toggleColumn(col.key)} />
+                  <span className="truncate">{col.label}</span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-400">{col.key}</span>
+                </label>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Selected {selectedColumns.size} / {activeReport?.columns.length || 0}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+          <span>{preview ? `Showing ${preview.rows.length} of ${preview.total} rows` : "Run preview to load table data."}</span>
+          <span>{activeReport ? `Dataset: ${activeReport.label}` : "No dataset selected"}</span>
+        </div>
+        {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+      </section>
+
+      <section className="section-card p-2 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col xl:overflow-hidden">
+        {preview ? (
+          <div className="space-y-2 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+            {previewInsights.length ? (
+              <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-5 xl:shrink-0">
+                {previewInsights.map((insight) => (
+                  <div key={insight.label} className="rounded-lg border border-slate-200 bg-white/70 px-2.5 py-1.5">
+                    <p className="text-[10px] uppercase tracking-wide text-slate-500">{insight.label}</p>
+                    <p className="text-xs font-semibold text-slate-900">{insight.value}</p>
+                    {insight.hint ? <p className="text-[11px] text-slate-500">{insight.hint}</p> : null}
+                  </div>
+                ))}
               </div>
-            </label>
-          </div>
+            ) : null}
 
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-xs text-slate-500">
-              {preview ? `Showing ${preview.rows.length} of ${preview.total} rows` : "Run a preview to inspect the data."}
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
-                onClick={() => void loadPreview()}
-                disabled={!activeReport || loading}
-              >
-                {loading ? "Loading..." : "Preview data"}
-              </button>
-              <button
-                type="button"
-                className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-slate-950"
-                onClick={downloadCsv}
-                disabled={!activeReport}
-              >
-                Download CSV
-              </button>
-            </div>
-          </div>
-
-          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
-
-          {preview ? (
-            <div className="rounded-2xl border border-slate-200 bg-white/70 p-3">
-              <div className="max-h-[420px] overflow-auto">
+            <div className="rounded-lg border border-slate-200 bg-white/70 xl:min-h-0 xl:flex-1 xl:overflow-auto">
+              <div className="max-h-[500px] overflow-auto xl:h-full xl:max-h-none">
                 <table className="min-w-full text-left text-xs text-slate-700">
-                  <thead className="sticky top-0 bg-white/90 text-[11px] uppercase tracking-wide text-slate-500">
+                  <thead className="sticky top-0 bg-white/95 text-[10px] uppercase tracking-wide text-slate-500">
                     <tr>
                       {preview.columns.map((col) => (
-                        <th key={col} className="px-3 py-2 font-semibold">
+                        <th key={col} className="px-2.5 py-2 font-semibold">
                           {col}
                         </th>
                       ))}
@@ -402,9 +432,9 @@ export default function ReportsClient({ canAccess }: { canAccess: boolean }) {
                       </tr>
                     ) : (
                       preview.rows.map((row, idx) => (
-                        <tr key={idx} className="border-t border-slate-100">
+                        <tr key={idx} className="border-t border-slate-100 align-top">
                           {preview.columns.map((col) => (
-                            <td key={col} className="px-3 py-2">
+                            <td key={col} className="max-w-[380px] px-2.5 py-1.5 align-top">
                               {formatCell(row[col])}
                             </td>
                           ))}
@@ -415,18 +445,107 @@ export default function ReportsClient({ canAccess }: { canAccess: boolean }) {
                 </table>
               </div>
             </div>
-          ) : null}
-        </section>
-      </div>
+          </div>
+        ) : (
+          <div className="flex min-h-[320px] items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/60 text-sm text-slate-500">
+            Run preview to load report rows.
+          </div>
+        )}
+      </section>
     </main>
   );
+}
+
+function readTextValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
+}
+
+function pickTextByKeys(row: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = readTextValue(row[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function countUniqueByKeys(rows: Record<string, unknown>[], keys: string[]): number {
+  const values = new Set<string>();
+  rows.forEach((row) => {
+    const value = pickTextByKeys(row, keys);
+    if (value) values.add(value);
+  });
+  return values.size;
+}
+
+function countRowsWithAnyValue(rows: Record<string, unknown>[], keys: string[]): number {
+  return rows.reduce((count, row) => (pickTextByKeys(row, keys) ? count + 1 : count), 0);
+}
+
+function topValueByKeys(
+  rows: Record<string, unknown>[],
+  keys: string[]
+): { value: string; count: number } | null {
+  const counts = new Map<string, number>();
+  rows.forEach((row) => {
+    const value = pickTextByKeys(row, keys);
+    if (!value) return;
+    counts.set(value, (counts.get(value) || 0) + 1);
+  });
+  let best: { value: string; count: number } | null = null;
+  counts.forEach((count, value) => {
+    if (!best || count > best.count) best = { value, count };
+  });
+  return best;
+}
+
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-IN", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+function isLikelyUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function isLikelyIsoDateTime(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}T/.test(value);
 }
 
 function formatCell(value: unknown) {
   if (value === null || value === undefined) return "";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number") return Number.isFinite(value) ? value.toString() : "";
-  if (typeof value === "string") return value;
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return "";
+    if (isLikelyUrl(text)) {
+      return (
+        <a href={text} target="_blank" rel="noreferrer" className="text-sky-700 underline underline-offset-2">
+          Open link
+        </a>
+      );
+    }
+    if (isLikelyIsoDateTime(text)) {
+      const parsed = new Date(text);
+      if (!Number.isNaN(parsed.getTime())) {
+        return (
+          <time dateTime={text} title={text}>
+            {DATE_TIME_FORMATTER.format(parsed)}
+          </time>
+        );
+      }
+    }
+    if (text.length > 120) {
+      return <span title={text}>{`${text.slice(0, 117)}...`}</span>;
+    }
+    return text;
+  }
   try {
     return JSON.stringify(value);
   } catch {

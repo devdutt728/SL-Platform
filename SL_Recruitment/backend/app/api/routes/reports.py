@@ -16,11 +16,17 @@ from app.api import deps
 from app.core.auth import require_roles
 from app.core.roles import Role
 from app.models.candidate import RecCandidate
+from app.models.candidate_assessment import RecCandidateAssessment
 from app.models.candidate_offer import RecCandidateOffer
 from app.models.candidate_sprint import RecCandidateSprint
+from app.models.event import RecCandidateEvent
 from app.models.interview import RecCandidateInterview
+from app.models.interview_assessment import RecCandidateInterviewAssessment
+from app.models.joining_doc import RecCandidateJoiningDoc
 from app.models.opening import RecOpening
+from app.models.screening import RecCandidateScreening
 from app.models.sprint_template import RecSprintTemplate
+from app.models.stage import RecCandidateStage
 
 router = APIRouter(prefix="/rec/reports", tags=["reports"])
 
@@ -66,6 +72,12 @@ def _csv_safe(value: object) -> str:
     return text
 
 
+def _parse_status_values(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [part.strip() for part in raw.split(",") if part and part.strip()]
+
+
 def _apply_filters(
     stmt: Select,
     *,
@@ -75,7 +87,7 @@ def _apply_filters(
     opening_field,
     opening_id: int | None,
     status_field,
-    status_value: str | None,
+    status_values: list[str] | None,
     active_field,
     is_active: int | None,
 ) -> Select:
@@ -85,8 +97,11 @@ def _apply_filters(
         stmt = stmt.where(date_field <= date_to)
     if opening_field is not None and opening_id is not None:
         stmt = stmt.where(opening_field == opening_id)
-    if status_field is not None and status_value:
-        stmt = stmt.where(status_field == status_value)
+    if status_field is not None and status_values:
+        if len(status_values) == 1:
+            stmt = stmt.where(status_field == status_values[0])
+        else:
+            stmt = stmt.where(status_field.in_(status_values))
     if active_field is not None and is_active is not None:
         stmt = stmt.where(active_field == is_active)
     return stmt
@@ -124,10 +139,52 @@ def _join_sprint_context(stmt: Select) -> Select:
     )
 
 
+def _latest_candidate_value(
+    column,
+    *,
+    source_model,
+    order_by,
+    predicates: Iterable | None = None,
+):
+    stmt = select(column).where(source_model.candidate_id == RecCandidate.candidate_id)
+    for predicate in predicates or []:
+        stmt = stmt.where(predicate)
+    return stmt.order_by(*order_by).limit(1).correlate(RecCandidate).scalar_subquery()
+
+
+def _candidate_count(
+    *,
+    source_model,
+    predicates: Iterable | None = None,
+):
+    stmt = select(func.count()).where(source_model.candidate_id == RecCandidate.candidate_id)
+    for predicate in predicates or []:
+        stmt = stmt.where(predicate)
+    return stmt.correlate(RecCandidate).scalar_subquery()
+
+
+_LATEST_STAGE_ORDER = (RecCandidateStage.started_at.desc(), RecCandidateStage.stage_id.desc())
+_LATEST_INTERVIEW_ORDER = (
+    RecCandidateInterview.scheduled_start_at.desc(),
+    RecCandidateInterview.candidate_interview_id.desc(),
+)
+_LATEST_INTERVIEW_ASSESSMENT_ORDER = (
+    RecCandidateInterviewAssessment.updated_at.desc(),
+    RecCandidateInterviewAssessment.candidate_interview_assessment_id.desc(),
+)
+_LATEST_OFFER_ORDER = (RecCandidateOffer.created_at.desc(), RecCandidateOffer.candidate_offer_id.desc())
+_LATEST_SPRINT_ORDER = (RecCandidateSprint.assigned_at.desc(), RecCandidateSprint.candidate_sprint_id.desc())
+_LATEST_JOINING_DOC_ORDER = (
+    RecCandidateJoiningDoc.created_at.desc(),
+    RecCandidateJoiningDoc.joining_doc_id.desc(),
+)
+_LATEST_EVENT_ORDER = (RecCandidateEvent.created_at.desc(), RecCandidateEvent.candidate_event_id.desc())
+
+
 REPORTS = {
     "candidates": {
         "label": "Candidates",
-        "description": "Full candidate pipeline data and sourcing details.",
+        "description": "Candidate profile with screening, interview, sprint, offer, and joining context.",
         "base": RecCandidate,
         "joins": [_join_candidate_opening],
         "date_field": RecCandidate.created_at,
@@ -147,15 +204,26 @@ REPORTS = {
             "opening_code": RecOpening.opening_code,
             "opening_title": RecOpening.title,
             "source_channel": RecCandidate.source_channel,
+            "source_origin": RecCandidate.source_origin,
+            "external_source_ref": RecCandidate.external_source_ref,
+            "educational_qualification": RecCandidate.educational_qualification,
+            "years_of_experience": RecCandidate.years_of_experience,
+            "city": RecCandidate.city,
+            "terms_consent": RecCandidate.terms_consent,
+            "terms_consent_at": RecCandidate.terms_consent_at,
             "current_location": RecCandidate.current_location,
             "current_company": RecCandidate.current_company,
             "status": RecCandidate.status,
             "final_decision": RecCandidate.final_decision,
             "cv_url": RecCandidate.cv_url,
+            "resume_url": RecCandidate.resume_url,
             "portfolio_url": RecCandidate.portfolio_url,
             "portfolio_not_uploaded_reason": RecCandidate.portfolio_not_uploaded_reason,
+            "questions_from_candidate": RecCandidate.questions_from_candidate,
             "owner_person_id_platform": RecCandidate.owner_person_id_platform,
             "hired_person_id_platform": RecCandidate.hired_person_id_platform,
+            "l2_owner_email": RecCandidate.l2_owner_email,
+            "l2_owner_name": RecCandidate.l2_owner_name,
             "drive_folder_id": RecCandidate.drive_folder_id,
             "drive_folder_url": RecCandidate.drive_folder_url,
             "caf_token": RecCandidate.caf_token,
@@ -164,6 +232,221 @@ REPORTS = {
             "needs_hr_review": RecCandidate.needs_hr_review,
             "application_docs_status": RecCandidate.application_docs_status,
             "joining_docs_status": RecCandidate.joining_docs_status,
+            "screening_result": _latest_candidate_value(
+                RecCandidateScreening.screening_result,
+                source_model=RecCandidateScreening,
+                order_by=(RecCandidateScreening.updated_at.desc(),),
+            ),
+            "screening_salary_band_fit": _latest_candidate_value(
+                RecCandidateScreening.salary_band_fit,
+                source_model=RecCandidateScreening,
+                order_by=(RecCandidateScreening.updated_at.desc(),),
+            ),
+            "screening_willing_to_relocate": _latest_candidate_value(
+                RecCandidateScreening.willing_to_relocate,
+                source_model=RecCandidateScreening,
+                order_by=(RecCandidateScreening.updated_at.desc(),),
+            ),
+            "screening_updated_at": _latest_candidate_value(
+                RecCandidateScreening.updated_at,
+                source_model=RecCandidateScreening,
+                order_by=(RecCandidateScreening.updated_at.desc(),),
+            ),
+            "assessment_sent_at": _latest_candidate_value(
+                RecCandidateAssessment.assessment_sent_at,
+                source_model=RecCandidateAssessment,
+                order_by=(RecCandidateAssessment.updated_at.desc(),),
+            ),
+            "assessment_submitted_at": _latest_candidate_value(
+                RecCandidateAssessment.assessment_submitted_at,
+                source_model=RecCandidateAssessment,
+                order_by=(RecCandidateAssessment.updated_at.desc(),),
+            ),
+            "assessment_current_employment_status": _latest_candidate_value(
+                RecCandidateAssessment.current_employment_status,
+                source_model=RecCandidateAssessment,
+                order_by=(RecCandidateAssessment.updated_at.desc(),),
+            ),
+            "assessment_notice_period_days": _latest_candidate_value(
+                RecCandidateAssessment.notice_period_days,
+                source_model=RecCandidateAssessment,
+                order_by=(RecCandidateAssessment.updated_at.desc(),),
+            ),
+            "assessment_current_ctc_annual": _latest_candidate_value(
+                RecCandidateAssessment.current_ctc_annual,
+                source_model=RecCandidateAssessment,
+                order_by=(RecCandidateAssessment.updated_at.desc(),),
+            ),
+            "assessment_expected_ctc_annual": _latest_candidate_value(
+                RecCandidateAssessment.expected_ctc_annual,
+                source_model=RecCandidateAssessment,
+                order_by=(RecCandidateAssessment.updated_at.desc(),),
+            ),
+            "assessment_declaration_accepted": _latest_candidate_value(
+                RecCandidateAssessment.declaration_accepted,
+                source_model=RecCandidateAssessment,
+                order_by=(RecCandidateAssessment.updated_at.desc(),),
+            ),
+            "assessment_updated_at": _latest_candidate_value(
+                RecCandidateAssessment.updated_at,
+                source_model=RecCandidateAssessment,
+                order_by=(RecCandidateAssessment.updated_at.desc(),),
+            ),
+            "stage_count": _candidate_count(source_model=RecCandidateStage),
+            "latest_stage_name": _latest_candidate_value(
+                RecCandidateStage.stage_name,
+                source_model=RecCandidateStage,
+                order_by=_LATEST_STAGE_ORDER,
+            ),
+            "latest_stage_status": _latest_candidate_value(
+                RecCandidateStage.stage_status,
+                source_model=RecCandidateStage,
+                order_by=_LATEST_STAGE_ORDER,
+            ),
+            "latest_stage_decision": _latest_candidate_value(
+                RecCandidateStage.decision,
+                source_model=RecCandidateStage,
+                order_by=_LATEST_STAGE_ORDER,
+            ),
+            "latest_stage_started_at": _latest_candidate_value(
+                RecCandidateStage.started_at,
+                source_model=RecCandidateStage,
+                order_by=_LATEST_STAGE_ORDER,
+            ),
+            "latest_stage_ended_at": _latest_candidate_value(
+                RecCandidateStage.ended_at,
+                source_model=RecCandidateStage,
+                order_by=_LATEST_STAGE_ORDER,
+            ),
+            "interview_count": _candidate_count(source_model=RecCandidateInterview),
+            "latest_interview_stage_name": _latest_candidate_value(
+                RecCandidateInterview.stage_name,
+                source_model=RecCandidateInterview,
+                order_by=_LATEST_INTERVIEW_ORDER,
+            ),
+            "latest_interview_round_type": _latest_candidate_value(
+                RecCandidateInterview.round_type,
+                source_model=RecCandidateInterview,
+                order_by=_LATEST_INTERVIEW_ORDER,
+            ),
+            "latest_interview_scheduled_at": _latest_candidate_value(
+                RecCandidateInterview.scheduled_start_at,
+                source_model=RecCandidateInterview,
+                order_by=_LATEST_INTERVIEW_ORDER,
+            ),
+            "latest_interview_decision": _latest_candidate_value(
+                RecCandidateInterview.decision,
+                source_model=RecCandidateInterview,
+                order_by=_LATEST_INTERVIEW_ORDER,
+            ),
+            "latest_interview_feedback_submitted": _latest_candidate_value(
+                RecCandidateInterview.feedback_submitted,
+                source_model=RecCandidateInterview,
+                order_by=_LATEST_INTERVIEW_ORDER,
+            ),
+            "latest_interview_rating_overall": _latest_candidate_value(
+                RecCandidateInterview.rating_overall,
+                source_model=RecCandidateInterview,
+                order_by=_LATEST_INTERVIEW_ORDER,
+            ),
+            "interview_assessment_count": _candidate_count(source_model=RecCandidateInterviewAssessment),
+            "latest_interview_assessment_status": _latest_candidate_value(
+                RecCandidateInterviewAssessment.status,
+                source_model=RecCandidateInterviewAssessment,
+                order_by=_LATEST_INTERVIEW_ASSESSMENT_ORDER,
+            ),
+            "latest_interview_assessment_submitted_at": _latest_candidate_value(
+                RecCandidateInterviewAssessment.submitted_at,
+                source_model=RecCandidateInterviewAssessment,
+                order_by=_LATEST_INTERVIEW_ASSESSMENT_ORDER,
+            ),
+            "offer_count": _candidate_count(source_model=RecCandidateOffer),
+            "latest_offer_status": _latest_candidate_value(
+                RecCandidateOffer.offer_status,
+                source_model=RecCandidateOffer,
+                order_by=_LATEST_OFFER_ORDER,
+            ),
+            "latest_offer_designation_title": _latest_candidate_value(
+                RecCandidateOffer.designation_title,
+                source_model=RecCandidateOffer,
+                order_by=_LATEST_OFFER_ORDER,
+            ),
+            "latest_offer_gross_ctc_annual": _latest_candidate_value(
+                RecCandidateOffer.gross_ctc_annual,
+                source_model=RecCandidateOffer,
+                order_by=_LATEST_OFFER_ORDER,
+            ),
+            "latest_offer_sent_at": _latest_candidate_value(
+                RecCandidateOffer.sent_at,
+                source_model=RecCandidateOffer,
+                order_by=_LATEST_OFFER_ORDER,
+            ),
+            "latest_offer_accepted_at": _latest_candidate_value(
+                RecCandidateOffer.accepted_at,
+                source_model=RecCandidateOffer,
+                order_by=_LATEST_OFFER_ORDER,
+            ),
+            "latest_offer_declined_at": _latest_candidate_value(
+                RecCandidateOffer.declined_at,
+                source_model=RecCandidateOffer,
+                order_by=_LATEST_OFFER_ORDER,
+            ),
+            "sprint_count": _candidate_count(
+                source_model=RecCandidateSprint,
+                predicates=(RecCandidateSprint.deleted_at.is_(None),),
+            ),
+            "latest_sprint_status": _latest_candidate_value(
+                RecCandidateSprint.status,
+                source_model=RecCandidateSprint,
+                order_by=_LATEST_SPRINT_ORDER,
+                predicates=(RecCandidateSprint.deleted_at.is_(None),),
+            ),
+            "latest_sprint_due_at": _latest_candidate_value(
+                RecCandidateSprint.due_at,
+                source_model=RecCandidateSprint,
+                order_by=_LATEST_SPRINT_ORDER,
+                predicates=(RecCandidateSprint.deleted_at.is_(None),),
+            ),
+            "latest_sprint_submitted_at": _latest_candidate_value(
+                RecCandidateSprint.submitted_at,
+                source_model=RecCandidateSprint,
+                order_by=_LATEST_SPRINT_ORDER,
+                predicates=(RecCandidateSprint.deleted_at.is_(None),),
+            ),
+            "latest_sprint_decision": _latest_candidate_value(
+                RecCandidateSprint.decision,
+                source_model=RecCandidateSprint,
+                order_by=_LATEST_SPRINT_ORDER,
+                predicates=(RecCandidateSprint.deleted_at.is_(None),),
+            ),
+            "latest_sprint_score_overall": _latest_candidate_value(
+                RecCandidateSprint.score_overall,
+                source_model=RecCandidateSprint,
+                order_by=_LATEST_SPRINT_ORDER,
+                predicates=(RecCandidateSprint.deleted_at.is_(None),),
+            ),
+            "joining_doc_count": _candidate_count(source_model=RecCandidateJoiningDoc),
+            "latest_joining_doc_type": _latest_candidate_value(
+                RecCandidateJoiningDoc.doc_type,
+                source_model=RecCandidateJoiningDoc,
+                order_by=_LATEST_JOINING_DOC_ORDER,
+            ),
+            "latest_joining_doc_uploaded_at": _latest_candidate_value(
+                RecCandidateJoiningDoc.created_at,
+                source_model=RecCandidateJoiningDoc,
+                order_by=_LATEST_JOINING_DOC_ORDER,
+            ),
+            "event_count": _candidate_count(source_model=RecCandidateEvent),
+            "latest_event_type": _latest_candidate_value(
+                RecCandidateEvent.action_type,
+                source_model=RecCandidateEvent,
+                order_by=_LATEST_EVENT_ORDER,
+            ),
+            "latest_event_at": _latest_candidate_value(
+                RecCandidateEvent.created_at,
+                source_model=RecCandidateEvent,
+                order_by=_LATEST_EVENT_ORDER,
+            ),
             "created_at": RecCandidate.created_at,
             "updated_at": RecCandidate.updated_at,
             "archived_at": RecCandidate.archived_at,
@@ -174,7 +457,10 @@ REPORTS = {
             "email",
             "opening_title",
             "status",
-            "needs_hr_review",
+            "latest_stage_status",
+            "latest_interview_decision",
+            "latest_offer_status",
+            "joining_docs_status",
             "created_at",
         ],
     },
@@ -420,7 +706,7 @@ async def _fetch_rows(
     date_from: datetime | None,
     date_to: datetime | None,
     opening_id: int | None,
-    status_value: str | None,
+    status_values: list[str] | None,
     is_active: int | None,
 ):
     expressions = [cfg["columns"][key].label(key) for key in columns]
@@ -434,7 +720,7 @@ async def _fetch_rows(
         opening_field=cfg["opening_field"],
         opening_id=opening_id,
         status_field=cfg["status_field"],
-        status_value=status_value,
+        status_values=status_values,
         active_field=cfg["active_field"],
         is_active=is_active,
     )
@@ -450,7 +736,7 @@ async def _fetch_count(
     date_from: datetime | None,
     date_to: datetime | None,
     opening_id: int | None,
-    status_value: str | None,
+    status_values: list[str] | None,
     is_active: int | None,
 ) -> int:
     stmt = select(func.count()).select_from(cfg["base"])
@@ -463,7 +749,7 @@ async def _fetch_count(
         opening_field=cfg["opening_field"],
         opening_id=opening_id,
         status_field=cfg["status_field"],
-        status_value=status_value,
+        status_values=status_values,
         active_field=cfg["active_field"],
         is_active=is_active,
     )
@@ -488,6 +774,7 @@ async def preview_report(
     column_list = _parse_columns(cfg, columns)
     date_from_value = _parse_datetime(date_from)
     date_to_value = _expand_end_of_day(date_to, _parse_datetime(date_to))
+    status_values = _parse_status_values(status_value)
     rows = await _fetch_rows(
         session,
         cfg=cfg,
@@ -497,7 +784,7 @@ async def preview_report(
         date_from=date_from_value,
         date_to=date_to_value,
         opening_id=opening_id,
-        status_value=status_value.strip() if status_value else None,
+        status_values=status_values,
         is_active=is_active,
     )
     total = await _fetch_count(
@@ -506,7 +793,7 @@ async def preview_report(
         date_from=date_from_value,
         date_to=date_to_value,
         opening_id=opening_id,
-        status_value=status_value.strip() if status_value else None,
+        status_values=status_values,
         is_active=is_active,
     )
     return {
@@ -537,6 +824,7 @@ async def download_report(
     column_list = _parse_columns(cfg, columns)
     date_from_value = _parse_datetime(date_from)
     date_to_value = _expand_end_of_day(date_to, _parse_datetime(date_to))
+    status_values = _parse_status_values(status_value)
     rows = await _fetch_rows(
         session,
         cfg=cfg,
@@ -546,7 +834,7 @@ async def download_report(
         date_from=date_from_value,
         date_to=date_to_value,
         opening_id=opening_id,
-        status_value=status_value.strip() if status_value else None,
+        status_values=status_values,
         is_active=is_active,
     )
 
