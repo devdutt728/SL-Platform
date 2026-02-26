@@ -2300,6 +2300,17 @@ export function Candidate360Client({
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Chip className={statusTone(candidate.status)}>{candidate.status.split("_").join(" ")}</Chip>
             <Chip className={chipTone("blue")}>Stage: {stageLabel(candidate.current_stage)}</Chip>
+            {candidate.duplicate_tag ? (
+              <Chip className={chipTone("amber")}>
+                Duplicate
+                {candidate.duplicate_application_count && candidate.duplicate_application_count > 1
+                  ? ` x${candidate.duplicate_application_count}`
+                  : ""}
+              </Chip>
+            ) : null}
+            {candidate.latest_reapplication_at ? (
+              <Chip className={chipTone("neutral")}>Last reapply: {formatDate(candidate.latest_reapplication_at)}</Chip>
+            ) : null}
             <Chip className={cafState.tone}>{cafState.label}</Chip>
             {needsReviewChip}
             {screening?.screening_result ? (

@@ -30,6 +30,8 @@ const INGEST_CONFIG = {
   auditSheetName: "Ingest Audit Log",
   auditMaxRows: 50000,
   archiveStatuses: ["created", "duplicate"],
+  archiveMinAgeHours: 24,
+  defaultSourceChannel: "google_sheet",
   requiredHeaderHints: ["Job ID", "First name", "Last name", "Email", "Terms"],
   statusColumn: "ingest_status",
   codeColumn: "candidate_code",
@@ -159,7 +161,8 @@ function handleIngestSheetChange(e) {
  */
 function runScheduledIngest() {
   try {
-    pushCandidatesToRecruitment();
+    syncExternalUpdatedToIngestQueue(); // pulls correct columns
+    pushCandidatesToRecruitment();      // your existing ingest flow
   } catch (err) {
     Logger.log(`runScheduledIngest failed: ${err}`);
   }
@@ -219,7 +222,10 @@ function pushCandidatesToRecruitment() {
 
     const rows = values.slice(1);
     const richRows = richValues.slice(1);
-    const pending = _collectPendingRows(rows, richRows, headerIndex);
+    const pending = _collectPendingRows(rows, richRows, headerIndex, {
+      sheetId: ss.getId(),
+      sheetName: sheet.getName()
+    });
     if (!pending.length) {
       _pushAuditEntry(auditEntries, auditContext, "INFO", "run_no_pending", {
         details: { total_rows: rows.length }
@@ -431,8 +437,9 @@ function pushCandidatesToRecruitment() {
   }
 }
 
-function _collectPendingRows(rows, richRows, headerIndex) {
+function _collectPendingRows(rows, richRows, headerIndex, context) {
   const out = [];
+  const ctx = context || {};
   const requiredHeaders = [
     "Job ID",
     "First name",
@@ -468,8 +475,23 @@ function _collectPendingRows(rows, richRows, headerIndex) {
       terms: _readCell(row, headerIndex, "Terms"),
       portfolio: portfolioValue,
       cv: cvValue,
-      resume: resumeValue
+      resume: resumeValue,
+      source_channel:
+        _readCell(row, headerIndex, "Source Channel") ||
+        _readCell(row, headerIndex, "source_channel") ||
+        INGEST_CONFIG.defaultSourceChannel,
+      external_source_ref: _normalizeExternalSourceRef(
+        _readCell(row, headerIndex, "External Source Ref") ||
+          _readCell(row, headerIndex, "external_source_ref")
+      )
     };
+    if (!payload.external_source_ref) {
+      payload.external_source_ref = _deriveExternalSourceRef(payload, {
+        sheetId: ctx.sheetId || "",
+        sheetName: ctx.sheetName || "",
+        rowKey: String(rowNumber)
+      });
+    }
 
     const missing = requiredHeaders.filter((h) => !_readCell(row, headerIndex, h));
     if (missing.length) {
@@ -536,6 +558,49 @@ function _collectPendingRows(rows, richRows, headerIndex) {
   return out;
 }
 
+function _normalizeExternalSourceRef(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.slice(0, 191);
+}
+
+function _deriveExternalSourceRef(payload, context) {
+  const ctx = context || {};
+  const appliedAt = String(payload && payload.date ? payload.date : "").trim();
+  const pieces = [
+    "google_sheet",
+    String(ctx.sheetId || "").trim(),
+    String(ctx.sheetName || "").trim(),
+    appliedAt,
+    String(payload && payload.job_id ? payload.job_id : "").trim(),
+    String(payload && payload.applying_for ? payload.applying_for : "").trim(),
+    String(payload && payload.email ? payload.email : "").trim().toLowerCase(),
+    String(payload && payload.first_name ? payload.first_name : "").trim(),
+    String(payload && payload.last_name ? payload.last_name : "").trim(),
+    String(payload && payload.portfolio ? payload.portfolio : "").trim(),
+    String(payload && payload.cv ? payload.cv : "").trim(),
+    String(payload && payload.resume ? payload.resume : "").trim()
+  ];
+  if (!appliedAt) {
+    pieces.push(String(ctx.rowKey || "").trim());
+  }
+
+  const fingerprint = pieces.join("|").toLowerCase();
+  const digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    fingerprint,
+    Utilities.Charset.UTF_8
+  );
+  const hex = digest
+    .map((b) => {
+      const n = b < 0 ? b + 256 : b;
+      const h = n.toString(16);
+      return h.length === 1 ? `0${h}` : h;
+    })
+    .join("");
+  return _normalizeExternalSourceRef(`gs:${hex.slice(0, 40)}`);
+}
+
 function _shouldSkipRowForStatus(status, row, headerIndex) {
   const normalized = String(status || "").trim().toLowerCase();
   if (!normalized) return false;
@@ -557,17 +622,7 @@ function _shouldSkipRowForStatus(status, row, headerIndex) {
   if (normalized !== "duplicate") {
     return INGEST_CONFIG.skipStatuses.includes(normalized);
   }
-
-  const cooldownHours = Number(INGEST_CONFIG.duplicateCooldownHours || 0);
-  if (!Number.isFinite(cooldownHours) || cooldownHours <= 0) return false;
-
-  const ingestedAtRaw = _readCell(row, headerIndex, INGEST_CONFIG.ingestedAtColumn);
-  if (!ingestedAtRaw) return false;
-
-  const parsedMillis = Date.parse(String(ingestedAtRaw));
-  if (!Number.isFinite(parsedMillis)) return false;
-
-  return Date.now() - parsedMillis < cooldownHours * 60 * 60 * 1000;
+  return true;
 }
 
 function _readFileField(row, richRow, headerIndex, headerName) {
@@ -781,6 +836,7 @@ function _archiveSuccessfulRows(ss, sourceSheet, sourceHeaders) {
     const row = data[i];
     const status = String(row[statusIdx] || "").trim().toLowerCase();
     if (!INGEST_CONFIG.archiveStatuses.includes(status)) continue;
+    if (!_shouldArchiveRowByAge(row, status, headerIndex)) continue;
     sourceRowsToArchive.push({ rowNumber: i + 1, row, status });
   }
 
@@ -819,6 +875,18 @@ function _archiveSuccessfulRows(ss, sourceSheet, sourceHeaders) {
   Logger.log(
     `Archived ${sourceRowsToArchive.length} row(s) to "${archiveSheet.getName()}".`
   );
+}
+
+function _shouldArchiveRowByAge(row, status, headerIndex) {
+  const minAgeHours = Number(INGEST_CONFIG.archiveMinAgeHours || 0);
+  if (!Number.isFinite(minAgeHours) || minAgeHours <= 0) return true;
+
+  const ingestedAt = _readCell(row, headerIndex, INGEST_CONFIG.ingestedAtColumn);
+  if (!ingestedAt) return true;
+  const parsed = Date.parse(String(ingestedAt));
+  if (!Number.isFinite(parsed)) return true;
+
+  return Date.now() - parsed >= minAgeHours * 60 * 60 * 1000;
 }
 
 function _getOrCreateArchiveSheet(ss) {

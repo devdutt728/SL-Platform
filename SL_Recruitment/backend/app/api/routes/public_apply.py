@@ -13,12 +13,13 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.models.apply_idempotency import RecApplyIdempotency
 from app.models.candidate import RecCandidate
+from app.models.candidate_ingest_attempt import RecCandidateIngestAttempt
 from app.models.opening import RecOpening
 from app.models.screening import RecCandidateScreening
 from app.services.drive import create_candidate_folder, upload_application_doc
@@ -38,6 +39,7 @@ RATE_LIMIT_WINDOW = timedelta(minutes=1)
 RATE_LIMIT_MAX = 5
 EXTERNAL_DOC_MAX_BYTES_DOC = 2 * 1024 * 1024
 EXTERNAL_DOC_MAX_BYTES_PORTFOLIO = 10 * 1024 * 1024
+PUBLIC_APPLY_DUPLICATE_WINDOW = timedelta(hours=24)
 
 
 class PublicApplyIn(BaseModel):
@@ -57,6 +59,7 @@ class PublicApplyOut(BaseModel):
     caf_url: str
     screening_result: str | None = None
     already_applied: bool = False
+    reapplied: bool = False
 
 
 class OpeningApplyPrefillOut(BaseModel):
@@ -127,6 +130,93 @@ def _strip_optional(value: str | None) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def _truncate_text(value: str | None, *, max_len: int = 500) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) <= max_len:
+        return text
+    if max_len <= 3:
+        return text[:max_len]
+    return f"{text[: max_len - 3]}..."
+
+
+def _normalize_external_source_ref(value: str | None) -> str | None:
+    cleaned = _strip_optional(value)
+    if cleaned is None:
+        return None
+    return cleaned[:191]
+
+
+def _safe_payload_json(payload: dict[str, object]) -> str:
+    try:
+        return _truncate_text(json.dumps(payload, ensure_ascii=True, default=str), max_len=4000) or "{}"
+    except Exception:
+        return "{}"
+
+
+def _derive_public_apply_external_ref(*, opening_code: str, email_normalized: str, idempotency_key: str) -> str:
+    fingerprint = "|".join(
+        [
+            "public_apply",
+            opening_code.strip().lower(),
+            email_normalized.strip().lower(),
+            idempotency_key.strip(),
+        ]
+    )
+    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:40]
+    return f"apply:{digest}"
+
+
+def _is_recent_public_apply_duplicate(candidate: RecCandidate, *, now: datetime) -> bool:
+    marker = candidate.created_at or candidate.updated_at
+    if marker is None:
+        return True
+    return marker >= (now - PUBLIC_APPLY_DUPLICATE_WINDOW)
+
+
+async def _record_public_apply_attempt(
+    session: AsyncSession,
+    *,
+    opening_id: int | None,
+    opening_code: str,
+    email_normalized: str,
+    external_source_ref: str | None,
+    attempt_status: str,
+    candidate_id: int | None,
+    message: str | None,
+    idempotency_key: str | None,
+    attempted_at: datetime,
+    request_payload: dict[str, object],
+) -> None:
+    try:
+        async with session.begin_nested():
+            session.add(
+                RecCandidateIngestAttempt(
+                    source_origin="public_apply",
+                    sheet_id=None,
+                    sheet_name=None,
+                    batch_id=None,
+                    row_key=_truncate_text(idempotency_key, max_len=64),
+                    opening_id=opening_id,
+                    opening_code=_truncate_text(opening_code, max_len=100),
+                    email_normalized=email_normalized,
+                    external_source_ref=_normalize_external_source_ref(external_source_ref),
+                    attempt_status=(attempt_status or "error").strip()[:32],
+                    candidate_id=candidate_id,
+                    message=_truncate_text(message, max_len=500),
+                    payload_json=_safe_payload_json(request_payload),
+                    attempted_at=attempted_at,
+                    created_at=attempted_at,
+                )
+            )
+            await session.flush()
+    except OperationalError:
+        return
 
 
 def _compose_full_name(first_name: str, last_name: str | None) -> str:
@@ -379,29 +469,33 @@ async def apply_for_opening(
             detail="Too many submission attempts. Please wait a minute and try again.",
         )
 
-    request_hash = _hash_request(
-        {
-            "opening_code": opening_code,
-            "email": email_normalized,
-            "first_name": first_name_clean,
-            "last_name": last_name_clean,
-            "phone": phone_value,
-            "note": note_value,
-            "educational_qualification": educational_qualification_value,
-            "years_of_experience": years_of_experience_value,
-            "city": city_value,
-            "questions_from_candidate": questions_value,
-            "willing_to_relocate": _strip_optional(willing_to_relocate),
-            "terms_consent": terms_accepted,
-            "gender_identity": _strip_optional(gender_identity),
-            "gender_self_describe": _strip_optional(gender_self_describe),
-            "cv_filename": cv_file.filename if has_cv_file else None,
-            "portfolio_filename": portfolio_file.filename if has_portfolio_file else None,
-            "resume_filename": resume_file.filename if has_resume_file else None,
-            "cv_url": cv_source_url,
-            "portfolio_url": portfolio_source_url,
-            "resume_url": resume_source_url,
-        }
+    request_payload: dict[str, object] = {
+        "opening_code": opening_code,
+        "email": email_normalized,
+        "first_name": first_name_clean,
+        "last_name": last_name_clean,
+        "phone": phone_value,
+        "note": note_value,
+        "educational_qualification": educational_qualification_value,
+        "years_of_experience": years_of_experience_value,
+        "city": city_value,
+        "questions_from_candidate": questions_value,
+        "willing_to_relocate": _strip_optional(willing_to_relocate),
+        "terms_consent": terms_accepted,
+        "gender_identity": _strip_optional(gender_identity),
+        "gender_self_describe": _strip_optional(gender_self_describe),
+        "cv_filename": cv_file.filename if has_cv_file else None,
+        "portfolio_filename": portfolio_file.filename if has_portfolio_file else None,
+        "resume_filename": resume_file.filename if has_resume_file else None,
+        "cv_url": cv_source_url,
+        "portfolio_url": portfolio_source_url,
+        "resume_url": resume_source_url,
+    }
+    request_hash = _hash_request(request_payload)
+    external_source_ref = _derive_public_apply_external_ref(
+        opening_code=opening_code,
+        email_normalized=email_normalized,
+        idempotency_key=idempotency_key,
     )
 
     existing_idem = (
@@ -457,7 +551,8 @@ async def apply_for_opening(
             .limit(1)
         )
     ).scalars().first()
-    if existing_candidate:
+    if existing_candidate and _is_recent_public_apply_duplicate(existing_candidate, now=now):
+        duplicate_message = "Candidate already exists for this opening/email within last 24 hours."
         caf_token_existing = existing_candidate.caf_token or uuid4().hex
         if existing_candidate.caf_token != caf_token_existing:
             existing_candidate.caf_token = caf_token_existing
@@ -472,6 +567,25 @@ async def apply_for_opening(
                 related_entity_id=existing_candidate.candidate_id,
                 meta_json={"caf_token": caf_token_existing, "reason": "apply_deduped"},
             )
+        if not existing_candidate.source_channel:
+            existing_candidate.source_channel = "website"
+        if not existing_candidate.source_origin:
+            existing_candidate.source_origin = "public_apply"
+        if not existing_candidate.external_source_ref:
+            existing_candidate.external_source_ref = external_source_ref
+        await _record_public_apply_attempt(
+            session,
+            opening_id=opening.opening_id,
+            opening_code=opening_code,
+            email_normalized=email_normalized,
+            external_source_ref=external_source_ref,
+            attempt_status="duplicate_recent",
+            candidate_id=existing_candidate.candidate_id,
+            message=duplicate_message,
+            idempotency_key=idempotency_key,
+            attempted_at=now,
+            request_payload=request_payload,
+        )
         response_payload = PublicApplyOut(
             candidate_id=existing_candidate.candidate_id,
             candidate_code=existing_candidate.candidate_code,
@@ -479,6 +593,7 @@ async def apply_for_opening(
             caf_url=build_public_path(f"/caf/{caf_token_existing}"),
             screening_result=None,
             already_applied=True,
+            reapplied=False,
         ).model_dump()
         idem.status_code = status.HTTP_200_OK
         idem.response_json = json.dumps(response_payload, ensure_ascii=True)
@@ -486,171 +601,247 @@ async def apply_for_opening(
         await session.commit()
         return JSONResponse(content=response_payload, status_code=status.HTTP_200_OK)
 
-    caf_token = uuid4().hex
-    full_name = _compose_full_name(first_name_clean, last_name_clean)
-    application_docs_status = _application_docs_status(
-        cv_url=cv_source_url if has_cv_file or cv_source_url else None,
-        portfolio_url=portfolio_source_url if has_portfolio_file or portfolio_source_url else None,
-        resume_url=resume_source_url if has_resume_file or resume_source_url else None,
-    )
-    temp_candidate_code = uuid4().hex[:8].upper()
+    is_reapplied = bool(existing_candidate)
+    candidate: RecCandidate
+    caf_token: str
+    if existing_candidate:
+        candidate = existing_candidate
+        caf_token = candidate.caf_token or uuid4().hex
+        candidate.first_name = first_name_clean
+        candidate.last_name = last_name_clean
+        candidate.full_name = _compose_full_name(first_name_clean, last_name_clean)
+        candidate.email = email_normalized
+        candidate.phone = phone_value
+        candidate.source_channel = "website"
+        candidate.source_origin = "public_apply"
+        candidate.external_source_ref = external_source_ref
+        candidate.opening_id = opening.opening_id
+        candidate.educational_qualification = educational_qualification_value
+        candidate.years_of_experience = years_of_experience_value
+        candidate.city = city_value
+        candidate.current_location = city_value
+        candidate.terms_consent = True
+        candidate.terms_consent_at = now
+        candidate.cv_url = cv_source_url or candidate.cv_url
+        candidate.portfolio_url = portfolio_source_url or candidate.portfolio_url
+        candidate.resume_url = resume_source_url or candidate.resume_url
+        candidate.questions_from_candidate = questions_value
+        candidate.caf_token = caf_token
+        candidate.caf_sent_at = now
+        candidate.updated_at = now
+        candidate.application_docs_status = _application_docs_status(
+            cv_url=cv_source_url if has_cv_file or cv_source_url else candidate.cv_url,
+            portfolio_url=portfolio_source_url if has_portfolio_file or portfolio_source_url else candidate.portfolio_url,
+            resume_url=resume_source_url if has_resume_file or resume_source_url else candidate.resume_url,
+        )
+        if not candidate.candidate_code:
+            candidate.candidate_code = _candidate_code(candidate.candidate_id)
 
-    candidate = RecCandidate(
-        candidate_code=temp_candidate_code,
-        first_name=first_name_clean,
-        last_name=last_name_clean,
-        full_name=full_name,
-        email=email_normalized,
-        phone=phone_value,
-        source_channel="website",
-        source_origin="public_apply",
-        opening_id=opening.opening_id,
-        educational_qualification=educational_qualification_value,
-        years_of_experience=years_of_experience_value,
-        city=city_value,
-        current_location=city_value,
-        terms_consent=True,
-        terms_consent_at=now,
-        status="enquiry",
-        cv_url=cv_source_url,
-        portfolio_url=portfolio_source_url,
-        resume_url=resume_source_url,
-        caf_token=caf_token,
-        caf_sent_at=now,
-        application_docs_status=application_docs_status,
-        joining_docs_status="none",
-        created_at=now,
-        updated_at=now,
-    )
-    session.add(candidate)
-    try:
-        await session.flush()
-    except IntegrityError:
-        await session.rollback()
-        existing_candidate = (
-            await session.execute(
-                select(RecCandidate)
-                .where(
-                    RecCandidate.opening_id == opening.opening_id,
-                    func.lower(RecCandidate.email) == email_normalized,
+        await log_event(
+            session,
+            candidate_id=candidate.candidate_id,
+            action_type="public_apply_reapplied",
+            performed_by_person_id_platform=None,
+            related_entity_type="candidate",
+            related_entity_id=candidate.candidate_id,
+            meta_json={
+                "opening_id": opening.opening_id,
+                "opening_code": opening_code,
+                "idempotency_key": idempotency_key,
+                "external_source_ref": external_source_ref,
+            },
+        )
+        await log_event(
+            session,
+            candidate_id=candidate.candidate_id,
+            action_type="caf_link_generated",
+            performed_by_person_id_platform=None,
+            related_entity_type="candidate",
+            related_entity_id=candidate.candidate_id,
+            meta_json={"caf_token": caf_token, "reason": "public_apply_reapply"},
+        )
+    else:
+        caf_token = uuid4().hex
+        full_name = _compose_full_name(first_name_clean, last_name_clean)
+        application_docs_status = _application_docs_status(
+            cv_url=cv_source_url if has_cv_file or cv_source_url else None,
+            portfolio_url=portfolio_source_url if has_portfolio_file or portfolio_source_url else None,
+            resume_url=resume_source_url if has_resume_file or resume_source_url else None,
+        )
+        temp_candidate_code = uuid4().hex[:8].upper()
+
+        candidate = RecCandidate(
+            candidate_code=temp_candidate_code,
+            first_name=first_name_clean,
+            last_name=last_name_clean,
+            full_name=full_name,
+            email=email_normalized,
+            phone=phone_value,
+            source_channel="website",
+            source_origin="public_apply",
+            external_source_ref=external_source_ref,
+            opening_id=opening.opening_id,
+            educational_qualification=educational_qualification_value,
+            years_of_experience=years_of_experience_value,
+            city=city_value,
+            current_location=city_value,
+            terms_consent=True,
+            terms_consent_at=now,
+            status="enquiry",
+            cv_url=cv_source_url,
+            portfolio_url=portfolio_source_url,
+            resume_url=resume_source_url,
+            caf_token=caf_token,
+            caf_sent_at=now,
+            application_docs_status=application_docs_status,
+            joining_docs_status="none",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(candidate)
+        try:
+            await session.flush()
+        except IntegrityError:
+            await session.rollback()
+            existing_candidate = (
+                await session.execute(
+                    select(RecCandidate)
+                    .where(
+                        RecCandidate.opening_id == opening.opening_id,
+                        func.lower(RecCandidate.email) == email_normalized,
+                    )
+                    .order_by(RecCandidate.candidate_id.desc())
+                    .limit(1)
                 )
-                .order_by(RecCandidate.candidate_id.desc())
-                .limit(1)
-            )
-        ).scalars().first()
-        if existing_candidate:
-            caf_token_existing = existing_candidate.caf_token or uuid4().hex
-            if existing_candidate.caf_token != caf_token_existing:
-                existing_candidate.caf_token = caf_token_existing
-                existing_candidate.caf_sent_at = now
-                existing_candidate.updated_at = now
-            response_payload = PublicApplyOut(
-                candidate_id=existing_candidate.candidate_id,
-                candidate_code=existing_candidate.candidate_code,
-                caf_token=caf_token_existing,
-                caf_url=build_public_path(f"/caf/{caf_token_existing}"),
-                screening_result=None,
-                already_applied=True,
-            ).model_dump()
-            # Best-effort: persist idempotency completion.
-            try:
-                session.add(
-                    RecApplyIdempotency(
-                        idempotency_key=idempotency_key,
-                        request_hash=request_hash,
+            ).scalars().first()
+            if existing_candidate:
+                caf_token_existing = existing_candidate.caf_token or uuid4().hex
+                if existing_candidate.caf_token != caf_token_existing:
+                    existing_candidate.caf_token = caf_token_existing
+                    existing_candidate.caf_sent_at = now
+                    existing_candidate.updated_at = now
+                response_payload = PublicApplyOut(
+                    candidate_id=existing_candidate.candidate_id,
+                    candidate_code=existing_candidate.candidate_code,
+                    caf_token=caf_token_existing,
+                    caf_url=build_public_path(f"/caf/{caf_token_existing}"),
+                    screening_result=None,
+                    already_applied=True,
+                    reapplied=False,
+                ).model_dump()
+                try:
+                    session.add(
+                        RecApplyIdempotency(
+                            idempotency_key=idempotency_key,
+                            request_hash=request_hash,
+                            opening_code=opening_code,
+                            email_normalized=email_normalized,
+                            ip_address=ip_address,
+                            status_code=status.HTTP_200_OK,
+                            response_json=json.dumps(response_payload, ensure_ascii=True),
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+                    await _record_public_apply_attempt(
+                        session,
+                        opening_id=opening.opening_id,
                         opening_code=opening_code,
                         email_normalized=email_normalized,
-                        ip_address=ip_address,
-                        status_code=status.HTTP_200_OK,
-                        response_json=json.dumps(response_payload, ensure_ascii=True),
-                        created_at=now,
-                        updated_at=now,
+                        external_source_ref=external_source_ref,
+                        attempt_status="duplicate_recent",
+                        candidate_id=existing_candidate.candidate_id,
+                        message="Candidate already exists for this opening/email within last 24 hours.",
+                        idempotency_key=idempotency_key,
+                        attempted_at=now,
+                        request_payload=request_payload,
                     )
-                )
-                await session.commit()
-            except Exception:
-                await session.rollback()
-            return JSONResponse(content=response_payload, status_code=status.HTTP_200_OK)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An application with this email already exists for this role.",
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                return JSONResponse(content=response_payload, status_code=status.HTTP_200_OK)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An application with this email already exists for this role.",
+            )
+
+        candidate.candidate_code = _candidate_code(candidate.candidate_id)
+        await session.flush()
+
+    if not is_reapplied:
+        await apply_stage_transition(
+            session,
+            candidate=candidate,
+            to_stage="enquiry",
+            reason="system_init",
+            note="system_init",
+            source="public_apply",
         )
 
-    candidate.candidate_code = _candidate_code(candidate.candidate_id)
-    await session.flush()
-
-    await apply_stage_transition(
-        session,
-        candidate=candidate,
-        to_stage="enquiry",
-        reason="system_init",
-        note="system_init",
-        source="public_apply",
-    )
-
-    await log_event(
-        session,
-        candidate_id=candidate.candidate_id,
-        action_type="candidate_created",
-        performed_by_person_id_platform=None,
-        related_entity_type="candidate",
-        related_entity_id=candidate.candidate_id,
-        meta_json={
-            "source_channel": "website",
-            "opening_id": opening.opening_id,
-            "opening_code": opening_code,
-            "note": note_value,
-            "city": city_value,
-            "educational_qualification": educational_qualification_value,
-            "years_of_experience": years_of_experience_value,
-            "terms_consent": True,
-        },
-    )
-    await log_event(
-        session,
-        candidate_id=candidate.candidate_id,
-        action_type="caf_link_generated",
-        performed_by_person_id_platform=None,
-        related_entity_type="candidate",
-        related_entity_id=candidate.candidate_id,
-        meta_json={"caf_token": caf_token},
-    )
+        await log_event(
+            session,
+            candidate_id=candidate.candidate_id,
+            action_type="candidate_created",
+            performed_by_person_id_platform=None,
+            related_entity_type="candidate",
+            related_entity_id=candidate.candidate_id,
+            meta_json={
+                "source_channel": "website",
+                "opening_id": opening.opening_id,
+                "opening_code": opening_code,
+                "note": note_value,
+                "city": city_value,
+                "educational_qualification": educational_qualification_value,
+                "years_of_experience": years_of_experience_value,
+                "terms_consent": True,
+            },
+        )
+        await log_event(
+            session,
+            candidate_id=candidate.candidate_id,
+            action_type="caf_link_generated",
+            performed_by_person_id_platform=None,
+            related_entity_type="candidate",
+            related_entity_id=candidate.candidate_id,
+            meta_json={"caf_token": caf_token},
+        )
 
     caf_link = build_public_link(f"/caf/{caf_token}")
 
-    # Drive folder creation (required)
-    drive_folder_id: str | None = None
-    drive_folder_url: str | None = None
-    try:
-        folder_id, folder_url = await anyio.to_thread.run_sync(
-            create_candidate_folder, candidate.candidate_code, candidate.full_name
-        )
-        candidate.drive_folder_id = drive_folder_id = folder_id
-        candidate.drive_folder_url = drive_folder_url = folder_url
-        await log_event(
-            session,
-            candidate_id=candidate.candidate_id,
-            action_type="drive_folder_created",
-            performed_by_person_id_platform=None,
-            related_entity_type="candidate",
-            related_entity_id=candidate.candidate_id,
-            meta_json={"drive_folder_id": folder_id, "drive_folder_url": folder_url},
-        )
-    except Exception as exc:
-        await log_event(
-            session,
-            candidate_id=candidate.candidate_id,
-            action_type="drive_folder_failed",
-            performed_by_person_id_platform=None,
-            related_entity_type="candidate",
-            related_entity_id=candidate.candidate_id,
-            meta_json={"error": str(exc)},
-        )
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to create candidate folder in Drive. Please retry later.",
-        )
+    # Re-use existing folder for reapply; create only if missing.
+    drive_folder_id = _strip_optional(candidate.drive_folder_id)
+    drive_folder_url = _strip_optional(candidate.drive_folder_url)
+    if not drive_folder_id:
+        try:
+            folder_id, folder_url = await anyio.to_thread.run_sync(
+                create_candidate_folder, candidate.candidate_code, candidate.full_name or candidate.first_name
+            )
+            candidate.drive_folder_id = drive_folder_id = folder_id
+            candidate.drive_folder_url = drive_folder_url = folder_url
+            await log_event(
+                session,
+                candidate_id=candidate.candidate_id,
+                action_type="drive_folder_created",
+                performed_by_person_id_platform=None,
+                related_entity_type="candidate",
+                related_entity_id=candidate.candidate_id,
+                meta_json={"drive_folder_id": folder_id, "drive_folder_url": folder_url},
+            )
+        except Exception as exc:
+            await log_event(
+                session,
+                candidate_id=candidate.candidate_id,
+                action_type="drive_folder_failed",
+                performed_by_person_id_platform=None,
+                related_entity_type="candidate",
+                related_entity_id=candidate.candidate_id,
+                meta_json={"error": str(exc)},
+            )
+            await session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Unable to create candidate folder in Drive. Please retry later.",
+            )
 
     async def _upload_bytes(
         kind: str,
@@ -785,9 +976,9 @@ async def apply_for_opening(
             detail="Portfolio upload failed. Please retry with a valid file/link.",
         )
 
-    candidate.cv_url = cv_url
-    candidate.portfolio_url = portfolio_url
-    candidate.resume_url = resume_url_uploaded
+    candidate.cv_url = cv_url or candidate.cv_url
+    candidate.portfolio_url = portfolio_url or candidate.portfolio_url
+    candidate.resume_url = resume_url_uploaded or candidate.resume_url
     candidate.portfolio_not_uploaded_reason = None
     candidate.application_docs_status = _application_docs_status(
         cv_url=candidate.cv_url,
@@ -839,9 +1030,10 @@ async def apply_for_opening(
         caf_url=build_public_path(f"/caf/{caf_token}"),
         screening_result=decision,
         already_applied=False,
+        reapplied=is_reapplied,
     ).model_dump()
 
-    await send_email(
+    email_meta = await send_email(
         session,
         candidate_id=candidate.candidate_id,
         to_emails=[candidate.email],
@@ -856,7 +1048,49 @@ async def apply_for_opening(
             "willing_to_relocate": _label_yes_no(screening_data.get("willing_to_relocate")),
         },
         email_type="application_links",
-        meta_extra={"caf_token": caf_token},
+        meta_extra={
+            "caf_token": caf_token,
+            "reason": "public_apply_reapply" if is_reapplied else "public_apply",
+        },
+    )
+
+    email_status = _strip_optional(str((email_meta or {}).get("status") or ""))
+    email_error = _strip_optional(str((email_meta or {}).get("error") or ""))
+    attempt_status = "reapplied" if is_reapplied else "created"
+    attempt_message = "Candidate re-applied and profile refreshed." if is_reapplied else "Candidate created."
+    if email_status == "sent":
+        attempt_message = (
+            "Candidate re-applied and application links email sent."
+            if is_reapplied
+            else "Candidate created and application links email sent."
+        )
+    elif email_status == "failed":
+        attempt_message = (
+            "Candidate re-applied, but application links email failed."
+            if is_reapplied
+            else "Candidate created, but application links email failed."
+        )
+    elif email_status == "skipped":
+        attempt_message = (
+            "Candidate re-applied, but application links email was skipped."
+            if is_reapplied
+            else "Candidate created, but application links email was skipped."
+        )
+    if email_error:
+        attempt_message = f"{attempt_message} ({email_error})"
+
+    await _record_public_apply_attempt(
+        session,
+        opening_id=opening.opening_id,
+        opening_code=opening_code,
+        email_normalized=email_normalized,
+        external_source_ref=external_source_ref,
+        attempt_status=attempt_status,
+        candidate_id=candidate.candidate_id,
+        message=attempt_message,
+        idempotency_key=idempotency_key,
+        attempted_at=datetime.utcnow(),
+        request_payload=request_payload,
     )
 
     idem.status_code = status.HTTP_201_CREATED

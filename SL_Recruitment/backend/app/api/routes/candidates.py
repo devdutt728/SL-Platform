@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import hmac
+from hashlib import sha256
 import logging
 import mimetypes
 from pathlib import Path
@@ -24,6 +25,8 @@ from app.core.datetime_utils import now_ist_naive, to_ist_naive
 from app.core.roles import Role
 from app.models.candidate import RecCandidate
 from app.models.candidate_assessment import RecCandidateAssessment
+from app.models.candidate_ingest_attempt import RecCandidateIngestAttempt
+from app.models.candidate_ingest_idempotency import RecCandidateIngestIdempotency
 from app.models.candidate_offer import RecCandidateOffer
 from app.models.event import RecCandidateEvent
 from app.models.opening import RecOpening
@@ -480,6 +483,215 @@ def _is_recent_google_sheet_duplicate(candidate: RecCandidate, *, now: datetime)
     if marker is None:
         return True
     return marker >= (now - GOOGLE_SHEET_DUPLICATE_WINDOW)
+
+
+def _truncate_text(value: str | None, *, max_len: int = 500) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) <= max_len:
+        return text
+    if max_len <= 3:
+        return text[:max_len]
+    return f"{text[: max_len - 3]}..."
+
+
+def _normalize_external_source_ref(value: str | None) -> str | None:
+    cleaned = _strip_optional(value)
+    if cleaned is None:
+        return None
+    return cleaned[:191]
+
+
+def _derive_google_sheet_external_ref(
+    *,
+    payload: GoogleSheetIngestIn,
+    row: GoogleSheetCandidateRow,
+    row_key: str,
+) -> str:
+    provided = _normalize_external_source_ref(row.external_source_ref)
+    if provided:
+        return provided
+
+    applied_at = ""
+    if isinstance(row.applied_at, datetime):
+        applied_at = row.applied_at.isoformat()
+    elif row.applied_at is not None:
+        applied_at = str(row.applied_at).strip()
+
+    parts = [
+        SOURCE_ORIGIN_GOOGLE_SHEET,
+        (payload.sheet_id or "").strip(),
+        (payload.sheet_name or "").strip(),
+        applied_at,
+        (row.opening_code or "").strip(),
+        (row.applying_for or "").strip(),
+        str(row.email).strip().lower(),
+        (row.first_name or "").strip(),
+        (row.last_name or "").strip(),
+        (row.portfolio_url or "").strip(),
+        (row.cv_url or "").strip(),
+        (row.resume_url or "").strip(),
+    ]
+    if not applied_at:
+        parts.append(str(row_key or "").strip())
+    fingerprint = "|".join(part.lower() for part in parts)
+    digest = sha256(fingerprint.encode("utf-8")).hexdigest()[:40]
+    return f"gs:{digest}"
+
+
+def _safe_payload_json(value: dict[str, object]) -> str:
+    try:
+        return _truncate_text(json.dumps(value, ensure_ascii=True, default=str), max_len=4000) or "{}"
+    except Exception:
+        return "{}"
+
+
+async def _find_ingest_idempotency(
+    session: AsyncSession,
+    *,
+    source_origin: str,
+    external_source_ref: str | None,
+) -> RecCandidateIngestIdempotency | None:
+    ref = _normalize_external_source_ref(external_source_ref)
+    if not ref:
+        return None
+    try:
+        return (
+            await session.execute(
+                select(RecCandidateIngestIdempotency)
+                .where(
+                    RecCandidateIngestIdempotency.source_origin == source_origin,
+                    RecCandidateIngestIdempotency.external_source_ref == ref,
+                )
+                .limit(1)
+            )
+        ).scalars().first()
+    except OperationalError:
+        return None
+
+
+async def _upsert_ingest_idempotency(
+    session: AsyncSession,
+    *,
+    source_origin: str,
+    external_source_ref: str | None,
+    candidate_id: int | None,
+    result_status: str,
+    result_message: str | None,
+) -> None:
+    ref = _normalize_external_source_ref(external_source_ref)
+    if not ref:
+        return
+
+    try:
+        async with session.begin_nested():
+            existing = (
+                await session.execute(
+                    select(RecCandidateIngestIdempotency)
+                    .where(
+                        RecCandidateIngestIdempotency.source_origin == source_origin,
+                        RecCandidateIngestIdempotency.external_source_ref == ref,
+                    )
+                    .limit(1)
+                )
+            ).scalars().first()
+            if existing:
+                if candidate_id is not None:
+                    existing.candidate_id = candidate_id
+                existing.result_status = (result_status or existing.result_status or "created").strip()[:32]
+                existing.result_message = _truncate_text(result_message, max_len=500)
+                existing.last_seen_at = now_ist_naive()
+            else:
+                session.add(
+                    RecCandidateIngestIdempotency(
+                        source_origin=source_origin,
+                        external_source_ref=ref,
+                        candidate_id=candidate_id,
+                        result_status=(result_status or "created").strip()[:32],
+                        result_message=_truncate_text(result_message, max_len=500),
+                        first_seen_at=now_ist_naive(),
+                        last_seen_at=now_ist_naive(),
+                    )
+                )
+            await session.flush()
+    except OperationalError:
+        logger.warning("Ingest idempotency table unavailable. Apply migration 0037.")
+
+
+async def _record_ingest_attempt(
+    session: AsyncSession,
+    *,
+    payload: GoogleSheetIngestIn,
+    row_key: str,
+    row: GoogleSheetCandidateRow | None,
+    email_normalized: str,
+    external_source_ref: str | None,
+    attempt_status: str,
+    candidate_id: int | None,
+    opening_id: int | None,
+    message: str | None,
+    raw_row: dict[str, object],
+    attempted_at: datetime,
+) -> None:
+    try:
+        async with session.begin_nested():
+            session.add(
+                RecCandidateIngestAttempt(
+                    source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                    sheet_id=(payload.sheet_id or "").strip() or None,
+                    sheet_name=(payload.sheet_name or "").strip() or None,
+                    batch_id=(payload.batch_id or "").strip() or None,
+                    row_key=(row_key or "").strip() or None,
+                    opening_id=opening_id,
+                    opening_code=(
+                        ((row.opening_code if row is not None else None) or raw_row.get("opening_code") or raw_row.get("job_id") or "")
+                    ).strip()
+                    or None,
+                    email_normalized=email_normalized,
+                    external_source_ref=_normalize_external_source_ref(external_source_ref),
+                    attempt_status=(attempt_status or "error").strip()[:32],
+                    candidate_id=candidate_id,
+                    message=_truncate_text(message, max_len=500),
+                    payload_json=_safe_payload_json(raw_row),
+                    attempted_at=attempted_at,
+                    created_at=attempted_at,
+                )
+            )
+            await session.flush()
+    except OperationalError:
+        logger.warning("Ingest attempt table unavailable. Apply migration 0037.")
+
+
+async def _candidate_duplicate_metadata(session: AsyncSession, *, candidate_id: int) -> tuple[bool, int, datetime | None]:
+    try:
+        row = (
+            await session.execute(
+                select(
+                    func.count(RecCandidateIngestAttempt.candidate_ingest_attempt_id).label("attempt_count"),
+                    func.count(func.distinct(RecCandidateIngestAttempt.external_source_ref)).label("distinct_ref_count"),
+                    func.max(
+                        case(
+                            (RecCandidateIngestAttempt.attempt_status == "reapplied", RecCandidateIngestAttempt.attempted_at),
+                            else_=None,
+                        )
+                    ).label("latest_reapply_at"),
+                ).where(
+                    RecCandidateIngestAttempt.candidate_id == candidate_id,
+                )
+            )
+        ).first()
+    except OperationalError:
+        return (False, 0, None)
+
+    if not row:
+        return (False, 0, None)
+    attempt_count = int(row.attempt_count or 0)
+    distinct_ref_count = int(row.distinct_ref_count or 0)
+    application_count = distinct_ref_count if distinct_ref_count > 0 else attempt_count
+    return (application_count > 1, application_count, row.latest_reapply_at)
 
 
 async def _send_assessment_link_for_l2_shortlist(
@@ -1112,17 +1324,71 @@ async def import_candidates_from_google_sheet(
     for idx, raw_row in enumerate(payload.rows, start=1):
         row_key = _extract_row_key(raw_row, idx)
         row_now = now_ist_naive()
-        try:
-            row = GoogleSheetCandidateRow.model_validate(raw_row)
-        except ValidationError as exc:
-            failed_count += 1
-            message = "; ".join(error.get("msg", "invalid row") for error in exc.errors()) or "Invalid row payload."
-            results.append({"row_key": row_key, "status": "error", "message": message})
-            continue
-
-        email_normalized = str(row.email).strip().lower()
+        row: GoogleSheetCandidateRow | None = None
+        email_normalized = str(raw_row.get("email") or raw_row.get("Email") or "").strip().lower()
+        external_source_ref = _normalize_external_source_ref(
+            str(raw_row.get("external_source_ref") or raw_row.get("External Source Ref") or "").strip()
+        )
         opening_id_for_dedupe: int | None = None
         try:
+            row = GoogleSheetCandidateRow.model_validate(raw_row)
+            email_normalized = str(row.email).strip().lower()
+            external_source_ref = _derive_google_sheet_external_ref(
+                payload=payload,
+                row=row,
+                row_key=row_key,
+            )
+
+            idempotent_hit = await _find_ingest_idempotency(
+                session,
+                source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                external_source_ref=external_source_ref,
+            )
+            if idempotent_hit:
+                duplicate_count += 1
+                idempotent_candidate: RecCandidate | None = None
+                if idempotent_hit.candidate_id is not None:
+                    idempotent_candidate = await session.get(RecCandidate, idempotent_hit.candidate_id)
+                idempotent_message = (
+                    _strip_optional(idempotent_hit.result_message)
+                    or "This source application row was already ingested."
+                )
+                await _record_ingest_attempt(
+                    session,
+                    payload=payload,
+                    row_key=row_key,
+                    row=row,
+                    email_normalized=email_normalized,
+                    external_source_ref=external_source_ref,
+                    attempt_status="duplicate_idempotent",
+                    candidate_id=idempotent_candidate.candidate_id if idempotent_candidate else idempotent_hit.candidate_id,
+                    opening_id=idempotent_candidate.opening_id if idempotent_candidate else None,
+                    message=idempotent_message,
+                    raw_row=raw_row,
+                    attempted_at=row_now,
+                )
+                await _upsert_ingest_idempotency(
+                    session,
+                    source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                    external_source_ref=external_source_ref,
+                    candidate_id=idempotent_candidate.candidate_id if idempotent_candidate else idempotent_hit.candidate_id,
+                    result_status="duplicate",
+                    result_message=idempotent_message,
+                )
+                await session.commit()
+                results.append(
+                    {
+                        "row_key": row_key,
+                        "status": "duplicate",
+                        "candidate_id": idempotent_candidate.candidate_id if idempotent_candidate else idempotent_hit.candidate_id,
+                        "candidate_code": (
+                            idempotent_candidate.candidate_code if idempotent_candidate else None
+                        ),
+                        "message": idempotent_message,
+                    }
+                )
+                continue
+
             opening: RecOpening | None = None
             opening_code = (row.opening_code or "").strip().upper()
             applying_for = (row.applying_for or "").strip()
@@ -1212,6 +1478,7 @@ async def import_candidates_from_google_sheet(
                 )
             ).scalars().first()
             if existing_candidate and _is_recent_google_sheet_duplicate(existing_candidate, now=row_now):
+                duplicate_message = "Candidate already exists for this opening/email within last 24 hours."
                 duplicate_count += 1
                 if not existing_candidate.source_origin:
                     existing_candidate.source_origin = SOURCE_ORIGIN_GOOGLE_SHEET
@@ -1223,6 +1490,28 @@ async def import_candidates_from_google_sheet(
                 if not existing_candidate.external_source_ref:
                     existing_candidate.external_source_ref = external_source_ref
                 existing_candidate.updated_at = now_ist_naive()
+                await _record_ingest_attempt(
+                    session,
+                    payload=payload,
+                    row_key=row_key,
+                    row=row,
+                    email_normalized=email_normalized,
+                    external_source_ref=external_source_ref,
+                    attempt_status="duplicate_recent",
+                    candidate_id=existing_candidate.candidate_id,
+                    opening_id=opening.opening_id,
+                    message=duplicate_message,
+                    raw_row=raw_row,
+                    attempted_at=row_now,
+                )
+                await _upsert_ingest_idempotency(
+                    session,
+                    source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                    external_source_ref=external_source_ref,
+                    candidate_id=existing_candidate.candidate_id,
+                    result_status="duplicate",
+                    result_message=duplicate_message,
+                )
                 await session.commit()
                 results.append(
                     {
@@ -1230,9 +1519,121 @@ async def import_candidates_from_google_sheet(
                         "status": "duplicate",
                         "candidate_id": existing_candidate.candidate_id,
                         "candidate_code": existing_candidate.candidate_code,
-                        "message": "Candidate already exists for this opening/email within last 24 hours.",
+                        "message": duplicate_message,
                     }
                 )
+                continue
+
+            if existing_candidate:
+                existing_candidate.first_name = row.first_name or existing_candidate.first_name
+                existing_candidate.last_name = row.last_name if row.last_name is not None else existing_candidate.last_name
+                existing_candidate.full_name = _compose_full_name(existing_candidate.first_name or "", existing_candidate.last_name)
+                if row.phone:
+                    existing_candidate.phone = row.phone
+                if row.educational_qualification:
+                    existing_candidate.educational_qualification = row.educational_qualification
+                if row.years_of_experience is not None:
+                    existing_candidate.years_of_experience = row.years_of_experience
+                if row.city:
+                    existing_candidate.city = row.city
+                    existing_candidate.current_location = row.city
+                existing_candidate.terms_consent = True
+                existing_candidate.terms_consent_at = row_now
+                existing_candidate.source_origin = SOURCE_ORIGIN_GOOGLE_SHEET
+                existing_candidate.source_channel = _normalize_source_channel(
+                    row.source_channel,
+                    fallback=existing_candidate.source_channel or SOURCE_ORIGIN_GOOGLE_SHEET,
+                )
+                existing_candidate.external_source_ref = external_source_ref
+                if not existing_candidate.caf_token:
+                    existing_candidate.caf_token = uuid4().hex
+                existing_candidate.caf_sent_at = row_now
+                existing_candidate.updated_at = row_now
+
+                await log_event(
+                    session,
+                    candidate_id=existing_candidate.candidate_id,
+                    action_type="google_sheet_reapplied",
+                    performed_by_person_id_platform=None,
+                    related_entity_type="candidate",
+                    related_entity_id=existing_candidate.candidate_id,
+                    meta_json={
+                        "row_key": row_key,
+                        "batch_id": payload.batch_id,
+                        "sheet_id": payload.sheet_id,
+                        "sheet_name": payload.sheet_name,
+                        "external_source_ref": external_source_ref,
+                    },
+                )
+
+                reapply_email_meta = await send_email(
+                    session,
+                    candidate_id=existing_candidate.candidate_id,
+                    to_emails=[existing_candidate.email],
+                    subject="Your Studio Lotus application links",
+                    template_name="application_links",
+                    context={
+                        "candidate_name": existing_candidate.full_name,
+                        "candidate_code": existing_candidate.candidate_code,
+                        "caf_link": build_public_link(f"/caf/{existing_candidate.caf_token}"),
+                        "candidate_email": existing_candidate.email,
+                        "candidate_phone": existing_candidate.phone or "—",
+                        "willing_to_relocate": _label_yes_no(willing_to_relocate),
+                    },
+                    email_type="application_links",
+                    meta_extra={
+                        "caf_token": existing_candidate.caf_token,
+                        "reason": "google_sheet_reapply",
+                    },
+                )
+
+                reapply_status = _strip_optional(str((reapply_email_meta or {}).get("status") or ""))
+                reapply_error = _strip_optional(str((reapply_email_meta or {}).get("error") or ""))
+                reapply_message = "Candidate re-applied and profile refreshed."
+                if reapply_status == "sent":
+                    reapply_message = "Candidate re-applied and application links email sent."
+                elif reapply_status == "failed":
+                    reapply_message = "Candidate re-applied, but application links email failed."
+                elif reapply_status == "skipped":
+                    reapply_message = "Candidate re-applied, but application links email was skipped."
+
+                await _record_ingest_attempt(
+                    session,
+                    payload=payload,
+                    row_key=row_key,
+                    row=row,
+                    email_normalized=email_normalized,
+                    external_source_ref=external_source_ref,
+                    attempt_status="reapplied",
+                    candidate_id=existing_candidate.candidate_id,
+                    opening_id=opening.opening_id,
+                    message=reapply_message,
+                    raw_row=raw_row,
+                    attempted_at=row_now,
+                )
+                await _upsert_ingest_idempotency(
+                    session,
+                    source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                    external_source_ref=external_source_ref,
+                    candidate_id=existing_candidate.candidate_id,
+                    result_status="reapplied",
+                    result_message=reapply_message,
+                )
+                await session.commit()
+
+                created_count += 1
+                result_payload = {
+                    "row_key": row_key,
+                    "status": "created",
+                    "candidate_id": existing_candidate.candidate_id,
+                    "candidate_code": existing_candidate.candidate_code,
+                    "message": reapply_message,
+                }
+                if reapply_status:
+                    result_payload["email_status"] = reapply_status
+                if reapply_error:
+                    result_payload["email_error"] = reapply_error
+                results.append(result_payload)
                 continue
 
             candidate = await _create_candidate_with_automation(
@@ -1261,6 +1662,28 @@ async def import_candidates_from_google_sheet(
                 user=None,
                 event_source="google_sheet_import",
             )
+            await _record_ingest_attempt(
+                session,
+                payload=payload,
+                row_key=row_key,
+                row=row,
+                email_normalized=email_normalized,
+                external_source_ref=external_source_ref,
+                attempt_status="created",
+                candidate_id=candidate.candidate_id,
+                opening_id=opening.opening_id,
+                message="Candidate created.",
+                raw_row=raw_row,
+                attempted_at=row_now,
+            )
+            await _upsert_ingest_idempotency(
+                session,
+                source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                external_source_ref=external_source_ref,
+                candidate_id=candidate.candidate_id,
+                result_status="created",
+                result_message="Candidate created.",
+            )
             await session.commit()
             created_count += 1
             result_payload = {
@@ -1288,6 +1711,26 @@ async def import_candidates_from_google_sheet(
                 if email_error:
                     result_payload["email_error"] = email_error
             results.append(result_payload)
+        except ValidationError as exc:
+            await session.rollback()
+            failed_count += 1
+            message = "; ".join(error.get("msg", "invalid row") for error in exc.errors()) or "Invalid row payload."
+            await _record_ingest_attempt(
+                session,
+                payload=payload,
+                row_key=row_key,
+                row=None,
+                email_normalized=email_normalized,
+                external_source_ref=external_source_ref,
+                attempt_status="error",
+                candidate_id=None,
+                opening_id=None,
+                message=message,
+                raw_row=raw_row,
+                attempted_at=row_now,
+            )
+            await session.commit()
+            results.append({"row_key": row_key, "status": "error", "message": message})
         except IntegrityError:
             await session.rollback()
             dedupe_filters = [func.lower(RecCandidate.email) == email_normalized]
@@ -1301,30 +1744,90 @@ async def import_candidates_from_google_sheet(
                     .limit(1)
                 )
             ).scalars().first()
-            if existing_candidate and _is_recent_google_sheet_duplicate(existing_candidate, now=row_now):
+            if existing_candidate:
                 duplicate_count += 1
+                duplicate_message = (
+                    "Candidate already exists for this opening/email within last 24 hours."
+                    if _is_recent_google_sheet_duplicate(existing_candidate, now=row_now)
+                    else "Candidate already exists for this opening/email."
+                )
+                await _record_ingest_attempt(
+                    session,
+                    payload=payload,
+                    row_key=row_key,
+                    row=row,
+                    email_normalized=email_normalized,
+                    external_source_ref=external_source_ref,
+                    attempt_status="duplicate_integrity",
+                    candidate_id=existing_candidate.candidate_id,
+                    opening_id=opening_id_for_dedupe,
+                    message=duplicate_message,
+                    raw_row=raw_row,
+                    attempted_at=row_now,
+                )
+                await _upsert_ingest_idempotency(
+                    session,
+                    source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                    external_source_ref=external_source_ref,
+                    candidate_id=existing_candidate.candidate_id,
+                    result_status="duplicate",
+                    result_message=duplicate_message,
+                )
+                await session.commit()
                 results.append(
                     {
                         "row_key": row_key,
                         "status": "duplicate",
                         "candidate_id": existing_candidate.candidate_id,
                         "candidate_code": existing_candidate.candidate_code,
-                        "message": "Candidate already exists for this opening/email within last 24 hours.",
+                        "message": duplicate_message,
                     }
                 )
             else:
                 failed_count += 1
+                message = "Candidate could not be imported due to an integrity error."
+                await _record_ingest_attempt(
+                    session,
+                    payload=payload,
+                    row_key=row_key,
+                    row=row,
+                    email_normalized=email_normalized,
+                    external_source_ref=external_source_ref,
+                    attempt_status="error",
+                    candidate_id=None,
+                    opening_id=opening_id_for_dedupe,
+                    message=message,
+                    raw_row=raw_row,
+                    attempted_at=row_now,
+                )
+                await session.commit()
                 results.append(
                     {
                         "row_key": row_key,
                         "status": "error",
-                        "message": "Candidate could not be imported due to an integrity error.",
+                        "message": message,
                     }
                 )
         except HTTPException as exc:
             await session.rollback()
             failed_count += 1
-            results.append({"row_key": row_key, "status": "error", "message": str(exc.detail)})
+            message = str(exc.detail)
+            await _record_ingest_attempt(
+                session,
+                payload=payload,
+                row_key=row_key,
+                row=row,
+                email_normalized=email_normalized,
+                external_source_ref=external_source_ref,
+                attempt_status="error",
+                candidate_id=None,
+                opening_id=opening_id_for_dedupe,
+                message=message,
+                raw_row=raw_row,
+                attempted_at=row_now,
+            )
+            await session.commit()
+            results.append({"row_key": row_key, "status": "error", "message": message})
         except Exception as exc:
             await session.rollback()
             failed_count += 1
@@ -1332,6 +1835,21 @@ async def import_candidates_from_google_sheet(
             detail = "Candidate import failed."
             if settings.environment != "production":
                 detail = f"Candidate import failed: {exc}"
+            await _record_ingest_attempt(
+                session,
+                payload=payload,
+                row_key=row_key,
+                row=row,
+                email_normalized=email_normalized,
+                external_source_ref=external_source_ref,
+                attempt_status="error",
+                candidate_id=None,
+                opening_id=opening_id_for_dedupe,
+                message=detail,
+                raw_row=raw_row,
+                attempted_at=row_now,
+            )
+            await session.commit()
             results.append({"row_key": row_key, "status": "error", "message": detail})
 
     return {
@@ -1523,6 +2041,9 @@ async def get_candidate(
         ).scalar_one_or_none()
 
     current_stage = await _get_current_stage_name(session, candidate_id=candidate_id)
+    duplicate_tag, duplicate_application_count, latest_reapplication_at = await _candidate_duplicate_metadata(
+        session, candidate_id=candidate_id
+    )
     return CandidateDetailOut(
         candidate_id=candidate.candidate_id,
         candidate_code=candidate.candidate_code or _candidate_code(candidate.candidate_id),
@@ -1557,6 +2078,9 @@ async def get_candidate(
         needs_hr_review=bool(candidate.needs_hr_review),
         application_docs_status=candidate.application_docs_status,
         joining_docs_status=candidate.joining_docs_status,
+        duplicate_tag=duplicate_tag,
+        duplicate_application_count=duplicate_application_count,
+        latest_reapplication_at=latest_reapplication_at,
         created_at=candidate.created_at,
         updated_at=candidate.updated_at,
     )

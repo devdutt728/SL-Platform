@@ -59,6 +59,9 @@ export type CandidateDetail = {
   needs_hr_review?: boolean;
   application_docs_status: string;
   joining_docs_status: string;
+  duplicate_tag?: boolean;
+  duplicate_application_count?: number;
+  latest_reapplication_at?: string | null;
   created_at: string;
   updated_at: string;
 };

@@ -20,6 +20,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<boolean>(false);
   const [alreadyApplied, setAlreadyApplied] = useState<boolean>(false);
+  const [reapplied, setReapplied] = useState<boolean>(false);
   const [candidateCode, setCandidateCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cvName, setCvName] = useState<string>("");
@@ -98,9 +99,11 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
     try {
       const body = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : null;
       setAlreadyApplied(Boolean(body?.already_applied));
+      setReapplied(Boolean(body?.reapplied));
       setCandidateCode(body?.candidate_code ? String(body.candidate_code) : null);
     } catch {
       setAlreadyApplied(false);
+      setReapplied(false);
       setCandidateCode(null);
     }
 
@@ -117,20 +120,24 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
           </div>
           <div>
             <h2 className="text-lg font-semibold text-[var(--dim-grey)]">
-              {alreadyApplied ? "Application already received" : "Application submitted"}
+              {alreadyApplied ? "Application already received" : reapplied ? "Application re-submitted" : "Application submitted"}
             </h2>
             <p className="mt-2 text-[13px] text-[var(--dim-grey)]">
               Thank you for your interest. The hiring team has received your submission and will review it shortly.
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span className={pillClass}>{alreadyApplied ? "Already received" : "Received"}</span>
+              <span className={pillClass}>{alreadyApplied ? "Already received" : reapplied ? "Re-applied" : "Received"}</span>
               {candidateCode ? (
                 <span className={pillClass}>
                   Candidate code: <span className="font-semibold text-[var(--dim-grey)]">{candidateCode}</span>
                 </span>
               ) : null}
             </div>
-            <p className="mt-3 text-[13px] text-[var(--dim-grey)]">Please do not submit another application for the same role.</p>
+            <p className="mt-3 text-[13px] text-[var(--dim-grey)]">
+              {alreadyApplied
+                ? "You already applied for this role in the last 24 hours. Please reapply after 24 hours if needed."
+                : "You can reapply for the same role after 24 hours if your profile has updates."}
+            </p>
           </div>
         </div>
       </div>

@@ -114,6 +114,9 @@ class CandidateDetailOut(BaseModel):
 
     application_docs_status: str
     joining_docs_status: str
+    duplicate_tag: bool = False
+    duplicate_application_count: int = 0
+    latest_reapplication_at: Optional[datetime] = None
 
     created_at: datetime
     updated_at: datetime
