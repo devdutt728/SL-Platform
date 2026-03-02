@@ -5,14 +5,17 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
 import { CandidateListItem, OpeningListItem } from "@/lib/types";
-import { AlertTriangle, CheckCircle2, Filter, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Filter, XCircle, Bookmark, Eye } from "lucide-react";
 import { parseDateUtc } from "@/lib/datetime";
 import { redirectToLogin } from "@/lib/auth-client";
+import { useToast } from "@/components/ui/toast-provider";
+import { trackUxMetric } from "@/lib/ux-metrics";
 
 type Props = {
   initialCandidates: CandidateListItem[];
   openings: OpeningListItem[];
   canNavigate?: boolean;
+  canViewBasicDetails?: boolean;
 };
 
 const stageTone: Record<string, string> = {
@@ -75,6 +78,16 @@ function sourceLabel(candidate: CandidateListItem) {
   return "";
 }
 
+function yesNoUnknown(value: boolean | null | undefined): string {
+  if (value == null) return "-";
+  return value ? "Yes" : "No";
+}
+
+function cleanText(value: string | null | undefined): string {
+  const trimmed = String(value || "").trim();
+  return trimmed || "-";
+}
+
 function chipTone(kind: "neutral" | "green" | "amber" | "red" | "blue") {
   if (kind === "green") return "bg-emerald-500/15 text-emerald-800 ring-1 ring-emerald-500/20";
   if (kind === "amber") return "bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/20";
@@ -101,6 +114,19 @@ function priorityChip(candidate: CandidateListItem) {
   return null;
 }
 
+function isAttentionCandidate(candidate: CandidateListItem) {
+  const screening = (candidate.screening_result || "").trim().toLowerCase();
+  const isHighAge = (candidate.ageing_days || 0) >= 2;
+  const isHigh = screening === "red" || screening === "high";
+  const isMedium = screening === "amber" || screening === "medium";
+  const isLow = screening === "green" || screening === "low";
+  const cafPendingTooLong =
+    normalizeStage(candidate.current_stage) === "hr_screening" &&
+    !candidate.caf_submitted_at &&
+    (candidate.ageing_days || 0) >= 3;
+  return isHighAge || isHigh || isMedium || isLow || cafPendingTooLong || !!candidate.needs_hr_review;
+}
+
 const STAGE_OPTIONS = [
   "enquiry",
   "hr_screening",
@@ -117,6 +143,16 @@ const STAGE_OPTIONS = [
   "declined",
   "rejected",
 ];
+
+type SavedView = {
+  id: string;
+  name: string;
+  selectedStages: string[];
+  openingId: string;
+  statusView: "all" | "active" | "hired" | "rejected";
+  needsAttention: boolean;
+  cafToday: boolean;
+};
 
 async function fetchCandidates(params: {
   stage: string[];
@@ -145,12 +181,20 @@ async function fetchCandidates(params: {
   return (await res.json()) as CandidateListItem[];
 }
 
-export function CandidatesClient({ initialCandidates, openings, canNavigate = true }: Props) {
+export function CandidatesClient({
+  initialCandidates,
+  openings,
+  canNavigate = true,
+  canViewBasicDetails = false,
+}: Props) {
+  const { pushToast } = useToast();
   const [candidates, setCandidates] = useState<CandidateListItem[]>(initialCandidates);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const searchParams = useSearchParams();
   const [initialized, setInitialized] = useState(false);
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
 
   const tableGrid =
     "grid grid-cols-[minmax(200px,2.4fr)_minmax(140px,1.2fr)_minmax(170px,1.5fr)_minmax(200px,1.9fr)_minmax(80px,0.7fr)_minmax(80px,0.7fr)_minmax(95px,0.8fr)]";
@@ -167,6 +211,32 @@ export function CandidatesClient({ initialCandidates, openings, canNavigate = tr
     setStatusView("active");
     setNeedsAttention(false);
     setCafToday(false);
+  }
+
+  function applySavedView(view: SavedView) {
+    setSelectedStages(view.selectedStages || []);
+    setOpeningId(view.openingId || "");
+    setStatusView(view.statusView || "active");
+    setNeedsAttention(Boolean(view.needsAttention));
+    setCafToday(Boolean(view.cafToday));
+    pushToast({ tone: "info", title: `View loaded: ${view.name}` });
+    trackUxMetric({ event_name: "candidate_saved_view_applied", entity_type: "saved_view", entity_id: view.id });
+  }
+
+  function saveCurrentView() {
+    const name = `View ${savedViews.length + 1}`;
+    const view: SavedView = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      selectedStages: [...selectedStages],
+      openingId,
+      statusView,
+      needsAttention,
+      cafToday,
+    };
+    setSavedViews((prev) => [view, ...prev].slice(0, 12));
+    pushToast({ tone: "success", title: `Saved view: ${view.name}` });
+    trackUxMetric({ event_name: "candidate_saved_view_created", entity_type: "saved_view", entity_id: view.id });
   }
 
   function toDayKey(value: Date, tz: string) {
@@ -202,6 +272,25 @@ export function CandidatesClient({ initialCandidates, openings, canNavigate = tr
     setCafToday(searchParams.get("caf_today") === "1");
     setInitialized(true);
   }, [initialized, searchParams]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("rec_candidates_saved_views_v1");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as SavedView[];
+      if (Array.isArray(parsed)) setSavedViews(parsed.slice(0, 12));
+    } catch {
+      // Ignore malformed local storage data.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("rec_candidates_saved_views_v1", JSON.stringify(savedViews.slice(0, 12)));
+    } catch {
+      // Ignore storage write issues.
+    }
+  }, [savedViews]);
 
   useEffect(() => {
     let cancelled = false;
@@ -276,108 +365,148 @@ export function CandidatesClient({ initialCandidates, openings, canNavigate = tr
       });
     }
     if (!needsAttention) return current;
-    return current.filter((c) => {
-      const screening = (c.screening_result || "").trim().toLowerCase();
-      const isHighAge = (c.ageing_days || 0) >= 2;
-      const isHigh = screening === "red" || screening === "high";
-      const isMedium = screening === "amber" || screening === "medium";
-      const isLow = screening === "green" || screening === "low";
-      const cafPendingTooLong = normalizeStage(c.current_stage) === "hr_screening" && !c.caf_submitted_at && (c.ageing_days || 0) >= 3;
-      return isHighAge || isHigh || isMedium || isLow || cafPendingTooLong || !!c.needs_hr_review;
-    });
+    return current.filter((candidate) => isAttentionCandidate(candidate));
   }, [candidates, needsAttention, cafToday]);
 
-  const uniqueStages = useMemo(() => {
-    const built = new Set<string>([
-      "enquiry",
-      "hr_screening",
-      "l2_shortlist",
-      "l2_interview",
-      "l2_feedback",
-      "sprint",
-      "l1_shortlist",
-      "l1_interview",
-      "l1_feedback",
-      "offer",
-      "hired",
-      "rejected",
-    ]);
-    for (const c of candidates) {
-      const s = normalizeStage(c.current_stage);
-      if (s) built.add(s);
+  useEffect(() => {
+    if (!filtered.length) {
+      setSelectedCandidateId(null);
+      return;
     }
-    return Array.from(built);
-  }, [candidates]);
+    if (selectedCandidateId == null || !filtered.some((item) => item.candidate_id === selectedCandidateId)) {
+      setSelectedCandidateId(filtered[0].candidate_id);
+    }
+  }, [filtered, selectedCandidateId]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.target instanceof HTMLElement) {
+        const tag = event.target.tagName.toLowerCase();
+        if (["input", "textarea", "select"].includes(tag) || event.target.isContentEditable) return;
+      }
+      if (!filtered.length) return;
+      if (event.key.toLowerCase() === "j") {
+        event.preventDefault();
+        setSelectedCandidateId((prev) => {
+          const currentIdx = filtered.findIndex((item) => item.candidate_id === prev);
+          const nextIdx = currentIdx < 0 ? 0 : Math.min(filtered.length - 1, currentIdx + 1);
+          return filtered[nextIdx].candidate_id;
+        });
+      }
+      if (event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSelectedCandidateId((prev) => {
+          const currentIdx = filtered.findIndex((item) => item.candidate_id === prev);
+          const nextIdx = currentIdx <= 0 ? 0 : currentIdx - 1;
+          return filtered[nextIdx].candidate_id;
+        });
+      }
+      if (event.key.toLowerCase() === "e") {
+        const selected = filtered.find((item) => item.candidate_id === selectedCandidateId);
+        if (!selected) return;
+        const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
+        window.location.href = `${basePath}/candidates/${selected.candidate_id}`;
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [filtered, selectedCandidateId]);
+
+  const selectedCandidate = useMemo(
+    () => filtered.find((item) => item.candidate_id === selectedCandidateId) || null,
+    [filtered, selectedCandidateId]
+  );
+
+  const stageDistribution = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const candidate of filtered) {
+      const key = normalizeStage(candidate.current_stage) || "unknown";
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([key, count]) => ({ key, label: stageLabels[key] || key.replace(/_/g, " "), count }));
+  }, [filtered]);
+
+  const attentionQueue = useMemo(() => {
+    return filtered
+      .filter((candidate) => isAttentionCandidate(candidate))
+      .sort((a, b) => (b.ageing_days || 0) - (a.ageing_days || 0))
+      .slice(0, 5);
+  }, [filtered]);
+
+  const attentionCount = useMemo(
+    () => filtered.filter((candidate) => isAttentionCandidate(candidate)).length,
+    [filtered]
+  );
 
   return (
-    <main className="content-pad space-y-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <main className="content-pad space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-xs uppercase tracking-tight text-slate-500">Control panel</p>
-          <h1 className="mt-1 text-2xl font-semibold">Candidates</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Showing <span className="font-semibold">{filtered.length}</span> candidates
-            {needsAttention ? " (needs attention)" : ""}
-            {cafToday ? " (CAF today)" : ""}.
-          </p>
+          <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Control panel</p>
+          <h1 className="text-2xl font-semibold text-slate-900">Candidates</h1>
         </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+            Total {filtered.length}
+          </span>
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+            Attention {attentionCount}
+          </span>
+          {loading ? <span className="text-xs text-slate-500">Refreshing...</span> : null}
+        </div>
+      </div>
 
+      {error ? <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+
+      <div className="rounded-2xl border border-slate-200 bg-white/70 p-3">
         <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
+            <Filter className="h-3.5 w-3.5 text-slate-500" />
+            Filters
+          </div>
+          {(["active", "all", "hired", "rejected"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              className={clsx(
+                "rounded-full px-3 py-1 text-xs font-semibold transition",
+                statusView === v ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+              )}
+              onClick={() => setStatusView(v)}
+            >
+              {v === "all" ? "All" : v === "active" ? "Active" : v === "hired" ? "Hired" : "Rejected"}
+            </button>
+          ))}
           <button
             type="button"
             className={clsx(
-              "inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold ring-1",
-              needsAttention ? "bg-amber-500/15 text-amber-800 ring-amber-500/20" : "bg-white/50 text-slate-800 ring-white/70 hover:bg-white/70"
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ring-1",
+              needsAttention ? "bg-amber-500/15 text-amber-800 ring-amber-500/20" : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
             )}
             onClick={() => setNeedsAttention((v) => !v)}
           >
-            <AlertTriangle className="h-4 w-4" />
+            <AlertTriangle className="h-3.5 w-3.5" />
             Needs attention
           </button>
           <button
             type="button"
             className={clsx(
-              "inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold ring-1",
-              cafToday ? "bg-emerald-500/15 text-emerald-800 ring-emerald-500/20" : "bg-white/50 text-slate-800 ring-white/70 hover:bg-white/70"
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ring-1",
+              cafToday ? "bg-emerald-500/15 text-emerald-800 ring-emerald-500/20" : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
             )}
             onClick={() => setCafToday((v) => !v)}
           >
             CAF today
           </button>
-        </div>
-      </div>
-
-      {error ? <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
-
-      <div className="rounded-2xl border border-slate-200 bg-white/60 p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
-            <Filter className="h-4 w-4 text-slate-500" />
-            Filters
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {(["active", "all", "hired", "rejected"] as const).map((v) => (
-              <button
-                key={v}
-                type="button"
-                className={clsx(
-                  "rounded-full px-4 py-2 text-xs font-semibold transition",
-                  statusView === v ? "bg-slate-900 text-white" : "bg-white/60 text-slate-800 hover:bg-white"
-                )}
-                onClick={() => setStatusView(v)}
-              >
-                {v === "all" ? "All" : v === "active" ? "Active" : v === "hired" ? "Hired" : "Rejected"}
-              </button>
-            ))}
-          </div>
-
-          <label className="ml-auto flex w-full flex-col gap-1 md:w-auto">
-            <span className="text-xs font-semibold text-slate-600">Opening</span>
+          <label className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+            Opening
             <select
               value={openingId}
               onChange={(e) => setOpeningId(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-sm md:w-72"
+              className="w-56 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
             >
               <option value="">All openings</option>
               {openings.map((o) => (
@@ -387,192 +516,341 @@ export function CandidatesClient({ initialCandidates, openings, canNavigate = tr
               ))}
             </select>
           </label>
-
-          <div className="flex w-full flex-col gap-2 md:w-auto">
-            <span className="text-xs font-semibold text-slate-600">Stage</span>
-            <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white/70 p-2">
-              {STAGE_OPTIONS.map((stage) => {
-                const active = selectedStages.includes(stage);
-                return (
-                  <button
-                    key={stage}
-                    type="button"
-                    onClick={() => {
-                      setSelectedStages((prev) =>
-                        prev.includes(stage) ? prev.filter((s) => s !== stage) : [...prev, stage]
-                      );
-                    }}
-                    className={clsx(
-                      "rounded-full px-3 py-1 text-xs font-semibold transition",
-                      active ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-white/80"
-                    )}
-                  >
-                    {stageLabels[stage] || stage}
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() => setSelectedStages([])}
-                className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-white"
-                title="Clear stage filter"
-              >
-                <XCircle className="h-3.5 w-3.5" />
-                Clear
-              </button>
-            </div>
-            <p className="text-xs text-slate-500">Multi-select with clicks (no Ctrl/Cmd needed).</p>
-          </div>
-
+          <button
+            type="button"
+            onClick={saveCurrentView}
+            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            <Bookmark className="h-3.5 w-3.5" />
+            Save view
+          </button>
           <button
             type="button"
             onClick={resetFilters}
-            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-white"
+            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
           >
-            <XCircle className="h-4 w-4" />
+            <XCircle className="h-3.5 w-3.5" />
             Reset
           </button>
         </div>
-      </div>
 
-      <div className="overflow-x-auto overflow-y-hidden rounded-2xl border border-slate-200 bg-white/60">
-        <div
-          className={clsx(
-            "gap-2 border-b border-slate-200 px-3 py-2 text-xs uppercase tracking-wide text-slate-500",
-            tableGrid
-          )}
-        >
-          <span>Candidate</span>
-          <span>Opening</span>
-          <span>Stage</span>
-          <span>CAF / Screening</span>
-          <span className="text-center">Applied age</span>
-          <span className="text-center">Stage age</span>
-          <span>Status</span>
-        </div>
-
-        <div className="divide-y divide-slate-200">
-          {filtered.map((c) => {
-            const caf = cafChip(c);
-            const screening = priorityChip(c);
-            const stageKey = normalizeStage(c.current_stage);
-            const stageClass = stageTone[stageKey] || "bg-slate-500/10 text-slate-700 ring-1 ring-slate-500/15";
-            const screeningValue = (c.screening_result || "").trim().toLowerCase();
-            const isHighAge = (c.ageing_days || 0) >= 2;
-            const isHigh = screeningValue === "red" || screeningValue === "high";
-            const isMedium = screeningValue === "amber" || screeningValue === "medium";
-            const isLow = screeningValue === "green" || screeningValue === "low";
-            const cafPendingTooLong = normalizeStage(c.current_stage) === "hr_screening" && !c.caf_submitted_at && (c.ageing_days || 0) >= 3;
-            const attention = needsAttention
-              ? true
-              : !!c.needs_hr_review ||
-                isHighAge ||
-                isHigh ||
-                isMedium ||
-                isLow ||
-                cafPendingTooLong;
-            const l1Count = c.l1_interview_count || 0;
-            const l2Count = c.l2_interview_count || 0;
-            const l1Feedback = !!c.l1_feedback_submitted;
-            const l2Feedback = !!c.l2_feedback_submitted;
-
-            const appliedAgeRaw = Number.isFinite(c.applied_ageing_days) ? c.applied_ageing_days : 0;
-            const appliedAge =
-              appliedAgeRaw > 0
-                ? appliedAgeRaw
-                : c.created_at
-                  ? Math.max(
-                      0,
-                      Math.floor(
-                        (new Date().getTime() - new Date(c.created_at).getTime()) / (24 * 60 * 60 * 1000)
-                      )
-                    )
-                  : 0;
-            const rowClass = clsx(
-              "gap-2 px-3 py-3 transition",
-              canNavigate ? "hover:bg-white/70" : "",
-              tableGrid,
-              isHighAge || isHigh ? "bg-rose-500/10" : attention ? "bg-amber-500/5" : ""
-            );
-            const rowContent = (
-              <>
-                <div className="min-w-0">
-                  <p className="truncate font-semibold text-slate-900">{c.name}</p>
-                  <p className="text-xs text-slate-600">{c.candidate_code}</p>
-                  {sourceLabel(c) ? <p className="text-[11px] text-slate-500">{sourceLabel(c)}</p> : null}
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-800">{c.opening_title || "-"}</p>
-                  <p className="text-xs text-slate-600">{c.opening_id ? `ID: ${c.opening_id}` : ""}</p>
-                </div>
-                <div className="min-w-0">
-                  <span className={clsx("inline-flex rounded-full px-2 py-1 text-xs font-semibold", stageClass)}>
-                    {stageLabel(c.current_stage) || "-"}
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 whitespace-nowrap">
-                  <span className={clsx("rounded-full px-2 py-1 text-xs font-semibold", caf.tone)}>{caf.label}</span>
-                  {screening ? (
-                    <span className={clsx("inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold", screening.tone)}>
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      {screening.label}
-                    </span>
-                  ) : null}
-                  {l1Count > 0 ? (
-                    <span
-                      className={clsx(
-                        "rounded-full px-2 py-1 text-xs font-semibold",
-                        l1Feedback ? chipTone("green") : chipTone("amber")
-                      )}
-                    >
-                      L1 feedback {l1Feedback ? "submitted" : "pending"}
-                    </span>
-                  ) : null}
-                  {l2Count > 0 ? (
-                    <span
-                      className={clsx(
-                        "rounded-full px-2 py-1 text-xs font-semibold",
-                        l2Feedback ? chipTone("green") : chipTone("amber")
-                      )}
-                    >
-                      L2 feedback {l2Feedback ? "submitted" : "pending"}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="whitespace-nowrap text-center text-sm text-slate-800">{appliedAge}d</div>
-                <div className="whitespace-nowrap text-center text-sm text-slate-800">{c.ageing_days}d</div>
-                <div className="whitespace-nowrap">
-                  <span className={clsx("rounded-full px-2 py-1 text-xs font-semibold", chipTone(c.status === "rejected" || c.status === "declined" ? "red" : c.status === "hired" ? "green" : "neutral"))}>
-                    {c.status.split("_").join(" ")}
-                  </span>
-                </div>
-              </>
-            );
-
-            return canNavigate ? (
-              <Link
-                key={c.candidate_id}
-                href={`/candidates/${c.candidate_id}`}
-                className={rowClass}
+        <div className="mt-2 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-1">
+          {STAGE_OPTIONS.map((stage) => {
+            const active = selectedStages.includes(stage);
+            return (
+              <button
+                key={stage}
+                type="button"
+                onClick={() => {
+                  setSelectedStages((prev) =>
+                    prev.includes(stage) ? prev.filter((s) => s !== stage) : [...prev, stage]
+                  );
+                }}
+                className={clsx(
+                  "rounded-full px-2.5 py-1 text-[11px] font-semibold transition",
+                  active ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+                )}
               >
-                {rowContent}
-              </Link>
-            ) : (
-              <div
-                key={c.candidate_id}
-                className={rowClass}
-              >
-                {rowContent}
-              </div>
+                {stageLabels[stage] || stage}
+              </button>
             );
           })}
-
-          {filtered.length === 0 ? (
-            <div className="px-3 py-10 text-center text-sm text-slate-500">
-              {loading ? "Loading..." : "No candidates found for these filters."}
-            </div>
-          ) : null}
+          <button
+            type="button"
+            onClick={() => setSelectedStages([])}
+            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+            title="Clear stage filter"
+          >
+            <XCircle className="h-3 w-3" />
+            Clear stage
+          </button>
         </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-semibold text-slate-500">Saved</span>
+          {savedViews.length === 0 ? (
+            <p className="text-[11px] text-slate-500">No saved views yet.</p>
+          ) : (
+            savedViews.map((view) => (
+              <button
+                key={view.id}
+                type="button"
+                className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={() => applySavedView(view)}
+              >
+                {view.name}
+              </button>
+            ))
+          )}
+          <span className="ml-auto text-[11px] text-slate-500">Shortcuts: J/K move · E open profile</span>
+        </div>
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
+        <div className="overflow-x-auto overflow-y-hidden rounded-2xl border border-slate-200 bg-white/70">
+          <div
+            className={clsx(
+              "gap-2 border-b border-slate-200 px-3 py-1.5 text-[11px] uppercase tracking-wide text-slate-500",
+              tableGrid
+            )}
+          >
+            <span>Candidate</span>
+            <span>Opening</span>
+            <span>Stage</span>
+            <span>CAF / Screening</span>
+            <span className="text-center">Applied age</span>
+            <span className="text-center">Stage age</span>
+            <span>Status</span>
+          </div>
+
+          <div className="divide-y divide-slate-200">
+            {filtered.map((candidate) => {
+              const caf = cafChip(candidate);
+              const screening = priorityChip(candidate);
+              const stageKey = normalizeStage(candidate.current_stage);
+              const stageClass = stageTone[stageKey] || "bg-slate-500/10 text-slate-700 ring-1 ring-slate-500/15";
+              const attention = isAttentionCandidate(candidate);
+              const l1Count = candidate.l1_interview_count || 0;
+              const l2Count = candidate.l2_interview_count || 0;
+              const l1Feedback = !!candidate.l1_feedback_submitted;
+              const l2Feedback = !!candidate.l2_feedback_submitted;
+
+              const appliedAgeRaw = Number.isFinite(candidate.applied_ageing_days) ? candidate.applied_ageing_days : 0;
+              const appliedAge =
+                appliedAgeRaw > 0
+                  ? appliedAgeRaw
+                  : candidate.created_at
+                    ? Math.max(
+                        0,
+                        Math.floor(
+                          (new Date().getTime() - new Date(candidate.created_at).getTime()) / (24 * 60 * 60 * 1000)
+                        )
+                      )
+                    : 0;
+              const isSelected = selectedCandidateId === candidate.candidate_id;
+              const rowClass = clsx(
+                "gap-2 px-3 py-2.5 transition",
+                canNavigate ? "hover:bg-white/80" : "",
+                tableGrid,
+                attention ? "bg-amber-500/5" : "",
+                isSelected ? "ring-2 ring-inset ring-[rgba(19,120,209,0.45)]" : ""
+              );
+              const rowContent = (
+                <>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-900">{candidate.name}</p>
+                    <p className="text-[11px] text-slate-600">{candidate.candidate_code}</p>
+                    {sourceLabel(candidate) ? <p className="text-[10px] text-slate-500">{sourceLabel(candidate)}</p> : null}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-800">{candidate.opening_title || "-"}</p>
+                    <p className="text-[11px] text-slate-600">{candidate.opening_id ? `ID: ${candidate.opening_id}` : ""}</p>
+                  </div>
+                  <div className="min-w-0">
+                    <span className={clsx("inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold", stageClass)}>
+                      {stageLabel(candidate.current_stage) || "-"}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 whitespace-nowrap">
+                    <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", caf.tone)}>{caf.label}</span>
+                    {screening ? (
+                      <span className={clsx("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold", screening.tone)}>
+                        <CheckCircle2 className="h-3 w-3" />
+                        {screening.label}
+                      </span>
+                    ) : null}
+                    {l1Count > 0 ? (
+                      <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", l1Feedback ? chipTone("green") : chipTone("amber"))}>
+                        L1 {l1Feedback ? "done" : "pending"}
+                      </span>
+                    ) : null}
+                    {l2Count > 0 ? (
+                      <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", l2Feedback ? chipTone("green") : chipTone("amber"))}>
+                        L2 {l2Feedback ? "done" : "pending"}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="whitespace-nowrap text-center text-sm text-slate-800">{appliedAge}d</div>
+                  <div className="whitespace-nowrap text-center text-sm text-slate-800">{candidate.ageing_days}d</div>
+                  <div className="whitespace-nowrap">
+                    <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", chipTone(candidate.status === "rejected" || candidate.status === "declined" ? "red" : candidate.status === "hired" ? "green" : "neutral"))}>
+                      {candidate.status.split("_").join(" ")}
+                    </span>
+                  </div>
+                </>
+              );
+
+              return canNavigate ? (
+                <Link
+                  key={candidate.candidate_id}
+                  href={`/candidates/${candidate.candidate_id}`}
+                  className={rowClass}
+                  onMouseEnter={() => setSelectedCandidateId(candidate.candidate_id)}
+                >
+                  {rowContent}
+                </Link>
+              ) : (
+                <div
+                  key={candidate.candidate_id}
+                  className={rowClass}
+                  onMouseEnter={() => setSelectedCandidateId(candidate.candidate_id)}
+                >
+                  {rowContent}
+                </div>
+              );
+            })}
+
+            {filtered.length === 0 ? (
+              <div className="px-3 py-8 text-center text-sm text-slate-500">
+                {loading ? "Loading..." : "No candidates found for these filters."}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <aside className="space-y-3 xl:sticky xl:top-3">
+          <div className="rounded-2xl border border-slate-200 bg-white/75 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Quick preview</p>
+              {selectedCandidate && canNavigate ? (
+                <Link
+                  href={`/candidates/${selectedCandidate.candidate_id}`}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-800 hover:bg-slate-50"
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  Open 360
+                </Link>
+              ) : null}
+            </div>
+            {selectedCandidate ? (
+              <>
+                <p className="mt-2 text-sm font-semibold text-slate-900">{selectedCandidate.name}</p>
+                <p className="text-[11px] text-slate-600">{selectedCandidate.candidate_code} · {stageLabel(selectedCandidate.current_stage)}</p>
+                <div className="mt-2 rounded-xl border border-slate-200 bg-white p-2.5">
+                  <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px]">
+                    <p className="text-slate-500">Applying for</p>
+                    <p className="truncate text-right font-medium text-slate-800" title={cleanText(selectedCandidate.opening_title)}>
+                      {cleanText(selectedCandidate.opening_title)}
+                    </p>
+                    <p className="text-slate-500">Applied age</p>
+                    <p className="text-right font-medium text-slate-800">{selectedCandidate.applied_ageing_days || 0}d</p>
+                    <p className="text-slate-500">Stage age</p>
+                    <p className="text-right font-medium text-slate-800">{selectedCandidate.ageing_days || 0}d</p>
+                    <p className="text-slate-500">Status</p>
+                    <p className="text-right font-medium capitalize text-slate-800">{selectedCandidate.status.split("_").join(" ")}</p>
+                  </div>
+                </div>
+                {canViewBasicDetails ? (
+                  <div className="mt-2 rounded-xl border border-slate-200 bg-white p-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Candidate basic details</p>
+                    <div className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px]">
+                      <p className="text-slate-500">Full name</p>
+                      <p className="truncate text-right text-slate-800" title={cleanText(`${selectedCandidate.first_name || ""} ${selectedCandidate.last_name || ""}`.trim() || selectedCandidate.name)}>
+                        {cleanText(`${selectedCandidate.first_name || ""} ${selectedCandidate.last_name || ""}`.trim() || selectedCandidate.name)}
+                      </p>
+                      <p className="text-slate-500">Email</p>
+                      <p className="truncate text-right text-slate-800" title={cleanText(selectedCandidate.email)}>{cleanText(selectedCandidate.email)}</p>
+                      <p className="text-slate-500">Contact</p>
+                      <p className="truncate text-right text-slate-800" title={cleanText(selectedCandidate.phone)}>{cleanText(selectedCandidate.phone)}</p>
+                      <p className="text-slate-500">Education</p>
+                      <p className="truncate text-right text-slate-800" title={cleanText(selectedCandidate.educational_qualification)}>
+                        {cleanText(selectedCandidate.educational_qualification)}
+                      </p>
+                      <p className="text-slate-500">Experience</p>
+                      <p className="text-right text-slate-800">
+                        {selectedCandidate.years_of_experience == null ? "-" : `${selectedCandidate.years_of_experience} years`}
+                      </p>
+                      <p className="text-slate-500">City</p>
+                      <p className="truncate text-right text-slate-800" title={cleanText(selectedCandidate.city)}>{cleanText(selectedCandidate.city)}</p>
+                      <p className="text-slate-500">Relocate</p>
+                      <p className="text-right text-slate-800">{yesNoUnknown(selectedCandidate.willing_to_relocate)}</p>
+                      <p className="text-slate-500">Terms</p>
+                      <p className="text-right text-slate-800">{yesNoUnknown(selectedCandidate.terms_consent)}</p>
+                    </div>
+                    <div className="mt-2 flex flex-wrap justify-end gap-1.5">
+                      {selectedCandidate.portfolio_url ? (
+                        <a
+                          href={selectedCandidate.portfolio_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          Portfolio
+                        </a>
+                      ) : (
+                        <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-400">Portfolio</span>
+                      )}
+                      {selectedCandidate.cv_url ? (
+                        <a
+                          href={selectedCandidate.cv_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          CV
+                        </a>
+                      ) : (
+                        <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-400">CV</span>
+                      )}
+                      {selectedCandidate.resume_url ? (
+                        <a
+                          href={selectedCandidate.resume_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          Resume
+                        </a>
+                      ) : (
+                        <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-400">Resume</span>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+                {!canViewBasicDetails ? (
+                  <p className="mt-2 text-[11px] text-slate-500">Basic candidate details are visible to HR roles and super admin only.</p>
+                ) : null}
+                <div className="mt-2">
+                  <p className="truncate text-[11px] text-slate-500">{sourceLabel(selectedCandidate) || "Source not available"}</p>
+                </div>
+              </>
+            ) : (
+              <p className="mt-2 text-xs text-slate-600">Select a row to preview candidate details.</p>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white/75 p-3">
+            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Stage distribution</p>
+            <div className="mt-2 space-y-1.5">
+              {stageDistribution.length === 0 ? (
+                <p className="text-xs text-slate-500">No stage data for current filters.</p>
+              ) : (
+                stageDistribution.map((item) => (
+                  <div key={item.key} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
+                    <span className="truncate text-xs font-semibold text-slate-700">{item.label}</span>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">{item.count}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3">
+            <p className="text-[11px] uppercase tracking-[0.12em] text-amber-800">Attention queue</p>
+            <div className="mt-2 space-y-1.5">
+              {attentionQueue.length === 0 ? (
+                <p className="text-xs text-amber-700">No urgent candidates in this view.</p>
+              ) : (
+                attentionQueue.map((candidate) => (
+                  <div key={candidate.candidate_id} className="rounded-lg border border-amber-200 bg-white px-2.5 py-1.5">
+                    <p className="truncate text-xs font-semibold text-slate-800">{candidate.name}</p>
+                    <p className="text-[11px] text-slate-600">{stageLabel(candidate.current_stage)} · {candidate.ageing_days}d</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </aside>
       </div>
     </main>
   );

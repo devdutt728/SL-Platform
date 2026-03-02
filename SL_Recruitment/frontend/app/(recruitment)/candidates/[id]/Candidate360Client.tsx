@@ -8,6 +8,9 @@ import { clsx } from "clsx";
 import { CheckCircle2, Copy, ExternalLink, FileText, Layers, Mail, Phone, XCircle } from "lucide-react";
 import { DeleteCandidateButton } from "./DeleteCandidateButton";
 import { parseDateUtc } from "@/lib/datetime";
+import { ActionDialog } from "@/components/ui/action-dialog";
+import { useToast } from "@/components/ui/toast-provider";
+import { trackUxMetric } from "@/lib/ux-metrics";
 
 type Props = {
   candidateId: string;
@@ -34,6 +37,19 @@ type StageButton = {
   intent: string;
   action: () => void | Promise<void>;
   disabled?: boolean;
+};
+
+type DialogState = {
+  open: boolean;
+  title: string;
+  description?: string;
+  confirmLabel?: string;
+  tone?: "neutral" | "danger" | "success";
+  requireReason?: boolean;
+  reasonLabel?: string;
+  reasonPlaceholder?: string;
+  error?: string | null;
+  onConfirm: (value?: string) => void | Promise<void>;
 };
 
 const stageOrder = [
@@ -607,9 +623,22 @@ export function Candidate360Client({
   canAccessOffers,
 }: Props) {
   const searchParams = useSearchParams();
+  const { pushToast } = useToast();
   const [data, setData] = useState<CandidateFull>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<DialogState>({
+    open: false,
+    title: "",
+    description: "",
+    confirmLabel: "Confirm",
+    tone: "neutral",
+    requireReason: false,
+    reasonLabel: "Reason",
+    reasonPlaceholder: "",
+    error: null,
+    onConfirm: () => undefined,
+  });
   const [cafLink, setCafLink] = useState<{ caf_token: string; caf_url: string } | null>(null);
   const [interviews, setInterviews] = useState<Interview[] | null>(null);
   const [interviewsBusy, setInterviewsBusy] = useState(false);
@@ -946,6 +975,14 @@ export function Candidate360Client({
     return <Chip className={chipTone("amber")}>Needs HR review</Chip>;
   }, [candidate.needs_hr_review]);
 
+  function closeDialog() {
+    setDialog((prev) => ({ ...prev, open: false, error: null }));
+  }
+
+  function openDialog(next: Omit<DialogState, "open">) {
+    setDialog({ ...next, open: true, error: null });
+  }
+
   async function refreshAll() {
     const full = await fetchFull(candidateId);
     setData(full);
@@ -1019,10 +1056,10 @@ export function Candidate360Client({
     }
   }
 
-  async function handleTransition(toStage: string, decision: string, reasonOverride?: string) {
+  async function performTransition(toStage: string, decision: string, reasonOverride?: string) {
     if (!canManageCandidate360) {
       setError("Candidate 360 actions are restricted for your role.");
-      return;
+      return false;
     }
     setBusy(true);
     setError(null);
@@ -1030,24 +1067,58 @@ export function Candidate360Client({
       if (toStage === "hr_screening" && !candidate.l2_owner_email) {
         setBusy(false);
         setError("Assign GL/L2 email before moving to HR screening.");
-        return;
+        return false;
       }
-      let reason = reasonOverride;
-      if (decision === "reject" && !reason) {
-        const input = window.prompt("Reason for rejection (required):");
-        if (!input || !input.trim()) {
-          setBusy(false);
-          return;
-        }
-        reason = input.trim();
-      }
+      const reason = (reasonOverride || "").trim() || undefined;
       await transition(candidateId, { to_stage: toStage, decision, reason, note: `UI: ${decision}` });
       await refreshAll();
+      trackUxMetric({
+        event_name: "candidate_stage_transition",
+        entity_type: "candidate",
+        entity_id: String(candidate.candidate_id),
+        metadata: { to_stage: toStage, decision: decision, has_reason: Boolean(reason) },
+      });
+      pushToast({
+        tone: "success",
+        title: `Moved to ${stageLabel(toStage)}`,
+        description: `${candidate.name} updated successfully.`,
+      });
+      return true;
     } catch (e: any) {
       setError(e?.message || "Transition failed");
+      pushToast({
+        tone: "error",
+        title: "Transition failed",
+        description: e?.message || "Could not update candidate stage.",
+      });
+      return false;
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleTransition(toStage: string, decision: string, reasonOverride?: string) {
+    if (decision === "reject" && !(reasonOverride || "").trim()) {
+      openDialog({
+        title: "Reject candidate",
+        description: "Rejection reason is required and will be logged in the event timeline.",
+        confirmLabel: "Reject candidate",
+        tone: "danger",
+        requireReason: true,
+        reasonLabel: "Rejection reason",
+        reasonPlaceholder: "Why is this candidate being rejected?",
+        onConfirm: async (value) => {
+          if (!value || !value.trim()) {
+            setDialog((prev) => ({ ...prev, error: "Reason is required." }));
+            return;
+          }
+          const ok = await performTransition(toStage, decision, value.trim());
+          if (ok) closeDialog();
+        },
+      });
+      return;
+    }
+    await performTransition(toStage, decision, reasonOverride);
   }
 
   async function handleSkip() {
@@ -1057,6 +1128,13 @@ export function Candidate360Client({
     try {
       await transition(candidateId, { to_stage: skipStage, decision: "skip", note: "superadmin_skip" });
       await refreshAll();
+      pushToast({ tone: "success", title: `Skipped to ${stageLabel(skipStage)}` });
+      trackUxMetric({
+        event_name: "candidate_stage_skip",
+        entity_type: "candidate",
+        entity_id: String(candidate.candidate_id),
+        metadata: { to_stage: skipStage },
+      });
     } catch (e: any) {
       setError(e?.message || "Skip failed");
     } finally {
@@ -1308,30 +1386,39 @@ export function Candidate360Client({
 
   async function handleDeleteSprint(candidateSprintId: number) {
     if (!canSkip) return;
-    const confirmed = window.confirm("Delete this sprint assignment? This cannot be undone.");
-    if (!confirmed) return;
-    setSprintsError(null);
-    setSprintDeleteBusy(true);
-    try {
-      const deleted = (candidateSprints || []).find((sprint) => sprint.candidate_sprint_id === candidateSprintId);
-      await deleteCandidateSprint(candidateSprintId);
-      const list = await fetchCandidateSprints(candidateId);
-      setCandidateSprints(list);
-      if (deleted) {
-        setLastSprintNotice({
-          template_name: deleted.template_name,
-          template_code: deleted.template_code,
-          assigned_at: deleted.assigned_at,
-          due_at: deleted.due_at,
-          status: "deleted",
-          deleted_at: new Date().toISOString(),
-        });
-      }
-    } catch (e: any) {
-      setSprintsError(e?.message || "Could not delete sprint.");
-    } finally {
-      setSprintDeleteBusy(false);
-    }
+    openDialog({
+      title: "Delete sprint assignment",
+      description: "This action removes the assignment and cannot be undone.",
+      confirmLabel: "Delete sprint",
+      tone: "danger",
+      onConfirm: async () => {
+        setSprintsError(null);
+        setSprintDeleteBusy(true);
+        try {
+          const deleted = (candidateSprints || []).find((sprint) => sprint.candidate_sprint_id === candidateSprintId);
+          await deleteCandidateSprint(candidateSprintId);
+          const list = await fetchCandidateSprints(candidateId);
+          setCandidateSprints(list);
+          if (deleted) {
+            setLastSprintNotice({
+              template_name: deleted.template_name,
+              template_code: deleted.template_code,
+              assigned_at: deleted.assigned_at,
+              due_at: deleted.due_at,
+              status: "deleted",
+              deleted_at: new Date().toISOString(),
+            });
+          }
+          pushToast({ tone: "success", title: "Sprint assignment deleted" });
+          closeDialog();
+        } catch (e: any) {
+          setSprintsError(e?.message || "Could not delete sprint.");
+          setDialog((prev) => ({ ...prev, error: e?.message || "Could not delete sprint." }));
+        } finally {
+          setSprintDeleteBusy(false);
+        }
+      },
+    });
   }
 
   async function handleCreateOffer() {
@@ -1442,18 +1529,28 @@ export function Candidate360Client({
   }
 
   async function handleAdminDecision(offerId: number, decision: "accept" | "decline") {
-    if (!confirm(`Mark offer as ${decision}? This will update candidate status and stage.`)) return;
-    setOffersBusy(true);
-    setOffersError(null);
-    try {
-      await adminDecideOffer(offerId, decision);
-      await refreshOffers();
-      await refreshAll();
-    } catch (e: any) {
-      setOffersError(e?.message || "Offer decision failed.");
-    } finally {
-      setOffersBusy(false);
-    }
+    openDialog({
+      title: `Mark offer as ${decision}`,
+      description: "This updates candidate status and stage progression.",
+      confirmLabel: `Mark as ${decision}`,
+      tone: decision === "accept" ? "success" : "danger",
+      onConfirm: async () => {
+        setOffersBusy(true);
+        setOffersError(null);
+        try {
+          await adminDecideOffer(offerId, decision);
+          await refreshOffers();
+          await refreshAll();
+          pushToast({ tone: "success", title: `Offer marked as ${decision}` });
+          closeDialog();
+        } catch (e: any) {
+          setOffersError(e?.message || "Offer decision failed.");
+          setDialog((prev) => ({ ...prev, error: e?.message || "Offer decision failed." }));
+        } finally {
+          setOffersBusy(false);
+        }
+      },
+    });
   }
 
   async function handleSaveDraftOverrides(offerId: number) {
@@ -1471,17 +1568,27 @@ export function Candidate360Client({
   }
 
   async function handleDeleteOffer(offerId: number) {
-    if (!confirm("Delete this draft offer? This cannot be undone.")) return;
-    setOffersBusy(true);
-    setOffersError(null);
-    try {
-      await deleteOffer(offerId);
-      await refreshOffers();
-    } catch (e: any) {
-      setOffersError(e?.message || "Offer deletion failed.");
-    } finally {
-      setOffersBusy(false);
-    }
+    openDialog({
+      title: "Delete draft offer",
+      description: "This draft offer will be permanently removed.",
+      confirmLabel: "Delete draft",
+      tone: "danger",
+      onConfirm: async () => {
+        setOffersBusy(true);
+        setOffersError(null);
+        try {
+          await deleteOffer(offerId);
+          await refreshOffers();
+          pushToast({ tone: "success", title: "Draft offer deleted" });
+          closeDialog();
+        } catch (e: any) {
+          setOffersError(e?.message || "Offer deletion failed.");
+          setDialog((prev) => ({ ...prev, error: e?.message || "Offer deletion failed." }));
+        } finally {
+          setOffersBusy(false);
+        }
+      },
+    });
   }
 
   async function handleConvertCandidate() {
@@ -2229,6 +2336,20 @@ export function Candidate360Client({
     offersBusy,
   ]);
 
+  const nextBestAction = useMemo(() => {
+    const primary = stageButtons.find((item) => item.intent === "advance" && !item.disabled) || stageButtons[0] || null;
+    if (!primary) return null;
+    let blocker = "";
+    if (currentStageKey === "enquiry" && !candidate.l2_owner_email) {
+      blocker = "Assign GL/L2 owner before moving to HR screening.";
+    } else if (cafLocked) {
+      blocker = "CAF is pending. Candidate cannot progress until submission.";
+    } else if (currentStageKey === "joining_documents" && !joiningDocsComplete) {
+      blocker = "All required joining documents are needed before conversion.";
+    }
+    return { primary, blocker };
+  }, [stageButtons, currentStageKey, candidate.l2_owner_email, cafLocked, joiningDocsComplete]);
+
   const screening = data.screening as Screening | null | undefined;
   const interviewUpcoming = useMemo(() => {
     if (!interviews) return [] as Interview[];
@@ -2334,6 +2455,27 @@ export function Candidate360Client({
           ) : null}
         </div>
       </div>
+      {nextBestAction ? (
+        <div className="sticky top-20 z-[120] rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/95 p-3 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.45)] backdrop-blur">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Next best action</p>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">{nextBestAction.primary.label}</p>
+              <p className="text-xs text-slate-600">Current stage: {stageLabel(candidate.current_stage)}</p>
+              {nextBestAction.blocker ? <p className="mt-1 text-xs font-medium text-amber-700">{nextBestAction.blocker}</p> : null}
+            </div>
+            <button
+              type="button"
+              className={clsx("inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-white", nextBestAction.primary.tone)}
+              disabled={busy || !!nextBestAction.primary.disabled}
+              onClick={() => void nextBestAction.primary.action()}
+            >
+              {nextBestAction.primary.icon}
+              {nextBestAction.primary.label}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {error ? <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
       {!canManageCandidate360 ? (
@@ -2714,24 +2856,27 @@ export function Candidate360Client({
                   const toStage = bestEffortFromMeta(meta, "to_stage") || bestEffortFromMeta(meta, "to_status");
                   const note = bestEffortFromMeta(meta, "note");
                   const decision = bestEffortFromMeta(meta, "decision") || bestEffortFromMeta(meta, "reason");
+                  const reasonCode = bestEffortFromMeta(meta, "reason_code");
+                  const actor = ev.performed_by_name || ev.performed_by_email || "System";
                   const title =
                     ev.action_type === "stage_change" && (fromStage || toStage)
-                      ? `Stage: ${fromStage || "?"} ? ${toStage || "?"}`
+                      ? `Stage: ${fromStage || "?"} -> ${toStage || "?"}`
                       : ev.action_type.split("_").join(" ");
                   return (
                     <div key={ev.event_id} className="rounded-2xl border border-white/60 bg-white/30 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-slate-900">{title}</p>
-                          <p className="mt-1 text-xs text-slate-600">{formatDateTime(ev.created_at)}</p>
+                          <p className="mt-1 text-xs text-slate-600">{formatDateTime(ev.created_at)} · {actor}</p>
                         </div>
                         <Chip className={chipTone("neutral")}>{ev.action_type}</Chip>
                       </div>
 
-                      {(decision || note) ? (
-                        <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      {(decision || note || reasonCode) ? (
+                        <div className="mt-3 grid gap-2 md:grid-cols-3">
                           {decision ? <Metric label="Decision" value={decision} /> : null}
                           {note ? <Metric label="Note" value={note} /> : null}
+                          {reasonCode ? <Metric label="Reason code" value={reasonCode} /> : null}
                         </div>
                       ) : null}
                     </div>
@@ -3300,28 +3445,38 @@ export function Candidate360Client({
                                   <button
                                     type="button"
                                     className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                                      onClick={() => {
-                                        if (!window.confirm("Cancel this interview? This will remove it from the interviewer calendar.")) return;
-                                        const reason = window.prompt("Reason for cancelling this interview (required):", "");
-                                        if (!reason || !reason.trim()) {
-                                          setInterviewsError("Cancellation requires a reason.");
-                                          return;
-                                        }
-                                        void (async () => {
+                                    onClick={() => {
+                                      openDialog({
+                                        title: "Cancel interview",
+                                        description: "This removes the interview from the interviewer calendar.",
+                                        confirmLabel: "Cancel interview",
+                                        tone: "danger",
+                                        requireReason: true,
+                                        reasonLabel: "Cancellation reason",
+                                        reasonPlaceholder: "Reason for cancelling this interview",
+                                        onConfirm: async (value) => {
+                                          if (!value || !value.trim()) {
+                                            setDialog((prev) => ({ ...prev, error: "Cancellation reason is required." }));
+                                            return;
+                                          }
                                           setBusy(true);
                                           setInterviewsError(null);
                                           setInterviewsNotice(null);
                                           try {
-                                            await cancelInterview(item.candidate_interview_id, reason.trim());
+                                            await cancelInterview(item.candidate_interview_id, value.trim());
                                             const next = await fetchInterviews(candidateId);
                                             setInterviews(next);
                                             setInterviewsNotice("Interview cancelled.");
-                                        } catch (e: any) {
-                                          setInterviewsError(e?.message || "Could not cancel interview.");
-                                        } finally {
-                                          setBusy(false);
-                                        }
-                                      })();
+                                            pushToast({ tone: "success", title: "Interview cancelled" });
+                                            closeDialog();
+                                          } catch (e: any) {
+                                            setInterviewsError(e?.message || "Could not cancel interview.");
+                                            setDialog((prev) => ({ ...prev, error: e?.message || "Could not cancel interview." }));
+                                          } finally {
+                                            setBusy(false);
+                                          }
+                                        },
+                                      });
                                     }}
                                     disabled={busy}
                                   >
@@ -4457,6 +4612,30 @@ export function Candidate360Client({
           </div>
         </div>
       ) : null}
+      <ActionDialog
+        open={dialog.open}
+        title={dialog.title}
+        description={dialog.description}
+        confirmLabel={dialog.confirmLabel || "Confirm"}
+        tone={dialog.tone || "neutral"}
+        loading={busy || offersBusy || sprintDeleteBusy}
+        error={dialog.error || null}
+        input={
+          dialog.requireReason
+            ? {
+                label: dialog.reasonLabel || "Reason",
+                placeholder: dialog.reasonPlaceholder || "",
+                required: true,
+                minLength: 2,
+                multiline: true,
+              }
+            : null
+        }
+        onConfirm={async (value) => {
+          await dialog.onConfirm(value);
+        }}
+        onClose={closeDialog}
+      />
     </main>
   );
 }

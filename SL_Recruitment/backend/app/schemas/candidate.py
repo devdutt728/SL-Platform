@@ -53,6 +53,10 @@ class CandidateListItem(BaseModel):
     candidate_id: int
     candidate_code: str
     name: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
     opening_id: Optional[int] = None
     opening_title: Optional[str] = None
     l2_owner_email: Optional[EmailStr] = None
@@ -60,6 +64,14 @@ class CandidateListItem(BaseModel):
     source_channel: Optional[str] = None
     source_origin: Optional[str] = None
     external_source_ref: Optional[str] = None
+    educational_qualification: Optional[str] = None
+    years_of_experience: Optional[float] = None
+    city: Optional[str] = None
+    terms_consent: Optional[bool] = None
+    willing_to_relocate: Optional[bool] = None
+    cv_url: Optional[str] = None
+    resume_url: Optional[str] = None
+    portfolio_url: Optional[str] = None
     current_stage: Optional[str] = None
     status: str
     ageing_days: int

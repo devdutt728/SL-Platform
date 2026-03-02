@@ -9,6 +9,9 @@ import { Bell, Briefcase, Check, LayoutPanelLeft, UsersRound, X } from "lucide-r
 import { fetchDeduped } from "@/lib/fetch-deduped";
 import NeedsReviewCard from "./NeedsReviewCard";
 import RecentActivityCard from "./RecentActivityCard";
+import { ActionDialog } from "@/components/ui/action-dialog";
+import { useToast } from "@/components/ui/toast-provider";
+import { trackUxMetric } from "@/lib/ux-metrics";
 
 type Props = {
   initialMetrics: DashboardMetrics | null;
@@ -22,6 +25,8 @@ type Props = {
   canNavigate?: boolean;
   canNavigatePipeline?: boolean;
   hideActivity?: boolean;
+  roleWorkspacePreset?: "hr" | "interviewer" | "ops";
+  lockWorkspacePreset?: boolean;
 };
 
 const stageOrder = [
@@ -114,7 +119,10 @@ export default function DashboardClient({
   canNavigate = true,
   canNavigatePipeline = canNavigate,
   hideActivity = false,
+  roleWorkspacePreset = "ops",
+  lockWorkspacePreset = false,
 }: Props) {
+  const { pushToast } = useToast();
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(initialMetrics);
   const [events, setEvents] = useState<CandidateEvent[]>(initialEvents);
   const [offers, setOffers] = useState<CandidateOffer[]>(initialOffers);
@@ -131,7 +139,39 @@ export default function DashboardClient({
   const [requestActionBusyId, setRequestActionBusyId] = useState<number | null>(null);
   const [requestActionError, setRequestActionError] = useState<string | null>(null);
   const [requestActionNotice, setRequestActionNotice] = useState<string | null>(null);
+  const [selectedOpeningId, setSelectedOpeningId] = useState<number | null>(null);
+  const [workspacePreset, setWorkspacePreset] = useState<"hr" | "interviewer" | "ops">(
+    roleWorkspacePreset
+  );
+  const [decisionDialog, setDecisionDialog] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+    confirmLabel: string;
+    tone: "neutral" | "danger" | "success";
+    requireReason: boolean;
+    request: OpeningRequest | null;
+    action: "approve" | "reject";
+    error: string | null;
+  }>({
+    open: false,
+    title: "",
+    description: "",
+    confirmLabel: "Confirm",
+    tone: "neutral",
+    requireReason: false,
+    request: null,
+    action: "approve",
+    error: null,
+  });
   const [hideActivityClient] = useState(hideActivity);
+  const showOffersPanel = canViewOffers && workspacePreset !== "interviewer";
+  const showNeedsReviewPanel = workspacePreset !== "interviewer";
+  const showActivityPanel = !hideActivityClient && workspacePreset !== "interviewer";
+
+  useEffect(() => {
+    setWorkspacePreset(roleWorkspacePreset);
+  }, [roleWorkspacePreset]);
 
   const PipelineItem = ({
     href,
@@ -217,9 +257,10 @@ export default function DashboardClient({
       });
   }, [openings, candidates]);
   const maxOpeningCount = useMemo(() => Math.max(1, ...openingStripRows.map((row) => row.count || 0)), [openingStripRows]);
+  const activeOpeningId = selectedOpeningId ?? hoveredOpeningId;
   const hoveredOpening = useMemo(
-    () => openingStripRows.find((opening) => opening.openingId === hoveredOpeningId) || null,
-    [openingStripRows, hoveredOpeningId]
+    () => openingStripRows.find((opening) => opening.openingId === activeOpeningId) || null,
+    [openingStripRows, activeOpeningId]
   );
 
   async function refreshPendingOpeningRequests() {
@@ -236,7 +277,7 @@ export default function DashboardClient({
     }
   }
 
-  async function decideOpeningRequest(request: OpeningRequest, action: "approve" | "reject") {
+  async function decideOpeningRequest(request: OpeningRequest, action: "approve" | "reject", reason?: string) {
     const requestId = request.opening_request_id;
     let endpoint = `/api/rec/openings/requests/${requestId}/approve`;
     let payload: Record<string, string | null> = {
@@ -245,10 +286,8 @@ export default function DashboardClient({
     };
 
     if (action === "reject") {
-      const reason = window.prompt("Rejection reason:", "Insufficient details");
-      if (!reason || !reason.trim()) return;
       endpoint = `/api/rec/openings/requests/${requestId}/reject`;
-      payload = { rejection_reason: reason.trim() };
+      payload = { rejection_reason: (reason || "").trim() };
     }
 
     setRequestActionBusyId(requestId);
@@ -264,15 +303,43 @@ export default function DashboardClient({
       if (!res.ok) {
         const raw = (await res.text()).trim();
         setRequestActionError(parseDetail(raw) || `${action === "approve" ? "Approve" : "Reject"} failed (${res.status})`);
-        return;
+        return false;
       }
       setRequestActionNotice(`Request #${requestId} ${action === "approve" ? "approved" : "rejected"}.`);
+      pushToast({
+        tone: "success",
+        title: `Request #${requestId} ${action === "approve" ? "approved" : "rejected"}`,
+      });
+      trackUxMetric({
+        event_name: `opening_request_${action}`,
+        entity_type: "opening_request",
+        entity_id: String(requestId),
+      });
       await refreshPendingOpeningRequests();
+      return true;
     } catch {
       setRequestActionError("Request action failed. Try again.");
+      return false;
     } finally {
       setRequestActionBusyId(null);
     }
+  }
+
+  function openRequestDecisionDialog(request: OpeningRequest, action: "approve" | "reject") {
+    setDecisionDialog({
+      open: true,
+      title: action === "approve" ? "Approve opening request" : "Reject opening request",
+      description:
+        action === "approve"
+          ? `Approve request #${request.opening_request_id} and apply headcount changes.`
+          : `Reject request #${request.opening_request_id}. A reason is required.`,
+      confirmLabel: action === "approve" ? "Approve request" : "Reject request",
+      tone: action === "approve" ? "success" : "danger",
+      requireReason: action === "reject",
+      request,
+      action,
+      error: null,
+    });
   }
 
   function clearOpeningHoverCloseTimer() {
@@ -283,6 +350,7 @@ export default function DashboardClient({
   }
 
   function scheduleOpeningHoverClose() {
+    if (selectedOpeningId !== null) return;
     clearOpeningHoverCloseTimer();
     openingHoverCloseTimerRef.current = window.setTimeout(() => {
       setHoveredOpeningId(null);
@@ -467,7 +535,7 @@ export default function DashboardClient({
                               title="Approve"
                               aria-label={`Approve request ${request.opening_request_id}`}
                               disabled={requestActionBusyId === request.opening_request_id}
-                              onClick={() => void decideOpeningRequest(request, "approve")}
+                              onClick={() => openRequestDecisionDialog(request, "approve")}
                               className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
                             >
                               <Check className="h-3.5 w-3.5" />
@@ -477,7 +545,7 @@ export default function DashboardClient({
                               title="Reject"
                               aria-label={`Reject request ${request.opening_request_id}`}
                               disabled={requestActionBusyId === request.opening_request_id}
-                              onClick={() => void decideOpeningRequest(request, "reject")}
+                              onClick={() => openRequestDecisionDialog(request, "reject")}
                               className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-60"
                             >
                               <X className="h-3.5 w-3.5" />
@@ -494,6 +562,41 @@ export default function DashboardClient({
         ) : null}
       </section>
 
+      <section className="flex flex-wrap items-center gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--light-grey)]">Workspace preset</p>
+        {(
+          [
+            { key: "hr", label: "HR Ops" },
+            { key: "ops", label: "General Ops" },
+            { key: "interviewer", label: "Interviewer" },
+          ] as const
+        )
+          .filter((item) => !lockWorkspacePreset || item.key === roleWorkspacePreset)
+          .map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              disabled={lockWorkspacePreset}
+              className={clsx(
+                "rounded-full border px-3 py-1 text-xs font-semibold",
+                workspacePreset === item.key
+                  ? "border-[var(--brand-color)] bg-[rgba(231,64,17,0.12)] text-[var(--dim-grey)]"
+                  : "border-[var(--accessible-components--dark-grey)] bg-white text-[var(--dim-grey)] hover:bg-[var(--surface-card)]",
+                lockWorkspacePreset ? "cursor-default opacity-95" : ""
+              )}
+              onClick={() => {
+                if (lockWorkspacePreset) return;
+                setWorkspacePreset(item.key);
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        {lockWorkspacePreset ? (
+          <span className="text-[11px] text-[var(--light-grey)]">Locked by role</span>
+        ) : null}
+      </section>
+
       <section className="section-card motion-fade-up motion-delay-1 relative z-[90] overflow-visible border border-[var(--border-soft)] bg-white/80 p-3">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(231,64,17,0.08),_transparent_40%)]" />
         <div className="relative flex items-center justify-between">
@@ -501,7 +604,7 @@ export default function DashboardClient({
             <Briefcase className="h-4 w-4 text-[var(--dim-grey)]" />
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--light-grey)]">Openings Live Strip</p>
           </div>
-          <p className="text-[11px] text-[var(--light-grey)]">Hover for pipeline breakdown</p>
+          <p className="text-[11px] text-[var(--light-grey)]">Click a card for pipeline breakdown</p>
         </div>
         <div
           ref={stripRef}
@@ -540,6 +643,7 @@ export default function DashboardClient({
               )}
               {openingStripRows.map((opening) => {
                 const barWidth = Math.max(8, Math.round((opening.count / maxOpeningCount) * 100));
+                const active = activeOpeningId === opening.openingId;
                 return (
                   <div
                     key={opening.openingId}
@@ -548,76 +652,68 @@ export default function DashboardClient({
                       clearOpeningHoverCloseTimer();
                       handleOpeningHover(opening.openingId, event);
                     }}
+                    onClick={(event) => {
+                      clearOpeningHoverCloseTimer();
+                      handleOpeningHover(opening.openingId, event);
+                      setSelectedOpeningId((prev) => (prev === opening.openingId ? null : opening.openingId));
+                    }}
                   >
-                    {canNavigate ? (
-                      <Link
-                        href={`/candidates?status_view=all&opening_id=${opening.openingId}`}
-                        className={clsx(
-                          "block h-14 w-[175px] shrink-0 rounded-lg border px-2 py-1.5 text-left transition-all duration-150",
-                          opening.isActive
-                            ? "border-[var(--accessible-components--dark-grey)] bg-white/95 text-[var(--dim-grey)] hover:bg-[var(--surface-card)]"
-                            : "border-[var(--accessible-components--dark-grey)] bg-[var(--surface-card)] text-[var(--light-grey)] hover:bg-white"
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="truncate text-[10px] font-semibold">{opening.title}</p>
-                          <span className="rounded-md bg-[var(--surface-card)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--dim-grey)]">
-                            {opening.count}
-                          </span>
-                        </div>
-                        <p className="mt-0.5 truncate text-[10px] text-[var(--light-grey)]">{opening.code}</p>
-                        <div className="mt-1 h-0.5 w-full overflow-hidden rounded-full bg-[rgba(93,85,82,0.14)]">
-                          <div
-                            className="h-full rounded-full bg-[rgba(231,64,17,0.55)] transition-all duration-200"
-                            style={{ width: `${barWidth}%` }}
-                          />
-                        </div>
-                      </Link>
-                    ) : (
-                      <div
-                        className={clsx(
-                          "h-14 w-[175px] shrink-0 rounded-lg border px-2 py-1.5 text-left",
-                          opening.isActive
-                            ? "border-[var(--accessible-components--dark-grey)] bg-white/95 text-[var(--dim-grey)]"
-                            : "border-[var(--accessible-components--dark-grey)] bg-[var(--surface-card)] text-[var(--light-grey)]"
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="truncate text-[10px] font-semibold">{opening.title}</p>
-                          <span className="rounded-md bg-[var(--surface-card)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--dim-grey)]">
-                            {opening.count}
-                          </span>
-                        </div>
-                        <p className="mt-0.5 truncate text-[10px] text-[var(--light-grey)]">{opening.code}</p>
-                        <div className="mt-1 h-0.5 w-full overflow-hidden rounded-full bg-[rgba(93,85,82,0.14)]">
-                          <div
-                            className="h-full rounded-full bg-[rgba(231,64,17,0.55)]"
-                            style={{ width: `${barWidth}%` }}
-                          />
-                        </div>
+                    <button
+                      type="button"
+                      className={clsx(
+                        "h-14 w-[175px] shrink-0 rounded-lg border px-2 py-1.5 text-left",
+                        active ? "ring-2 ring-[rgba(231,64,17,0.45)]" : "",
+                        opening.isActive
+                          ? "border-[var(--accessible-components--dark-grey)] bg-white/95 text-[var(--dim-grey)] hover:bg-[var(--surface-card)]"
+                          : "border-[var(--accessible-components--dark-grey)] bg-[var(--surface-card)] text-[var(--light-grey)] hover:bg-white"
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-[10px] font-semibold">{opening.title}</p>
+                        <span className="rounded-md bg-[var(--surface-card)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--dim-grey)]">
+                          {opening.count}
+                        </span>
                       </div>
-                    )}
+                      <p className="mt-0.5 truncate text-[10px] text-[var(--light-grey)]">{opening.code}</p>
+                      <div className="mt-1 h-0.5 w-full overflow-hidden rounded-full bg-[rgba(93,85,82,0.14)]">
+                        <div
+                          className="h-full rounded-full bg-[rgba(231,64,17,0.55)] transition-all duration-200"
+                          style={{ width: `${barWidth}%` }}
+                        />
+                      </div>
+                    </button>
                   </div>
                 );
               })}
             </div>
           </div>
 
-          {hoveredOpeningId !== null && hoveredOpening ? (
+          {activeOpeningId !== null && hoveredOpening ? (
             <div
               className="absolute top-full z-[180] w-[280px] rounded-lg border border-[var(--border-soft)] bg-white p-2 shadow-[0_16px_30px_-18px_rgba(93,85,82,0.45)]"
               style={{ left: `${hoverPanelLeft}px` }}
               onMouseEnter={() => {
                 clearOpeningHoverCloseTimer();
-                setHoveredOpeningId(hoveredOpening.openingId);
+                if (selectedOpeningId === null) setHoveredOpeningId(hoveredOpening.openingId);
               }}
               onMouseLeave={scheduleOpeningHoverClose}
             >
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <p className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--light-grey)]">{hoveredOpening.title}</p>
-                <span className="rounded-md bg-[var(--surface-card)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--dim-grey)]">
-                  {hoveredOpening.count}
-                </span>
+                <div className="flex items-center gap-1">
+                  <span className="rounded-md bg-[var(--surface-card)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--dim-grey)]">
+                    {hoveredOpening.count}
+                  </span>
+                  {selectedOpeningId !== null ? (
+                    <button
+                      type="button"
+                      className="rounded-md border border-[var(--accessible-components--dark-grey)] bg-white px-1.5 py-0.5 text-[10px] font-semibold text-[var(--dim-grey)] hover:bg-[var(--surface-card)]"
+                      onClick={() => setSelectedOpeningId(null)}
+                    >
+                      Close
+                    </button>
+                  ) : null}
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-1">
                 {openingHoverStageKeys
@@ -784,7 +880,7 @@ export default function DashboardClient({
             </div>
           )}
         </div>
-        {canViewOffers ? (
+        {showOffersPanel ? (
           <div className="section-card motion-fade-up motion-delay-3 relative overflow-hidden border border-[var(--border-soft)] bg-white/75 p-2.5">
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(231,64,17,0.1),_transparent_60%)]" />
             <div className="relative flex items-center justify-between">
@@ -930,11 +1026,11 @@ export default function DashboardClient({
           </div>
         </div>
 
-        <NeedsReviewCard initialMetrics={metrics} canViewOffers={canViewOffers} />
+        {showNeedsReviewPanel ? <NeedsReviewCard initialMetrics={metrics} canViewOffers={canViewOffers} /> : null}
       </section>
 
       <section className="grid gap-3 lg:grid-cols-3">
-        {!hideActivityClient ? <RecentActivityCard events={events} /> : null}
+        {showActivityPanel ? <RecentActivityCard events={events} /> : null}
 
         <div className="section-card motion-fade-up motion-delay-8 border border-[var(--border-soft)] bg-white/75 p-4">
           <div className="flex items-center gap-2">
@@ -959,6 +1055,38 @@ export default function DashboardClient({
           )}
         </div>
       </section>
+
+      <ActionDialog
+        open={decisionDialog.open}
+        title={decisionDialog.title}
+        description={decisionDialog.description}
+        confirmLabel={decisionDialog.confirmLabel}
+        tone={decisionDialog.tone}
+        loading={requestActionBusyId != null}
+        error={decisionDialog.error}
+        input={
+          decisionDialog.requireReason
+            ? {
+                label: "Rejection reason",
+                placeholder: "Why should this request be rejected?",
+                required: true,
+                minLength: 3,
+                multiline: true,
+              }
+            : null
+        }
+        onConfirm={async (value) => {
+          if (!decisionDialog.request) return;
+          if (decisionDialog.requireReason && !(value || "").trim()) {
+            setDecisionDialog((prev) => ({ ...prev, error: "Reason is required." }));
+            return;
+          }
+          const ok = await decideOpeningRequest(decisionDialog.request, decisionDialog.action, (value || "").trim());
+          if (ok) setDecisionDialog((prev) => ({ ...prev, open: false, error: null }));
+          else setDecisionDialog((prev) => ({ ...prev, error: requestActionError || "Action failed." }));
+        }}
+        onClose={() => setDecisionDialog((prev) => ({ ...prev, open: false, error: null }))}
+      />
     </main>
   );
 }

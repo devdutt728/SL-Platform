@@ -452,6 +452,14 @@ def _can_manage_candidate_360(user: UserContext) -> bool:
     return True
 
 
+def _can_view_candidate_basic_details(user: UserContext) -> bool:
+    roles = set(user.roles or [])
+    if Role.HR_ADMIN in roles or Role.HR_EXEC in roles:
+        return True
+    role_ids = _actor_role_ids(user)
+    return 2 in role_ids
+
+
 def _clean_person_id_platform(raw: str | None) -> str | None:
     if raw is None:
         return None
@@ -2205,6 +2213,7 @@ async def list_candidates(
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
+    can_view_basic_details = _can_view_candidate_basic_details(user)
     latest_stage_subq = (
         select(RecCandidateStage.candidate_id, func.max(RecCandidateStage.stage_id).label("stage_id"))
         .where(RecCandidateStage.stage_status == "pending")
@@ -2259,6 +2268,17 @@ async def list_candidates(
             RecCandidate.candidate_id,
             RecCandidate.candidate_code,
             RecCandidate.full_name,
+            RecCandidate.first_name,
+            RecCandidate.last_name,
+            RecCandidate.email,
+            RecCandidate.phone.label("phone"),
+            RecCandidate.educational_qualification,
+            RecCandidate.years_of_experience,
+            RecCandidate.city,
+            RecCandidate.terms_consent,
+            RecCandidate.cv_url,
+            RecCandidate.resume_url,
+            RecCandidate.portfolio_url,
             RecCandidate.status,
             RecCandidate.opening_id.label("opening_id"),
             RecCandidate.l2_owner_email.label("l2_owner_email"),
@@ -2272,6 +2292,7 @@ async def list_candidates(
             RecCandidate.needs_hr_review.label("needs_hr_review"),
             RecOpening.title.label("opening_title"),
             RecCandidateScreening.screening_result.label("screening_result"),
+            RecCandidateScreening.willing_to_relocate.label("willing_to_relocate"),
             current_stage_subq.c.stage_name.label("current_stage"),
             func.coalesce(func.datediff(func.curdate(), current_stage_subq.c.started_at), 0).label("ageing_days"),
             func.coalesce(func.datediff(func.curdate(), RecCandidate.created_at), 0).label("applied_ageing_days"),
@@ -2328,6 +2349,10 @@ async def list_candidates(
             candidate_id=row.candidate_id,
             candidate_code=row.candidate_code or "",
             name=row.full_name,
+            first_name=row.first_name if can_view_basic_details else None,
+            last_name=row.last_name if can_view_basic_details else None,
+            email=row.email if can_view_basic_details else None,
+            phone=row.phone if can_view_basic_details else None,
             opening_id=row.opening_id,
             opening_title=row.opening_title,
             l2_owner_email=row.l2_owner_email,
@@ -2335,6 +2360,16 @@ async def list_candidates(
             source_channel=row.source_channel,
             source_origin=row.source_origin,
             external_source_ref=row.external_source_ref,
+            educational_qualification=row.educational_qualification if can_view_basic_details else None,
+            years_of_experience=row.years_of_experience if can_view_basic_details else None,
+            city=row.city if can_view_basic_details else None,
+            terms_consent=bool(row.terms_consent) if can_view_basic_details and row.terms_consent is not None else None,
+            willing_to_relocate=bool(row.willing_to_relocate)
+            if can_view_basic_details and row.willing_to_relocate is not None
+            else None,
+            portfolio_url=row.portfolio_url if can_view_basic_details else None,
+            cv_url=row.cv_url if can_view_basic_details else None,
+            resume_url=row.resume_url if can_view_basic_details else None,
             current_stage=row.current_stage,
             status=row.status,
             ageing_days=int(row.ageing_days or 0),

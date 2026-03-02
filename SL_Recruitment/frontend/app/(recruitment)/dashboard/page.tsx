@@ -113,6 +113,8 @@ export default async function DashboardPage() {
     roleIds.includes(6);
   const canViewOffers = isHr || isSuperadmin;
   const canViewOpeningRequestNotifications = isHr || isSuperadmin;
+  const roleWorkspacePreset: "hr" | "interviewer" | "ops" = isHr ? "hr" : isInterviewer ? "interviewer" : "ops";
+  const lockWorkspacePreset = isInterviewer && !isHr;
 
   const [metrics, events, offers, openings, candidates, openingRequests] = await Promise.all([
     fetchDashboard(),
@@ -138,6 +140,8 @@ export default async function DashboardPage() {
       canNavigate={canNavigate}
       canNavigatePipeline={canNavigatePipeline}
       hideActivity={hideActivity}
+      roleWorkspacePreset={roleWorkspacePreset}
+      lockWorkspacePreset={lockWorkspacePreset}
     />
   );
 }

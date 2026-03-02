@@ -2,6 +2,10 @@ export type CandidateListItem = {
   candidate_id: number;
   candidate_code: string;
   name: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
   opening_id?: number | null;
   opening_title?: string | null;
   l2_owner_email?: string | null;
@@ -9,6 +13,14 @@ export type CandidateListItem = {
   source_channel?: string | null;
   source_origin?: string | null;
   external_source_ref?: string | null;
+  educational_qualification?: string | null;
+  years_of_experience?: number | null;
+  city?: string | null;
+  terms_consent?: boolean | null;
+  willing_to_relocate?: boolean | null;
+  cv_url?: string | null;
+  resume_url?: string | null;
+  portfolio_url?: string | null;
   current_stage?: string | null;
   status: string;
   ageing_days: number;

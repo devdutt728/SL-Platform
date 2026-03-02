@@ -80,7 +80,14 @@ export default async function CandidatesPage({}: {}) {
     redirect("/interviewer");
   }
   const [candidates, openings] = await Promise.all([fetchCandidates(), fetchOpenings()]);
-  return <CandidatesClient initialCandidates={candidates} openings={openings} canNavigate={canAccessCandidate360} />;
+  return (
+    <CandidatesClient
+      initialCandidates={candidates}
+      openings={openings}
+      canNavigate={canAccessCandidate360}
+      canViewBasicDetails={isHr}
+    />
+  );
 }
 
 
