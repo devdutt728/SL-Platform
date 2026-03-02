@@ -665,6 +665,186 @@ async def _record_ingest_attempt(
         logger.warning("Ingest attempt table unavailable. Apply migration 0037.")
 
 
+async def _record_ui_ingest_attempt(
+    session: AsyncSession,
+    *,
+    opening_id: int | None,
+    email_normalized: str,
+    external_source_ref: str | None,
+    attempt_status: str,
+    candidate_id: int | None,
+    message: str | None,
+    attempted_at: datetime,
+    payload: dict[str, object],
+) -> None:
+    try:
+        async with session.begin_nested():
+            session.add(
+                RecCandidateIngestAttempt(
+                    source_origin=SOURCE_ORIGIN_UI,
+                    sheet_id=None,
+                    sheet_name=None,
+                    batch_id=None,
+                    row_key=None,
+                    opening_id=opening_id,
+                    opening_code=None,
+                    email_normalized=email_normalized,
+                    external_source_ref=_normalize_external_source_ref(external_source_ref),
+                    attempt_status=(attempt_status or "error").strip()[:32],
+                    candidate_id=candidate_id,
+                    message=_truncate_text(message, max_len=500),
+                    payload_json=_safe_payload_json(payload),
+                    attempted_at=attempted_at,
+                    created_at=attempted_at,
+                )
+            )
+            await session.flush()
+    except OperationalError:
+        logger.warning("Ingest attempt table unavailable. Apply migration 0037.")
+
+
+async def _find_existing_candidate_by_opening_email(
+    session: AsyncSession,
+    *,
+    opening_id: int | None,
+    email_normalized: str,
+) -> RecCandidate | None:
+    if opening_id is None:
+        return None
+    return (
+        await session.execute(
+            select(RecCandidate)
+            .where(
+                RecCandidate.opening_id == opening_id,
+                func.lower(RecCandidate.email) == email_normalized,
+            )
+            .order_by(RecCandidate.candidate_id.desc())
+            .limit(1)
+        )
+    ).scalars().first()
+
+
+def _derive_ui_external_source_ref(
+    *,
+    opening_id: int | None,
+    email_normalized: str,
+    first_name: str,
+    last_name: str | None,
+    source_channel: str | None,
+    attempted_at: datetime,
+) -> str:
+    parts = [
+        SOURCE_ORIGIN_UI,
+        str(opening_id or ""),
+        email_normalized.strip().lower(),
+        (first_name or "").strip(),
+        (last_name or "").strip(),
+        (source_channel or "").strip(),
+        attempted_at.isoformat(),
+    ]
+    digest = sha256("|".join(parts).encode("utf-8")).hexdigest()[:40]
+    return f"ui:{digest}"
+
+
+async def _apply_ui_reapplication(
+    session: AsyncSession,
+    *,
+    candidate: RecCandidate,
+    opening_id: int | None,
+    first_name: str,
+    last_name: str | None,
+    email_normalized: str,
+    phone: str | None,
+    source_channel: str | None,
+    external_source_ref: str,
+    cv_url: str | None,
+    portfolio_url: str | None,
+    resume_url: str | None,
+    educational_qualification: str | None,
+    years_of_experience: float | None,
+    city: str | None,
+    terms_consent: bool | None,
+    l2_owner_email: str | None,
+    l2_owner_name: str | None,
+    performed_by_person_id_platform: int | None,
+    performed_by_email: str | None,
+    attempted_at: datetime,
+) -> None:
+    candidate.first_name = first_name
+    candidate.last_name = last_name
+    candidate.full_name = _compose_full_name(first_name, last_name)
+    candidate.email = email_normalized
+    candidate.phone = phone
+    candidate.opening_id = opening_id
+    candidate.source_channel = source_channel
+    candidate.source_origin = SOURCE_ORIGIN_UI
+    candidate.external_source_ref = external_source_ref
+    candidate.cv_url = cv_url
+    candidate.portfolio_url = portfolio_url
+    candidate.resume_url = resume_url
+    candidate.educational_qualification = educational_qualification
+    candidate.years_of_experience = years_of_experience
+    candidate.city = city
+    candidate.current_location = city
+    candidate.terms_consent = bool(terms_consent)
+    candidate.terms_consent_at = attempted_at if terms_consent else candidate.terms_consent_at
+    candidate.l2_owner_email = l2_owner_email.lower() if l2_owner_email else None
+    candidate.l2_owner_name = l2_owner_name
+    candidate.caf_token = candidate.caf_token or uuid4().hex
+    candidate.caf_sent_at = attempted_at
+    candidate.updated_at = attempted_at
+    candidate.application_docs_status = _application_docs_status(
+        cv_url=candidate.cv_url,
+        portfolio_url=candidate.portfolio_url,
+        resume_url=candidate.resume_url,
+    )
+
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type="candidate_reapplied_ui",
+        performed_by_person_id_platform=performed_by_person_id_platform,
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={
+            "opening_id": opening_id,
+            "source_channel": source_channel,
+            "source_origin": SOURCE_ORIGIN_UI,
+            "external_source_ref": external_source_ref,
+            "performed_by_email": performed_by_email,
+        },
+    )
+
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type="caf_link_generated",
+        performed_by_person_id_platform=performed_by_person_id_platform,
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={"caf_token": candidate.caf_token, "reason": "ui_reapply"},
+    )
+
+    caf_link = build_public_link(f"/caf/{candidate.caf_token}")
+    await send_email(
+        session,
+        candidate_id=candidate.candidate_id,
+        to_emails=[candidate.email],
+        subject="Your Studio Lotus application links",
+        template_name="application_links",
+        context={
+            "candidate_name": candidate.full_name,
+            "candidate_code": candidate.candidate_code,
+            "caf_link": caf_link,
+            "candidate_email": candidate.email,
+            "candidate_phone": candidate.phone or "—",
+            "willing_to_relocate": _label_yes_no(None),
+        },
+        email_type="application_links",
+        meta_extra={"caf_token": candidate.caf_token, "source": "ui_reapply"},
+    )
+
+
 async def _candidate_duplicate_metadata(session: AsyncSession, *, candidate_id: int) -> tuple[bool, int, datetime | None]:
     try:
         row = (
@@ -1214,6 +1394,7 @@ async def _get_ageing_days(session: AsyncSession, *, candidate_id: int) -> int:
 @router.post("", response_model=CandidateDetailOut, status_code=status.HTTP_201_CREATED)
 async def create_candidate(
     payload: CandidateCreate,
+    response: Response,
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
@@ -1226,76 +1407,225 @@ async def create_candidate(
     if not first_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="First name is required.")
 
-    candidate = await _create_candidate_with_automation(
+    now = now_ist_naive()
+    email_normalized = str(payload.email).strip().lower()
+    source_channel = _normalize_source_channel(payload.source_channel, fallback="ui_manual")
+    opening_id = payload.opening_id
+    l2_owner_email = str(payload.l2_owner_email) if payload.l2_owner_email else None
+    performed_by_person_id_platform = _platform_person_id(user)
+
+    attempt_payload: dict[str, object] = {
+        "opening_id": opening_id,
+        "email": email_normalized,
+        "first_name": first_name,
+        "last_name": last_name,
+        "phone": payload.phone,
+        "source_channel": source_channel,
+        "cv_url": payload.cv_url,
+        "portfolio_url": payload.portfolio_url,
+        "resume_url": payload.resume_url,
+        "educational_qualification": payload.educational_qualification,
+        "years_of_experience": payload.years_of_experience,
+        "city": payload.city,
+        "terms_consent": payload.terms_consent,
+        "l2_owner_email": l2_owner_email,
+        "l2_owner_name": payload.l2_owner_name,
+    }
+
+    existing_candidate = await _find_existing_candidate_by_opening_email(
         session,
+        opening_id=opening_id,
+        email_normalized=email_normalized,
+    )
+    if existing_candidate and _is_recent_google_sheet_duplicate(existing_candidate, now=now):
+        duplicate_message = "Candidate already exists for this opening/email within last 24 hours."
+        await _record_ui_ingest_attempt(
+            session,
+            opening_id=opening_id,
+            email_normalized=email_normalized,
+            external_source_ref=existing_candidate.external_source_ref,
+            attempt_status="duplicate_recent",
+            candidate_id=existing_candidate.candidate_id,
+            message=duplicate_message,
+            attempted_at=now,
+            payload=attempt_payload,
+        )
+        await session.commit()
+        response.status_code = status.HTTP_200_OK
+        return await get_candidate(existing_candidate.candidate_id, session, user)  # type: ignore[arg-type]
+
+    if existing_candidate:
+        reapply_external_source_ref = _derive_ui_external_source_ref(
+            opening_id=opening_id,
+            email_normalized=email_normalized,
+            first_name=first_name,
+            last_name=last_name,
+            source_channel=source_channel,
+            attempted_at=now,
+        )
+        await _apply_ui_reapplication(
+            session,
+            candidate=existing_candidate,
+            opening_id=opening_id,
+            first_name=first_name,
+            last_name=last_name,
+            email_normalized=email_normalized,
+            phone=payload.phone,
+            source_channel=source_channel,
+            external_source_ref=reapply_external_source_ref,
+            cv_url=payload.cv_url,
+            portfolio_url=payload.portfolio_url,
+            resume_url=payload.resume_url,
+            educational_qualification=payload.educational_qualification,
+            years_of_experience=payload.years_of_experience,
+            city=payload.city,
+            terms_consent=payload.terms_consent,
+            l2_owner_email=l2_owner_email,
+            l2_owner_name=payload.l2_owner_name,
+            performed_by_person_id_platform=performed_by_person_id_platform,
+            performed_by_email=user.email,
+            attempted_at=now,
+        )
+        await _record_ui_ingest_attempt(
+            session,
+            opening_id=opening_id,
+            email_normalized=email_normalized,
+            external_source_ref=reapply_external_source_ref,
+            attempt_status="reapplied",
+            candidate_id=existing_candidate.candidate_id,
+            message="Candidate reapplied for the same opening after duplicate cooldown.",
+            attempted_at=now,
+            payload=attempt_payload,
+        )
+        await session.commit()
+        response.status_code = status.HTTP_200_OK
+        return await get_candidate(existing_candidate.candidate_id, session, user)  # type: ignore[arg-type]
+
+    create_external_source_ref = _derive_ui_external_source_ref(
+        opening_id=opening_id,
+        email_normalized=email_normalized,
         first_name=first_name,
         last_name=last_name,
-        email=str(payload.email),
-        phone=payload.phone,
-        opening_id=payload.opening_id,
-        source_channel=_normalize_source_channel(payload.source_channel, fallback="ui_manual"),
-        source_origin=SOURCE_ORIGIN_UI,
-        cv_url=payload.cv_url,
-        portfolio_url=payload.portfolio_url,
-        resume_url=payload.resume_url,
-        educational_qualification=payload.educational_qualification,
-        years_of_experience=payload.years_of_experience,
-        city=payload.city,
-        terms_consent=payload.terms_consent,
-        l2_owner_email=str(payload.l2_owner_email) if payload.l2_owner_email else None,
-        l2_owner_name=payload.l2_owner_name,
-        performed_by_person_id_platform=_platform_person_id(user),
-        performed_by_email=user.email,
-        user=user,
-        event_source="candidate_create",
+        source_channel=source_channel,
+        attempted_at=now,
     )
 
-    await session.commit()
+    try:
+        candidate = await _create_candidate_with_automation(
+            session,
+            first_name=first_name,
+            last_name=last_name,
+            email=email_normalized,
+            phone=payload.phone,
+            opening_id=opening_id,
+            source_channel=source_channel,
+            source_origin=SOURCE_ORIGIN_UI,
+            external_source_ref=create_external_source_ref,
+            cv_url=payload.cv_url,
+            portfolio_url=payload.portfolio_url,
+            resume_url=payload.resume_url,
+            educational_qualification=payload.educational_qualification,
+            years_of_experience=payload.years_of_experience,
+            city=payload.city,
+            terms_consent=payload.terms_consent,
+            l2_owner_email=l2_owner_email,
+            l2_owner_name=payload.l2_owner_name,
+            performed_by_person_id_platform=performed_by_person_id_platform,
+            performed_by_email=user.email,
+            user=user,
+            event_source="candidate_create",
+        )
+    except IntegrityError:
+        await session.rollback()
+        raced_candidate = await _find_existing_candidate_by_opening_email(
+            session,
+            opening_id=opening_id,
+            email_normalized=email_normalized,
+        )
+        if not raced_candidate:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Candidate already exists for this opening/email.",
+            )
 
-    opening_title = None
-    if candidate.opening_id is not None:
-        opening_title = (
-            await session.execute(select(RecOpening.title).where(RecOpening.opening_id == candidate.opening_id))
-        ).scalar_one_or_none()
+        race_now = now_ist_naive()
+        if _is_recent_google_sheet_duplicate(raced_candidate, now=race_now):
+            duplicate_message = "Candidate already exists for this opening/email within last 24 hours."
+            await _record_ui_ingest_attempt(
+                session,
+                opening_id=opening_id,
+                email_normalized=email_normalized,
+                external_source_ref=raced_candidate.external_source_ref,
+                attempt_status="duplicate_recent",
+                candidate_id=raced_candidate.candidate_id,
+                message=duplicate_message,
+                attempted_at=race_now,
+                payload=attempt_payload,
+            )
+            await session.commit()
+            response.status_code = status.HTTP_200_OK
+            return await get_candidate(raced_candidate.candidate_id, session, user)  # type: ignore[arg-type]
 
-    return CandidateDetailOut(
+        race_reapply_ref = _derive_ui_external_source_ref(
+            opening_id=opening_id,
+            email_normalized=email_normalized,
+            first_name=first_name,
+            last_name=last_name,
+            source_channel=source_channel,
+            attempted_at=race_now,
+        )
+        await _apply_ui_reapplication(
+            session,
+            candidate=raced_candidate,
+            opening_id=opening_id,
+            first_name=first_name,
+            last_name=last_name,
+            email_normalized=email_normalized,
+            phone=payload.phone,
+            source_channel=source_channel,
+            external_source_ref=race_reapply_ref,
+            cv_url=payload.cv_url,
+            portfolio_url=payload.portfolio_url,
+            resume_url=payload.resume_url,
+            educational_qualification=payload.educational_qualification,
+            years_of_experience=payload.years_of_experience,
+            city=payload.city,
+            terms_consent=payload.terms_consent,
+            l2_owner_email=l2_owner_email,
+            l2_owner_name=payload.l2_owner_name,
+            performed_by_person_id_platform=performed_by_person_id_platform,
+            performed_by_email=user.email,
+            attempted_at=race_now,
+        )
+        await _record_ui_ingest_attempt(
+            session,
+            opening_id=opening_id,
+            email_normalized=email_normalized,
+            external_source_ref=race_reapply_ref,
+            attempt_status="reapplied",
+            candidate_id=raced_candidate.candidate_id,
+            message="Candidate reapplied for the same opening after duplicate cooldown.",
+            attempted_at=race_now,
+            payload=attempt_payload,
+        )
+        await session.commit()
+        response.status_code = status.HTTP_200_OK
+        return await get_candidate(raced_candidate.candidate_id, session, user)  # type: ignore[arg-type]
+
+    await _record_ui_ingest_attempt(
+        session,
+        opening_id=opening_id,
+        email_normalized=email_normalized,
+        external_source_ref=create_external_source_ref,
+        attempt_status="created",
         candidate_id=candidate.candidate_id,
-        candidate_code=candidate.candidate_code,
-        name=candidate.full_name,
-        first_name=candidate.first_name,
-        last_name=candidate.last_name,
-        email=candidate.email,
-        phone=candidate.phone,
-        opening_id=candidate.opening_id,
-        opening_title=opening_title,
-        l2_owner_email=candidate.l2_owner_email,
-        l2_owner_name=candidate.l2_owner_name,
-        source_channel=candidate.source_channel,
-        source_origin=candidate.source_origin,
-        external_source_ref=candidate.external_source_ref,
-        educational_qualification=candidate.educational_qualification,
-        years_of_experience=candidate.years_of_experience,
-        city=candidate.city,
-        terms_consent=candidate.terms_consent,
-        terms_consent_at=candidate.terms_consent_at,
-        status=candidate.status,
-        current_stage="enquiry",
-        final_decision=candidate.final_decision,
-        hired_person_id_platform=candidate.hired_person_id_platform,
-        cv_url=candidate.cv_url,
-        resume_url=candidate.resume_url,
-        portfolio_url=candidate.portfolio_url,
-        portfolio_not_uploaded_reason=candidate.portfolio_not_uploaded_reason,
-        questions_from_candidate=candidate.questions_from_candidate,
-        drive_folder_url=candidate.drive_folder_url,
-        caf_sent_at=candidate.caf_sent_at,
-        caf_submitted_at=candidate.caf_submitted_at,
-        needs_hr_review=bool(candidate.needs_hr_review),
-        application_docs_status=candidate.application_docs_status,
-        joining_docs_status=candidate.joining_docs_status,
-        created_at=candidate.created_at,
-        updated_at=candidate.updated_at,
+        message="Candidate created via HR UI.",
+        attempted_at=now,
+        payload=attempt_payload,
     )
+    await session.commit()
+    response.status_code = status.HTTP_201_CREATED
+    return await get_candidate(candidate.candidate_id, session, user)  # type: ignore[arg-type]
 
 
 @router.post("/import/google-sheet", status_code=status.HTTP_200_OK)
