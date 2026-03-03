@@ -3,7 +3,6 @@ import { CandidateListItem } from "@/lib/types";
 import { internalUrl } from "@/lib/internal";
 import { OpeningListItem } from "@/lib/types";
 import { CandidatesClient } from "./CandidatesClient";
-import { redirect } from "next/navigation";
 import { getAuthMe } from "@/lib/auth-me";
 
 function normalizeRoleToken(value: unknown): string {
@@ -71,21 +70,17 @@ export default async function CandidatesPage({}: {}) {
     normalizedRoles.some((role) => ["2", "superadmin", "s_admin", "super_admin"].includes(role));
   const isRoleFiveOrSix = roleIds.includes(5) || roleIds.includes(6);
   const isHr = isSuperadmin || normalizedRoles.some((role) => isHrRoleToken(role));
-  const canAccessCandidate360 = !isRoleFiveOrSix || isHr || isSuperadmin;
+  const canAccessCandidate360 = true;
   const isInterviewer = normalizedRoles.some((role) =>
     ["interviewer", "gl", "group_lead", "grouplead", "hiring_manager"].includes(role)
   );
-
-  if (isInterviewer && !isHr && !isRoleFiveOrSix) {
-    redirect("/interviewer");
-  }
   const [candidates, openings] = await Promise.all([fetchCandidates(), fetchOpenings()]);
   return (
     <CandidatesClient
       initialCandidates={candidates}
       openings={openings}
       canNavigate={canAccessCandidate360}
-      canViewBasicDetails={isHr}
+      canViewBasicDetails={isHr || isRoleFiveOrSix || isInterviewer}
     />
   );
 }

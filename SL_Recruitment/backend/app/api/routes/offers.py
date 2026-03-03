@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from pydantic import BaseModel
 from urllib.parse import urlparse, parse_qs
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,7 @@ from app.services.offers import (
     approve_offer,
     convert_candidate_to_employee,
     create_offer,
+    create_offer_revision,
     is_principal_approver_email,
     normalize_principal_email,
     offer_approval_public_link,
@@ -114,6 +116,10 @@ def _safe_person_id(raw: str | None) -> int | None:
         return int(raw)
     except Exception:
         return None
+
+
+class OfferRevisionIn(BaseModel):
+    reason: str | None = None
 
 
 def _request_ip(request: Request) -> str | None:
@@ -340,7 +346,7 @@ async def update_offer(
                 "offer_currency": offer.currency or "INR",
                 "approval_link": approval_link,
                 "offer_file_url": offer_pdf_signed_url(offer.public_token),
-                "sender_name": user.full_name or "Studio Lotus Recruitment Team",
+                "sender_name": "Studio Lotus Recruitment Team",
             },
             email_type="offer_approval_request_principal",
             related_entity_type="offer",
@@ -493,6 +499,36 @@ async def admin_offer_decision(
     return OfferOut(
         **_offer_base_payload(offer),
         letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
+
+
+@router.post("/{offer_id}/revise", response_model=OfferOut, status_code=status.HTTP_201_CREATED)
+async def revise_offer_route(
+    offer_id: int,
+    payload: OfferRevisionIn | None = None,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    source_offer = await session.get(RecCandidateOffer, offer_id)
+    if not source_offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    candidate = await session.get(RecCandidate, source_offer.candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    opening = await session.get(RecOpening, source_offer.opening_id) if source_offer.opening_id else None
+    revised = await create_offer_revision(
+        session,
+        source_offer=source_offer,
+        candidate=candidate,
+        opening=opening,
+        user=user,
+        revision_reason=(payload.reason if payload else None),
+    )
+    await session.commit()
+    await session.refresh(revised)
+    return OfferOut(
+        **_offer_base_payload(revised),
+        letter_overrides=_decode_letter_overrides(revised.offer_letter_overrides),
     )
 
 
@@ -717,8 +753,6 @@ async def get_public_offer_pdf(
     ).scalars().first()
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
-    if offer.offer_status not in {"approved", "sent", "viewed", "accepted"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Offer PDF is available after approval.")
     file_id = _extract_drive_file_id(offer.pdf_url)
     candidate = await session.get(RecCandidate, offer.candidate_id)
     opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None

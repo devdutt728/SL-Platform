@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { LogOut, Sparkles, User } from "lucide-react";
+import type { InterviewNotificationCounts } from "@/lib/types";
 
 type Me = {
   email?: string;
@@ -24,6 +25,10 @@ const roleLabel: Record<string, string> = {
   viewer: "Viewer",
 };
 
+function normalizeRoleToken(value: unknown): string {
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
 function firstName(me: Me) {
   const source = (me.full_name || "").trim() || (me.email || "");
   const token = source.split(/\s+/)[0] || source;
@@ -35,6 +40,7 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const pathname = usePathname();
   const me = initialMe;
+  const [interviewNotifications, setInterviewNotifications] = useState<InterviewNotificationCounts | null>(null);
 
   const displayRoles = useMemo(() => {
     if (!me) return [];
@@ -48,6 +54,25 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
     return labels.length ? labels : [me.platform_role_name || "Viewer"];
   }, [me]);
 
+  const roleTokens = useMemo(() => {
+    if (!me) return [] as string[];
+    const values = [
+      ...(me.roles || []),
+      ...(me.platform_role_codes || []),
+      ...(me.platform_role_names || []),
+      me.platform_role_code || "",
+      me.platform_role_name || "",
+    ];
+    return values.map((value) => normalizeRoleToken(value)).filter(Boolean);
+  }, [me]);
+
+  const isHrLike = useMemo(() => {
+    return roleTokens.some((role) => role === "hr" || role.startsWith("hr_") || role.startsWith("hr") || role.includes("humanresource"));
+  }, [roleTokens]);
+  const isAssessmentActor = useMemo(() => {
+    return roleTokens.some((role) => ["interviewer", "gl", "group_lead", "grouplead", "hiring_manager"].includes(role));
+  }, [roleTokens]);
+
   const sectionLabel = useMemo(() => {
     const normalized = basePath && pathname.startsWith(basePath) ? pathname.slice(basePath.length) || "/" : pathname;
     const first = normalized.split("/").filter(Boolean)[0] || "dashboard";
@@ -58,12 +83,39 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
       offers: "Offers",
       reports: "Reports",
       "sprint-templates": "Sprint templates",
-      interviewer: "Interviewer",
-      "gl-portal": "GL portal",
+      interviewer: "Assessment hub",
+      "gl-portal": "Assessment hub",
       superadmin: "Superadmin",
     };
     return map[first] || "Workspace";
   }, [pathname, basePath]);
+
+  useEffect(() => {
+    if (!me || (!isAssessmentActor && !isHrLike)) return;
+    let cancelled = false;
+    const query = isAssessmentActor && !isHrLike ? "?interviewer=me" : "";
+
+    async function refresh() {
+      try {
+        const res = await fetch(`/api/rec/interviews/notifications${query}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as InterviewNotificationCounts;
+        if (!cancelled) setInterviewNotifications(data);
+      } catch {
+        // Ignore notification fetch failures in topbar.
+      }
+    }
+
+    void refresh();
+    const source = new EventSource("/api/rec/events/stream");
+    source.onmessage = () => {
+      void refresh();
+    };
+    return () => {
+      cancelled = true;
+      source.close();
+    };
+  }, [isAssessmentActor, isHrLike, me]);
 
   async function signOut() {
     await fetch(`${basePath}/api/auth/logout`, { method: "POST" });
@@ -82,6 +134,11 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
           <span className="hidden text-xs font-semibold text-[var(--dim-grey)] xl:inline">
             / {sectionLabel}
           </span>
+          {(interviewNotifications?.total_pending || 0) > 0 ? (
+            <span className="hidden rounded-full bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white xl:inline-flex">
+              {interviewNotifications?.total_pending} pending
+            </span>
+          ) : null}
         </div>
 
         <div className="flex shrink-0 items-center gap-2">

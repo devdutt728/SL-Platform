@@ -1,32 +1,39 @@
-export const runtime = "nodejs";
+import { type NextRequest } from "next/server";
+import { backendUrl } from "@/lib/backend";
+import { authHeaderFromCookie } from "@/lib/auth-server";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function createEventStream() {
-  const encoder = new TextEncoder();
-  let interval: NodeJS.Timeout | undefined;
+export async function GET(request: NextRequest) {
+  const controller = new AbortController();
+  request.signal.addEventListener("abort", () => controller.abort());
 
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(encoder.encode(": connected\n\n"));
-      interval = setInterval(() => {
-        controller.enqueue(encoder.encode("event: ping\ndata: {}\n\n"));
-      }, 25000);
+  const upstream = await fetch(backendUrl("/rec/events/stream"), {
+    cache: "no-store",
+    headers: {
+      accept: "text/event-stream",
+      ...await authHeaderFromCookie(),
     },
-    cancel() {
-      if (interval) clearInterval(interval);
-    },
+    signal: controller.signal,
   });
-}
 
-export async function GET() {
-  const stream = createEventStream();
-  return new Response(stream, {
+  if (!upstream.ok || !upstream.body) {
+    const text = await upstream.text();
+    return new Response(text || "Unable to open events stream", {
+      status: upstream.status || 502,
+      headers: { "content-type": upstream.headers.get("content-type") || "text/plain" },
+    });
+  }
+
+  return new Response(upstream.body, {
+    status: 200,
     headers: {
       "content-type": "text/event-stream",
-      "cache-control": "no-cache",
+      "cache-control": "no-cache, no-transform",
       connection: "keep-alive",
+      "x-accel-buffering": "no",
     },
   });
 }

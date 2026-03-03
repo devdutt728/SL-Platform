@@ -76,22 +76,12 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
             </Link>
             {candidate.cv_url ? (
               <a
-                href={candidate.cv_url}
+                href={`/candidates/${encodeURIComponent(id)}/documents/cv`}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-600 to-violet-600 px-4 py-2 text-xs font-semibold text-white shadow-card hover:from-cyan-700 hover:to-violet-700"
               >
-                Open CV
-              </a>
-            ) : null}
-            {candidate.drive_folder_url ? (
-              <a
-                href={candidate.drive_folder_url}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-full border border-slate-200 bg-white/70 px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-white"
-              >
-                Drive folder
+                Preview CV
               </a>
             ) : null}
           </div>

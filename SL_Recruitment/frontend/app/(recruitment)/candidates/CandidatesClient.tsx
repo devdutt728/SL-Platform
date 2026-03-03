@@ -88,6 +88,10 @@ function cleanText(value: string | null | undefined): string {
   return trimmed || "-";
 }
 
+function documentPreviewHref(candidateId: number, kind: "cv" | "resume" | "portfolio") {
+  return `/candidates/${encodeURIComponent(String(candidateId))}/documents/${encodeURIComponent(kind)}`;
+}
+
 function chipTone(kind: "neutral" | "green" | "amber" | "red" | "blue") {
   if (kind === "green") return "bg-emerald-500/15 text-emerald-800 ring-1 ring-emerald-500/20";
   if (kind === "amber") return "bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/20";
@@ -770,7 +774,7 @@ export function CandidatesClient({
                     <div className="mt-2 flex flex-wrap justify-end gap-1.5">
                       {selectedCandidate.portfolio_url ? (
                         <a
-                          href={selectedCandidate.portfolio_url}
+                          href={documentPreviewHref(selectedCandidate.candidate_id, "portfolio")}
                           target="_blank"
                           rel="noreferrer"
                           className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
@@ -782,7 +786,7 @@ export function CandidatesClient({
                       )}
                       {selectedCandidate.cv_url ? (
                         <a
-                          href={selectedCandidate.cv_url}
+                          href={documentPreviewHref(selectedCandidate.candidate_id, "cv")}
                           target="_blank"
                           rel="noreferrer"
                           className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
@@ -794,7 +798,7 @@ export function CandidatesClient({
                       )}
                       {selectedCandidate.resume_url ? (
                         <a
-                          href={selectedCandidate.resume_url}
+                          href={documentPreviewHref(selectedCandidate.candidate_id, "resume")}
                           target="_blank"
                           rel="noreferrer"
                           className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"

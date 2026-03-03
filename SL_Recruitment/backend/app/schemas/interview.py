@@ -68,3 +68,12 @@ class InterviewOut(BaseModel):
     candidate_code: Optional[str] = None
     opening_id: Optional[int] = None
     opening_title: Optional[str] = None
+
+
+class InterviewNotificationCountsOut(BaseModel):
+    l1_assigned: int = 0
+    l1_pending: int = 0
+    l2_assigned: int = 0
+    l2_pending: int = 0
+    total_assigned: int = 0
+    total_pending: int = 0

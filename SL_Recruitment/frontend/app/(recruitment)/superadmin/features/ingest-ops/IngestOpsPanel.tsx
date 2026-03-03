@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
 import { AlertTriangle, Download, RefreshCcw, RotateCw, ShieldCheck } from "lucide-react";
 import type {
@@ -26,6 +27,7 @@ type Props = {
 };
 
 export function IngestOpsPanel({ openings }: Props) {
+  const searchParams = useSearchParams();
   const [dashboard, setDashboard] = useState<IngestOpsDashboard | null>(null);
   const [rowsData, setRowsData] = useState<IngestOpsRowsResponse>({ total: 0, limit: 100, offset: 0, rows: [] });
   const [selected, setSelected] = useState<IngestOpsRow | null>(null);
@@ -42,6 +44,13 @@ export function IngestOpsPanel({ openings }: Props) {
   const [preflightJson, setPreflightJson] = useState('{\n  "sheet_name": "Master Data",\n  "rows": []\n}');
   const [preflightResult, setPreflightResult] = useState<GoogleSheetIngestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const attemptId = useMemo(() => {
+    const raw = searchParams?.get("attempt_id");
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [searchParams]);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -76,6 +85,13 @@ export function IngestOpsPanel({ openings }: Props) {
       ]);
       setDashboard(dash);
       setRowsData(rows);
+      if (attemptId !== null) {
+        const attemptRow = rows.rows.find((row) => row.candidate_ingest_attempt_id === attemptId);
+        if (attemptRow) {
+          setSelected(attemptRow);
+          return;
+        }
+      }
       if (!selected || !rows.rows.some((row) => row.candidate_ingest_attempt_id === selected.candidate_ingest_attempt_id)) {
         setSelected(rows.rows[0] || null);
       }
@@ -89,7 +105,7 @@ export function IngestOpsPanel({ openings }: Props) {
   useEffect(() => {
     void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.toString()]);
+  }, [attemptId, query.toString()]);
 
   useEffect(() => {
     if (!selected?.candidate_ingest_attempt_id) {
@@ -380,7 +396,10 @@ export function IngestOpsPanel({ openings }: Props) {
                       Candidate profile
                     </Link>
                   ) : null}
-                  <Link href={`/superadmin?attempt_id=${selected.candidate_ingest_attempt_id}`} className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50">
+                  <Link
+                    href={`/superadmin/ingest-ops?attempt_id=${selected.candidate_ingest_attempt_id}`}
+                    className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                  >
                     Attempt history
                   </Link>
                 </div>

@@ -163,99 +163,99 @@ a {
   font-family: var(--font-primary), Roboto, var(--font-stack-fallback);
 }
 
-.recruitment-theme [class*="text-blue-"],
-.recruitment-theme [class*="text-sky-"],
-.recruitment-theme [class*="text-cyan-"],
-.recruitment-theme [class*="text-teal-"],
-.recruitment-theme [class*="text-indigo-"],
-.recruitment-theme [class*="text-violet-"],
-.recruitment-theme [class*="text-purple-"],
-.recruitment-theme [class*="text-fuchsia-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-blue-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-sky-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-cyan-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-teal-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-indigo-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-violet-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-purple-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-fuchsia-"] {
   color: #3b5f85 !important;
 }
 
-.recruitment-theme [class*="bg-blue-"],
-.recruitment-theme [class*="bg-sky-"],
-.recruitment-theme [class*="bg-cyan-"],
-.recruitment-theme [class*="bg-teal-"],
-.recruitment-theme [class*="bg-indigo-"],
-.recruitment-theme [class*="bg-violet-"],
-.recruitment-theme [class*="bg-purple-"],
-.recruitment-theme [class*="bg-fuchsia-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-blue-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-sky-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-cyan-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-teal-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-indigo-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-violet-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-purple-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-fuchsia-"] {
   background-color: rgba(59, 95, 133, 0.12) !important;
 }
 
-.recruitment-theme [class*="border-blue-"],
-.recruitment-theme [class*="border-sky-"],
-.recruitment-theme [class*="border-cyan-"],
-.recruitment-theme [class*="border-teal-"],
-.recruitment-theme [class*="border-indigo-"],
-.recruitment-theme [class*="border-violet-"],
-.recruitment-theme [class*="border-purple-"],
-.recruitment-theme [class*="border-fuchsia-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-blue-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-sky-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-cyan-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-teal-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-indigo-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-violet-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-purple-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-fuchsia-"] {
   border-color: rgba(59, 95, 133, 0.3) !important;
 }
 
-.recruitment-theme [class*="text-emerald-"],
-.recruitment-theme [class*="text-green-"],
-.recruitment-theme [class*="text-lime-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-emerald-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-green-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-lime-"] {
   color: #2f6f57 !important;
 }
 
-.recruitment-theme [class*="bg-emerald-"],
-.recruitment-theme [class*="bg-green-"],
-.recruitment-theme [class*="bg-lime-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-emerald-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-green-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-lime-"] {
   background-color: rgba(47, 111, 87, 0.12) !important;
 }
 
-.recruitment-theme [class*="border-emerald-"],
-.recruitment-theme [class*="border-green-"],
-.recruitment-theme [class*="border-lime-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-emerald-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-green-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-lime-"] {
   border-color: rgba(47, 111, 87, 0.3) !important;
 }
 
-.recruitment-theme [class*="text-amber-"],
-.recruitment-theme [class*="text-yellow-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-amber-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-yellow-"] {
   color: #8a622d !important;
 }
 
-.recruitment-theme [class*="bg-amber-"],
-.recruitment-theme [class*="bg-yellow-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-amber-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-yellow-"] {
   background-color: rgba(138, 98, 45, 0.14) !important;
 }
 
-.recruitment-theme [class*="border-amber-"],
-.recruitment-theme [class*="border-yellow-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-amber-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-yellow-"] {
   border-color: rgba(138, 98, 45, 0.32) !important;
 }
 
-.recruitment-theme [class*="text-orange-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-orange-"] {
   color: var(--brand-color) !important;
 }
 
-.recruitment-theme [class*="bg-orange-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-orange-"] {
   background-color: rgba(231, 64, 17, 0.12) !important;
 }
 
-.recruitment-theme [class*="border-orange-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-orange-"] {
   border-color: rgba(231, 64, 17, 0.34) !important;
 }
 
-.recruitment-theme [class*="text-red-"],
-.recruitment-theme [class*="text-rose-"],
-.recruitment-theme [class*="text-pink-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-red-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-rose-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="text-pink-"] {
   color: #8a4b4b !important;
 }
 
-.recruitment-theme [class*="bg-red-"],
-.recruitment-theme [class*="bg-rose-"],
-.recruitment-theme [class*="bg-pink-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-red-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-rose-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="bg-pink-"] {
   background-color: rgba(138, 75, 75, 0.12) !important;
 }
 
-.recruitment-theme [class*="border-red-"],
-.recruitment-theme [class*="border-rose-"],
-.recruitment-theme [class*="border-pink-"] {
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-red-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-rose-"],
+.recruitment-theme :not(button):not([role="button"]):not(a)[class*="border-pink-"] {
   border-color: rgba(138, 75, 75, 0.3) !important;
 }
 

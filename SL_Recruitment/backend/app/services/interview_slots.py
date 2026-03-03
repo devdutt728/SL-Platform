@@ -13,7 +13,8 @@ from app.services.calendar import list_calendar_events, list_visible_calendar_id
 
 BUSINESS_START = time(10, 0)
 BUSINESS_END = time(18, 30)
-SLOT_MINUTES = 60
+DEFAULT_SLOT_DURATION_MINUTES = 60
+DEFAULT_SLOT_STEP_MINUTES = 5
 SLOTS_PER_DAY = 2
 DAYS_REQUIRED = 3
 MAX_BUSINESS_DAYS_SCAN = 12
@@ -46,17 +47,33 @@ def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: date
     return a_start < b_end and a_end > b_start
 
 
+def _slot_schedule_minutes() -> tuple[int, int]:
+    duration = settings.interview_slot_duration_minutes
+    if duration <= 0:
+        duration = DEFAULT_SLOT_DURATION_MINUTES
+
+    step = settings.interview_slot_step_minutes
+    if step <= 0:
+        step = DEFAULT_SLOT_STEP_MINUTES
+
+    # Step cannot be larger than duration, otherwise the engine skips viable starts.
+    return duration, min(step, duration)
+
+
 def generate_candidate_slots(*, tz: ZoneInfo, start_day: date | None = None, include_start: bool = False) -> list[SlotCandidate]:
     slots: list[SlotCandidate] = []
+    slot_minutes, slot_step_minutes = _slot_schedule_minutes()
+    slot_delta = timedelta(minutes=slot_minutes)
+    step_delta = timedelta(minutes=slot_step_minutes)
     base_day = start_day or datetime.now(tz).date()
     for day in _iter_business_days(base_day, include_start=include_start):
         if len(slots) >= (DAYS_REQUIRED * SLOTS_PER_DAY * 2):
             break
         current = datetime.combine(day, BUSINESS_START, tzinfo=tz)
         day_end = datetime.combine(day, BUSINESS_END, tzinfo=tz)
-        while current + timedelta(minutes=SLOT_MINUTES) <= day_end:
-            slots.append(SlotCandidate(start_at=current, end_at=current + timedelta(minutes=SLOT_MINUTES)))
-            current += timedelta(minutes=SLOT_MINUTES)
+        while current + slot_delta <= day_end:
+            slots.append(SlotCandidate(start_at=current, end_at=current + slot_delta))
+            current += step_delta
     return slots
 
 
@@ -139,17 +156,31 @@ def _busy_ranges_utc(
 
 def _day_slots(day: date, *, tz: ZoneInfo) -> list[SlotCandidate]:
     slots: list[SlotCandidate] = []
+    slot_minutes, slot_step_minutes = _slot_schedule_minutes()
+    slot_delta = timedelta(minutes=slot_minutes)
+    step_delta = timedelta(minutes=slot_step_minutes)
     current = datetime.combine(day, BUSINESS_START, tzinfo=tz)
     day_end = datetime.combine(day, BUSINESS_END, tzinfo=tz)
-    while current + timedelta(minutes=SLOT_MINUTES) <= day_end:
-        slots.append(SlotCandidate(start_at=current, end_at=current + timedelta(minutes=SLOT_MINUTES)))
-        current += timedelta(minutes=SLOT_MINUTES)
+    while current + slot_delta <= day_end:
+        slots.append(SlotCandidate(start_at=current, end_at=current + slot_delta))
+        current += step_delta
     return slots
 
 
-def filter_free_slots(*, interviewer_email: str, start_day: date, tz: ZoneInfo) -> list[SlotCandidate]:
+def filter_free_slots(
+    *,
+    interviewer_email: str,
+    start_day: date,
+    tz: ZoneInfo,
+    now_local: datetime | None = None,
+) -> list[SlotCandidate]:
     free_slots: list[SlotCandidate] = []
-    now_local = datetime.now(tz)
+    if now_local is None:
+        effective_now_local = datetime.now(tz)
+    elif now_local.tzinfo is None:
+        effective_now_local = now_local.replace(tzinfo=tz)
+    else:
+        effective_now_local = now_local.astimezone(tz)
     candidate_days: list[date] = []
     for day in _iter_business_days(start_day, include_start=True):
         candidate_days.append(day)
@@ -172,14 +203,18 @@ def filter_free_slots(*, interviewer_email: str, start_day: date, tz: ZoneInfo) 
             calendar_ids=[interviewer_email] if interviewer_email else None,
         )
         available: list[SlotCandidate] = []
+        day_last_selected_end: datetime | None = None
         for slot in day_slots:
-            if slot.start_at <= now_local:
+            if slot.start_at <= effective_now_local:
+                continue
+            if day_last_selected_end and slot.start_at < day_last_selected_end:
                 continue
             slot_start_utc = slot.start_at.astimezone(timezone.utc)
             slot_end_utc = slot.end_at.astimezone(timezone.utc)
             if any(_overlaps(slot_start_utc, slot_end_utc, busy_start, busy_end) for busy_start, busy_end in busy_utc):
                 continue
             available.append(slot)
+            day_last_selected_end = slot.end_at
             if len(available) >= SLOTS_PER_DAY:
                 break
         if not available:

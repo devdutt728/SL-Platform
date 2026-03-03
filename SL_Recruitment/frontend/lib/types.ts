@@ -273,6 +273,15 @@ export type Interview = {
   opening_title?: string | null;
 };
 
+export type InterviewNotificationCounts = {
+  l1_assigned: number;
+  l1_pending: number;
+  l2_assigned: number;
+  l2_pending: number;
+  total_assigned: number;
+  total_pending: number;
+};
+
 export type L2Assessment = {
   candidate_interview_assessment_id?: number | null;
   candidate_interview_id: number;

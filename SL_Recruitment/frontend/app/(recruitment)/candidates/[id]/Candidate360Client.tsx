@@ -22,6 +22,7 @@ type Props = {
   canCancelInterview: boolean;
   canUploadJoiningDocs: boolean;
   canAccessOffers: boolean;
+  canOpenDriveFolder: boolean;
 };
 
 type SlotPreview = {
@@ -94,6 +95,10 @@ function normalizeStage(raw?: string | null) {
   if (normalized === "l2") return "l2_interview";
   if (normalized === "l1") return "l1_interview";
   return normalized;
+}
+
+function normalizeOfferStatus(raw?: string | null) {
+  return (raw || "").trim().toLowerCase();
 }
 
 function stageLabel(raw?: string | null) {
@@ -449,6 +454,20 @@ async function deleteOffer(offerId: number) {
   if (!res.ok) throw new Error(await res.text());
 }
 
+async function reviseOffer(offerId: number, reason?: string) {
+  const res = await fetch(`/api/rec/offers/${encodeURIComponent(String(offerId))}/revise`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reason: reason || null }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as CandidateOffer;
+}
+
+function documentPreviewPath(candidateId: string, kind: "cv" | "resume" | "portfolio") {
+  return `/candidates/${encodeURIComponent(candidateId)}/documents/${encodeURIComponent(kind)}`;
+}
+
 async function convertCandidate(candidateId: string) {
   const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/convert`, { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
@@ -569,6 +588,7 @@ const principalApproverOptions = [
   { email: "ankur@studiolotus.in", label: "Ankur" },
   { email: "ambrish@studiolotus.in", label: "Ambrish" },
   { email: "harsh@studiolotus.in", label: "Harsh" },
+  { email: "datahub@studiolotus.in", label: "Datahub" },
 ];
 
 const letterOverrideFields = [
@@ -621,6 +641,7 @@ export function Candidate360Client({
   canCancelInterview,
   canUploadJoiningDocs,
   canAccessOffers,
+  canOpenDriveFolder,
 }: Props) {
   const searchParams = useSearchParams();
   const { pushToast } = useToast();
@@ -694,12 +715,16 @@ export function Candidate360Client({
     () => (candidateSprints || []).filter((sprint) => sprint.status !== "deleted"),
     [candidateSprints]
   );
-  const hasSubmittedSprint = useMemo(
-    () => activeSprints.some((sprint) => sprint.status === "submitted"),
+  const hasApprovedSprint = useMemo(
+    () =>
+      activeSprints.some(
+        (sprint) => sprint.status === "submitted" && String(sprint.decision || "").trim().toLowerCase() === "advance"
+      ),
     [activeSprints]
   );
   const sprintAssigned = activeSprints.length > 0;
   const sprintAssignDisabled = sprintAssigned && !canSkip;
+  const sprintApprovalPending = sprintAssigned && !hasApprovedSprint;
   const [sprintDeleteBusy, setSprintDeleteBusy] = useState(false);
   function isCancelled(item: Interview) {
     if ((item.decision || "").toLowerCase() === "cancelled") return true;
@@ -1515,11 +1540,16 @@ export function Candidate360Client({
     }
   }
 
-  async function handleSendOffer(offerId: number) {
+  async function handleSendOffer(offer: CandidateOffer) {
     setOffersBusy(true);
     setOffersError(null);
     try {
-      await sendOffer(offerId);
+      const status = normalizeOfferStatus(offer.offer_status);
+      const decision = normalizeOfferStatus(offer.approval_decision);
+      if (status === "pending_approval" && decision === "approved") {
+        await approveOffer(offer.candidate_offer_id);
+      }
+      await sendOffer(offer.candidate_offer_id);
       await refreshOffers();
     } catch (e: any) {
       setOffersError(e?.message || "Offer send failed.");
@@ -1584,6 +1614,34 @@ export function Candidate360Client({
         } catch (e: any) {
           setOffersError(e?.message || "Offer deletion failed.");
           setDialog((prev) => ({ ...prev, error: e?.message || "Offer deletion failed." }));
+        } finally {
+          setOffersBusy(false);
+        }
+      },
+    });
+  }
+
+  async function handleReviseOffer(offerId: number) {
+    openDialog({
+      title: "Create offer revision",
+      description: "This will create a new draft offer version and reopen the offer stage.",
+      confirmLabel: "Create revision",
+      tone: "success",
+      requireReason: true,
+      reasonLabel: "Revision reason",
+      reasonPlaceholder: "Candidate requested revised compensation / terms",
+      onConfirm: async (value) => {
+        setOffersBusy(true);
+        setOffersError(null);
+        try {
+          await reviseOffer(offerId, value);
+          await refreshOffers();
+          await refreshAll();
+          pushToast({ tone: "success", title: "Offer revision draft created" });
+          closeDialog();
+        } catch (e: any) {
+          setOffersError(e?.message || "Could not create revision.");
+          setDialog((prev) => ({ ...prev, error: e?.message || "Could not create revision." }));
         } finally {
           setOffersBusy(false);
         }
@@ -2253,15 +2311,14 @@ export function Candidate360Client({
     }
     if (current === "sprint") {
       const actions: StageButton[] = [];
-      if (hasSubmittedSprint) {
-        actions.push({
-          label: "Advance to L1 shortlist",
-          tone: "btn-action-success",
-          icon: <CheckCircle2 className="h-4 w-4" />,
-          intent: "advance",
-          action: () => handleTransition("l1_shortlist", "advance"),
-        });
-      }
+      actions.push({
+        label: hasApprovedSprint ? "Advance to L1 shortlist" : "L1 shortlist locked",
+        tone: "btn-action-success",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "advance",
+        disabled: !hasApprovedSprint,
+        action: () => handleTransition("l1_shortlist", "advance"),
+      });
       actions.push(
         {
           label: "Assign sprint",
@@ -2331,24 +2388,10 @@ export function Candidate360Client({
     cafLocked,
     candidate.l2_owner_email,
     sprintAssignDisabled,
-    hasSubmittedSprint,
+    hasApprovedSprint,
     joiningDocsComplete,
     offersBusy,
   ]);
-
-  const nextBestAction = useMemo(() => {
-    const primary = stageButtons.find((item) => item.intent === "advance" && !item.disabled) || stageButtons[0] || null;
-    if (!primary) return null;
-    let blocker = "";
-    if (currentStageKey === "enquiry" && !candidate.l2_owner_email) {
-      blocker = "Assign GL/L2 owner before moving to HR screening.";
-    } else if (cafLocked) {
-      blocker = "CAF is pending. Candidate cannot progress until submission.";
-    } else if (currentStageKey === "joining_documents" && !joiningDocsComplete) {
-      blocker = "All required joining documents are needed before conversion.";
-    }
-    return { primary, blocker };
-  }, [stageButtons, currentStageKey, candidate.l2_owner_email, cafLocked, joiningDocsComplete]);
 
   const screening = data.screening as Screening | null | undefined;
   const interviewUpcoming = useMemo(() => {
@@ -2381,6 +2424,9 @@ export function Candidate360Client({
     [interviewPast]
   );
   const latestOffer = candidateOffers && candidateOffers.length > 0 ? candidateOffers[0] : null;
+  const latestOfferStatus = normalizeOfferStatus(latestOffer?.offer_status);
+  const latestOfferApprovalDecision = normalizeOfferStatus(latestOffer?.approval_decision);
+  const canSendApprovedOffer = latestOfferStatus === "approved" || (latestOfferStatus === "pending_approval" && latestOfferApprovalDecision === "approved");
   const stageProgressSteps = useMemo(() => {
     const hasStage = (key: string) => data.stages.some((stage) => normalizeStage(stage.stage_name) === key);
     const status = (candidate.status || "").toLowerCase();
@@ -2443,7 +2489,7 @@ export function Candidate360Client({
 
         <div className="flex flex-wrap items-center gap-2">
           {canDelete ? <DeleteCandidateButton candidateId={candidate.candidate_id} /> : null}
-          {candidate.drive_folder_url ? (
+          {canOpenDriveFolder && candidate.drive_folder_url ? (
             <Link
               href={candidate.drive_folder_url}
               target="_blank"
@@ -2455,28 +2501,6 @@ export function Candidate360Client({
           ) : null}
         </div>
       </div>
-      {nextBestAction ? (
-        <div className="sticky top-20 z-[120] rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/95 p-3 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.45)] backdrop-blur">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Next best action</p>
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">{nextBestAction.primary.label}</p>
-              <p className="text-xs text-slate-600">Current stage: {stageLabel(candidate.current_stage)}</p>
-              {nextBestAction.blocker ? <p className="mt-1 text-xs font-medium text-amber-700">{nextBestAction.blocker}</p> : null}
-            </div>
-            <button
-              type="button"
-              className={clsx("inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-white", nextBestAction.primary.tone)}
-              disabled={busy || !!nextBestAction.primary.disabled}
-              onClick={() => void nextBestAction.primary.action()}
-            >
-              {nextBestAction.primary.icon}
-              {nextBestAction.primary.label}
-            </button>
-          </div>
-        </div>
-      ) : null}
-
       {error ? <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
       {!canManageCandidate360 ? (
         <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-800">
@@ -3166,39 +3190,39 @@ export function Candidate360Client({
                 <div className="mt-4 flex flex-wrap gap-2">
                   {candidate.cv_url ? (
                     <Link
-                      href={candidate.cv_url}
+                      href={documentPreviewPath(candidateId, "cv")}
                       target="_blank"
                       className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-white"
                     >
                       <ExternalLink className="h-4 w-4" />
-                      Open CV
+                      Preview CV
                     </Link>
                   ) : null}
                   {candidate.resume_url ? (
                     <Link
-                      href={candidate.resume_url}
+                      href={documentPreviewPath(candidateId, "resume")}
                       target="_blank"
                       className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-white"
                     >
                       <ExternalLink className="h-4 w-4" />
-                      Open Resume
+                      Preview Resume
                     </Link>
                   ) : null}
                   {candidate.portfolio_url ? (
                     <Link
-                      href={candidate.portfolio_url}
+                      href={documentPreviewPath(candidateId, "portfolio")}
                       target="_blank"
                       className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-white"
                     >
                       <ExternalLink className="h-4 w-4" />
-                      Open Portfolio
+                      Preview Portfolio
                     </Link>
                   ) : candidate.portfolio_not_uploaded_reason ? (
                     <span className="inline-flex items-center rounded-xl border border-white/60 bg-white/30 px-4 py-2 text-sm text-slate-700">
                       Portfolio not uploaded: {candidate.portfolio_not_uploaded_reason}
                     </span>
                   ) : null}
-                  {candidate.drive_folder_url ? (
+                  {canOpenDriveFolder && candidate.drive_folder_url ? (
                     <Link
                       href={candidate.drive_folder_url}
                       target="_blank"
@@ -3207,9 +3231,9 @@ export function Candidate360Client({
                       <ExternalLink className="h-4 w-4" />
                       Open folder in Drive
                     </Link>
-                  ) : (
+                  ) : canOpenDriveFolder ? (
                     <span className="text-sm text-slate-600">No Drive folder linked yet.</span>
-                  )}
+                  ) : null}
                 </div>
 
                 <div className="mt-4 border-t border-white/60 pt-4">
@@ -4024,7 +4048,8 @@ export function Candidate360Client({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <p className="text-xs uppercase tracking-tight text-slate-500">Sprint</p>
-                {hasSubmittedSprint ? <Chip className={chipTone("amber")}>Submitted</Chip> : null}
+                {hasApprovedSprint ? <Chip className={chipTone("green")}>L2 approved</Chip> : null}
+                {sprintApprovalPending ? <Chip className={chipTone("amber")}>Awaiting L2 approval</Chip> : null}
               </div>
               <button
                 type="button"
@@ -4344,11 +4369,11 @@ export function Candidate360Client({
                           ) : null}
                         </>
                       ) : null}
-                      {latestOffer.offer_status === "approved" ? (
+                      {canSendApprovedOffer ? (
                         <button
                           type="button"
                           className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
-                          onClick={() => void handleSendOffer(latestOffer.candidate_offer_id)}
+                          onClick={() => void handleSendOffer(latestOffer)}
                           disabled={offersBusy}
                         >
                           Send to candidate
@@ -4373,6 +4398,16 @@ export function Candidate360Client({
                             Mark declined
                           </button>
                         </>
+                      ) : null}
+                      {canAccessOffers && ["declined", "withdrawn"].includes(latestOffer.offer_status) ? (
+                        <button
+                          type="button"
+                          className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
+                          onClick={() => void handleReviseOffer(latestOffer.candidate_offer_id)}
+                          disabled={offersBusy}
+                        >
+                          Create revised offer
+                        </button>
                       ) : null}
                       {latestOffer.offer_status === "accepted" ? (
                         <button

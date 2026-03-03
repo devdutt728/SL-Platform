@@ -1,17 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
 import { Home, Users, Briefcase, LayoutDashboard, CalendarClock, FileSignature, BarChart3, Shield } from "lucide-react";
+import type { InterviewNotificationCounts } from "@/lib/types";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, guard: "all" },
   { href: "/candidates", label: "Candidates", icon: Users, guard: "interviewer" },
   { href: "/openings", label: "Openings", icon: Briefcase, guard: "hr" },
-  { href: "/interviewer", label: "Interviewer", icon: CalendarClock, guard: "interviewer" },
-  { href: "/gl-portal", label: "GL Portal", icon: CalendarClock, guard: "gl" },
+  { href: "/gl-portal", label: "Assessment Hub", icon: CalendarClock, guard: "interviewer" },
   { href: "/offers", label: "Offers", icon: FileSignature, guard: "offers" },
   { href: "/reports", label: "Reports", icon: BarChart3, guard: "reports" },
   { href: "/", label: "Home", icon: Home, guard: "all" },
@@ -85,17 +85,45 @@ export function Sidebar({ initialMe }: { initialMe: SidebarMe | null }) {
   const isHr = isSuperadmin || normalizedRoles.some((role) => isHrRole(role));
   const isGl = normalizedRoles.some((role) => isGlRole(role));
   const isInterviewer = normalizedRoles.includes("interviewer");
+  const [interviewNotifications, setInterviewNotifications] = useState<InterviewNotificationCounts | null>(null);
 
   const guards = useMemo(() => {
     return {
       all: true,
       hr: isHr || isRoleFiveOrSix,
       interviewer: isInterviewer || isGl || isRoleFiveOrSix || isHr,
-      gl: isGl || isRoleFiveOrSix || isHr,
       offers: isHr || isSuperadmin,
       reports: isSuperadmin || normalizedRoles.includes("hr_admin"),
     };
   }, [isGl, isHr, isInterviewer, isRoleFiveOrSix, isSuperadmin, normalizedRoles]);
+
+  useEffect(() => {
+    if (!guards.interviewer) return;
+    let cancelled = false;
+    const withMeFilter = !isHr;
+    const query = withMeFilter ? "?interviewer=me" : "";
+
+    async function refresh() {
+      try {
+        const res = await fetch(`/api/rec/interviews/notifications${query}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as InterviewNotificationCounts;
+        if (!cancelled) setInterviewNotifications(data);
+      } catch {
+        // Keep the navigation usable even if notifications fail.
+      }
+    }
+
+    void refresh();
+    const source = new EventSource("/api/rec/events/stream");
+    source.onmessage = () => {
+      void refresh();
+    };
+    return () => {
+      cancelled = true;
+      source.close();
+    };
+  }, [guards.interviewer, isHr]);
 
   return (
     <aside className="glass-panel fixed bottom-4 left-4 top-4 z-20 w-16 overflow-hidden rounded-2xl p-2 sm:w-20 sm:p-3 2xl:w-56 2xl:p-4">
@@ -111,6 +139,7 @@ export function Sidebar({ initialMe }: { initialMe: SidebarMe | null }) {
         {navItems.filter((item) => guards[item.guard as keyof typeof guards]).map((item) => {
           const active = item.href === "/" ? normalizedPath === "/" : normalizedPath.startsWith(item.href);
           const Icon = item.icon;
+          const showHubBadge = item.href === "/gl-portal" && (interviewNotifications?.total_pending || 0) > 0;
           return (
             <Link
               key={item.href}
@@ -123,7 +152,14 @@ export function Sidebar({ initialMe }: { initialMe: SidebarMe | null }) {
                   : "hover:bg-white/40 hover:text-[var(--dim-grey)]"
               )}
             >
-              <Icon className="h-4 w-4" />
+              <span className="relative inline-flex">
+                <Icon className="h-4 w-4" />
+                {showHubBadge ? (
+                  <span className="absolute -right-2 -top-2 inline-flex min-w-[18px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold text-white">
+                    {interviewNotifications?.total_pending}
+                  </span>
+                ) : null}
+              </span>
               <span className="hidden 2xl:inline">{item.label}</span>
             </Link>
           );

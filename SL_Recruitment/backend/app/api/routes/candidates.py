@@ -7,7 +7,7 @@ import logging
 import mimetypes
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -30,6 +30,7 @@ from app.models.candidate_assessment import RecCandidateAssessment
 from app.models.candidate_ingest_attempt import RecCandidateIngestAttempt
 from app.models.candidate_ingest_idempotency import RecCandidateIngestIdempotency
 from app.models.candidate_offer import RecCandidateOffer
+from app.models.candidate_sprint import RecCandidateSprint
 from app.models.event import RecCandidateEvent
 from app.models.opening import RecOpening
 from app.models.screening import RecCandidateScreening
@@ -43,7 +44,13 @@ from app.schemas.candidate_assessment import CandidateAssessmentOut
 from app.schemas.screening import ScreeningOut, ScreeningUpsertIn
 from app.schemas.stage import CandidateStageOut, StageTransitionRequest
 from app.schemas.user import UserContext
-from app.services.drive import create_candidate_folder, delete_candidate_folder, delete_all_candidate_folders, upload_application_doc
+from app.services.drive import (
+    create_candidate_folder,
+    delete_all_candidate_folders,
+    delete_candidate_folder,
+    download_drive_file,
+    upload_application_doc,
+)
 from app.services.email import send_email
 from app.services.events import log_event
 from app.services.offers import convert_candidate_to_employee, create_offer, offer_pdf_signed_url
@@ -473,9 +480,13 @@ def _is_interviewer_scope(user: UserContext) -> bool:
     is_hr = Role.HR_ADMIN in roles or Role.HR_EXEC in roles
     role_ids = _actor_role_ids(user)
     is_superadmin = 2 in role_ids
-    is_role_5_or_6 = 5 in role_ids or 6 in role_ids
-    is_interviewer = Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
-    return (is_role_5_or_6 or is_interviewer) and not is_hr and not is_superadmin
+    if is_hr or is_superadmin:
+        return False
+    # Keep strict assignment scope only for pure viewer-only access.
+    is_viewer_only = Role.VIEWER in roles and not (
+        Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
+    )
+    return is_viewer_only
 
 
 def _can_manage_candidate_360(user: UserContext) -> bool:
@@ -490,12 +501,53 @@ def _can_manage_candidate_360(user: UserContext) -> bool:
     return True
 
 
+def _can_view_candidate_360(user: UserContext) -> bool:
+    roles = set(user.roles or [])
+    role_ids = _actor_role_ids(user)
+    if 2 in role_ids:
+        return True
+    if 5 in role_ids or 6 in role_ids:
+        return True
+    return bool(
+        roles
+        & {
+            Role.HR_ADMIN,
+            Role.HR_EXEC,
+            Role.HIRING_MANAGER,
+            Role.INTERVIEWER,
+            Role.GROUP_LEAD,
+            Role.VIEWER,
+        }
+    )
+
+
 def _can_view_candidate_basic_details(user: UserContext) -> bool:
     roles = set(user.roles or [])
     if Role.HR_ADMIN in roles or Role.HR_EXEC in roles:
         return True
     role_ids = _actor_role_ids(user)
-    return 2 in role_ids
+    if 2 in role_ids or 5 in role_ids or 6 in role_ids:
+        return True
+    return bool(roles & {Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD})
+
+
+def _extract_drive_file_id(raw_url: str | None) -> str | None:
+    if not raw_url:
+        return None
+    try:
+        parsed = urlparse(raw_url)
+        if parsed.query:
+            query = parse_qs(parsed.query)
+            if "id" in query and query["id"]:
+                return query["id"][0]
+        parts = parsed.path.split("/")
+        if "d" in parts:
+            idx = parts.index("d")
+            if idx + 1 < len(parts):
+                return parts[idx + 1]
+    except Exception:
+        return None
+    return None
 
 
 def _clean_person_id_platform(raw: str | None) -> str | None:
@@ -1857,6 +1909,26 @@ async def _get_current_stage_name(session: AsyncSession, *, candidate_id: int) -
         .limit(1)
     )
     return latest.scalar_one_or_none()
+
+
+async def _has_l2_sprint_approval(session: AsyncSession, *, candidate_id: int) -> bool:
+    try:
+        approved = (
+            await session.execute(
+                select(RecCandidateSprint.candidate_sprint_id)
+                .where(
+                    RecCandidateSprint.candidate_id == candidate_id,
+                    RecCandidateSprint.status == "submitted",
+                    RecCandidateSprint.decision == "advance",
+                    RecCandidateSprint.deleted_at.is_(None),
+                )
+                .order_by(RecCandidateSprint.reviewed_at.desc(), RecCandidateSprint.candidate_sprint_id.desc())
+                .limit(1)
+            )
+        ).first()
+    except Exception:
+        return False
+    return approved is not None
 
 
 async def _get_ageing_days(session: AsyncSession, *, candidate_id: int) -> int:
@@ -3696,6 +3768,7 @@ async def get_candidate(
 async def download_candidate_application_document(
     candidate_id: int,
     kind: str,
+    download: bool = Query(default=False),
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
@@ -3706,6 +3779,7 @@ async def download_candidate_application_document(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    await _assert_candidate_access(session, candidate_id, user)
 
     if normalized == "cv":
         url = candidate.cv_url
@@ -3720,6 +3794,16 @@ async def download_candidate_application_document(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Document stored locally; Drive storage is required.",
         )
+    file_id = _extract_drive_file_id(url)
+    if file_id:
+        try:
+            data, content_type, file_name = await anyio.to_thread.run_sync(lambda: download_drive_file(file_id))
+            disposition = "attachment" if download else "inline"
+            safe_name = file_name or f"{normalized}.bin"
+            headers = {"Content-Disposition": f'{disposition}; filename="{safe_name}"'}
+            return Response(content=data, media_type=content_type or "application/octet-stream", headers=headers)
+        except Exception as exc:
+            logger.warning("Drive file proxy failed for candidate_id=%s kind=%s: %s", candidate_id, normalized, exc)
     return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
 
 
@@ -3729,7 +3813,7 @@ async def get_candidate_full(
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
-    if not _can_manage_candidate_360(user):
+    if not _can_view_candidate_360(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 is not available for this account.")
 
     candidate = await get_candidate(candidate_id, session, user)  # type: ignore[arg-type]
@@ -4200,6 +4284,15 @@ async def transition_stage(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     if not _can_manage_candidate_360(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 actions are restricted for this account.")
+    current_stage = (await _get_current_stage_name(session, candidate_id=candidate_id) or "").strip().lower()
+    target_stage = (payload.to_stage or "").strip().lower()
+    if current_stage == "sprint" and target_stage == "l1_shortlist":
+        has_approval = await _has_l2_sprint_approval(session, candidate_id=candidate_id)
+        if not has_approval:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="L2 sprint approval is required before moving to L1 shortlist.",
+            )
 
     result = await apply_stage_transition(
         session,

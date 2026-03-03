@@ -747,7 +747,7 @@ async def list_sprints(
     status_filter: str | None = None,
     reviewer: str | None = None,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD])),
 ):
     query = (
         select(RecCandidateSprint, RecSprintTemplate, RecCandidate, RecOpening)
@@ -789,7 +789,7 @@ async def update_sprint(
     candidate_sprint_id: int,
     payload: SprintUpdateIn,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD])),
 ):
     sprint = await session.get(RecCandidateSprint, candidate_sprint_id)
     if not sprint:

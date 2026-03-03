@@ -34,6 +34,7 @@ PRINCIPAL_APPROVER_EMAILS = (
     "ankur@studiolotus.in",
     "ambrish@studiolotus.in",
     "harsh@studiolotus.in",
+    "datahub@studiolotus.in",
 )
 
 REQUIRED_JOINING_DOC_TYPES = {
@@ -462,6 +463,91 @@ async def create_offer(session: AsyncSession, *, candidate: RecCandidate, openin
         meta_json=_event_meta(user, {"offer_id": offer.candidate_offer_id, "template_code": offer.offer_template_code}),
     )
     return offer
+
+
+async def create_offer_revision(
+    session: AsyncSession,
+    *,
+    source_offer: RecCandidateOffer,
+    candidate: RecCandidate,
+    opening: RecOpening | None,
+    user: UserContext,
+    revision_reason: str | None = None,
+) -> RecCandidateOffer:
+    if source_offer.offer_status not in {"declined", "withdrawn"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Offer revision is allowed only after a declined/withdrawn offer.",
+        )
+    max_version = (
+        await session.execute(select(func.max(RecCandidateOffer.offer_version)).where(RecCandidateOffer.candidate_id == source_offer.candidate_id))
+    ).scalar_one()
+    next_version = int(max_version or 0) + 1
+    now = datetime.utcnow()
+    revision_note = (revision_reason or "").strip()
+    notes = (source_offer.notes_internal or "").strip()
+    if revision_note:
+        notes = f"{notes}\n\nRevision reason: {revision_note}".strip()
+
+    revision = RecCandidateOffer(
+        candidate_id=source_offer.candidate_id,
+        opening_id=source_offer.opening_id,
+        offer_template_code=source_offer.offer_template_code,
+        offer_version=next_version,
+        gross_ctc_annual=source_offer.gross_ctc_annual,
+        fixed_ctc_annual=source_offer.fixed_ctc_annual,
+        variable_ctc_annual=source_offer.variable_ctc_annual,
+        currency=source_offer.currency or "INR",
+        designation_title=source_offer.designation_title or (opening.title if opening else None),
+        grade_id_platform=source_offer.grade_id_platform,
+        joining_date=source_offer.joining_date,
+        probation_months=source_offer.probation_months,
+        offer_valid_until=source_offer.offer_valid_until,
+        offer_status="draft",
+        public_token=uuid4().hex,
+        generated_by_person_id_platform=_platform_person_id(user),
+        generated_at=now,
+        notes_internal=notes or None,
+        offer_letter_overrides=source_offer.offer_letter_overrides,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(revision)
+    await session.flush()
+
+    candidate.status = "offer"
+    candidate.final_decision = "pending"
+    candidate.updated_at = now
+    await apply_stage_transition(
+        session,
+        candidate=candidate,
+        to_stage="offer",
+        decision="advance",
+        note="offer_revision",
+        reason=revision_reason,
+        user=user,
+        source="offer_revision",
+        allow_noop=True,
+    )
+    await log_event(
+        session,
+        candidate_id=source_offer.candidate_id,
+        action_type="offer_revision_created",
+        performed_by_person_id_platform=_platform_person_id(user),
+        related_entity_type="offer",
+        related_entity_id=revision.candidate_offer_id,
+        meta_json=_event_meta(
+            user,
+            {
+                "offer_id": revision.candidate_offer_id,
+                "source_offer_id": source_offer.candidate_offer_id,
+                "source_offer_status": source_offer.offer_status,
+                "offer_version": revision.offer_version,
+                "reason": revision_reason,
+            },
+        ),
+    )
+    return revision
 
 
 async def update_offer_details(session: AsyncSession, *, offer: RecCandidateOffer, payload: dict[str, Any], user: UserContext) -> RecCandidateOffer:

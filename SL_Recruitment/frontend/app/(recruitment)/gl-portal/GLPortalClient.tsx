@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
 import { BriefcaseBusiness, CalendarCheck2, ClipboardCheck, FileDown, Loader2, UserRound } from "lucide-react";
-import type { CandidateDetail, Interview, L2Assessment, OpeningListItem, Screening } from "@/lib/types";
+import type { CandidateDetail, CandidateSprint, Interview, L2Assessment, OpeningListItem, Screening } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
 import { OpeningRequestsWorkspace } from "./OpeningRequestsWorkspace";
 
@@ -24,9 +24,15 @@ type Props = {
 };
 
 type AssessmentMode = "l1" | "l2";
-type PortalTab = "assessments" | "opening_requests";
+type PortalTab = "assessments" | "opening_requests" | "sprint_reviews";
 type L1Data = Record<string, any>;
 type L2Data = Record<string, any>;
+type SprintReviewForm = {
+  score_overall: string;
+  decision: string;
+  comments_internal: string;
+  comments_for_candidate: string;
+};
 
 const yesNoOptions = ["", "YES", "NO"];
 const ratingOptions = ["", "1", "2", "3", "4", "5"];
@@ -337,12 +343,49 @@ function interviewReason(interview: Interview) {
   return reason || "";
 }
 
+const INTERVIEW_READ_STORAGE_KEY = "sl_assessment_hub_interview_read_v1";
+const SPRINT_READ_STORAGE_KEY = "sl_assessment_hub_sprint_read_v1";
+
+function hasPendingFeedback(interview: Interview) {
+  return !interview.feedback_submitted && (interview.decision || "").trim().toLowerCase() !== "cancelled";
+}
+
+function interviewNotificationKey(interview: Interview) {
+  return [
+    interview.candidate_interview_id,
+    interview.feedback_submitted ? "submitted" : "pending",
+    (interview.interview_status || "").toLowerCase(),
+    interview.updated_at || "",
+  ].join(":");
+}
+
+function isPendingSprintReview(sprint: CandidateSprint) {
+  return (sprint.status || "").toLowerCase() === "submitted";
+}
+
+function sprintNotificationKey(sprint: CandidateSprint) {
+  return [
+    sprint.candidate_sprint_id,
+    (sprint.status || "").toLowerCase(),
+    sprint.updated_at || "",
+    sprint.submitted_at || "",
+  ].join(":");
+}
+
 async function fetchInterviews(params: Record<string, string>) {
   const url = new URL("/api/rec/interviews", window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   const res = await fetch(url.toString(), { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as Interview[];
+}
+
+async function fetchSprints(params: Record<string, string>) {
+  const url = new URL("/api/rec/sprints", window.location.origin);
+  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+  const res = await fetch(url.toString(), { cache: "no-store" });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as CandidateSprint[];
 }
 
 async function fetchOpenings() {
@@ -434,6 +477,16 @@ async function markInterview(interviewId: number, status: "taken" | "not_taken",
   return await res.json();
 }
 
+async function submitSprintReview(sprintId: number, payload: Record<string, unknown>) {
+  const res = await fetch(`/api/rec/sprints/${encodeURIComponent(String(sprintId))}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as CandidateSprint;
+}
+
 function updateNested<T extends Record<string, any>>(obj: T, path: string[], value: string) {
   const next = typeof structuredClone === "function" ? structuredClone(obj) : JSON.parse(JSON.stringify(obj));
   let cursor: any = next;
@@ -474,24 +527,80 @@ export function GLPortalClient({
   const [previewOpen, setPreviewOpen] = useState(false);
   const searchParams = useSearchParams();
   const [portalTab, setPortalTab] = useState<PortalTab>("assessments");
+  const [sprints, setSprints] = useState<CandidateSprint[]>([]);
+  const [sprintsBusy, setSprintsBusy] = useState(false);
+  const [sprintsError, setSprintsError] = useState<string | null>(null);
+  const [activeSprint, setActiveSprint] = useState<CandidateSprint | null>(null);
+  const [sprintForm, setSprintForm] = useState<SprintReviewForm>({
+    score_overall: "",
+    decision: "",
+    comments_internal: "",
+    comments_for_candidate: "",
+  });
+  const [readInterviewNotifications, setReadInterviewNotifications] = useState<Record<string, boolean>>({});
+  const [readSprintNotifications, setReadSprintNotifications] = useState<Record<string, boolean>>({});
 
   const l2Interviews = useMemo(() => interviews.filter((item) => item.round_type.toLowerCase().includes("l2")), [interviews]);
   const l1Interviews = useMemo(() => interviews.filter((item) => item.round_type.toLowerCase().includes("l1")), [interviews]);
   const [activeTab, setActiveTab] = useState<AssessmentMode>("l2");
+  const [queueSearch, setQueueSearch] = useState("");
+  const [queueStatus, setQueueStatus] = useState<"all" | "pending_feedback" | "taken" | "not_taken" | "other">("all");
+  const [queuePage, setQueuePage] = useState(1);
   const visibleInterviews = activeTab === "l1" ? l1Interviews : l2Interviews;
+  const l1PendingCount = useMemo(() => l1Interviews.filter(hasPendingFeedback).length, [l1Interviews]);
+  const l2PendingCount = useMemo(() => l2Interviews.filter(hasPendingFeedback).length, [l2Interviews]);
+  const l1UnreadCount = useMemo(
+    () =>
+      l1Interviews.filter((item) => hasPendingFeedback(item) && !readInterviewNotifications[interviewNotificationKey(item)]).length,
+    [l1Interviews, readInterviewNotifications]
+  );
+  const l2UnreadCount = useMemo(
+    () =>
+      l2Interviews.filter((item) => hasPendingFeedback(item) && !readInterviewNotifications[interviewNotificationKey(item)]).length,
+    [l2Interviews, readInterviewNotifications]
+  );
+  const interviewUnreadCount = l1UnreadCount + l2UnreadCount;
+  const unreadSprintCount = useMemo(
+    () => sprints.filter((sprint) => isPendingSprintReview(sprint) && !readSprintNotifications[sprintNotificationKey(sprint)]).length,
+    [sprints, readSprintNotifications]
+  );
+  const queuePageSize = 20;
+  const queueFilteredInterviews = useMemo(() => {
+    const query = queueSearch.trim().toLowerCase();
+    return visibleInterviews
+      .filter((item) => {
+        const status = (item.interview_status || "").toLowerCase();
+        if (queueStatus === "pending_feedback" && !hasPendingFeedback(item)) return false;
+        if (queueStatus === "taken" && status !== "taken") return false;
+        if (queueStatus === "not_taken" && status !== "not_taken") return false;
+        if (queueStatus === "other" && ["taken", "not_taken"].includes(status)) return false;
+        if (!query) return true;
+        const haystack = [
+          item.candidate_name || "",
+          item.opening_title || "",
+          item.round_type || "",
+          item.interviewer_name || "",
+          item.location || "",
+          interviewLabel(item),
+        ]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(query);
+      })
+      .sort((a, b) => {
+        const aStart = parseDateUtc(a.scheduled_start_at)?.getTime() || 0;
+        const bStart = parseDateUtc(b.scheduled_start_at)?.getTime() || 0;
+        return bStart - aStart;
+      });
+  }, [visibleInterviews, queueSearch, queueStatus]);
+  const queueTotalPages = Math.max(1, Math.ceil(queueFilteredInterviews.length / queuePageSize));
+  const queuePageItems = useMemo(() => {
+    const start = (queuePage - 1) * queuePageSize;
+    return queueFilteredInterviews.slice(start, start + queuePageSize);
+  }, [queueFilteredInterviews, queuePage]);
+  const queueStartIndex = queueFilteredInterviews.length === 0 ? 0 : (queuePage - 1) * queuePageSize + 1;
+  const queueEndIndex = Math.min(queueFilteredInterviews.length, queuePage * queuePageSize);
   const currentStage = candidate?.current_stage ? candidate.current_stage.replace(/_/g, " ") : "";
-  const takenInterviews = useMemo(
-    () => visibleInterviews.filter((item) => (item.interview_status || "").toLowerCase() === "taken"),
-    [visibleInterviews]
-  );
-  const notTakenInterviews = useMemo(
-    () => visibleInterviews.filter((item) => (item.interview_status || "").toLowerCase() === "not_taken"),
-    [visibleInterviews]
-  );
-  const otherInterviews = useMemo(
-    () => visibleInterviews.filter((item) => !["taken", "not_taken"].includes((item.interview_status || "").toLowerCase())),
-    [visibleInterviews]
-  );
 
   async function refreshList() {
     setBusy(true);
@@ -515,8 +624,53 @@ export function GLPortalClient({
     }
   }
 
+  async function refreshSprints() {
+    setSprintsBusy(true);
+    setSprintsError(null);
+    try {
+      const next = await fetchSprints({ ...(useMeFilter ? { reviewer: "me" } : {}), status_filter: "submitted" });
+      setSprints(next);
+    } catch (e: any) {
+      setSprintsError(e?.message || "Could not load sprint reviews.");
+    } finally {
+      setSprintsBusy(false);
+    }
+  }
+
+  function markInterviewNotificationRead(interview: Interview) {
+    if (!hasPendingFeedback(interview)) return;
+    const key = interviewNotificationKey(interview);
+    setReadInterviewNotifications((prev) => {
+      if (prev[key]) return prev;
+      return { ...prev, [key]: true };
+    });
+  }
+
+  function markVisibleNotificationsRead() {
+    setReadInterviewNotifications((prev) => {
+      const next = { ...prev };
+      queueFilteredInterviews.forEach((item) => {
+        if (hasPendingFeedback(item)) {
+          next[interviewNotificationKey(item)] = true;
+        }
+      });
+      return next;
+    });
+  }
+
+  function markSprintNotificationRead(sprint: CandidateSprint) {
+    if (!isPendingSprintReview(sprint)) return;
+    const key = sprintNotificationKey(sprint);
+    setReadSprintNotifications((prev) => {
+      if (prev[key]) return prev;
+      return { ...prev, [key]: true };
+    });
+  }
+
   async function selectInterview(interview: Interview) {
     setActive(interview);
+    markInterviewNotificationRead(interview);
+    setPreviewOpen(false);
     setError(null);
     setCandidate(null);
     setAssessment(null);
@@ -577,21 +731,118 @@ export function GLPortalClient({
     }
   }
 
+  function openSprintReview(sprint: CandidateSprint) {
+    markSprintNotificationRead(sprint);
+    setActiveSprint(sprint);
+    setSprintForm({
+      score_overall: sprint.score_overall == null ? "" : String(sprint.score_overall),
+      decision: sprint.decision || "",
+      comments_internal: sprint.comments_internal || "",
+      comments_for_candidate: sprint.comments_for_candidate || "",
+    });
+  }
+
+  async function handleSubmitSprintReview() {
+    if (!activeSprint) return;
+    setSprintsBusy(true);
+    setSprintsError(null);
+    try {
+      const payload: Record<string, unknown> = {};
+      if (sprintForm.score_overall.trim()) payload.score_overall = Number(sprintForm.score_overall);
+      if (sprintForm.decision.trim()) payload.decision = sprintForm.decision.trim();
+      payload.comments_internal = sprintForm.comments_internal.trim() || null;
+      payload.comments_for_candidate = sprintForm.comments_for_candidate.trim() || null;
+      await submitSprintReview(activeSprint.candidate_sprint_id, payload);
+      setNotice("Sprint review saved.");
+      window.setTimeout(() => setNotice(null), 2500);
+      setActiveSprint(null);
+      await Promise.all([refreshSprints(), refreshList()]);
+    } catch (e: any) {
+      setSprintsError(e?.message || "Could not submit sprint review.");
+    } finally {
+      setSprintsBusy(false);
+    }
+  }
+
   useEffect(() => {
-    if (active) return;
     const targetId = searchParams?.get("interview");
-    if (targetId) {
-      const match = interviews.find((item) => String(item.candidate_interview_id) === targetId);
-      if (match) {
-        setActiveTab(match.round_type.toLowerCase().includes("l1") ? "l1" : "l2");
-        void selectInterview(match);
-        return;
+    if (!targetId) return;
+    if (active && String(active.candidate_interview_id) === targetId) return;
+    const match = interviews.find((item) => String(item.candidate_interview_id) === targetId);
+    if (match) {
+      setActiveTab(match.round_type.toLowerCase().includes("l1") ? "l1" : "l2");
+      void selectInterview(match);
+    }
+  }, [interviews, searchParams, active]);
+
+  useEffect(() => {
+    setQueuePage(1);
+  }, [activeTab, queueSearch, queueStatus]);
+
+  useEffect(() => {
+    if (queuePage <= queueTotalPages) return;
+    setQueuePage(queueTotalPages);
+  }, [queuePage, queueTotalPages]);
+
+  useEffect(() => {
+    if (!active) return;
+    if (assessmentModeForInterview(active) !== activeTab) {
+      setActive(null);
+      setCandidate(null);
+      setAssessment(null);
+      setPreviewOpen(false);
+    }
+  }, [activeTab, active]);
+
+  useEffect(() => {
+    if (!active) return;
+    const stillAssigned = interviews.some((item) => item.candidate_interview_id === active.candidate_interview_id);
+    if (stillAssigned) return;
+    setActive(null);
+    setCandidate(null);
+    setAssessment(null);
+    setPreviewOpen(false);
+  }, [interviews, active]);
+
+  useEffect(() => {
+    void refreshSprints();
+  }, [useMeFilter]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(INTERVIEW_READ_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          setReadInterviewNotifications(parsed as Record<string, boolean>);
+        }
       }
+    } catch {
+      // Ignore local cache parse issues.
     }
-    if (visibleInterviews.length > 0) {
-      void selectInterview(visibleInterviews[0]);
+    try {
+      const raw = window.localStorage.getItem(SPRINT_READ_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          setReadSprintNotifications(parsed as Record<string, boolean>);
+        }
+      }
+    } catch {
+      // Ignore local cache parse issues.
     }
-  }, [interviews, visibleInterviews, searchParams, active]);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(INTERVIEW_READ_STORAGE_KEY, JSON.stringify(readInterviewNotifications));
+  }, [readInterviewNotifications]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SPRINT_READ_STORAGE_KEY, JSON.stringify(readSprintNotifications));
+  }, [readSprintNotifications]);
 
   useEffect(() => {
     const requestedTab = searchParams?.get("tab");
@@ -601,14 +852,49 @@ export function GLPortalClient({
       setPortalTab("opening_requests");
       return;
     }
+    if (["sprints", "sprint_reviews", "sprint_review"].includes(normalized)) {
+      setPortalTab("sprint_reviews");
+      return;
+    }
     if (["assessments", "assessment"].includes(normalized)) {
       setPortalTab("assessments");
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let busyRefreshing = false;
+    let refreshQueued = false;
+    const source = new EventSource("/api/rec/events/stream");
+
+    async function refreshAll() {
+      if (busyRefreshing) {
+        refreshQueued = true;
+        return;
+      }
+      busyRefreshing = true;
+      try {
+        await Promise.all([refreshList(), refreshSprints()]);
+      } finally {
+        busyRefreshing = false;
+        if (refreshQueued && !cancelled) {
+          refreshQueued = false;
+          void refreshAll();
+        }
+      }
+    }
+
+    source.onmessage = () => {
+      void refreshAll();
+    };
+    return () => {
+      cancelled = true;
+      source.close();
+    };
+  }, [useMeFilter]);
+
   const locked = assessment?.locked ?? false;
   const isSubmitted = assessment?.status === "submitted";
-  const currentStageKey = (candidate?.current_stage || "").trim().toLowerCase();
   const activeMode = active ? assessmentModeForInterview(active) : activeTab;
   const pdfSlug = activeMode === "l1" ? "l1-assessment" : "l2-assessment";
   const sections = activeMode === "l1" ? L1_SECTION_FIELDS : L2_SECTION_FIELDS;
@@ -654,6 +940,75 @@ export function GLPortalClient({
     }
   }
 
+  function isInterviewNotificationUnread(interview: Interview) {
+    return hasPendingFeedback(interview) && !readInterviewNotifications[interviewNotificationKey(interview)];
+  }
+
+  function renderInterviewCard(item: Interview) {
+    const status = (item.interview_status || "pending").replace(/_/g, " ");
+    const unread = isInterviewNotificationUnread(item);
+    return (
+      <button
+        key={item.candidate_interview_id}
+        type="button"
+        className={clsx(
+          "group flex w-full flex-col gap-0.5 rounded-lg border border-white/60 bg-gradient-to-br from-white/70 via-white/60 to-slate-50/70 p-2 text-left transition hover:border-slate-200 hover:bg-white",
+          active?.candidate_interview_id === item.candidate_interview_id && "border-slate-300 bg-white ring-2 ring-slate-200/70"
+        )}
+        onClick={() => void selectInterview(item)}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p className="truncate text-xs font-semibold text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
+          <span className="rounded-full border border-slate-200 bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+            {status}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-1 text-[11px] text-slate-600">
+          <span className="truncate">{item.opening_title || "Opening"}</span>
+          <span>·</span>
+          <span>{item.round_type}</span>
+        </div>
+        <div className="flex items-center gap-1 text-[11px] text-slate-600">
+          <CalendarCheck2 className="h-3.5 w-3.5" />
+          {interviewLabel(item)}
+        </div>
+        <div className="flex flex-wrap items-center gap-1 text-[11px]">
+          {hasPendingFeedback(item) ? (
+            <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 font-semibold text-amber-700 ring-1 ring-amber-500/20">
+              Feedback pending
+            </span>
+          ) : (
+            <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 font-semibold text-emerald-700 ring-1 ring-emerald-500/20">
+              Feedback submitted
+            </span>
+          )}
+          {unread ? (
+            <span className="rounded-full bg-rose-500/15 px-1.5 py-0.5 font-semibold text-rose-700 ring-1 ring-rose-500/20">
+              Unread
+            </span>
+          ) : (
+            <span className="rounded-full bg-slate-500/10 px-1.5 py-0.5 font-semibold text-slate-600 ring-1 ring-slate-500/20">
+              Read
+            </span>
+          )}
+          {item.meeting_link ? (
+            <a
+              className="ml-auto text-slate-700 underline decoration-dotted underline-offset-2"
+              href={item.meeting_link}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Link
+            </a>
+          ) : null}
+        </div>
+        {interviewReason(item) ? (
+          <p className="truncate text-[11px] text-slate-500">Reason: {interviewReason(item)}</p>
+        ) : null}
+      </button>
+    );
+  }
+
   function renderField(field: FieldConfig) {
     const rawValue = field.path.reduce(
       (acc, key) => (acc && typeof acc === "object" ? (acc as Record<string, any>)[key] : ""),
@@ -662,7 +1017,7 @@ export function GLPortalClient({
     const value = typeof rawValue === "string" ? rawValue : "";
     const commonProps = {
       className:
-        "w-full rounded-2xl border border-slate-200/80 bg-white/80 px-3 py-2 text-sm text-slate-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6)] focus:outline-none focus:ring-2 focus:ring-slate-900/20 disabled:bg-slate-100",
+        "w-full rounded-xl border border-slate-200/80 bg-white/80 px-2.5 py-1.5 text-sm text-slate-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6)] focus:outline-none focus:ring-2 focus:ring-slate-900/20 disabled:bg-slate-100",
       disabled: locked || !isInterviewTaken,
     };
     if (field.type === "yesno") {
@@ -699,7 +1054,7 @@ export function GLPortalClient({
       return (
         <textarea
           {...commonProps}
-          className={`${commonProps.className} h-20`}
+          className={`${commonProps.className} h-16`}
           value={value || ""}
           onChange={(e) => setData((prev) => updateNested(prev, field.path, e.target.value))}
         />
@@ -715,50 +1070,74 @@ export function GLPortalClient({
   }
 
   return (
-    <main className="content-pad space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-tight text-slate-500">GL / Interviewer</p>
-          <h1 className="text-2xl font-semibold text-slate-900">Assessment Portal</h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-full border border-slate-200 bg-white/80 p-1 text-xs font-semibold text-slate-700">
-            <button
-              type="button"
-              className={clsx(
-                "inline-flex items-center gap-1 rounded-full px-3 py-1.5",
-                portalTab === "assessments" ? "bg-slate-900 text-white" : "text-slate-600"
-              )}
-              onClick={() => setPortalTab("assessments")}
-            >
-              <ClipboardCheck className="h-3.5 w-3.5" />
-              Assessments
-            </button>
-            {canSeeOpeningRequests ? (
+    <main className="content-pad space-y-2">
+      <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-slate-900">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Assessment Hub</p>
+            <h1 className="mt-0.5 text-lg font-semibold text-slate-900">Interviews, feedback, and sprint reviews</h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-full border border-slate-200 bg-white p-0.5 text-xs font-semibold text-slate-700">
               <button
                 type="button"
                 className={clsx(
-                  "inline-flex items-center gap-1 rounded-full px-3 py-1.5",
-                  portalTab === "opening_requests" ? "bg-slate-900 text-white" : "text-slate-600"
+                  "inline-flex items-center gap-1 rounded-full px-2.5 py-1",
+                  portalTab === "assessments" ? "bg-slate-200 text-slate-800" : "text-slate-700"
                 )}
-                onClick={() => setPortalTab("opening_requests")}
+                onClick={() => setPortalTab("assessments")}
               >
-                <BriefcaseBusiness className="h-3.5 w-3.5" />
-                Opening Requests
+                <ClipboardCheck className="h-3.5 w-3.5" />
+                Assessments
+                <span className={clsx("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", portalTab === "assessments" ? "bg-white text-slate-700" : "bg-slate-200 text-slate-700")}>
+                  {interviewUnreadCount}
+                </span>
               </button>
-            ) : null}
+              <button
+                type="button"
+                className={clsx(
+                  "inline-flex items-center gap-1 rounded-full px-2.5 py-1",
+                  portalTab === "sprint_reviews" ? "bg-slate-200 text-slate-800" : "text-slate-700"
+                )}
+                onClick={() => setPortalTab("sprint_reviews")}
+              >
+                Sprint Reviews
+                <span className={clsx("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", portalTab === "sprint_reviews" ? "bg-white text-slate-700" : "bg-slate-200 text-slate-700")}>
+                  {unreadSprintCount}
+                </span>
+              </button>
+              {canSeeOpeningRequests ? (
+                <button
+                  type="button"
+                  className={clsx(
+                    "inline-flex items-center gap-1 rounded-full px-2.5 py-1",
+                    portalTab === "opening_requests" ? "bg-slate-200 text-slate-800" : "text-slate-700"
+                  )}
+                  onClick={() => setPortalTab("opening_requests")}
+                >
+                  <BriefcaseBusiness className="h-3.5 w-3.5" />
+                  Opening Requests
+                </button>
+              ) : null}
+            </div>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin text-slate-500" /> : null}
           </div>
-          {busy ? <Loader2 className="h-4 w-4 animate-spin text-slate-500" /> : null}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600">L1 unread: {l1UnreadCount}</span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600">L2 unread: {l2UnreadCount}</span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600">Sprint unread: {unreadSprintCount}</span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600">Pending feedback: {l1PendingCount + l2PendingCount}</span>
         </div>
       </div>
 
       {error ? (
-        <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">
+        <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-700">
           {error}
         </div>
       ) : null}
       {notice ? (
-        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
           {notice}
         </div>
       ) : null}
@@ -782,189 +1161,198 @@ export function GLPortalClient({
         )
       ) : null}
 
-      {portalTab === "assessments" ? <section className="grid gap-4 lg:grid-cols-[1fr_2fr]">
-        <div className="section-card">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold">Assigned interviews</p>
+      {portalTab === "sprint_reviews" ? (
+        <section className="section-card" style={{ padding: "0.85rem" }}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold">Sprint review queue</p>
+              <p className="text-xs text-slate-600">Submitted sprints awaiting L2 decision.</p>
+            </div>
             <button
               type="button"
               className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+              onClick={() => void refreshSprints()}
+              disabled={sprintsBusy}
+            >
+              Refresh
+            </button>
+          </div>
+          {sprintsError ? (
+            <div className="mt-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-700">
+              {sprintsError}
+            </div>
+          ) : null}
+          <div className="mt-3 space-y-2">
+            {sprintsBusy && sprints.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white/40 p-4 text-sm text-slate-600">
+                Loading sprint reviews...
+              </div>
+            ) : sprints.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white/40 p-4 text-sm text-slate-600">
+                No sprint submissions waiting for review.
+              </div>
+            ) : (
+              sprints.map((sprint) => (
+                <button
+                  key={sprint.candidate_sprint_id}
+                  type="button"
+                  className="w-full rounded-xl border border-white/70 bg-gradient-to-br from-white/70 via-white/60 to-slate-50/70 px-3 py-2.5 text-left hover:from-white hover:to-slate-50"
+                  onClick={() => void openSprintReview(sprint)}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[13px] font-semibold text-slate-900">{sprint.candidate_name || `Candidate ${sprint.candidate_id}`}</p>
+                      <p className="text-xs text-slate-600">{sprint.opening_title || "Opening"} · {sprint.template_name || "Sprint"}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-500/20">
+                        {(sprint.status || "submitted").replace(/_/g, " ")}
+                      </span>
+                      {isPendingSprintReview(sprint) && !readSprintNotifications[sprintNotificationKey(sprint)] ? (
+                        <span className="rounded-full bg-rose-500/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-rose-700 ring-1 ring-rose-500/20">
+                          Unread
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-slate-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600 ring-1 ring-slate-500/20">
+                          Read
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Submitted: {formatDateTime(sprint.submitted_at)} · Due: {formatDateTime(sprint.due_at)}
+                  </p>
+                </button>
+              ))
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {portalTab === "assessments" ? <section className="space-y-2">
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+          Queue: {queueFilteredInterviews.length} items · unread {interviewUnreadCount} · pending {l1PendingCount + l2PendingCount}
+        </div>
+        <div className="grid gap-2 lg:grid-cols-[300px_1fr]">
+        <div className="section-card border-slate-200/80 bg-gradient-to-b from-white/95 via-white/90 to-slate-50/70" style={{ padding: "0.7rem" }}>
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Interview Queue</p>
+              <p className="text-[11px] text-slate-600">Click row to open details.</p>
+            </div>
+            <button
+              type="button"
+              className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-semibold text-slate-700"
               onClick={() => void refreshList()}
               disabled={busy}
             >
               Refresh
             </button>
           </div>
-          <div className="mt-3 inline-flex rounded-full border border-slate-200 bg-white/70 p-1 text-xs font-semibold text-slate-700">
+
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-1.5">
+            <div className="inline-flex rounded-full border border-slate-200 bg-white/80 p-0.5 text-xs font-semibold text-slate-700">
+              <button
+                type="button"
+                className={clsx(
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5",
+                  activeTab === "l1" ? "bg-slate-200 text-slate-800" : "text-slate-600"
+                )}
+                onClick={() => setActiveTab("l1")}
+              >
+                L1
+                <span className={clsx("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", activeTab === "l1" ? "bg-white text-slate-700" : "bg-slate-200 text-slate-700")}>
+                  {l1UnreadCount}
+                </span>
+              </button>
+              <button
+                type="button"
+                className={clsx(
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5",
+                  activeTab === "l2" ? "bg-slate-200 text-slate-800" : "text-slate-600"
+                )}
+                onClick={() => setActiveTab("l2")}
+              >
+                L2
+                <span className={clsx("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", activeTab === "l2" ? "bg-white text-slate-700" : "bg-slate-200 text-slate-700")}>
+                  {l2UnreadCount}
+                </span>
+              </button>
+            </div>
             <button
               type="button"
-              className={clsx(
-                "rounded-full px-3 py-1.5",
-                activeTab === "l1" ? "bg-slate-900 text-white" : "text-slate-600"
-              )}
-              onClick={() => setActiveTab("l1")}
+              className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+              onClick={markVisibleNotificationsRead}
+              disabled={queueFilteredInterviews.length === 0}
             >
-              L1
-            </button>
-            <button
-              type="button"
-              className={clsx(
-                "rounded-full px-3 py-1.5",
-                activeTab === "l2" ? "bg-slate-900 text-white" : "text-slate-600"
-              )}
-              onClick={() => setActiveTab("l2")}
-            >
-              L2
+              Mark filtered as read
             </button>
           </div>
-          <div className="mt-3 space-y-2">
-            {visibleInterviews.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-white/30 p-4 text-sm text-slate-600">
-                No interviews assigned yet.
+
+          <div className="mt-1.5 grid gap-1.5 md:grid-cols-[1fr_130px]">
+            <input
+              className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-800"
+              placeholder="Search candidate, opening, interviewer, round"
+              value={queueSearch}
+              onChange={(e) => setQueueSearch(e.target.value)}
+            />
+            <select
+              className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-800"
+              value={queueStatus}
+              onChange={(e) => setQueueStatus(e.target.value as "all" | "pending_feedback" | "taken" | "not_taken" | "other")}
+            >
+              <option value="all">All statuses</option>
+              <option value="pending_feedback">Pending feedback</option>
+              <option value="taken">Interview taken</option>
+              <option value="not_taken">Interview not taken</option>
+              <option value="other">Other statuses</option>
+            </select>
+          </div>
+
+          <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+            <span>
+              Showing {queueStartIndex}-{queueEndIndex} of {queueFilteredInterviews.length}
+            </span>
+            <span>Page {queuePage} / {queueTotalPages}</span>
+          </div>
+
+          <div className="mt-1.5 space-y-1.5">
+            {queueFilteredInterviews.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-200 bg-white/30 p-2.5 text-sm text-slate-600">
+                No interviews found for this filter.
               </div>
             ) : (
-              <>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Interview taken</p>
-                  <div className="mt-2 space-y-2">
-                    {takenInterviews.length === 0 ? (
-                      <p className="text-xs text-slate-600">No interviews marked as taken.</p>
-                    ) : (
-                      takenInterviews.map((item) => (
-                        <button
-                          key={item.candidate_interview_id}
-                          type="button"
-                          className={clsx(
-                            "flex w-full flex-col gap-1 rounded-2xl border border-white/60 bg-white/40 p-3 text-left transition hover:bg-white/70",
-                            active?.candidate_interview_id === item.candidate_interview_id && "bg-white/80 ring-1 ring-slate-200"
-                          )}
-                          onClick={() => void selectInterview(item)}
-                        >
-                          <p className="text-sm font-semibold text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
-                          <p className="text-xs text-slate-600">{item.opening_title || "Opening"}</p>
-                          <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
-                            <CalendarCheck2 className="h-3.5 w-3.5" />
-                            {interviewLabel(item)}
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                            <span>{item.location || "Location TBD"}</span>
-                            {item.meeting_link ? (
-                              <a
-                                className="text-slate-800 underline decoration-dotted underline-offset-2"
-                                href={item.meeting_link}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Meeting link
-                              </a>
-                            ) : null}
-                          </div>
-                          {interviewReason(item) ? (
-                            <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
-                          ) : null}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Interview not taken</p>
-                  <div className="mt-2 space-y-2">
-                    {notTakenInterviews.length === 0 ? (
-                      <p className="text-xs text-slate-600">No interviews marked as not taken.</p>
-                    ) : (
-                      notTakenInterviews.map((item) => (
-                        <button
-                          key={item.candidate_interview_id}
-                          type="button"
-                          className={clsx(
-                            "flex w-full flex-col gap-1 rounded-2xl border border-white/60 bg-white/40 p-3 text-left transition hover:bg-white/70",
-                            active?.candidate_interview_id === item.candidate_interview_id && "bg-white/80 ring-1 ring-slate-200"
-                          )}
-                          onClick={() => void selectInterview(item)}
-                        >
-                          <p className="text-sm font-semibold text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
-                          <p className="text-xs text-slate-600">{item.opening_title || "Opening"}</p>
-                          <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
-                            <CalendarCheck2 className="h-3.5 w-3.5" />
-                            {interviewLabel(item)}
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                            <span>{item.location || "Location TBD"}</span>
-                            {item.meeting_link ? (
-                              <a
-                                className="text-slate-800 underline decoration-dotted underline-offset-2"
-                                href={item.meeting_link}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Meeting link
-                              </a>
-                            ) : null}
-                          </div>
-                          {interviewReason(item) ? (
-                            <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
-                          ) : null}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {otherInterviews.length > 0 ? (
-                  <div className="mt-4">
-                    <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Other interviews</p>
-                    <div className="mt-2 space-y-2">
-                      {otherInterviews.map((item) => (
-                        <button
-                          key={item.candidate_interview_id}
-                          type="button"
-                          className={clsx(
-                            "flex w-full flex-col gap-1 rounded-2xl border border-white/60 bg-white/40 p-3 text-left transition hover:bg-white/70",
-                            active?.candidate_interview_id === item.candidate_interview_id && "bg-white/80 ring-1 ring-slate-200"
-                          )}
-                          onClick={() => void selectInterview(item)}
-                        >
-                          <p className="text-sm font-semibold text-slate-900">{item.candidate_name || `Candidate ${item.candidate_id}`}</p>
-                          <p className="text-xs text-slate-600">{item.opening_title || "Opening"}</p>
-                          <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
-                            <CalendarCheck2 className="h-3.5 w-3.5" />
-                            {interviewLabel(item)}
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                            <span>{item.location || "Location TBD"}</span>
-                            {item.meeting_link ? (
-                              <a
-                                className="text-slate-800 underline decoration-dotted underline-offset-2"
-                                href={item.meeting_link}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Meeting link
-                              </a>
-                            ) : null}
-                          </div>
-                          {interviewReason(item) ? (
-                            <p className="mt-1 text-xs text-slate-600">Reason: {interviewReason(item)}</p>
-                          ) : null}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </>
+              queuePageItems.map((item) => renderInterviewCard(item))
             )}
+          </div>
+
+          <div className="mt-1.5 flex items-center justify-between">
+            <button
+              type="button"
+              className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+              onClick={() => setQueuePage((prev) => Math.max(1, prev - 1))}
+              disabled={queuePage <= 1}
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+              onClick={() => setQueuePage((prev) => Math.min(queueTotalPages, prev + 1))}
+              disabled={queuePage >= queueTotalPages}
+            >
+              Next
+            </button>
           </div>
         </div>
 
-        <div className="section-card space-y-4 border-slate-200/70 bg-white/70 shadow-[0_25px_60px_rgba(15,23,42,0.12)]">
+        <div className="section-card space-y-3 border-slate-200/80 bg-gradient-to-b from-white/95 via-white/90 to-slate-50 shadow-[0_14px_30px_rgba(15,23,42,0.10)]" style={{ padding: "0.9rem" }}>
           {active ? (
             <>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-xs uppercase tracking-tight text-slate-500">Candidate</p>
-                  <h2 className="text-xl font-semibold text-slate-900">
+                  <h2 className="text-lg font-semibold text-slate-900">
                     {active.candidate_name || `Candidate ${active.candidate_id}`}
                   </h2>
                   <p className="text-xs text-slate-600">
@@ -977,14 +1365,14 @@ export function GLPortalClient({
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                    className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-semibold text-slate-700"
                     onClick={() => setPreviewOpen((prev) => !prev)}
                   >
                     {previewOpen ? "Hide preview" : "Preview"}
                   </button>
                   {assessment ? (
                     <a
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-semibold text-slate-700"
                       href={`/api/rec/interviews/${encodeURIComponent(String(active.candidate_interview_id))}/${pdfSlug}/pdf`}
                       target="_blank"
                       rel="noreferrer"
@@ -994,7 +1382,7 @@ export function GLPortalClient({
                   ) : null}
                   <button
                     type="button"
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                    className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-semibold text-slate-700"
                     onClick={() => void markInterviewStatus("taken")}
                     disabled={busy || !canUpdateInterviewStatus}
                   >
@@ -1002,7 +1390,7 @@ export function GLPortalClient({
                   </button>
                   <button
                     type="button"
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                    className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-semibold text-slate-700"
                     onClick={() => void markInterviewStatus("not_taken")}
                     disabled={busy || !canUpdateInterviewStatus}
                   >
@@ -1011,24 +1399,33 @@ export function GLPortalClient({
                 </div>
               </div>
               {!hasMeetingStarted ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-2 text-xs text-amber-700">
+                <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-1.5 text-xs text-amber-700">
                   Interview status can be updated once the scheduled start time begins.
                 </div>
               ) : null}
 
               {locked ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-2 text-xs text-amber-700">
+                <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-1.5 text-xs text-amber-700">
                   This assessment is locked after submission.
                 </div>
               ) : null}
               {!isInterviewTaken && !isInterviewNotTaken ? (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2 text-xs text-slate-600">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-xs text-slate-600">
                   Mark the interview as taken to unlock feedback.
                 </div>
               ) : null}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-tight text-slate-700">Workflow</p>
+                <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-xs text-slate-700">
+                  <li>Select interview from queue.</li>
+                  <li>Mark status as taken or not taken after scheduled start.</li>
+                  <li>Fill fields and save draft as needed.</li>
+                  <li>Submit only after final review (submission locks the form).</li>
+                </ol>
+              </div>
 
               {previewOpen && !isInterviewNotTaken ? (
-                <div className="rounded-2xl border border-slate-200/70 bg-white/80 p-4 text-sm text-slate-700">
+                <div className="rounded-xl border border-slate-200/70 bg-white/80 p-3 text-sm text-slate-700">
                   <p className="text-xs uppercase tracking-tight text-slate-500">Preview</p>
                   {activeMode === "l1" ? (
                     <>
@@ -1049,19 +1446,19 @@ export function GLPortalClient({
                 </div>
               ) : null}
 
-              <div className="space-y-6">
+              <div className="space-y-3">
                 {isInterviewNotTaken ? (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-700">
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-sm text-amber-700">
                     Interview marked as not taken. Assessment is unavailable.
                   </div>
                 ) : null}
                 {activeMode === "l1" ? (
-                  <section className="rounded-3xl border border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-slate-100 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
+                  <section className="rounded-xl border border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-slate-100 p-3 shadow-sm">
                     <p className="text-xs uppercase tracking-tight text-slate-500">Areas to assess on</p>
-                    <ul className="mt-3 space-y-1 text-sm text-slate-700">
+                    <ul className="mt-2 space-y-1 text-sm text-slate-700">
                       {L1_AREAS.map((item) => (
                         <li key={item} className="flex items-start gap-2">
-                          <span className="mt-1 h-1.5 w-1.5 rounded-full bg-slate-900/70" />
+                          <span className="mt-1 h-1.5 w-1.5 rounded-full bg-slate-600/70" />
                           <span>{item}</span>
                         </li>
                       ))}
@@ -1073,14 +1470,14 @@ export function GLPortalClient({
                   <section
                     key={section.title}
                     className={clsx(
-                      "rounded-3xl border border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-slate-100 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)]",
+                      "rounded-xl border border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-slate-100 p-3 shadow-sm",
                       !isInterviewTaken && "opacity-60"
                     )}
                   >
                     <div className="flex flex-wrap items-end justify-between gap-2">
                       <div>
                         <p className="text-xs uppercase tracking-tight text-slate-500">Section</p>
-                        <h3 className="text-lg font-semibold text-slate-900">{section.title}</h3>
+                        <h3 className="text-base font-semibold text-slate-900">{section.title}</h3>
                       </div>
                     </div>
                     {activeMode === "l1" && section.title === "Section 4: Before Closing out the interview" ? (
@@ -1090,7 +1487,7 @@ export function GLPortalClient({
                         <li>Ask the candidate for Feedback on the interview process and their experience of interviewing with Studio Lotus.</li>
                       </ol>
                     ) : null}
-                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
                       {section.fields.map((field) => (
                         <label
                           key={field.label}
@@ -1102,7 +1499,7 @@ export function GLPortalClient({
                       ))}
                     </div>
                     {activeMode === "l1" && section.title === "High Potential Check" ? (
-                      <div className="mt-4 rounded-2xl border border-slate-200/70 bg-white/70 p-3 text-sm text-slate-700">
+                      <div className="mt-3 rounded-xl border border-slate-200/70 bg-white/70 p-2.5 text-sm text-slate-700">
                         <p className="text-xs uppercase tracking-tight text-slate-500">Characteristics of a High Potential Candidate (Reference)</p>
                         <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-slate-600">
                           {HIGH_POTENTIAL_REFERENCE.map((item) => (
@@ -1123,7 +1520,7 @@ export function GLPortalClient({
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
                     onClick={() => void handleSave()}
                     disabled={busy || locked || isInterviewNotTaken || !isInterviewTaken}
                   >
@@ -1131,7 +1528,7 @@ export function GLPortalClient({
                   </button>
                   <button
                     type="button"
-                    className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                    className="rounded-lg bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-300 disabled:opacity-60"
                     onClick={() => void handleSubmit()}
                     disabled={busy || locked || isInterviewNotTaken || !isInterviewTaken}
                   >
@@ -1146,7 +1543,85 @@ export function GLPortalClient({
             </div>
           )}
         </div>
+        </div>
       </section> : null}
+      {activeSprint ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+          <div className="w-full max-w-xl rounded-2xl border border-white/20 bg-white/95 p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-tight text-slate-500">Sprint review</p>
+                <h2 className="text-lg font-semibold">{activeSprint.candidate_name || `Candidate ${activeSprint.candidate_id}`}</h2>
+                <p className="text-xs text-slate-600">{activeSprint.template_name || "Sprint"} · {activeSprint.opening_title || "Opening"}</p>
+              </div>
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                onClick={() => setActiveSprint(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-3 grid gap-2">
+              <label className="space-y-1 text-xs text-slate-600">
+                Score (0-10)
+                <input
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                  value={sprintForm.score_overall}
+                  onChange={(e) => setSprintForm((prev) => ({ ...prev, score_overall: e.target.value }))}
+                  placeholder="e.g. 7.5"
+                />
+              </label>
+              <label className="space-y-1 text-xs text-slate-600">
+                Decision
+                <select
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                  value={sprintForm.decision}
+                  onChange={(e) => setSprintForm((prev) => ({ ...prev, decision: e.target.value }))}
+                >
+                  <option value="">Select decision</option>
+                  <option value="advance">Advance</option>
+                  <option value="reject">Reject</option>
+                  <option value="keep_warm">Keep warm</option>
+                </select>
+              </label>
+              <label className="space-y-1 text-xs text-slate-600">
+                Internal comments
+                <textarea
+                  className="h-16 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                  value={sprintForm.comments_internal}
+                  onChange={(e) => setSprintForm((prev) => ({ ...prev, comments_internal: e.target.value }))}
+                />
+              </label>
+              <label className="space-y-1 text-xs text-slate-600">
+                Candidate comments
+                <textarea
+                  className="h-16 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                  value={sprintForm.comments_for_candidate}
+                  onChange={(e) => setSprintForm((prev) => ({ ...prev, comments_for_candidate: e.target.value }))}
+                />
+              </label>
+            </div>
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
+                onClick={() => setActiveSprint(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-full bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-300"
+                onClick={() => void handleSubmitSprintReview()}
+                disabled={sprintsBusy}
+              >
+                {sprintsBusy ? "Saving..." : "Save review"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

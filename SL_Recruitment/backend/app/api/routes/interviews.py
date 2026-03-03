@@ -24,7 +24,14 @@ from app.models.interview_slot import RecCandidateInterviewSlot
 from app.models.opening import RecOpening
 from app.models.platform_person import DimPerson
 from app.models.platform_role import DimRole
-from app.schemas.interview import InterviewCancel, InterviewCreate, InterviewOut, InterviewReschedule, InterviewUpdate
+from app.schemas.interview import (
+    InterviewCancel,
+    InterviewCreate,
+    InterviewNotificationCountsOut,
+    InterviewOut,
+    InterviewReschedule,
+    InterviewUpdate,
+)
 from app.schemas.interview_slots import InterviewSlotOut, InterviewSlotPreviewOut, InterviewSlotProposalIn
 from app.schemas.user import UserContext
 from app.services.platform_identity import active_status_filter
@@ -1816,6 +1823,75 @@ async def list_interviews(
             )
         )
     return out
+
+
+@router.get("/interviews/notifications", response_model=InterviewNotificationCountsOut)
+async def get_interview_notifications(
+    interviewer: str | None = Query(default=None),
+    interviewer_person_id_platform: str | None = Query(default=None),
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
+):
+    query = (
+        select(
+            RecCandidateInterview.round_type,
+            RecCandidateInterview.feedback_submitted,
+            RecCandidateInterview.decision,
+        )
+        .select_from(RecCandidateInterview)
+        .join(RecCandidate, RecCandidate.candidate_id == RecCandidateInterview.candidate_id)
+    )
+
+    interviewer_filter = interviewer_person_id_platform
+    if interviewer == "me":
+        if user.person_id_platform:
+            interviewer_filter = user.person_id_platform
+        elif not user.email and settings.environment == "production":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user has no platform person id")
+    elif (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and not (
+        Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles or Role.HIRING_MANAGER in user.roles
+    ):
+        if user.person_id_platform:
+            interviewer_filter = user.person_id_platform
+        elif not user.email and settings.environment == "production":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user has no platform person id")
+
+    if interviewer_filter:
+        base_filter = RecCandidateInterview.interviewer_person_id_platform == _clean_platform_person_id(interviewer_filter)
+        if (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and user.email:
+            base_filter = or_(base_filter, func.lower(RecCandidate.l2_owner_email) == user.email.lower())
+        query = query.where(base_filter)
+    elif (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and user.email:
+        query = query.where(func.lower(RecCandidate.l2_owner_email) == user.email.lower())
+
+    rows = (await session.execute(query)).all()
+    l1_assigned = 0
+    l2_assigned = 0
+    l1_pending = 0
+    l2_pending = 0
+    for round_type, feedback_submitted, decision in rows:
+        round_norm = _normalize_round(round_type)
+        decision_norm = _normalize_round(decision)
+        if decision_norm == "cancelled":
+            continue
+        is_pending = not bool(feedback_submitted)
+        if "l1" in round_norm:
+            l1_assigned += 1
+            if is_pending:
+                l1_pending += 1
+        elif "l2" in round_norm:
+            l2_assigned += 1
+            if is_pending:
+                l2_pending += 1
+
+    return InterviewNotificationCountsOut(
+        l1_assigned=l1_assigned,
+        l1_pending=l1_pending,
+        l2_assigned=l2_assigned,
+        l2_pending=l2_pending,
+        total_assigned=l1_assigned + l2_assigned,
+        total_pending=l1_pending + l2_pending,
+    )
 
 
 @router.get("/interviews/{candidate_interview_id}", response_model=InterviewOut)

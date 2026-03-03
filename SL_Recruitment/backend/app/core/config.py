@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     gmail_sender_name: str = "SL Recruitment"
     calendar_id: str = "primary"
     calendar_timezone: str = "Asia/Kolkata"
+    interview_slot_duration_minutes: int = 60
+    interview_slot_step_minutes: int = 5
     public_app_origin: str = ""
     public_app_base_path: str = "/recruitment"
     public_link_ttl_hours: int = 168

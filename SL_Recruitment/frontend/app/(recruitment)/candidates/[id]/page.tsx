@@ -74,18 +74,15 @@ export default async function CandidateDetailPage({ params }: { params: Promise<
     .map((role) => normalizeRole(role))
     .filter(Boolean);
   const isHrLikeRole = isSuperadmin || normalizedRoles.some((role) => isHrRole(role));
-  const isRoleFiveOrSix = roleIds.includes(5) || roleIds.includes(6);
-  if (isRoleFiveOrSix && !isHrLikeRole && !isSuperadmin) {
-    notFound();
-  }
   const full = await fetchCandidateFull(id);
   if (!full) notFound();
-  const canManageCandidate360 = !(isRoleFiveOrSix && !isHrLikeRole && !isSuperadmin);
+  const canManageCandidate360 = isHrLikeRole || isSuperadmin;
   const canSchedule = canManageCandidate360 && (isHrLikeRole || isSuperadmin);
   const canSkip = isSuperadmin;
   const canCancelInterview = canManageCandidate360 && (canSkip || isHrLikeRole);
   const canUploadJoiningDocs = canManageCandidate360 && (isHrLikeRole || isSuperadmin);
   const canAccessOffers = canManageCandidate360 && (isHrLikeRole || isSuperadmin);
+  const canOpenDriveFolder = isHrLikeRole || isSuperadmin;
 
   return (
     <Candidate360Client
@@ -98,6 +95,7 @@ export default async function CandidateDetailPage({ params }: { params: Promise<
       canCancelInterview={canCancelInterview}
       canUploadJoiningDocs={canUploadJoiningDocs}
       canAccessOffers={canAccessOffers}
+      canOpenDriveFolder={canOpenDriveFolder}
     />
   );
 }
