@@ -777,7 +777,7 @@ export function GLPortalClient({
           />
         ) : (
           <div className="rounded-2xl border border-dashed border-slate-200 bg-white/50 p-4 text-sm text-slate-600">
-            Opening requests are not available for your role.
+            Opening requests are not available in this view.
           </div>
         )
       ) : null}

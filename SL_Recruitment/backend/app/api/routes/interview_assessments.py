@@ -115,7 +115,7 @@ async def save_l2_assessment(
     interview = await _get_interview(session, candidate_interview_id)
     _assert_assessment_access(user, interview)
     if (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="HR roles cannot edit assessments")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to edit assessments")
     if not _round_matches(interview, "l2") and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L2 assessments are only for L2 interviews")
     assessment = (
@@ -162,7 +162,7 @@ async def submit_l2_assessment(
     interview = await _get_interview(session, candidate_interview_id)
     _assert_assessment_access(user, interview)
     if (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="HR roles cannot submit assessments")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to submit assessments")
     if not _round_matches(interview, "l2") and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L2 assessments are only for L2 interviews")
     assessment = (
@@ -309,7 +309,7 @@ async def save_l1_assessment(
     interview = await _get_interview(session, candidate_interview_id)
     _assert_assessment_access(user, interview)
     if (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="HR roles cannot edit assessments")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to edit assessments")
     if not _round_matches(interview, "l1") and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L1 assessments are only for L1 interviews")
     assessment = (
@@ -356,7 +356,7 @@ async def submit_l1_assessment(
     interview = await _get_interview(session, candidate_interview_id)
     _assert_assessment_access(user, interview)
     if (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="HR roles cannot submit assessments")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to submit assessments")
     if not _round_matches(interview, "l1") and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L1 assessments are only for L1 interviews")
     assessment = (

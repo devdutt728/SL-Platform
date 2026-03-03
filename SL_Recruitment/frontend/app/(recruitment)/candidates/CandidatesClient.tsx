@@ -808,7 +808,7 @@ export function CandidatesClient({
                   </div>
                 ) : null}
                 {!canViewBasicDetails ? (
-                  <p className="mt-2 text-[11px] text-slate-500">Basic candidate details are visible to HR roles and super admin only.</p>
+                  <p className="mt-2 text-[11px] text-slate-500">Basic candidate details are not available in this view.</p>
                 ) : null}
                 <div className="mt-2">
                   <p className="truncate text-[11px] text-slate-500">{sourceLabel(selectedCandidate) || "Source not available"}</p>

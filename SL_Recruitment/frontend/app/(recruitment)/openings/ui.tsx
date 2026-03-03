@@ -409,7 +409,7 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-tight text-slate-500">Create opening</p>
-              <p className="text-sm text-slate-500">Superadmin only. Opening codes are generated automatically and are immutable.</p>
+              <p className="text-sm text-slate-500">Opening codes are generated automatically and are immutable.</p>
             </div>
             <button
               className="rounded-full bg-teal-600 px-4 py-2 text-xs font-semibold text-white shadow-card hover:bg-teal-700 disabled:opacity-60"

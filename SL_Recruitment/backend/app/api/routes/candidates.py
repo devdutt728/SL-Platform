@@ -1,6 +1,8 @@
+import csv
 from datetime import datetime, timedelta
 import hmac
 from hashlib import sha256
+from io import StringIO
 import logging
 import mimetypes
 from pathlib import Path
@@ -59,6 +61,20 @@ SOURCE_ORIGIN_GOOGLE_SHEET = "google_sheet"
 EXTERNAL_DOC_MAX_BYTES_DOC = 2 * 1024 * 1024
 EXTERNAL_DOC_MAX_BYTES_PORTFOLIO = 10 * 1024 * 1024
 GOOGLE_SHEET_DUPLICATE_WINDOW = timedelta(hours=24)
+INGEST_STATE_CREATED = "created"
+INGEST_STATE_DUPLICATE = "duplicate"
+INGEST_STATE_RETRYING = "retrying"
+INGEST_STATE_FAILED_PERMANENT = "failed_permanent"
+INGEST_STATE_FAILED_TRANSIENT = "failed_transient"
+INGEST_ALLOWED_STATES = {
+    INGEST_STATE_CREATED,
+    INGEST_STATE_DUPLICATE,
+    INGEST_STATE_RETRYING,
+    INGEST_STATE_FAILED_PERMANENT,
+    INGEST_STATE_FAILED_TRANSIENT,
+}
+INGEST_DEFAULT_TRANSIENT_HINT = "Retry later. If the issue repeats, inspect payload and external dependencies."
+INGEST_DEFAULT_PERMANENT_HINT = "Fix the row data and retry, or mark resolved if no action is needed."
 
 
 def _strip_optional(value: str | None) -> str | None:
@@ -377,12 +393,34 @@ class GoogleSheetIngestIn(BaseModel):
     batch_id: str | None = None
     sheet_id: str | None = None
     sheet_name: str | None = None
+    validate_only: bool = False
     rows: list[dict[str, object]]
 
     @field_validator("batch_id", "sheet_id", "sheet_name")
     @classmethod
     def _strip_batch_fields(cls, value: str | None) -> str | None:
         return _strip_optional(value)
+
+
+class IngestRetryRowIn(BaseModel):
+    candidate_ingest_attempt_id: int = Field(..., ge=1)
+
+
+class IngestRetryTransientIn(BaseModel):
+    limit: int = Field(default=25, ge=1, le=200)
+    sheet_id: str | None = None
+    batch_id: str | None = None
+    opening_id: int | None = None
+
+    @field_validator("sheet_id", "batch_id")
+    @classmethod
+    def _strip_optional_text(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+
+class IngestMarkResolvedIn(BaseModel):
+    candidate_ingest_attempt_id: int = Field(..., ge=1)
+    note: str | None = None
 
 
 def _candidate_code(candidate_id: int) -> str:
@@ -513,6 +551,106 @@ def _normalize_external_source_ref(value: str | None) -> str | None:
     return cleaned[:191]
 
 
+def _normalize_ingest_state(value: str | None, *, fallback: str | None = None) -> str | None:
+    raw = _strip_optional(value)
+    if raw is None:
+        return fallback
+    normalized = raw.lower().strip()
+    if normalized in INGEST_ALLOWED_STATES:
+        return normalized
+    return fallback
+
+
+def _ingest_state_from_attempt_status(attempt_status: str | None, *, fallback: str = INGEST_STATE_FAILED_TRANSIENT) -> str:
+    status = (attempt_status or "").strip().lower()
+    if status in {"created", "reapplied"}:
+        return INGEST_STATE_CREATED
+    if status.startswith("duplicate") or status == "duplicate":
+        return INGEST_STATE_DUPLICATE
+    if status in {INGEST_STATE_RETRYING}:
+        return INGEST_STATE_RETRYING
+    if status in {INGEST_STATE_FAILED_PERMANENT, INGEST_STATE_FAILED_TRANSIENT}:
+        return status
+    if status in {"error"}:
+        return INGEST_STATE_FAILED_TRANSIENT
+    return fallback
+
+
+def _error_hint_for_code(error_code: str | None, *, transient: bool) -> str:
+    code = (error_code or "").strip().lower()
+    if code == "opening_not_found":
+        return "Map the row to an existing opening_code or fix the opening title."
+    if code == "opening_inactive":
+        return "Activate the opening or move the row to an active opening."
+    if code == "opening_title_mismatch":
+        return "Use the exact opening title for the supplied opening_code."
+    if code == "ambiguous_opening":
+        return "Provide opening_code/job_id so the row maps to a single opening."
+    if code == "terms_not_accepted":
+        return "Set Terms as accepted and retry."
+    if code == "invalid_row_payload":
+        return "Fix required fields and data formats, then retry."
+    if code == "integrity_conflict":
+        return "Check duplicate email/opening data and retry only if this is a fresh application."
+    if code == "idempotent_duplicate":
+        return "Row already ingested. Reuse the existing candidate."
+    if code == "api_transport_error":
+        return "Transient transport issue. Retry now or wait for the next automated retry."
+    if code == "unexpected_error":
+        return "Retry once. If it repeats, escalate with row payload and attempt history."
+    return INGEST_DEFAULT_TRANSIENT_HINT if transient else INGEST_DEFAULT_PERMANENT_HINT
+
+
+def _classify_ingest_error(
+    *,
+    detail: str,
+    status_code: int | None = None,
+    validation_error: bool = False,
+    unexpected_error: bool = False,
+) -> tuple[str, str, str]:
+    message = (detail or "").strip()
+    lower = message.lower()
+    if "opening not found" in lower:
+        code = "opening_not_found"
+        state = INGEST_STATE_FAILED_PERMANENT
+    elif "inactive" in lower and "opening" in lower:
+        code = "opening_inactive"
+        state = INGEST_STATE_FAILED_PERMANENT
+    elif "opening title mismatch" in lower:
+        code = "opening_title_mismatch"
+        state = INGEST_STATE_FAILED_PERMANENT
+    elif "multiple active openings" in lower:
+        code = "ambiguous_opening"
+        state = INGEST_STATE_FAILED_PERMANENT
+    elif "terms consent" in lower or "terms must be accepted" in lower:
+        code = "terms_not_accepted"
+        state = INGEST_STATE_FAILED_PERMANENT
+    elif validation_error:
+        code = "invalid_row_payload"
+        state = INGEST_STATE_FAILED_PERMANENT
+    elif "integrity" in lower:
+        code = "integrity_conflict"
+        state = INGEST_STATE_FAILED_PERMANENT
+    elif status_code is not None and status_code >= 500:
+        code = "api_transport_error"
+        state = INGEST_STATE_FAILED_TRANSIENT
+    elif unexpected_error:
+        code = "unexpected_error"
+        state = INGEST_STATE_FAILED_TRANSIENT
+    elif "timeout" in lower or "tempor" in lower or "retry later" in lower:
+        code = "api_transport_error"
+        state = INGEST_STATE_FAILED_TRANSIENT
+    elif status_code is not None and status_code in {400, 404, 409, 422}:
+        code = "invalid_row_payload"
+        state = INGEST_STATE_FAILED_PERMANENT
+    else:
+        code = "ingest_error"
+        state = INGEST_STATE_FAILED_TRANSIENT
+
+    hint = _error_hint_for_code(code, transient=(state == INGEST_STATE_FAILED_TRANSIENT))
+    return state, code, hint
+
+
 def _derive_google_sheet_external_ref(
     *,
     payload: GoogleSheetIngestIn,
@@ -589,10 +727,21 @@ async def _upsert_ingest_idempotency(
     candidate_id: int | None,
     result_status: str,
     result_message: str | None,
+    ingest_state: str | None = None,
+    error_code: str | None = None,
+    resolution_hint: str | None = None,
+    retry_count: int | None = None,
+    matching_key: str | None = None,
+    resolved_at: datetime | None = None,
+    resolved_by_email: str | None = None,
 ) -> None:
     ref = _normalize_external_source_ref(external_source_ref)
     if not ref:
         return
+    computed_state = _normalize_ingest_state(
+        ingest_state,
+        fallback=_ingest_state_from_attempt_status(result_status, fallback=INGEST_STATE_CREATED),
+    )
 
     try:
         async with session.begin_nested():
@@ -611,6 +760,26 @@ async def _upsert_ingest_idempotency(
                     existing.candidate_id = candidate_id
                 existing.result_status = (result_status or existing.result_status or "created").strip()[:32]
                 existing.result_message = _truncate_text(result_message, max_len=500)
+                existing.ingest_state = computed_state
+                existing.error_code = _truncate_text(error_code, max_len=64)
+                existing.resolution_hint = _truncate_text(
+                    resolution_hint,
+                    max_len=500,
+                ) or (
+                    _error_hint_for_code(error_code, transient=(computed_state == INGEST_STATE_FAILED_TRANSIENT))
+                    if error_code
+                    else existing.resolution_hint
+                )
+                if retry_count is not None:
+                    existing.retry_count = max(int(retry_count), 0)
+                if existing.ingest_state in {INGEST_STATE_FAILED_PERMANENT, INGEST_STATE_FAILED_TRANSIENT}:
+                    existing.last_error_at = now_ist_naive()
+                if matching_key is not None:
+                    existing.matching_key = _truncate_text(matching_key, max_len=32)
+                if resolved_at is not None:
+                    existing.resolved_at = resolved_at
+                if resolved_by_email is not None:
+                    existing.resolved_by_email = _truncate_text(resolved_by_email, max_len=255)
                 existing.last_seen_at = now_ist_naive()
             else:
                 session.add(
@@ -619,7 +788,30 @@ async def _upsert_ingest_idempotency(
                         external_source_ref=ref,
                         candidate_id=candidate_id,
                         result_status=(result_status or "created").strip()[:32],
+                        ingest_state=computed_state,
+                        error_code=_truncate_text(error_code, max_len=64),
+                        resolution_hint=(
+                            _truncate_text(
+                                resolution_hint,
+                                max_len=500,
+                            )
+                            or (
+                                _error_hint_for_code(
+                                    error_code,
+                                    transient=(computed_state == INGEST_STATE_FAILED_TRANSIENT),
+                                )
+                                if error_code
+                                else None
+                            )
+                        ),
+                        retry_count=max(int(retry_count or 0), 0),
+                        matching_key=_truncate_text(matching_key, max_len=32),
                         result_message=_truncate_text(result_message, max_len=500),
+                        last_error_at=now_ist_naive()
+                        if computed_state in {INGEST_STATE_FAILED_PERMANENT, INGEST_STATE_FAILED_TRANSIENT}
+                        else None,
+                        resolved_at=resolved_at,
+                        resolved_by_email=_truncate_text(resolved_by_email, max_len=255),
                         first_seen_at=now_ist_naive(),
                         last_seen_at=now_ist_naive(),
                     )
@@ -643,7 +835,23 @@ async def _record_ingest_attempt(
     message: str | None,
     raw_row: dict[str, object],
     attempted_at: datetime,
+    ingest_state: str | None = None,
+    error_code: str | None = None,
+    resolution_hint: str | None = None,
+    retry_count: int | None = None,
+    first_seen_at: datetime | None = None,
+    last_attempt_at: datetime | None = None,
+    next_retry_at: datetime | None = None,
+    resolved_at: datetime | None = None,
+    resolved_by_person_id_platform: int | None = None,
+    resolved_by_email: str | None = None,
+    triggered_by_person_id_platform: int | None = None,
+    triggered_by_email: str | None = None,
 ) -> None:
+    computed_state = _normalize_ingest_state(
+        ingest_state,
+        fallback=_ingest_state_from_attempt_status(attempt_status),
+    )
     try:
         async with session.begin_nested():
             session.add(
@@ -661,9 +869,28 @@ async def _record_ingest_attempt(
                     email_normalized=email_normalized,
                     external_source_ref=_normalize_external_source_ref(external_source_ref),
                     attempt_status=(attempt_status or "error").strip()[:32],
+                    ingest_state=computed_state,
+                    error_code=_truncate_text(error_code, max_len=64),
+                    resolution_hint=_truncate_text(
+                        resolution_hint,
+                        max_len=500,
+                    ) or (
+                        _error_hint_for_code(error_code, transient=(computed_state == INGEST_STATE_FAILED_TRANSIENT))
+                        if error_code
+                        else None
+                    ),
+                    retry_count=max(int(retry_count or 0), 0),
                     candidate_id=candidate_id,
                     message=_truncate_text(message, max_len=500),
                     payload_json=_safe_payload_json(raw_row),
+                    first_seen_at=first_seen_at or attempted_at,
+                    last_attempt_at=last_attempt_at or attempted_at,
+                    next_retry_at=next_retry_at,
+                    resolved_at=resolved_at,
+                    resolved_by_person_id_platform=resolved_by_person_id_platform,
+                    resolved_by_email=_truncate_text(resolved_by_email, max_len=255),
+                    triggered_by_person_id_platform=triggered_by_person_id_platform,
+                    triggered_by_email=_truncate_text(triggered_by_email, max_len=255),
                     attempted_at=attempted_at,
                     created_at=attempted_at,
                 )
@@ -684,6 +911,11 @@ async def _record_ui_ingest_attempt(
     message: str | None,
     attempted_at: datetime,
     payload: dict[str, object],
+    ingest_state: str | None = None,
+    error_code: str | None = None,
+    resolution_hint: str | None = None,
+    triggered_by_person_id_platform: int | None = None,
+    triggered_by_email: str | None = None,
 ) -> None:
     try:
         async with session.begin_nested():
@@ -699,9 +931,19 @@ async def _record_ui_ingest_attempt(
                     email_normalized=email_normalized,
                     external_source_ref=_normalize_external_source_ref(external_source_ref),
                     attempt_status=(attempt_status or "error").strip()[:32],
+                    ingest_state=_normalize_ingest_state(
+                        ingest_state,
+                        fallback=_ingest_state_from_attempt_status(attempt_status),
+                    ),
+                    error_code=_truncate_text(error_code, max_len=64),
+                    resolution_hint=_truncate_text(resolution_hint, max_len=500),
                     candidate_id=candidate_id,
                     message=_truncate_text(message, max_len=500),
                     payload_json=_safe_payload_json(payload),
+                    first_seen_at=attempted_at,
+                    last_attempt_at=attempted_at,
+                    triggered_by_person_id_platform=triggered_by_person_id_platform,
+                    triggered_by_email=_truncate_text(triggered_by_email, max_len=255),
                     attempted_at=attempted_at,
                     created_at=attempted_at,
                 )
@@ -1049,6 +1291,235 @@ async def _latest_email_meta(
                 continue
         return meta
     return None
+
+
+def _attempt_row_identity(attempt: RecCandidateIngestAttempt) -> str:
+    ext_ref = _normalize_external_source_ref(attempt.external_source_ref)
+    if ext_ref:
+        return f"ref:{ext_ref}"
+    parts = [
+        str(attempt.sheet_id or ""),
+        str(attempt.sheet_name or ""),
+        str(attempt.row_key or ""),
+        str(attempt.email_normalized or "").lower(),
+        str(attempt.opening_id or ""),
+    ]
+    return "row:" + "|".join(parts)
+
+
+def _attempt_ingest_state(attempt: RecCandidateIngestAttempt) -> str:
+    return _normalize_ingest_state(
+        attempt.ingest_state,
+        fallback=_ingest_state_from_attempt_status(attempt.attempt_status),
+    ) or INGEST_STATE_FAILED_TRANSIENT
+
+
+def _safe_json_object(raw_json: str | None) -> dict[str, object]:
+    raw = (raw_json or "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _row_timeline_payload(attempt: RecCandidateIngestAttempt) -> dict[str, object]:
+    return {
+        "candidate_ingest_attempt_id": attempt.candidate_ingest_attempt_id,
+        "attempt_status": attempt.attempt_status,
+        "ingest_state": _attempt_ingest_state(attempt),
+        "error_code": attempt.error_code,
+        "resolution_hint": attempt.resolution_hint,
+        "message": attempt.message,
+        "attempted_at": attempt.attempted_at.isoformat() if attempt.attempted_at else None,
+        "last_attempt_at": attempt.last_attempt_at.isoformat() if attempt.last_attempt_at else None,
+        "retry_count": int(attempt.retry_count or 0),
+        "next_retry_at": attempt.next_retry_at.isoformat() if attempt.next_retry_at else None,
+        "candidate_id": attempt.candidate_id,
+        "triggered_by_email": attempt.triggered_by_email,
+        "triggered_by_person_id_platform": attempt.triggered_by_person_id_platform,
+        "resolved_at": attempt.resolved_at.isoformat() if attempt.resolved_at else None,
+        "resolved_by_email": attempt.resolved_by_email,
+    }
+
+
+async def _fetch_google_sheet_attempts(
+    session: AsyncSession,
+    *,
+    max_rows: int = 5000,
+    sheet_id: str | None = None,
+    batch_id: str | None = None,
+    opening_id: int | None = None,
+    error_code: str | None = None,
+    recruiter_email: str | None = None,
+    attempted_after: datetime | None = None,
+) -> list[RecCandidateIngestAttempt]:
+    q = (
+        select(RecCandidateIngestAttempt)
+        .where(RecCandidateIngestAttempt.source_origin == SOURCE_ORIGIN_GOOGLE_SHEET)
+        .order_by(
+            RecCandidateIngestAttempt.attempted_at.desc(),
+            RecCandidateIngestAttempt.candidate_ingest_attempt_id.desc(),
+        )
+        .limit(max(int(max_rows), 1))
+    )
+    if sheet_id:
+        q = q.where(RecCandidateIngestAttempt.sheet_id == sheet_id)
+    if batch_id:
+        q = q.where(RecCandidateIngestAttempt.batch_id == batch_id)
+    if opening_id is not None:
+        q = q.where(RecCandidateIngestAttempt.opening_id == opening_id)
+    if error_code:
+        q = q.where(RecCandidateIngestAttempt.error_code == error_code)
+    if recruiter_email:
+        q = q.where(func.lower(RecCandidateIngestAttempt.triggered_by_email) == recruiter_email.strip().lower())
+    if attempted_after is not None:
+        q = q.where(RecCandidateIngestAttempt.attempted_at >= attempted_after)
+    try:
+        return (await session.execute(q)).scalars().all()
+    except OperationalError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ingest ops schema is unavailable. Apply migration 0038_ingest_ops_observability.sql.",
+        ) from exc
+
+
+def _summarize_ingest_rows(
+    attempts: list[RecCandidateIngestAttempt],
+    *,
+    status_filter: set[str] | None = None,
+    min_age_hours: float | None = None,
+) -> list[dict[str, object]]:
+    grouped: dict[str, list[RecCandidateIngestAttempt]] = {}
+    for attempt in attempts:
+        key = _attempt_row_identity(attempt)
+        grouped.setdefault(key, []).append(attempt)
+
+    now = now_ist_naive()
+    rows: list[dict[str, object]] = []
+    for identity, group in grouped.items():
+        ordered = sorted(
+            group,
+            key=lambda item: (
+                item.attempted_at or now,
+                item.candidate_ingest_attempt_id or 0,
+            ),
+        )
+        latest = ordered[-1]
+        latest_state = _attempt_ingest_state(latest)
+        if status_filter and latest_state not in status_filter:
+            continue
+
+        first_seen_at = min((item.first_seen_at or item.attempted_at or now for item in ordered), default=now)
+        age_hours = max((now - first_seen_at).total_seconds() / 3600, 0)
+        if min_age_hours is not None and age_hours < min_age_hours:
+            continue
+
+        last_error_attempt = None
+        for item in reversed(ordered):
+            state = _attempt_ingest_state(item)
+            if state in {INGEST_STATE_FAILED_PERMANENT, INGEST_STATE_FAILED_TRANSIENT}:
+                last_error_attempt = item
+                break
+
+        retry_count = sum(
+            1
+            for item in ordered
+            if _attempt_ingest_state(item) in {INGEST_STATE_FAILED_TRANSIENT, INGEST_STATE_RETRYING}
+        )
+        unresolved = latest.resolved_at is None
+        rows.append(
+            {
+                "row_identity": identity,
+                "candidate_ingest_attempt_id": latest.candidate_ingest_attempt_id,
+                "source_origin": latest.source_origin,
+                "sheet_id": latest.sheet_id,
+                "sheet_name": latest.sheet_name,
+                "batch_id": latest.batch_id,
+                "row_key": latest.row_key,
+                "opening_id": latest.opening_id,
+                "opening_code": latest.opening_code,
+                "email_normalized": latest.email_normalized,
+                "external_source_ref": latest.external_source_ref,
+                "candidate_id": latest.candidate_id,
+                "status": latest_state,
+                "error_code": last_error_attempt.error_code if last_error_attempt else latest.error_code,
+                "resolution_hint": (last_error_attempt.resolution_hint if last_error_attempt else latest.resolution_hint),
+                "message": latest.message,
+                "first_seen_at": first_seen_at.isoformat() if first_seen_at else None,
+                "last_attempt_at": (latest.last_attempt_at or latest.attempted_at).isoformat()
+                if (latest.last_attempt_at or latest.attempted_at)
+                else None,
+                "attempted_at": latest.attempted_at.isoformat() if latest.attempted_at else None,
+                "retry_count": retry_count,
+                "next_retry_at": latest.next_retry_at.isoformat() if latest.next_retry_at else None,
+                "unresolved": unresolved,
+                "resolved_at": latest.resolved_at.isoformat() if latest.resolved_at else None,
+                "resolved_by_email": latest.resolved_by_email,
+                "triggered_by_email": latest.triggered_by_email,
+                "age_hours": round(age_hours, 2),
+                "timeline_count": len(ordered),
+                "matching_key": "external_source_ref" if latest.external_source_ref else "email_opening",
+            }
+        )
+
+    rows.sort(key=lambda item: item.get("last_attempt_at") or "", reverse=True)
+    return rows
+
+
+async def _get_attempt_timeline_by_identity(
+    session: AsyncSession,
+    *,
+    attempt: RecCandidateIngestAttempt,
+    max_rows: int = 100,
+) -> list[RecCandidateIngestAttempt]:
+    ext_ref = _normalize_external_source_ref(attempt.external_source_ref)
+    if ext_ref:
+        q = (
+            select(RecCandidateIngestAttempt)
+            .where(
+                RecCandidateIngestAttempt.source_origin == SOURCE_ORIGIN_GOOGLE_SHEET,
+                RecCandidateIngestAttempt.external_source_ref == ext_ref,
+            )
+            .order_by(
+                RecCandidateIngestAttempt.attempted_at.asc(),
+                RecCandidateIngestAttempt.candidate_ingest_attempt_id.asc(),
+            )
+            .limit(max_rows)
+        )
+        try:
+            return (await session.execute(q)).scalars().all()
+        except OperationalError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Ingest ops schema is unavailable. Apply migration 0038_ingest_ops_observability.sql.",
+            ) from exc
+
+    q = (
+        select(RecCandidateIngestAttempt)
+        .where(
+            RecCandidateIngestAttempt.source_origin == SOURCE_ORIGIN_GOOGLE_SHEET,
+            RecCandidateIngestAttempt.sheet_id == attempt.sheet_id,
+            RecCandidateIngestAttempt.sheet_name == attempt.sheet_name,
+            RecCandidateIngestAttempt.row_key == attempt.row_key,
+            RecCandidateIngestAttempt.email_normalized == attempt.email_normalized,
+            RecCandidateIngestAttempt.opening_id == attempt.opening_id,
+        )
+        .order_by(
+            RecCandidateIngestAttempt.attempted_at.asc(),
+            RecCandidateIngestAttempt.candidate_ingest_attempt_id.asc(),
+        )
+        .limit(max_rows)
+    )
+    try:
+        return (await session.execute(q)).scalars().all()
+    except OperationalError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ingest ops schema is unavailable. Apply migration 0038_ingest_ops_observability.sql.",
+        ) from exc
 
 
 async def _create_candidate_with_automation(
@@ -1653,6 +2124,7 @@ async def import_candidates_from_google_sheet(
             detail=f"Payload too large. Maximum {max_rows} rows per request.",
         )
 
+    validate_only = bool(payload.validate_only)
     results: list[dict] = []
     created_count = 0
     duplicate_count = 0
@@ -1691,38 +2163,52 @@ async def import_candidates_from_google_sheet(
                     _strip_optional(idempotent_hit.result_message)
                     or "This source application row was already ingested."
                 )
-                await _record_ingest_attempt(
-                    session,
-                    payload=payload,
-                    row_key=row_key,
-                    row=row,
-                    email_normalized=email_normalized,
-                    external_source_ref=external_source_ref,
-                    attempt_status="duplicate_idempotent",
-                    candidate_id=idempotent_candidate.candidate_id if idempotent_candidate else idempotent_hit.candidate_id,
-                    opening_id=idempotent_candidate.opening_id if idempotent_candidate else None,
-                    message=idempotent_message,
-                    raw_row=raw_row,
-                    attempted_at=row_now,
-                )
-                await _upsert_ingest_idempotency(
-                    session,
-                    source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
-                    external_source_ref=external_source_ref,
-                    candidate_id=idempotent_candidate.candidate_id if idempotent_candidate else idempotent_hit.candidate_id,
-                    result_status="duplicate",
-                    result_message=idempotent_message,
-                )
-                await session.commit()
+                duplicate_error_code = "idempotent_duplicate"
+                duplicate_resolution = _error_hint_for_code(duplicate_error_code, transient=False)
+                if not validate_only:
+                    await _record_ingest_attempt(
+                        session,
+                        payload=payload,
+                        row_key=row_key,
+                        row=row,
+                        email_normalized=email_normalized,
+                        external_source_ref=external_source_ref,
+                        attempt_status="duplicate_idempotent",
+                        candidate_id=idempotent_candidate.candidate_id if idempotent_candidate else idempotent_hit.candidate_id,
+                        opening_id=idempotent_candidate.opening_id if idempotent_candidate else None,
+                        message=idempotent_message,
+                        raw_row=raw_row,
+                        attempted_at=row_now,
+                        ingest_state=INGEST_STATE_DUPLICATE,
+                        error_code=duplicate_error_code,
+                        resolution_hint=duplicate_resolution,
+                    )
+                    await _upsert_ingest_idempotency(
+                        session,
+                        source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                        external_source_ref=external_source_ref,
+                        candidate_id=idempotent_candidate.candidate_id if idempotent_candidate else idempotent_hit.candidate_id,
+                        result_status="duplicate",
+                        result_message=idempotent_message,
+                        ingest_state=INGEST_STATE_DUPLICATE,
+                        error_code=duplicate_error_code,
+                        resolution_hint=duplicate_resolution,
+                        matching_key="external_source_ref",
+                    )
+                    await session.commit()
                 results.append(
                     {
                         "row_key": row_key,
                         "status": "duplicate",
+                        "ingest_state": INGEST_STATE_DUPLICATE,
                         "candidate_id": idempotent_candidate.candidate_id if idempotent_candidate else idempotent_hit.candidate_id,
                         "candidate_code": (
                             idempotent_candidate.candidate_code if idempotent_candidate else None
                         ),
                         "message": idempotent_message,
+                        "error_code": duplicate_error_code,
+                        "resolution_hint": duplicate_resolution,
+                        "matching_key": "external_source_ref",
                     }
                 )
                 continue
@@ -1818,46 +2304,79 @@ async def import_candidates_from_google_sheet(
             if existing_candidate and _is_recent_google_sheet_duplicate(existing_candidate, now=row_now):
                 duplicate_message = "Candidate already exists for this opening/email within last 24 hours."
                 duplicate_count += 1
-                if not existing_candidate.source_origin:
-                    existing_candidate.source_origin = SOURCE_ORIGIN_GOOGLE_SHEET
-                if not existing_candidate.source_channel:
-                    existing_candidate.source_channel = _normalize_source_channel(
-                        row.source_channel,
-                        fallback=SOURCE_ORIGIN_GOOGLE_SHEET,
+                duplicate_error_code = "duplicate_recent_window"
+                duplicate_resolution = "Row is within duplicate cooldown window; retry after 24 hours if needed."
+                if not validate_only:
+                    if not existing_candidate.source_origin:
+                        existing_candidate.source_origin = SOURCE_ORIGIN_GOOGLE_SHEET
+                    if not existing_candidate.source_channel:
+                        existing_candidate.source_channel = _normalize_source_channel(
+                            row.source_channel,
+                            fallback=SOURCE_ORIGIN_GOOGLE_SHEET,
+                        )
+                    if not existing_candidate.external_source_ref:
+                        existing_candidate.external_source_ref = external_source_ref
+                    existing_candidate.updated_at = now_ist_naive()
+                    await _record_ingest_attempt(
+                        session,
+                        payload=payload,
+                        row_key=row_key,
+                        row=row,
+                        email_normalized=email_normalized,
+                        external_source_ref=external_source_ref,
+                        attempt_status="duplicate_recent",
+                        candidate_id=existing_candidate.candidate_id,
+                        opening_id=opening.opening_id,
+                        message=duplicate_message,
+                        raw_row=raw_row,
+                        attempted_at=row_now,
+                        ingest_state=INGEST_STATE_DUPLICATE,
+                        error_code=duplicate_error_code,
+                        resolution_hint=duplicate_resolution,
                     )
-                if not existing_candidate.external_source_ref:
-                    existing_candidate.external_source_ref = external_source_ref
-                existing_candidate.updated_at = now_ist_naive()
-                await _record_ingest_attempt(
-                    session,
-                    payload=payload,
-                    row_key=row_key,
-                    row=row,
-                    email_normalized=email_normalized,
-                    external_source_ref=external_source_ref,
-                    attempt_status="duplicate_recent",
-                    candidate_id=existing_candidate.candidate_id,
-                    opening_id=opening.opening_id,
-                    message=duplicate_message,
-                    raw_row=raw_row,
-                    attempted_at=row_now,
-                )
-                await _upsert_ingest_idempotency(
-                    session,
-                    source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
-                    external_source_ref=external_source_ref,
-                    candidate_id=existing_candidate.candidate_id,
-                    result_status="duplicate",
-                    result_message=duplicate_message,
-                )
-                await session.commit()
+                    await _upsert_ingest_idempotency(
+                        session,
+                        source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                        external_source_ref=external_source_ref,
+                        candidate_id=existing_candidate.candidate_id,
+                        result_status="duplicate",
+                        result_message=duplicate_message,
+                        ingest_state=INGEST_STATE_DUPLICATE,
+                        error_code=duplicate_error_code,
+                        resolution_hint=duplicate_resolution,
+                        matching_key="email_opening",
+                    )
+                    await session.commit()
                 results.append(
                     {
                         "row_key": row_key,
                         "status": "duplicate",
+                        "ingest_state": INGEST_STATE_DUPLICATE,
                         "candidate_id": existing_candidate.candidate_id,
                         "candidate_code": existing_candidate.candidate_code,
                         "message": duplicate_message,
+                        "error_code": duplicate_error_code,
+                        "resolution_hint": duplicate_resolution,
+                        "matching_key": "email_opening",
+                    }
+                )
+                continue
+
+            if validate_only:
+                preview_message = (
+                    "Validation passed. Existing candidate would be refreshed as a reapplication."
+                    if existing_candidate
+                    else "Validation passed. Candidate would be created."
+                )
+                created_count += 1
+                results.append(
+                    {
+                        "row_key": row_key,
+                        "status": "created",
+                        "ingest_state": INGEST_STATE_CREATED,
+                        "candidate_id": existing_candidate.candidate_id if existing_candidate else None,
+                        "candidate_code": existing_candidate.candidate_code if existing_candidate else None,
+                        "message": preview_message,
                     }
                 )
                 continue
@@ -1948,6 +2467,7 @@ async def import_candidates_from_google_sheet(
                     message=reapply_message,
                     raw_row=raw_row,
                     attempted_at=row_now,
+                    ingest_state=INGEST_STATE_CREATED,
                 )
                 await _upsert_ingest_idempotency(
                     session,
@@ -1956,6 +2476,7 @@ async def import_candidates_from_google_sheet(
                     candidate_id=existing_candidate.candidate_id,
                     result_status="reapplied",
                     result_message=reapply_message,
+                    ingest_state=INGEST_STATE_CREATED,
                 )
                 await session.commit()
 
@@ -1963,6 +2484,7 @@ async def import_candidates_from_google_sheet(
                 result_payload = {
                     "row_key": row_key,
                     "status": "created",
+                    "ingest_state": INGEST_STATE_CREATED,
                     "candidate_id": existing_candidate.candidate_id,
                     "candidate_code": existing_candidate.candidate_code,
                     "message": reapply_message,
@@ -2013,6 +2535,7 @@ async def import_candidates_from_google_sheet(
                 message="Candidate created.",
                 raw_row=raw_row,
                 attempted_at=row_now,
+                ingest_state=INGEST_STATE_CREATED,
             )
             await _upsert_ingest_idempotency(
                 session,
@@ -2021,12 +2544,14 @@ async def import_candidates_from_google_sheet(
                 candidate_id=candidate.candidate_id,
                 result_status="created",
                 result_message="Candidate created.",
+                ingest_state=INGEST_STATE_CREATED,
             )
             await session.commit()
             created_count += 1
             result_payload = {
                 "row_key": row_key,
                 "status": "created",
+                "ingest_state": INGEST_STATE_CREATED,
                 "candidate_id": candidate.candidate_id,
                 "candidate_code": candidate.candidate_code,
             }
@@ -2053,22 +2578,50 @@ async def import_candidates_from_google_sheet(
             await session.rollback()
             failed_count += 1
             message = "; ".join(error.get("msg", "invalid row") for error in exc.errors()) or "Invalid row payload."
-            await _record_ingest_attempt(
-                session,
-                payload=payload,
-                row_key=row_key,
-                row=None,
-                email_normalized=email_normalized,
-                external_source_ref=external_source_ref,
-                attempt_status="error",
-                candidate_id=None,
-                opening_id=None,
-                message=message,
-                raw_row=raw_row,
-                attempted_at=row_now,
+            ingest_state, error_code, resolution_hint = _classify_ingest_error(
+                detail=message,
+                validation_error=True,
             )
-            await session.commit()
-            results.append({"row_key": row_key, "status": "error", "message": message})
+            if not validate_only:
+                await _record_ingest_attempt(
+                    session,
+                    payload=payload,
+                    row_key=row_key,
+                    row=None,
+                    email_normalized=email_normalized,
+                    external_source_ref=external_source_ref,
+                    attempt_status="error",
+                    candidate_id=None,
+                    opening_id=None,
+                    message=message,
+                    raw_row=raw_row,
+                    attempted_at=row_now,
+                    ingest_state=ingest_state,
+                    error_code=error_code,
+                    resolution_hint=resolution_hint,
+                )
+                await _upsert_ingest_idempotency(
+                    session,
+                    source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                    external_source_ref=external_source_ref,
+                    candidate_id=None,
+                    result_status=ingest_state,
+                    result_message=message,
+                    ingest_state=ingest_state,
+                    error_code=error_code,
+                    resolution_hint=resolution_hint,
+                )
+                await session.commit()
+            results.append(
+                {
+                    "row_key": row_key,
+                    "status": "error",
+                    "ingest_state": ingest_state,
+                    "message": message,
+                    "error_code": error_code,
+                    "resolution_hint": resolution_hint,
+                }
+            )
         except IntegrityError:
             await session.rollback()
             dedupe_filters = [func.lower(RecCandidate.email) == email_normalized]
@@ -2089,41 +2642,108 @@ async def import_candidates_from_google_sheet(
                     if _is_recent_google_sheet_duplicate(existing_candidate, now=row_now)
                     else "Candidate already exists for this opening/email."
                 )
-                await _record_ingest_attempt(
-                    session,
-                    payload=payload,
-                    row_key=row_key,
-                    row=row,
-                    email_normalized=email_normalized,
-                    external_source_ref=external_source_ref,
-                    attempt_status="duplicate_integrity",
-                    candidate_id=existing_candidate.candidate_id,
-                    opening_id=opening_id_for_dedupe,
-                    message=duplicate_message,
-                    raw_row=raw_row,
-                    attempted_at=row_now,
-                )
-                await _upsert_ingest_idempotency(
-                    session,
-                    source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
-                    external_source_ref=external_source_ref,
-                    candidate_id=existing_candidate.candidate_id,
-                    result_status="duplicate",
-                    result_message=duplicate_message,
-                )
-                await session.commit()
+                duplicate_error_code = "integrity_duplicate"
+                duplicate_resolution = _error_hint_for_code(duplicate_error_code, transient=False)
+                if not validate_only:
+                    await _record_ingest_attempt(
+                        session,
+                        payload=payload,
+                        row_key=row_key,
+                        row=row,
+                        email_normalized=email_normalized,
+                        external_source_ref=external_source_ref,
+                        attempt_status="duplicate_integrity",
+                        candidate_id=existing_candidate.candidate_id,
+                        opening_id=opening_id_for_dedupe,
+                        message=duplicate_message,
+                        raw_row=raw_row,
+                        attempted_at=row_now,
+                        ingest_state=INGEST_STATE_DUPLICATE,
+                        error_code=duplicate_error_code,
+                        resolution_hint=duplicate_resolution,
+                    )
+                    await _upsert_ingest_idempotency(
+                        session,
+                        source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                        external_source_ref=external_source_ref,
+                        candidate_id=existing_candidate.candidate_id,
+                        result_status="duplicate",
+                        result_message=duplicate_message,
+                        ingest_state=INGEST_STATE_DUPLICATE,
+                        error_code=duplicate_error_code,
+                        resolution_hint=duplicate_resolution,
+                        matching_key="email_opening",
+                    )
+                    await session.commit()
                 results.append(
                     {
                         "row_key": row_key,
                         "status": "duplicate",
+                        "ingest_state": INGEST_STATE_DUPLICATE,
                         "candidate_id": existing_candidate.candidate_id,
                         "candidate_code": existing_candidate.candidate_code,
                         "message": duplicate_message,
+                        "error_code": duplicate_error_code,
+                        "resolution_hint": duplicate_resolution,
+                        "matching_key": "email_opening",
                     }
                 )
             else:
                 failed_count += 1
                 message = "Candidate could not be imported due to an integrity error."
+                ingest_state, error_code, resolution_hint = _classify_ingest_error(
+                    detail=message,
+                    validation_error=True,
+                )
+                if not validate_only:
+                    await _record_ingest_attempt(
+                        session,
+                        payload=payload,
+                        row_key=row_key,
+                        row=row,
+                        email_normalized=email_normalized,
+                        external_source_ref=external_source_ref,
+                        attempt_status="error",
+                        candidate_id=None,
+                        opening_id=opening_id_for_dedupe,
+                        message=message,
+                        raw_row=raw_row,
+                        attempted_at=row_now,
+                        ingest_state=ingest_state,
+                        error_code=error_code,
+                        resolution_hint=resolution_hint,
+                    )
+                    await _upsert_ingest_idempotency(
+                        session,
+                        source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                        external_source_ref=external_source_ref,
+                        candidate_id=None,
+                        result_status=ingest_state,
+                        result_message=message,
+                        ingest_state=ingest_state,
+                        error_code=error_code,
+                        resolution_hint=resolution_hint,
+                    )
+                    await session.commit()
+                results.append(
+                    {
+                        "row_key": row_key,
+                        "status": "error",
+                        "message": message,
+                        "ingest_state": ingest_state,
+                        "error_code": error_code,
+                        "resolution_hint": resolution_hint,
+                    }
+                )
+        except HTTPException as exc:
+            await session.rollback()
+            failed_count += 1
+            message = str(exc.detail)
+            ingest_state, error_code, resolution_hint = _classify_ingest_error(
+                detail=message,
+                status_code=exc.status_code,
+            )
+            if not validate_only:
                 await _record_ingest_attempt(
                     session,
                     payload=payload,
@@ -2137,35 +2757,32 @@ async def import_candidates_from_google_sheet(
                     message=message,
                     raw_row=raw_row,
                     attempted_at=row_now,
+                    ingest_state=ingest_state,
+                    error_code=error_code,
+                    resolution_hint=resolution_hint,
+                )
+                await _upsert_ingest_idempotency(
+                    session,
+                    source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                    external_source_ref=external_source_ref,
+                    candidate_id=None,
+                    result_status=ingest_state,
+                    result_message=message,
+                    ingest_state=ingest_state,
+                    error_code=error_code,
+                    resolution_hint=resolution_hint,
                 )
                 await session.commit()
-                results.append(
-                    {
-                        "row_key": row_key,
-                        "status": "error",
-                        "message": message,
-                    }
-                )
-        except HTTPException as exc:
-            await session.rollback()
-            failed_count += 1
-            message = str(exc.detail)
-            await _record_ingest_attempt(
-                session,
-                payload=payload,
-                row_key=row_key,
-                row=row,
-                email_normalized=email_normalized,
-                external_source_ref=external_source_ref,
-                attempt_status="error",
-                candidate_id=None,
-                opening_id=opening_id_for_dedupe,
-                message=message,
-                raw_row=raw_row,
-                attempted_at=row_now,
+            results.append(
+                {
+                    "row_key": row_key,
+                    "status": "error",
+                    "ingest_state": ingest_state,
+                    "message": message,
+                    "error_code": error_code,
+                    "resolution_hint": resolution_hint,
+                }
             )
-            await session.commit()
-            results.append({"row_key": row_key, "status": "error", "message": message})
         except Exception as exc:
             await session.rollback()
             failed_count += 1
@@ -2173,34 +2790,658 @@ async def import_candidates_from_google_sheet(
             detail = "Candidate import failed."
             if settings.environment != "production":
                 detail = f"Candidate import failed: {exc}"
-            await _record_ingest_attempt(
-                session,
-                payload=payload,
-                row_key=row_key,
-                row=row,
-                email_normalized=email_normalized,
-                external_source_ref=external_source_ref,
-                attempt_status="error",
-                candidate_id=None,
-                opening_id=opening_id_for_dedupe,
-                message=detail,
-                raw_row=raw_row,
-                attempted_at=row_now,
+            ingest_state, error_code, resolution_hint = _classify_ingest_error(
+                detail=detail,
+                unexpected_error=True,
             )
-            await session.commit()
-            results.append({"row_key": row_key, "status": "error", "message": detail})
+            if not validate_only:
+                await _record_ingest_attempt(
+                    session,
+                    payload=payload,
+                    row_key=row_key,
+                    row=row,
+                    email_normalized=email_normalized,
+                    external_source_ref=external_source_ref,
+                    attempt_status="error",
+                    candidate_id=None,
+                    opening_id=opening_id_for_dedupe,
+                    message=detail,
+                    raw_row=raw_row,
+                    attempted_at=row_now,
+                    ingest_state=ingest_state,
+                    error_code=error_code,
+                    resolution_hint=resolution_hint,
+                )
+                await _upsert_ingest_idempotency(
+                    session,
+                    source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                    external_source_ref=external_source_ref,
+                    candidate_id=None,
+                    result_status=ingest_state,
+                    result_message=detail,
+                    ingest_state=ingest_state,
+                    error_code=error_code,
+                    resolution_hint=resolution_hint,
+                )
+                await session.commit()
+            results.append(
+                {
+                    "row_key": row_key,
+                    "status": "error",
+                    "ingest_state": ingest_state,
+                    "message": detail,
+                    "error_code": error_code,
+                    "resolution_hint": resolution_hint,
+                }
+            )
 
+    requested_rows = len(payload.rows)
+    safe_denom = max(requested_rows, 1)
     return {
         "batch_id": payload.batch_id,
         "sheet_id": payload.sheet_id,
         "sheet_name": payload.sheet_name,
+        "validate_only": validate_only,
         "processed_at": processed_at,
-        "requested_rows": len(payload.rows),
+        "requested_rows": requested_rows,
         "created_count": created_count,
         "duplicate_count": duplicate_count,
         "failed_count": failed_count,
+        "success_pct": round((created_count / safe_denom) * 100, 2),
+        "duplicate_pct": round((duplicate_count / safe_denom) * 100, 2),
+        "failed_pct": round((failed_count / safe_denom) * 100, 2),
         "results": results,
     }
+
+
+@router.post("/import/google-sheet/preflight", status_code=status.HTTP_200_OK)
+async def preflight_candidates_from_google_sheet(
+    payload: GoogleSheetIngestIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    preflight_payload = GoogleSheetIngestIn.model_validate(
+        {
+            "batch_id": payload.batch_id,
+            "sheet_id": payload.sheet_id,
+            "sheet_name": payload.sheet_name,
+            "rows": payload.rows,
+            "validate_only": True,
+        }
+    )
+    return await import_candidates_from_google_sheet(
+        preflight_payload,
+        session=session,
+        x_sheet_ingest_token=(settings.sheet_ingest_token or "").strip(),
+    )
+
+
+@router.get("/import/google-sheet/ops/dashboard", status_code=status.HTTP_200_OK)
+async def get_google_sheet_ingest_dashboard(
+    opening_id: int | None = Query(default=None),
+    sheet_id: str | None = Query(default=None),
+    batch_id: str | None = Query(default=None),
+    recruiter: str | None = Query(default=None),
+    status_filter: list[str] | None = Query(default=None, alias="status"),
+    min_age_hours: float | None = Query(default=None, ge=0),
+    stuck_threshold_hours: float = Query(default=6, ge=1, le=168),
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    _ = user
+    attempts = await _fetch_google_sheet_attempts(
+        session,
+        max_rows=10000,
+        opening_id=opening_id,
+        sheet_id=_strip_optional(sheet_id),
+        batch_id=_strip_optional(batch_id),
+        recruiter_email=_strip_optional(recruiter),
+    )
+    filter_states = {
+        state
+        for state in (
+            _normalize_ingest_state(item)
+            for item in (status_filter or [])
+        )
+        if state
+    }
+    rows = _summarize_ingest_rows(
+        attempts,
+        status_filter=filter_states or None,
+        min_age_hours=min_age_hours,
+    )
+
+    total = len(rows)
+    created = sum(1 for row in rows if row.get("status") == INGEST_STATE_CREATED)
+    duplicate = sum(1 for row in rows if row.get("status") == INGEST_STATE_DUPLICATE)
+    failed_permanent = sum(1 for row in rows if row.get("status") == INGEST_STATE_FAILED_PERMANENT)
+    failed_transient = sum(1 for row in rows if row.get("status") == INGEST_STATE_FAILED_TRANSIENT)
+    retrying = sum(1 for row in rows if row.get("status") == INGEST_STATE_RETRYING)
+    failed_total = failed_permanent + failed_transient
+    retry_queue_count = sum(
+        1
+        for row in rows
+        if row.get("unresolved") and row.get("status") in {INGEST_STATE_FAILED_TRANSIENT, INGEST_STATE_RETRYING}
+    )
+    stuck_count = sum(
+        1
+        for row in rows
+        if row.get("unresolved")
+        and row.get("status") in {INGEST_STATE_FAILED_TRANSIENT, INGEST_STATE_RETRYING}
+        and float(row.get("age_hours") or 0) >= stuck_threshold_hours
+    )
+
+    grouped: dict[str, list[RecCandidateIngestAttempt]] = {}
+    for attempt in attempts:
+        grouped.setdefault(_attempt_row_identity(attempt), []).append(attempt)
+
+    time_to_ingest_hours: list[float] = []
+    time_to_recover_hours: list[float] = []
+    now = now_ist_naive()
+    for group in grouped.values():
+        ordered = sorted(
+            group,
+            key=lambda item: (
+                item.attempted_at or now,
+                item.candidate_ingest_attempt_id or 0,
+            ),
+        )
+        first_seen = min((item.first_seen_at or item.attempted_at or now for item in ordered), default=now)
+        first_success = next(
+            (
+                item
+                for item in ordered
+                if _attempt_ingest_state(item) in {INGEST_STATE_CREATED, INGEST_STATE_DUPLICATE}
+            ),
+            None,
+        )
+        if first_success and first_success.attempted_at:
+            time_to_ingest_hours.append(
+                max((first_success.attempted_at - first_seen).total_seconds() / 3600, 0)
+            )
+
+        first_failure = next(
+            (
+                item
+                for item in ordered
+                if _attempt_ingest_state(item) in {INGEST_STATE_FAILED_PERMANENT, INGEST_STATE_FAILED_TRANSIENT}
+            ),
+            None,
+        )
+        if first_failure and first_failure.attempted_at:
+            recovered = next(
+                (
+                    item
+                    for item in ordered
+                    if item.attempted_at
+                    and item.attempted_at > first_failure.attempted_at
+                    and _attempt_ingest_state(item) in {INGEST_STATE_CREATED, INGEST_STATE_DUPLICATE}
+                ),
+                None,
+            )
+            if recovered and recovered.attempted_at:
+                time_to_recover_hours.append(
+                    max((recovered.attempted_at - first_failure.attempted_at).total_seconds() / 3600, 0)
+                )
+
+    last_run_at = max((item.attempted_at for item in attempts if item.attempted_at), default=None)
+    one_hour_ago = now - timedelta(hours=1)
+    permanent_last_hour = sum(
+        1
+        for item in attempts
+        if item.attempted_at and item.attempted_at >= one_hour_ago and _attempt_ingest_state(item) == INGEST_STATE_FAILED_PERMANENT
+    )
+    transport_last_hour = sum(
+        1
+        for item in attempts
+        if item.attempted_at
+        and item.attempted_at >= one_hour_ago
+        and (item.error_code or "").strip().lower() == "api_transport_error"
+    )
+    alerts: list[dict[str, object]] = []
+    if permanent_last_hour >= 10:
+        alerts.append(
+            {
+                "kind": "permanent_failure_spike",
+                "severity": "high",
+                "channels": ["slack", "email"],
+                "message": f"{permanent_last_hour} permanent failures in the last hour.",
+            }
+        )
+    if transport_last_hour >= 5:
+        alerts.append(
+            {
+                "kind": "transport_error_spike",
+                "severity": "high",
+                "channels": ["slack", "email"],
+                "message": f"{transport_last_hour} transport errors in the last hour.",
+            }
+        )
+
+    denom = max(total, 1)
+    return {
+        "scope": {
+            "opening_id": opening_id,
+            "sheet_id": _strip_optional(sheet_id),
+            "batch_id": _strip_optional(batch_id),
+            "status": list(filter_states),
+            "min_age_hours": min_age_hours,
+            "recruiter": _strip_optional(recruiter),
+        },
+        "totals": {
+            "rows": total,
+            "created": created,
+            "duplicate": duplicate,
+            "failed_permanent": failed_permanent,
+            "failed_transient": failed_transient,
+            "failed_total": failed_total,
+            "retrying": retrying,
+            "retry_queue": retry_queue_count,
+            "stuck_over_threshold": stuck_count,
+        },
+        "rates": {
+            "success_pct": round((created / denom) * 100, 2),
+            "duplicate_pct": round((duplicate / denom) * 100, 2),
+            "failed_pct": round((failed_total / denom) * 100, 2),
+        },
+        "slo": {
+            "time_to_ingest_hours_avg": round(sum(time_to_ingest_hours) / len(time_to_ingest_hours), 2)
+            if time_to_ingest_hours
+            else None,
+            "time_to_recover_failed_row_hours_avg": round(sum(time_to_recover_hours) / len(time_to_recover_hours), 2)
+            if time_to_recover_hours
+            else None,
+            "stuck_gt_hours": stuck_threshold_hours,
+            "stuck_count": stuck_count,
+        },
+        "alerts": alerts,
+        "last_run_at": last_run_at.isoformat() if last_run_at else None,
+    }
+
+
+@router.get("/import/google-sheet/ops/rows", status_code=status.HTTP_200_OK)
+async def list_google_sheet_ingest_rows(
+    opening_id: int | None = Query(default=None),
+    sheet_id: str | None = Query(default=None),
+    batch_id: str | None = Query(default=None),
+    status_filter: list[str] | None = Query(default=None, alias="status"),
+    min_age_hours: float | None = Query(default=None, ge=0),
+    error_code: str | None = Query(default=None),
+    recruiter: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    _ = user
+    attempts = await _fetch_google_sheet_attempts(
+        session,
+        max_rows=10000,
+        opening_id=opening_id,
+        sheet_id=_strip_optional(sheet_id),
+        batch_id=_strip_optional(batch_id),
+        error_code=_strip_optional(error_code),
+        recruiter_email=_strip_optional(recruiter),
+    )
+    filter_states = {
+        state
+        for state in (
+            _normalize_ingest_state(item)
+            for item in (status_filter or [])
+        )
+        if state
+    }
+    rows = _summarize_ingest_rows(
+        attempts,
+        status_filter=filter_states or None,
+        min_age_hours=min_age_hours,
+    )
+    total = len(rows)
+    selected = rows[offset : offset + limit]
+    for row in selected:
+        cid = row.get("candidate_id")
+        row["candidate_profile_path"] = f"/candidates/{cid}" if cid else None
+        row["attempt_history_path"] = f"/superadmin/ingest?attempt_id={row.get('candidate_ingest_attempt_id')}"
+        if row.get("status") == INGEST_STATE_DUPLICATE:
+            row["duplicate_reason"] = {
+                "matching_key": row.get("matching_key"),
+                "external_source_ref": row.get("external_source_ref"),
+                "email_normalized": row.get("email_normalized"),
+                "opening_id": row.get("opening_id"),
+                "candidate_id": row.get("candidate_id"),
+            }
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "rows": selected,
+    }
+
+
+@router.get("/import/google-sheet/ops/rows/{candidate_ingest_attempt_id}/timeline", status_code=status.HTTP_200_OK)
+async def get_google_sheet_ingest_timeline(
+    candidate_ingest_attempt_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    _ = user
+    try:
+        attempt = await session.get(RecCandidateIngestAttempt, candidate_ingest_attempt_id)
+    except OperationalError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ingest ops schema is unavailable. Apply migration 0038_ingest_ops_observability.sql.",
+        ) from exc
+    if not attempt or attempt.source_origin != SOURCE_ORIGIN_GOOGLE_SHEET:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingest row not found.")
+
+    timeline = await _get_attempt_timeline_by_identity(session, attempt=attempt, max_rows=200)
+    if not timeline:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No timeline found for ingest row.")
+
+    row_summary = _summarize_ingest_rows(timeline)
+    summary = row_summary[0] if row_summary else {}
+    latest = timeline[-1]
+    duplicate_panel = None
+    if _attempt_ingest_state(latest) == INGEST_STATE_DUPLICATE:
+        duplicate_panel = {
+            "matching_key": "external_source_ref" if latest.external_source_ref else "email_opening",
+            "candidate_id": latest.candidate_id,
+            "external_source_ref": latest.external_source_ref,
+            "email_normalized": latest.email_normalized,
+            "opening_id": latest.opening_id,
+        }
+
+    return {
+        "row": summary,
+        "duplicate_panel": duplicate_panel,
+        "timeline": [_row_timeline_payload(item) for item in timeline],
+        "latest_payload": _safe_json_object(latest.payload_json),
+    }
+
+
+@router.post("/import/google-sheet/ops/retry-row", status_code=status.HTTP_200_OK)
+async def retry_google_sheet_ingest_row(
+    payload: IngestRetryRowIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    try:
+        attempt = await session.get(RecCandidateIngestAttempt, payload.candidate_ingest_attempt_id)
+    except OperationalError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ingest ops schema is unavailable. Apply migration 0038_ingest_ops_observability.sql.",
+        ) from exc
+    if not attempt or attempt.source_origin != SOURCE_ORIGIN_GOOGLE_SHEET:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingest row not found.")
+
+    row_payload = _safe_json_object(attempt.payload_json)
+    if not row_payload:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Row payload unavailable for retry.")
+
+    now = now_ist_naive()
+    actor_id = _platform_person_id(user)
+    manual_payload = GoogleSheetIngestIn(
+        batch_id=f"manual_retry_{attempt.candidate_ingest_attempt_id}_{int(now.timestamp())}",
+        sheet_id=attempt.sheet_id,
+        sheet_name=attempt.sheet_name,
+        rows=[row_payload],
+        validate_only=False,
+    )
+
+    await _record_ingest_attempt(
+        session,
+        payload=manual_payload,
+        row_key=(attempt.row_key or str(attempt.candidate_ingest_attempt_id)),
+        row=None,
+        email_normalized=attempt.email_normalized,
+        external_source_ref=attempt.external_source_ref,
+        attempt_status="retrying",
+        candidate_id=attempt.candidate_id,
+        opening_id=attempt.opening_id,
+        message="Manual retry started by Super Admin.",
+        raw_row=row_payload,
+        attempted_at=now,
+        ingest_state=INGEST_STATE_RETRYING,
+        retry_count=max(int(attempt.retry_count or 0), 0) + 1,
+        triggered_by_person_id_platform=actor_id,
+        triggered_by_email=user.email,
+    )
+    await session.commit()
+
+    ingest_result = await import_candidates_from_google_sheet(
+        manual_payload,
+        session=session,
+        x_sheet_ingest_token=(settings.sheet_ingest_token or "").strip(),
+    )
+    first_result = (ingest_result.get("results") or [{}])[0]
+    return {
+        "retry_started_at": now.isoformat(),
+        "candidate_ingest_attempt_id": attempt.candidate_ingest_attempt_id,
+        "result": first_result,
+        "batch_result": ingest_result,
+    }
+
+
+@router.post("/import/google-sheet/ops/retry-transient", status_code=status.HTTP_200_OK)
+async def retry_google_sheet_transient_failures(
+    payload: IngestRetryTransientIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    attempts = await _fetch_google_sheet_attempts(
+        session,
+        max_rows=10000,
+        opening_id=payload.opening_id,
+        sheet_id=payload.sheet_id,
+        batch_id=payload.batch_id,
+    )
+    rows = _summarize_ingest_rows(attempts, status_filter={INGEST_STATE_FAILED_TRANSIENT})
+    pending_rows = [row for row in rows if row.get("unresolved")]
+    selected = pending_rows[: payload.limit]
+    if not selected:
+        return {"queued": 0, "batch_result": None, "results": []}
+
+    attempts_by_id = {item.candidate_ingest_attempt_id: item for item in attempts}
+    retry_rows: list[dict[str, object]] = []
+    now = now_ist_naive()
+    actor_id = _platform_person_id(user)
+    manual_batch_id = f"manual_retry_bulk_{int(now.timestamp())}"
+    reference_sheet_id = None
+    reference_sheet_name = None
+    for row in selected:
+        attempt_id = int(row.get("candidate_ingest_attempt_id") or 0)
+        attempt = attempts_by_id.get(attempt_id)
+        if not attempt:
+            continue
+        raw_payload = _safe_json_object(attempt.payload_json)
+        if not raw_payload:
+            continue
+        retry_rows.append(raw_payload)
+        reference_sheet_id = reference_sheet_id or attempt.sheet_id
+        reference_sheet_name = reference_sheet_name or attempt.sheet_name
+        await _record_ingest_attempt(
+            session,
+            payload=GoogleSheetIngestIn(
+                batch_id=manual_batch_id,
+                sheet_id=attempt.sheet_id,
+                sheet_name=attempt.sheet_name,
+                rows=[raw_payload],
+            ),
+            row_key=attempt.row_key or str(attempt.candidate_ingest_attempt_id),
+            row=None,
+            email_normalized=attempt.email_normalized,
+            external_source_ref=attempt.external_source_ref,
+            attempt_status="retrying",
+            candidate_id=attempt.candidate_id,
+            opening_id=attempt.opening_id,
+            message="Bulk transient retry started by Super Admin.",
+            raw_row=raw_payload,
+            attempted_at=now,
+            ingest_state=INGEST_STATE_RETRYING,
+            retry_count=max(int(attempt.retry_count or 0), 0) + 1,
+            triggered_by_person_id_platform=actor_id,
+            triggered_by_email=user.email,
+        )
+
+    await session.commit()
+
+    if not retry_rows:
+        return {"queued": 0, "batch_result": None, "results": []}
+
+    batch_payload = GoogleSheetIngestIn(
+        batch_id=manual_batch_id,
+        sheet_id=reference_sheet_id,
+        sheet_name=reference_sheet_name,
+        rows=retry_rows,
+        validate_only=False,
+    )
+    batch_result = await import_candidates_from_google_sheet(
+        batch_payload,
+        session=session,
+        x_sheet_ingest_token=(settings.sheet_ingest_token or "").strip(),
+    )
+    return {
+        "queued": len(retry_rows),
+        "batch_id": manual_batch_id,
+        "batch_result": batch_result,
+        "results": batch_result.get("results") or [],
+    }
+
+
+@router.post("/import/google-sheet/ops/mark-resolved", status_code=status.HTTP_200_OK)
+async def mark_google_sheet_row_resolved(
+    payload: IngestMarkResolvedIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    try:
+        attempt = await session.get(RecCandidateIngestAttempt, payload.candidate_ingest_attempt_id)
+    except OperationalError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ingest ops schema is unavailable. Apply migration 0038_ingest_ops_observability.sql.",
+        ) from exc
+    if not attempt or attempt.source_origin != SOURCE_ORIGIN_GOOGLE_SHEET:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingest row not found.")
+
+    timeline = await _get_attempt_timeline_by_identity(session, attempt=attempt, max_rows=500)
+    if not timeline:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingest timeline not found.")
+
+    now = now_ist_naive()
+    actor_id = _platform_person_id(user)
+    for item in timeline:
+        item.resolved_at = now
+        item.resolved_by_email = _truncate_text(user.email, max_len=255)
+        item.resolved_by_person_id_platform = actor_id
+        item.next_retry_at = None
+    latest = timeline[-1]
+    if latest.external_source_ref:
+        await _upsert_ingest_idempotency(
+            session,
+            source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+            external_source_ref=latest.external_source_ref,
+            candidate_id=latest.candidate_id,
+            result_status=latest.attempt_status,
+            result_message=payload.note or latest.message,
+            ingest_state=_attempt_ingest_state(latest),
+            error_code=latest.error_code,
+            resolution_hint=latest.resolution_hint,
+            resolved_at=now,
+            resolved_by_email=user.email,
+        )
+    await session.commit()
+
+    return {
+        "resolved": True,
+        "resolved_at": now.isoformat(),
+        "resolved_by_email": user.email,
+        "candidate_ingest_attempt_id": payload.candidate_ingest_attempt_id,
+        "note": _truncate_text(payload.note, max_len=500),
+    }
+
+
+@router.get("/import/google-sheet/ops/export/failed", status_code=status.HTTP_200_OK)
+async def export_google_sheet_failed_rows(
+    opening_id: int | None = Query(default=None),
+    sheet_id: str | None = Query(default=None),
+    batch_id: str | None = Query(default=None),
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    _ = user
+    attempts = await _fetch_google_sheet_attempts(
+        session,
+        max_rows=10000,
+        opening_id=opening_id,
+        sheet_id=_strip_optional(sheet_id),
+        batch_id=_strip_optional(batch_id),
+    )
+    failed_rows = _summarize_ingest_rows(
+        attempts,
+        status_filter={INGEST_STATE_FAILED_PERMANENT, INGEST_STATE_FAILED_TRANSIENT},
+    )
+
+    out = StringIO()
+    writer = csv.writer(out)
+    writer.writerow(
+        [
+            "candidate_ingest_attempt_id",
+            "sheet_id",
+            "sheet_name",
+            "batch_id",
+            "row_key",
+            "opening_id",
+            "opening_code",
+            "email_normalized",
+            "status",
+            "error_code",
+            "resolution_hint",
+            "message",
+            "retry_count",
+            "first_seen_at",
+            "last_attempt_at",
+            "next_retry_at",
+            "resolved_at",
+            "triggered_by_email",
+            "candidate_id",
+            "external_source_ref",
+        ]
+    )
+    for row in failed_rows:
+        writer.writerow(
+            [
+                row.get("candidate_ingest_attempt_id"),
+                row.get("sheet_id"),
+                row.get("sheet_name"),
+                row.get("batch_id"),
+                row.get("row_key"),
+                row.get("opening_id"),
+                row.get("opening_code"),
+                row.get("email_normalized"),
+                row.get("status"),
+                row.get("error_code"),
+                row.get("resolution_hint"),
+                row.get("message"),
+                row.get("retry_count"),
+                row.get("first_seen_at"),
+                row.get("last_attempt_at"),
+                row.get("next_retry_at"),
+                row.get("resolved_at"),
+                row.get("triggered_by_email"),
+                row.get("candidate_id"),
+                row.get("external_source_ref"),
+            ]
+        )
+
+    csv_content = out.getvalue()
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"content-disposition": "attachment; filename=ingest_failed_rows.csv"},
+    )
 
 
 @router.get("", response_model=list[CandidateListItem])
@@ -2489,7 +3730,7 @@ async def get_candidate_full(
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
     if not _can_manage_candidate_360(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 is not available for this role.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 is not available for this account.")
 
     candidate = await get_candidate(candidate_id, session, user)  # type: ignore[arg-type]
 
@@ -2958,7 +4199,7 @@ async def transition_stage(
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     if not _can_manage_candidate_360(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 actions are restricted for this role.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 actions are restricted for this account.")
 
     result = await apply_stage_transition(
         session,

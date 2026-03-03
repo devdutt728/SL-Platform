@@ -910,7 +910,7 @@ async def update_opening_request_status(
     user: UserContext = Depends(deps.get_user),
 ):
     if not _is_superadmin_actor(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Superadmin can change request status.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to change request status.")
 
     request_row = await session.get(RecOpeningRequest, opening_request_id, with_for_update=True)
     if not request_row:
@@ -934,10 +934,10 @@ async def update_opening_request_status(
                 request_row=request_row,
                 approver_person_id_platform=approver_id,
                 approver_role=approver_role,
-                approval_note=_clean_text(payload.approval_note) or "Applied by Superadmin status override.",
+                approval_note=_clean_text(payload.approval_note) or "Applied by privileged status override.",
             )
         elif target_status == "rejected":
-            reason = _clean_text(payload.rejection_reason) or "Rejected by Superadmin."
+            reason = _clean_text(payload.rejection_reason) or "Rejected by privileged status override."
             request_row.status = "rejected"
             request_row.rejected_reason = reason
             request_row.approved_by_person_id_platform = approver_id
@@ -996,7 +996,7 @@ async def delete_opening_request(
     user: UserContext = Depends(deps.get_user),
 ):
     if not _is_superadmin_actor(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Superadmin can delete opening requests.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to delete opening requests.")
 
     request_row = await session.get(RecOpeningRequest, opening_request_id, with_for_update=True)
     if not request_row:
@@ -1219,7 +1219,7 @@ async def update_opening(
     if not is_superadmin and not is_hr_actor:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only HR roles or Superadmin can change opening status.",
+            detail="You do not have permission to change opening status.",
         )
 
     # HR can only toggle active/inactive state. All other edits are superadmin-only.
@@ -1227,7 +1227,7 @@ async def update_opening(
         allowed = {"is_active"}
         rejected = [k for k in updates.keys() if k not in allowed]
         if rejected:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Superadmin can edit opening details.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to edit opening details.")
         if "is_active" not in updates:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to update.")
 

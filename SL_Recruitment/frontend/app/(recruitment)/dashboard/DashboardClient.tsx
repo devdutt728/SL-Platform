@@ -593,7 +593,7 @@ export default function DashboardClient({
             </button>
           ))}
         {lockWorkspacePreset ? (
-          <span className="text-[11px] text-[var(--light-grey)]">Locked by role</span>
+          <span className="text-[11px] text-[var(--light-grey)]">Locked</span>
         ) : null}
       </section>
 
@@ -1051,7 +1051,7 @@ export default function DashboardClient({
               </li>
             </ul>
           ) : (
-            <p className="mt-3 text-sm text-[var(--dim-grey)]">Quick links are disabled for this role.</p>
+            <p className="mt-3 text-sm text-[var(--dim-grey)]">Quick links are disabled in this view.</p>
           )}
         </div>
       </section>

@@ -360,7 +360,7 @@ export function SprintTemplatesClient({ initialTemplates, initialIsSuperadmin }:
                   Supports placeholders: {"{{candidate_name}}"}, {"{{candidate_code}}"}, {"{{due_date}}"}, {"{{opening_title}}"}, {"{{template_name}}"}.
                 </span>
                 <span className="text-[11px] text-slate-500">
-                  Superadmin only. Plain text is auto-converted to HTML; the Studio Lotus signature is appended on public sprint pages and sprint emails.
+                  Plain text is auto-converted to HTML; the Studio Lotus signature is appended on public sprint pages and sprint emails.
                 </span>
               </label>
 

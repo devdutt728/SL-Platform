@@ -520,9 +520,7 @@ async def create_interview(
     existing_query = existing_query.where(_active_interview_filter())
     existing = (await session.execute(existing_query)).scalars().first()
     if existing:
-        is_superadmin = _is_superadmin(user)
-        detail = "Interview already scheduled. Only Superadmin can schedule again." if not is_superadmin else "Interview already scheduled."
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview already scheduled.")
 
     interview = RecCandidateInterview(
         candidate_id=candidate_id,
@@ -707,9 +705,7 @@ async def propose_interview_slots(
     existing_query = existing_query.where(_active_interview_filter())
     existing = (await session.execute(existing_query)).scalars().first()
     if existing:
-        is_superadmin = _is_superadmin(user)
-        detail = "Interview already scheduled. Only Superadmin can schedule again." if not is_superadmin else "Interview already scheduled."
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview already scheduled.")
 
     now_utc = datetime.utcnow()
     active_slots_query = select(func.max(RecCandidateInterviewSlot.expires_at)).where(
@@ -724,7 +720,7 @@ async def propose_interview_slots(
         expiry_local = active_slots_expiry.replace(tzinfo=timezone.utc).astimezone(tz).strftime("%d %b %Y, %I:%M %p %Z")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Slot invite already sent. It expires on {expiry_local}. Only Superadmin can resend before expiry.",
+            detail=f"Slot invite already sent. It expires on {expiry_local}.",
         )
 
     tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")

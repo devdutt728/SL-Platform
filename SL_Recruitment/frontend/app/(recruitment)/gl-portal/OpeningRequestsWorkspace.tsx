@@ -245,7 +245,7 @@ export function OpeningRequestsWorkspace({
       return;
     }
     if (targetMode === "new" && !canRaiseNew) {
-      setError("New opening requests are not available for your role.");
+      setError("New opening requests are not available in this view.");
       return;
     }
     if (targetMode === "new" && !title.trim()) {
@@ -690,7 +690,7 @@ export function OpeningRequestsWorkspace({
             </form>
           ) : (
             <div className="rounded-3xl border border-slate-200/80 bg-white/75 p-4 text-sm text-slate-600">
-              Request creation is disabled for your role.
+              Request creation is disabled in this view.
             </div>
           )}
 

@@ -762,7 +762,7 @@ async def apply_for_opening(
                 return JSONResponse(content=response_payload, status_code=status.HTTP_200_OK)
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="An application with this email already exists for this role.",
+                detail="An application with this email already exists for this opening.",
             )
 
         candidate.candidate_code = _candidate_code(candidate.candidate_id)

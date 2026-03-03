@@ -1024,7 +1024,7 @@ export function Candidate360Client({
 
   async function handleSaveL2Owner() {
     if (!canManageCandidate360) {
-      setL2OwnerError("Candidate 360 actions are restricted for your role.");
+      setL2OwnerError("You do not have permission to perform this action.");
       return;
     }
     const email = (l2OwnerSelected?.email || l2OwnerQuery || "").trim().toLowerCase();
@@ -1058,7 +1058,7 @@ export function Candidate360Client({
 
   async function performTransition(toStage: string, decision: string, reasonOverride?: string) {
     if (!canManageCandidate360) {
-      setError("Candidate 360 actions are restricted for your role.");
+      setError("You do not have permission to perform this action.");
       return false;
     }
     setBusy(true);
@@ -2480,7 +2480,7 @@ export function Candidate360Client({
       {error ? <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
       {!canManageCandidate360 ? (
         <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-800">
-          Candidate 360 is view-only for your role. You can view data but cannot perform lifecycle actions.
+          Candidate 360 is in view-only mode. You can view data but cannot perform lifecycle actions.
         </div>
       ) : null}
 
@@ -2572,7 +2572,7 @@ export function Candidate360Client({
 
           {canDelete ? (
             <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-3">
-              <p className="text-xs uppercase tracking-tight text-rose-700">Superadmin</p>
+              <p className="text-xs uppercase tracking-tight text-rose-700">Restricted</p>
               <p className="mt-1 text-sm text-rose-700">Delete is available on this candidate.</p>
             </div>
           ) : null}
@@ -2706,7 +2706,7 @@ export function Candidate360Client({
                     <p className="mt-2 text-xs text-rose-700">{l2OwnerError}</p>
                   ) : null}
                   {!canManageCandidate360 ? (
-                    <p className="mt-2 text-xs text-slate-500">GL / L2 owner updates are available only to HR or Superadmin.</p>
+                    <p className="mt-2 text-xs text-slate-500">GL / L2 owner updates are not available in this view.</p>
                   ) : null}
                 </div>
                 <div>
@@ -2792,7 +2792,7 @@ export function Candidate360Client({
                       </div>
                 ) : (
                   <p className="mt-3 text-sm text-slate-600">
-                    {canManageCandidate360 ? "Use the action buttons above to jump into the next step." : "Stage actions are locked for your role."}
+                    {canManageCandidate360 ? "Use the action buttons above to jump into the next step." : "Stage actions are locked in this view."}
                   </p>
                 )}
                     {!candidate.l2_owner_email && currentStageKey === "enquiry" ? (
@@ -2806,7 +2806,7 @@ export function Candidate360Client({
 
                     {canSkip ? (
                       <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-3">
-                        <p className="text-xs uppercase tracking-tight text-amber-700">Superadmin skip</p>
+                        <p className="text-xs uppercase tracking-tight text-amber-700">Advanced skip</p>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           <select
                             className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-800 md:w-auto"

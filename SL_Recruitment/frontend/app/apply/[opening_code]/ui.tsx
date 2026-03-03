@@ -206,8 +206,8 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
             </div>
             <p className="mt-3 text-[13px] text-[var(--dim-grey)]">
               {alreadyApplied
-                ? "You already applied for this role in the last 24 hours. Please reapply after 24 hours if needed."
-                : "You can reapply for the same role after 24 hours if your profile has updates."}
+                ? "You already applied for this opening in the last 24 hours. Please reapply after 24 hours if needed."
+                : "You can reapply for the same opening after 24 hours if your profile has updates."}
             </p>
           </div>
         </div>

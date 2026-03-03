@@ -36,6 +36,156 @@ export type CandidateListItem = {
   l2_feedback_submitted?: boolean;
 };
 
+export type GoogleSheetIngestRowResult = {
+  row_key: string;
+  status: "created" | "duplicate" | "error";
+  ingest_state?: "created" | "duplicate" | "retrying" | "failed_permanent" | "failed_transient";
+  candidate_id?: number | null;
+  candidate_code?: string | null;
+  message?: string | null;
+  error_code?: string | null;
+  resolution_hint?: string | null;
+  matching_key?: string | null;
+  email_status?: string | null;
+  email_error?: string | null;
+};
+
+export type GoogleSheetIngestResult = {
+  batch_id?: string | null;
+  sheet_id?: string | null;
+  sheet_name?: string | null;
+  validate_only?: boolean;
+  processed_at?: string;
+  requested_rows: number;
+  created_count: number;
+  duplicate_count: number;
+  failed_count: number;
+  success_pct?: number;
+  duplicate_pct?: number;
+  failed_pct?: number;
+  results: GoogleSheetIngestRowResult[];
+};
+
+export type IngestOpsAlert = {
+  kind: string;
+  severity: string;
+  channels: string[];
+  message: string;
+};
+
+export type IngestOpsDashboard = {
+  scope: {
+    opening_id?: number | null;
+    sheet_id?: string | null;
+    batch_id?: string | null;
+    status?: string[];
+    min_age_hours?: number | null;
+    recruiter?: string | null;
+  };
+  totals: {
+    rows: number;
+    created: number;
+    duplicate: number;
+    failed_permanent: number;
+    failed_transient: number;
+    failed_total: number;
+    retrying: number;
+    retry_queue: number;
+    stuck_over_threshold: number;
+  };
+  rates: {
+    success_pct: number;
+    duplicate_pct: number;
+    failed_pct: number;
+  };
+  slo: {
+    time_to_ingest_hours_avg?: number | null;
+    time_to_recover_failed_row_hours_avg?: number | null;
+    stuck_gt_hours: number;
+    stuck_count: number;
+  };
+  alerts: IngestOpsAlert[];
+  last_run_at?: string | null;
+};
+
+export type IngestOpsRow = {
+  row_identity: string;
+  candidate_ingest_attempt_id: number;
+  source_origin: string;
+  sheet_id?: string | null;
+  sheet_name?: string | null;
+  batch_id?: string | null;
+  row_key?: string | null;
+  opening_id?: number | null;
+  opening_code?: string | null;
+  email_normalized: string;
+  external_source_ref?: string | null;
+  candidate_id?: number | null;
+  status: "created" | "duplicate" | "retrying" | "failed_permanent" | "failed_transient";
+  error_code?: string | null;
+  resolution_hint?: string | null;
+  message?: string | null;
+  first_seen_at?: string | null;
+  last_attempt_at?: string | null;
+  attempted_at?: string | null;
+  retry_count: number;
+  next_retry_at?: string | null;
+  unresolved: boolean;
+  resolved_at?: string | null;
+  resolved_by_email?: string | null;
+  triggered_by_email?: string | null;
+  age_hours: number;
+  timeline_count: number;
+  matching_key?: string | null;
+  duplicate_reason?: {
+    matching_key?: string | null;
+    external_source_ref?: string | null;
+    email_normalized?: string | null;
+    opening_id?: number | null;
+    candidate_id?: number | null;
+  } | null;
+  candidate_profile_path?: string | null;
+  attempt_history_path?: string | null;
+};
+
+export type IngestOpsRowsResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  rows: IngestOpsRow[];
+};
+
+export type IngestOpsTimelineEntry = {
+  candidate_ingest_attempt_id: number;
+  attempt_status: string;
+  ingest_state: "created" | "duplicate" | "retrying" | "failed_permanent" | "failed_transient";
+  error_code?: string | null;
+  resolution_hint?: string | null;
+  message?: string | null;
+  attempted_at?: string | null;
+  last_attempt_at?: string | null;
+  retry_count: number;
+  next_retry_at?: string | null;
+  candidate_id?: number | null;
+  triggered_by_email?: string | null;
+  triggered_by_person_id_platform?: number | null;
+  resolved_at?: string | null;
+  resolved_by_email?: string | null;
+};
+
+export type IngestOpsTimelineResponse = {
+  row?: IngestOpsRow;
+  duplicate_panel?: {
+    matching_key?: string | null;
+    candidate_id?: number | null;
+    external_source_ref?: string | null;
+    email_normalized?: string | null;
+    opening_id?: number | null;
+  } | null;
+  timeline: IngestOpsTimelineEntry[];
+  latest_payload?: Record<string, unknown>;
+};
+
 export type CandidateDetail = {
   candidate_id: number;
   candidate_code: string;
