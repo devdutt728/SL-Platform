@@ -1,0 +1,334 @@
+"use client";
+
+import { CheckCircle2, Layers, XCircle } from "lucide-react";
+
+export type Candidate360StageButton = {
+  label: string;
+  tone: string;
+  icon: JSX.Element;
+  intent: string;
+  action: () => void | Promise<void>;
+  disabled?: boolean;
+};
+
+type BuildStageButtonsParams = {
+  currentStageKey: string | null;
+  canManageCandidate360: boolean;
+  canSchedule: boolean;
+  canAccessOffers: boolean;
+  cafLocked: boolean;
+  candidateL2OwnerEmail?: string | null;
+  sprintAssignDisabled: boolean;
+  hasApprovedSprint: boolean;
+  joiningDocsComplete: boolean;
+  offersBusy: boolean;
+  handleTransition: (toStage: string, decision: string) => void | Promise<void>;
+  handleConvertCandidate: () => void | Promise<void>;
+  focusSection: (section: "screening" | "documents" | "interviews" | "sprint" | "offer") => void;
+  openSchedule: (round: string) => void;
+  openAssignSprint: () => void | Promise<void>;
+};
+
+export function buildCandidate360StageButtons({
+  currentStageKey,
+  canManageCandidate360,
+  canSchedule,
+  canAccessOffers,
+  cafLocked,
+  candidateL2OwnerEmail,
+  sprintAssignDisabled,
+  hasApprovedSprint,
+  joiningDocsComplete,
+  offersBusy,
+  handleTransition,
+  handleConvertCandidate,
+  focusSection,
+  openSchedule,
+  openAssignSprint,
+}: BuildStageButtonsParams): Candidate360StageButton[] {
+  if (!canManageCandidate360) return [];
+  const current = currentStageKey;
+  if (cafLocked && current && current !== "rejected" && current !== "declined" && current !== "hired") {
+    return [
+      {
+        label: "Reject (CAF pending)",
+        tone: "btn-action-danger",
+        icon: <XCircle className="h-4 w-4" />,
+        intent: "reject",
+        action: () => handleTransition("rejected", "reject"),
+      },
+    ];
+  }
+  if (current === "hr_screening") {
+    return [
+      {
+        label: "Advance to L2 shortlist",
+        tone: "btn-action-success",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "advance",
+        action: () => handleTransition("l2_shortlist", "advance"),
+      },
+      {
+        label: "Reject after HR screening",
+        tone: "btn-action-danger",
+        icon: <XCircle className="h-4 w-4" />,
+        intent: "reject",
+        action: () => handleTransition("rejected", "reject"),
+      },
+      {
+        label: "Review screening",
+        tone: "btn-action-neutral",
+        icon: <Layers className="h-4 w-4" />,
+        intent: "review",
+        action: () => focusSection("screening"),
+      },
+    ];
+  }
+  if (current === "enquiry") {
+    return [
+      {
+        label: "Move to HR screening",
+        tone: "btn-action-success",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "advance",
+        disabled: !candidateL2OwnerEmail,
+        action: () => handleTransition("hr_screening", "advance"),
+      },
+      {
+        label: "Reject",
+        tone: "btn-action-danger",
+        icon: <XCircle className="h-4 w-4" />,
+        intent: "reject",
+        action: () => handleTransition("rejected", "reject"),
+      },
+    ];
+  }
+  if (current === "l2_shortlist") {
+    const actions: Candidate360StageButton[] = [];
+    actions.push({
+      label: "Advance to L2 interview",
+      tone: "btn-action-success",
+      icon: <CheckCircle2 className="h-4 w-4" />,
+      intent: "advance",
+      action: () => handleTransition("l2_interview", "advance"),
+    });
+    if (canSchedule) {
+      actions.push({
+        label: "Schedule L2 interview",
+        tone: "btn-action-neutral",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "review",
+        action: () => {
+          void (async () => {
+            await handleTransition("l2_interview", "advance");
+            focusSection("interviews");
+            openSchedule("L2");
+          })();
+        },
+      });
+    }
+    actions.push({
+      label: "Go to interviews",
+      tone: "btn-action-neutral",
+      icon: <Layers className="h-4 w-4" />,
+      intent: "review",
+      action: () => focusSection("interviews"),
+    });
+    return actions;
+  }
+  if (current === "l2_interview") {
+    const actions: Candidate360StageButton[] = [];
+    if (canSchedule) {
+      actions.push({
+        label: "Schedule L2 interview",
+        tone: "btn-action-success",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "advance",
+        action: () => {
+          focusSection("interviews");
+          openSchedule("L2");
+        },
+      });
+    }
+    actions.push({
+      label: "Go to interviews",
+      tone: "btn-action-neutral",
+      icon: <Layers className="h-4 w-4" />,
+      intent: "review",
+      action: () => focusSection("interviews"),
+    });
+    return actions;
+  }
+  if (current === "l2_feedback") {
+    return [
+      {
+        label: "Advance to sprint",
+        tone: "btn-action-success",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "advance",
+        action: () => handleTransition("sprint", "advance"),
+      },
+      {
+        label: "Reject after L2 feedback",
+        tone: "btn-action-danger",
+        icon: <XCircle className="h-4 w-4" />,
+        intent: "reject",
+        action: () => handleTransition("rejected", "reject"),
+      },
+      {
+        label: "Go to interviews",
+        tone: "btn-action-neutral",
+        icon: <Layers className="h-4 w-4" />,
+        intent: "review",
+        action: () => focusSection("interviews"),
+      },
+    ];
+  }
+  if (current === "l1_interview") {
+    const actions: Candidate360StageButton[] = [];
+    if (canSchedule) {
+      actions.push({
+        label: "Schedule L1 interview",
+        tone: "btn-action-success",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "advance",
+        action: () => {
+          focusSection("interviews");
+          openSchedule("L1");
+        },
+      });
+    }
+    actions.push({
+      label: "Go to interviews",
+      tone: "btn-action-neutral",
+      icon: <Layers className="h-4 w-4" />,
+      intent: "review",
+      action: () => focusSection("interviews"),
+    });
+    return actions;
+  }
+  if (current === "l1_shortlist") {
+    const actions: Candidate360StageButton[] = [];
+    actions.push({
+      label: "Advance to L1 interview",
+      tone: "btn-action-success",
+      icon: <CheckCircle2 className="h-4 w-4" />,
+      intent: "advance",
+      action: () => handleTransition("l1_interview", "advance"),
+    });
+    if (canSchedule) {
+      actions.push({
+        label: "Schedule L1 interview",
+        tone: "btn-action-neutral",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "review",
+        action: () => {
+          void (async () => {
+            await handleTransition("l1_interview", "advance");
+            focusSection("interviews");
+            openSchedule("L1");
+          })();
+        },
+      });
+    }
+    actions.push({
+      label: "Go to interviews",
+      tone: "btn-action-neutral",
+      icon: <Layers className="h-4 w-4" />,
+      intent: "review",
+      action: () => focusSection("interviews"),
+    });
+    return actions;
+  }
+  if (current === "l1_feedback") {
+    return [
+      {
+        label: "Advance to offer",
+        tone: "btn-action-success",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "advance",
+        action: () => handleTransition("offer", "advance"),
+      },
+      {
+        label: "Reject after L1 feedback",
+        tone: "btn-action-danger",
+        icon: <XCircle className="h-4 w-4" />,
+        intent: "reject",
+        action: () => handleTransition("rejected", "reject"),
+      },
+      {
+        label: "Go to interviews",
+        tone: "btn-action-neutral",
+        icon: <Layers className="h-4 w-4" />,
+        intent: "review",
+        action: () => focusSection("interviews"),
+      },
+    ];
+  }
+  if (current === "sprint") {
+    const actions: Candidate360StageButton[] = [];
+    actions.push({
+      label: hasApprovedSprint ? "Advance to L1 shortlist" : "L1 shortlist locked",
+      tone: "btn-action-success",
+      icon: <CheckCircle2 className="h-4 w-4" />,
+      intent: "advance",
+      disabled: !hasApprovedSprint,
+      action: () => handleTransition("l1_shortlist", "advance"),
+    });
+    actions.push(
+      {
+        label: "Assign sprint",
+        tone: "btn-action-success",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "advance",
+        disabled: sprintAssignDisabled,
+        action: () => {
+          focusSection("sprint");
+          void openAssignSprint();
+        },
+      },
+      {
+        label: "Go to sprint",
+        tone: "btn-action-neutral",
+        icon: <Layers className="h-4 w-4" />,
+        intent: "review",
+        action: () => focusSection("sprint"),
+      }
+    );
+    return actions;
+  }
+  if (current === "offer") {
+    return [
+      {
+        label: "Go to offer",
+        tone: "btn-action-neutral",
+        icon: <Layers className="h-4 w-4" />,
+        intent: "review",
+        action: () => focusSection("offer"),
+      },
+    ];
+  }
+  if (current === "joining_documents") {
+    const actions: Candidate360StageButton[] = [
+      {
+        label: "Go to documents",
+        tone: "btn-action-neutral",
+        icon: <Layers className="h-4 w-4" />,
+        intent: "review",
+        action: () => focusSection("documents"),
+      },
+    ];
+    if (canAccessOffers && joiningDocsComplete) {
+      actions.unshift({
+        label: "Mark as joined",
+        tone: "btn-action-success",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "advance",
+        disabled: offersBusy,
+        action: () => handleConvertCandidate(),
+      });
+    }
+    return actions;
+  }
+  return [];
+}
