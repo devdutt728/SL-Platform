@@ -82,6 +82,16 @@ export async function deleteCandidateSprint(candidateSprintId: number) {
   if (!res.ok) throw new Error(await res.text());
 }
 
+export async function updateCandidateSprint(candidateSprintId: number, payload: Record<string, unknown>) {
+  const res = await fetch(`/api/rec/sprints/${encodeURIComponent(String(candidateSprintId))}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as CandidateSprint;
+}
+
 export async function fetchSprintTemplates() {
   const res = await fetch("/api/rec/sprint-templates", { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
@@ -245,5 +255,5 @@ export async function transition(candidateId: string, payload: { to_stage: strin
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await readError(res));
 }

@@ -70,7 +70,7 @@ export function useCandidate360Sprints({
   const hasApprovedSprint = useMemo(
     () =>
       activeSprints.some(
-        (sprint) => sprint.status === "submitted" && String(sprint.decision || "").trim().toLowerCase() === "advance"
+        (sprint) => String(sprint.decision || "").trim().toLowerCase() === "advance"
       ),
     [activeSprints]
   );
@@ -294,6 +294,33 @@ export function useCandidate360Sprints({
     }
   }, [candidateId, dueAt, refreshAll, refreshSprints, selectedTemplateId]);
 
+  const handleSuperadminSprintDecision = useCallback(
+    async (candidateSprintId: number, decision: "advance" | "reject", reason?: string) => {
+      if (!canSkip) {
+        setSprintsError("Only superadmin can override sprint review.");
+        return;
+      }
+      setSprintsBusy(true);
+      setSprintsError(null);
+      try {
+        await candidate360Api.updateCandidateSprint(candidateSprintId, {
+          status: "completed",
+          decision,
+          comments_internal:
+            (reason || "").trim() ||
+            (decision === "advance" ? "Approved by superadmin override" : "Rejected by superadmin override"),
+        });
+        await refreshAll();
+        await refreshSprints();
+      } catch (e: any) {
+        setSprintsError(e?.message || "Could not update sprint decision.");
+      } finally {
+        setSprintsBusy(false);
+      }
+    },
+    [canSkip, refreshAll, refreshSprints]
+  );
+
   return {
     candidateSprints,
     setCandidateSprints,
@@ -320,5 +347,6 @@ export function useCandidate360Sprints({
     openAssignSprint,
     handleTemplateSelect,
     handleAssignSprint,
+    handleSuperadminSprintDecision,
   };
 }

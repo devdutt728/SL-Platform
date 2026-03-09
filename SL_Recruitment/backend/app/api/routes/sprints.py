@@ -62,6 +62,24 @@ def _normalize_person_id(raw: str | None) -> str | None:
     return val or None
 
 
+def _is_superadmin_actor(user: UserContext) -> bool:
+    if (user.platform_role_id or None) == 2:
+        return True
+    if user.platform_role_ids and 2 in user.platform_role_ids:
+        return True
+    role_tokens: set[str] = set()
+    if user.platform_role_id is not None:
+        role_tokens.add(str(user.platform_role_id))
+    role_tokens.update(str(rid) for rid in (user.platform_role_ids or []) if rid is not None)
+    if user.platform_role_code:
+        role_tokens.add(str(user.platform_role_code).strip().lower())
+    role_tokens.update(str(code).strip().lower() for code in (user.platform_role_codes or []) if code)
+    if user.platform_role_name:
+        role_tokens.add(str(user.platform_role_name).strip().lower().replace(" ", "_"))
+    role_tokens.update(str(name).strip().lower().replace(" ", "_") for name in (user.platform_role_names or []) if name)
+    return bool({"2", "superadmin", "super_admin", "s_admin"} & role_tokens)
+
+
 async def _resolve_person_id_by_email(email: str | None) -> str | None:
     email_norm = (email or "").strip().lower()
     if not email_norm:
@@ -819,32 +837,45 @@ async def update_sprint(
         meta_json={"status": sprint.status, "decision": sprint.decision, "score_overall": sprint.score_overall},
     )
 
-    if sprint.decision == "advance":
+    if sprint.decision in {"advance", "reject"}:
         candidate = await session.get(RecCandidate, sprint.candidate_id)
         if not candidate:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
-        await apply_stage_transition(
-            session,
-            candidate=candidate,
-            to_stage="l1_shortlist",
-            decision="advance",
-            note="sprint_review",
-            user=user,
-            source="sprint_review",
-        )
-    elif sprint.decision == "reject":
-        candidate = await session.get(RecCandidate, sprint.candidate_id)
-        if not candidate:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
-        await apply_stage_transition(
-            session,
-            candidate=candidate,
-            to_stage="rejected",
-            decision="reject",
-            note="sprint_review",
-            user=user,
-            source="sprint_review",
-        )
+
+        current_stage = await _current_stage_name(session, candidate_id=sprint.candidate_id)
+        if current_stage == "sprint":
+            to_stage = "l1_shortlist" if sprint.decision == "advance" else "rejected"
+            try:
+                await apply_stage_transition(
+                    session,
+                    candidate=candidate,
+                    to_stage=to_stage,
+                    decision=sprint.decision,
+                    note="sprint_review",
+                    user=user,
+                    source="sprint_review",
+                )
+            except HTTPException as exc:
+                # Superadmin can still approve/reject sprint with skip semantics.
+                if exc.status_code != status.HTTP_400_BAD_REQUEST or not _is_superadmin_actor(user):
+                    raise
+                await apply_stage_transition(
+                    session,
+                    candidate=candidate,
+                    to_stage=to_stage,
+                    decision="skip",
+                    note="superadmin_skip",
+                    user=user,
+                    source="sprint_review_superadmin_override",
+                    skip_requested=True,
+                    skip_requires_superadmin=False,
+                    allow_terminal_reopen=True,
+                    allow_noop=True,
+                    extra_meta={
+                        "sprint_decision": sprint.decision,
+                        "override_reason": "superadmin_sprint_decision",
+                    },
+                )
 
     await session.commit()
 

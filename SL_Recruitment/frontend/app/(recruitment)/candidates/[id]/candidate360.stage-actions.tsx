@@ -22,8 +22,12 @@ type BuildStageButtonsParams = {
   hasApprovedSprint: boolean;
   joiningDocsComplete: boolean;
   offersBusy: boolean;
+  canReviseOffer: boolean;
+  latestOfferStatus?: string | null;
+  latestOfferId?: number | null;
   handleTransition: (toStage: string, decision: string) => void | Promise<void>;
   handleConvertCandidate: () => void | Promise<void>;
+  handleReviseOffer: (offerId: number) => void | Promise<void>;
   focusSection: (section: "screening" | "documents" | "interviews" | "sprint" | "offer") => void;
   openSchedule: (round: string) => void;
   openAssignSprint: () => void | Promise<void>;
@@ -40,13 +44,19 @@ export function buildCandidate360StageButtons({
   hasApprovedSprint,
   joiningDocsComplete,
   offersBusy,
+  canReviseOffer,
+  latestOfferStatus,
+  latestOfferId,
   handleTransition,
   handleConvertCandidate,
+  handleReviseOffer,
   focusSection,
   openSchedule,
   openAssignSprint,
 }: BuildStageButtonsParams): Candidate360StageButton[] {
   if (!canManageCandidate360) return [];
+  const status = String(latestOfferStatus || "").toLowerCase();
+  const canCreateRevisionFromLatestOffer = Boolean(latestOfferId && !["draft", "pending_approval"].includes(status));
   const current = currentStageKey;
   if (cafLocked && current && current !== "rejected" && current !== "declined" && current !== "hired") {
     return [
@@ -298,7 +308,7 @@ export function buildCandidate360StageButtons({
     return actions;
   }
   if (current === "offer") {
-    return [
+    const actions: Candidate360StageButton[] = [
       {
         label: "Go to offer",
         tone: "btn-action-neutral",
@@ -307,6 +317,17 @@ export function buildCandidate360StageButtons({
         action: () => focusSection("offer"),
       },
     ];
+    if (canAccessOffers && canCreateRevisionFromLatestOffer && latestOfferId) {
+      actions.push({
+        label: canReviseOffer ? "Create revised offer draft" : "Revision unavailable",
+        tone: canReviseOffer ? "btn-action-success" : "btn-action-neutral",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "review",
+        disabled: !canReviseOffer,
+        action: () => handleReviseOffer(latestOfferId),
+      });
+    }
+    return actions;
   }
   if (current === "joining_documents") {
     const actions: Candidate360StageButton[] = [
@@ -326,6 +347,36 @@ export function buildCandidate360StageButtons({
         intent: "advance",
         disabled: offersBusy,
         action: () => handleConvertCandidate(),
+      });
+    }
+    return actions;
+  }
+  if (current === "rejected" || current === "declined" || current === "hired") {
+    const actions: Candidate360StageButton[] = [];
+    if (canAccessOffers) {
+      actions.push({
+        label: "Go to offer",
+        tone: "btn-action-neutral",
+        icon: <Layers className="h-4 w-4" />,
+        intent: "review",
+        action: () => focusSection("offer"),
+      });
+      if (canCreateRevisionFromLatestOffer && latestOfferId) {
+        actions.push({
+          label: canReviseOffer ? "Create revised offer draft" : "Revision unavailable",
+          tone: canReviseOffer ? "btn-action-success" : "btn-action-neutral",
+          icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "review",
+          disabled: !canReviseOffer,
+          action: () => handleReviseOffer(latestOfferId),
+        });
+      }
+      actions.push({
+        label: "Reopen stage to offer",
+        tone: "btn-action-neutral",
+        icon: <CheckCircle2 className="h-4 w-4" />,
+        intent: "advance",
+        action: () => handleTransition("offer", "skip"),
       });
     }
     return actions;

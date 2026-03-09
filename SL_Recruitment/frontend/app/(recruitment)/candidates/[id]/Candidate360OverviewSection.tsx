@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { clsx } from "clsx";
-import { Copy, ExternalLink, FileText, Layers, Mail, Phone } from "lucide-react";
-import { CandidateFull, CandidateOffer, CandidateStage, PlatformPersonSuggestion, Screening } from "@/lib/types";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, CheckCircle2, CircleDot, Copy, ExternalLink, FileText, Layers, Lock, Mail, Phone, Sparkles } from "lucide-react";
+import { CandidateEvent, CandidateFull, CandidateOffer, CandidateStage, PlatformPersonSuggestion, Screening } from "@/lib/types";
 import { Chip, Metric } from "./Candidate360Primitives";
 
 type StageButton = {
@@ -67,6 +68,15 @@ type Props = {
   setSkipStage: (value: string) => void;
   skipStageOptions: Array<{ value: string; label: string }>;
   onSkip: () => void;
+  onStageTransition: (toStage: string) => void;
+  nextBestActions: string[];
+  pipelineReplay: CandidateEvent[];
+  onJumpTimeline: () => void;
+  onJumpScreening: () => void;
+  onJumpDocuments: () => void;
+  onJumpInterviews: () => void;
+  onJumpSprint: () => void;
+  onJumpOffer: () => void;
 };
 
 export function Candidate360OverviewSection({
@@ -121,9 +131,69 @@ export function Candidate360OverviewSection({
   setSkipStage,
   skipStageOptions,
   onSkip,
+  onStageTransition,
+  nextBestActions,
+  pipelineReplay,
+  onJumpTimeline,
+  onJumpScreening,
+  onJumpDocuments,
+  onJumpInterviews,
+  onJumpSprint,
+  onJumpOffer,
 }: Props) {
+  const [selectedStageKey, setSelectedStageKey] = useState<string | null>(currentStageKey);
+
+  useEffect(() => {
+    if (!stageProgressSteps.length) {
+      setSelectedStageKey(null);
+      return;
+    }
+    const exists = selectedStageKey ? stageProgressSteps.some((item) => item.key === selectedStageKey) : false;
+    if (!exists) {
+      setSelectedStageKey(currentStageKey || stageProgressSteps[0].key);
+    }
+  }, [currentStageKey, selectedStageKey, stageProgressSteps]);
+
+  const selectedStage = useMemo(
+    () => stageProgressSteps.find((step) => step.key === selectedStageKey) || null,
+    [selectedStageKey, stageProgressSteps]
+  );
+  const selectedStageState = selectedStage ? stageStateKey(stages, currentStageKey, selectedStage.key) : null;
+  const selectedStageRow = selectedStage ? findStage(stages, selectedStage.key) : null;
+  const canTransitionToSelected =
+    canManageCandidate360 &&
+    !busy &&
+    !!selectedStage &&
+    selectedStage.key !== currentStageKey &&
+    selectedStageState !== "done" &&
+    (!cafLocked || ["rejected", "declined", "hired"].includes(selectedStage.key));
+  const stageStateCounts = useMemo(() => {
+    return stageProgressSteps.reduce(
+      (acc, step) => {
+        const state = stageStateKey(stages, currentStageKey, step.key);
+        if (state === "done") acc.done += 1;
+        if (state === "current") acc.current += 1;
+        if (state === "future") acc.future += 1;
+        return acc;
+      },
+      { done: 0, current: 0, future: 0 }
+    );
+  }, [currentStageKey, stageProgressSteps, stageStateKey, stages]);
+  const transitionCtaLabel = busy
+    ? "Updating stage..."
+    : !canManageCandidate360
+      ? "View-only access"
+      : !selectedStage
+        ? "Select a stage"
+        : selectedStage.key === currentStageKey
+          ? "Already current stage"
+          : selectedStageState === "done"
+            ? "Select an upcoming stage"
+            : cafLocked && !["rejected", "declined", "hired"].includes(selectedStage.key)
+              ? "CAF pending: terminal moves only"
+              : `Move to ${selectedStage.label}`;
   return (
-    <div className="grid gap-3 xl:grid-cols-[360px_1fr]">
+    <div className="grid gap-3 xl:grid-cols-[330px_minmax(0,1fr)]">
       <aside className="section-card space-y-3">
         <div className="grid gap-2">
           <div className="grid grid-cols-2 gap-2">
@@ -350,42 +420,161 @@ export function Candidate360OverviewSection({
               </div>
               <div>
                 <p className="text-xs uppercase tracking-tight text-slate-500">Stage progress</p>
-                <div className="stage-rail mt-3 rounded-2xl border border-white/70 px-4 py-4">
-                  <div className="flex flex-wrap items-center gap-3">
-                    {stageProgressSteps.map((step, idx) => {
-                      const state = stageStateKey(stages, currentStageKey, step.key);
-                      const stageRow = findStage(stages, step.key);
-                      const isTerminal = ["declined", "rejected", "hired"].includes(step.key);
-                      const isNegative = ["declined", "rejected"].includes(step.key);
-                      const staggerClass = `stage-node-stagger-${(idx % 4) + 1}`;
-                      const motion = state === "current" ? `stage-node-active ${staggerClass}` : "";
-                      const tone =
-                        state === "done"
-                          ? isNegative
-                            ? "bg-rose-600 text-white"
-                            : "bg-emerald-500 text-white"
-                          : state === "current"
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {[
+                    { label: "Timeline", action: onJumpTimeline },
+                    { label: "Screening", action: onJumpScreening },
+                    { label: "Documents", action: onJumpDocuments },
+                    { label: "Interviews", action: onJumpInterviews },
+                    { label: "Sprint", action: onJumpSprint },
+                    { label: "Offer", action: onJumpOffer },
+                  ].map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                      onClick={item.action}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-3 rounded-3xl border border-[#e9d8cc] bg-[linear-gradient(155deg,rgba(255,251,247,0.94),rgba(247,239,233,0.78))] p-2.5 shadow-[0_10px_30px_rgba(93,85,82,0.10)]">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-tight text-[#70594d]">Cozy Stage Flow</p>
+                      <p className="mt-1 text-xs text-[#79685f]">
+                        {canManageCandidate360
+                          ? "Select a stage card, review details, then transition from the side panel."
+                          : "Stage transitions are locked in this access mode. You can still inspect all stages."}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-2 rounded-full border border-[#bdd4c7] bg-[#eef8f1] px-2.5 py-1 text-[11px] font-semibold text-[#3f6a53]">
+                        <span className="h-2 w-2 rounded-full bg-[#5d9878] animate-pulse" />
+                        Live sync on
+                      </span>
+                      <Chip className={chipTone("green")}>Done: {stageStateCounts.done}</Chip>
+                      <Chip className={chipTone("amber")}>Upcoming: {stageStateCounts.future}</Chip>
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5 grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_270px]">
+                    <div className="rounded-2xl border border-[#ead9cd] bg-white/70 p-2">
+                      <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-5">
+                        {stageProgressSteps.map((step, idx) => {
+                          const state = stageStateKey(stages, currentStageKey, step.key);
+                          const stageRow = findStage(stages, step.key);
+                          const isCurrent = state === "current";
+                          const isDone = state === "done";
+                          const isSelected = selectedStageKey === step.key;
+                          const isNegative = ["declined", "rejected"].includes(step.key);
+                          const isTerminal = ["declined", "rejected", "hired"].includes(step.key);
+                          const cardTone = isCurrent
                             ? isTerminal
                               ? isNegative
-                                ? "bg-rose-600 text-white shadow-[0_0_20px_rgba(244,63,94,0.45)]"
-                                : "bg-emerald-600 text-white shadow-[0_0_20px_rgba(16,185,129,0.45)]"
-                              : "bg-slate-900 text-white shadow-[0_0_20px_rgba(15,23,42,0.35)]"
-                            : "bg-white text-slate-700 border border-slate-200";
-                      return (
-                        <div key={step.key} className="flex items-center gap-3">
-                          <div className={clsx("flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm", tone, motion)}>
-                            <span>{step.label}</span>
-                            <span className="text-[10px] opacity-80">
-                              {stageRow?.started_at ? formatDate(stageRow.started_at) : ""}
-                            </span>
-                          </div>
-                          {idx < stageProgressSteps.length - 1 ? (
-                            <div className={clsx("stage-connector", state === "current" ? "" : "stage-connector--idle")} />
-                          ) : null}
+                                ? "border-[#b35b5b] bg-[linear-gradient(135deg,#905050,#b35b5b)] text-rose-50"
+                                : "border-[#4e7b66] bg-[linear-gradient(135deg,#3f6756,#4e7b66)] text-emerald-50"
+                              : "border-[#6a4f42] bg-[linear-gradient(135deg,#5d453b,#7a5a4a)] text-amber-50"
+                            : isDone
+                              ? isNegative
+                                ? "border-[#efcaca] bg-[#fff5f5] text-[#7f4a4a]"
+                                : "border-[#c8dece] bg-[#f3faf5] text-[#2f5f4a]"
+                              : "border-[#e5d8ce] bg-[#fffdfa] text-[#6a5c54]";
+                          return (
+                            <button
+                              key={step.key}
+                              type="button"
+                              className={clsx(
+                                "group relative overflow-hidden rounded-md border px-2 py-1.5 text-left transition hover:-translate-y-0.5 hover:shadow-sm",
+                                cardTone,
+                                isSelected ? "ring-1 ring-[#d28a63]" : ""
+                              )}
+                              onClick={() => setSelectedStageKey(step.key)}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <span className={clsx(
+                                    "inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full",
+                                    isCurrent ? "bg-white/20" : "bg-black/5"
+                                  )}>
+                                    {isCurrent ? <Sparkles className="h-2.5 w-2.5" /> : isDone ? <CheckCircle2 className="h-2.5 w-2.5" /> : <CircleDot className="h-2.5 w-2.5" />}
+                                  </span>
+                                  <span className="truncate text-[12px] font-semibold">{step.label}</span>
+                                </div>
+                                <span className={clsx(
+                                  "rounded-full px-1.5 py-0.5 text-[9px] font-semibold",
+                                  isCurrent ? "bg-white/20 text-white" : "bg-black/10 text-current"
+                                )}>
+                                  #{idx + 1}
+                                </span>
+                              </div>
+                              <div className="mt-1 flex items-center justify-between gap-1.5">
+                                <span className={clsx("text-[9px]", isCurrent ? "text-white/85" : "opacity-80")}>
+                                  {stageRow?.started_at ? formatDate(stageRow.started_at) : "Not started"}
+                                </span>
+                                <span className={clsx(
+                                  "rounded-full px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide",
+                                  isCurrent ? "bg-white/20 text-white" : "bg-black/10 text-current"
+                                )}>
+                                  {isCurrent ? "Current" : isDone ? "Done" : "Next"}
+                                </span>
+                              </div>
+                              {isSelected ? (
+                                <span className={clsx(
+                                  "pointer-events-none absolute bottom-0 left-0 h-0.5 w-full",
+                                  isCurrent ? "bg-white/70" : "bg-[#d28a63]"
+                                )} />
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-[#e2c8b8] bg-[linear-gradient(160deg,#fff8f2,#fffdfb)] p-3 shadow-[0_10px_24px_rgba(93,85,82,0.12)]">
+                      <p className="text-xs uppercase tracking-tight text-[#ad5f38]">Selected stage</p>
+                      <p className="mt-1 text-[15px] font-semibold text-slate-900">{selectedStage?.label || "No stage selected"}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Chip className={chipTone("neutral")}>Current: {stageStateCounts.current}</Chip>
+                        {selectedStageState === "current" ? <Chip className={chipTone("blue")}>Current</Chip> : null}
+                        {selectedStageState === "done" ? <Chip className={chipTone("green")}>Completed</Chip> : null}
+                        {selectedStageState === "future" ? <Chip className={chipTone("amber")}>Upcoming</Chip> : null}
+                        {selectedStageRow?.started_at ? (
+                          <span className="text-xs text-slate-600">Started: {formatDate(selectedStageRow.started_at)}</span>
+                        ) : (
+                          <span className="text-xs text-slate-600">No start timestamp yet</span>
+                        )}
+                      </div>
+                      <p className="mt-2.5 text-xs text-[#79685f]">
+                        {canManageCandidate360
+                          ? "Transitions are one-click from this panel and sync live across sessions."
+                          : "You can inspect stage readiness here, but transitions require manage access."}
+                      </p>
+                      {cafLocked ? (
+                        <div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800">
+                          <Lock className="h-3.5 w-3.5" />
+                          CAF pending: non-terminal stage transitions are blocked
                         </div>
-                      );
-                    })}
+                      ) : null}
+                      <button
+                        type="button"
+                        className={clsx(
+                          "mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-60",
+                          canTransitionToSelected ? "btn-action-success" : "bg-slate-400 cursor-not-allowed"
+                        )}
+                        onClick={() => {
+                          if (!selectedStage || !canTransitionToSelected) return;
+                          onStageTransition(selectedStage.key);
+                        }}
+                        disabled={!canTransitionToSelected}
+                      >
+                        <ArrowRight className="h-4 w-4" />
+                        {transitionCtaLabel}
+                      </button>
+                    </div>
                   </div>
+
                   <p className="mt-3 text-xs text-slate-500">
                     {latestOffer?.offer_status === "declined"
                       ? "Offer declined. Joining documents and hiring steps are closed."
@@ -396,16 +585,29 @@ export function Candidate360OverviewSection({
                 </div>
               </div>
 
-              <div className="grid gap-3 lg:grid-cols-2">
-                <div className="rounded-2xl border border-white/60 bg-white/30 p-4">
-                  <p className="text-xs uppercase tracking-tight text-slate-500">Key screening values</p>
-                  {screening ? (
-                    <div className="mt-3 grid gap-2 md:grid-cols-2">
-                      <Metric label="Relocate" value={screening.willing_to_relocate == null ? "?" : screening.willing_to_relocate ? "Yes" : "No"} />
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-white/60 bg-white/30 p-4">
+                    <p className="text-xs uppercase tracking-tight text-slate-500">Key screening values</p>
+                    {screening ? (
+                      <div className="mt-3 grid gap-2 md:grid-cols-2">
+                        <Metric label="Relocate" value={screening.willing_to_relocate == null ? "?" : screening.willing_to_relocate ? "Yes" : "No"} />
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-slate-600">No screening submitted yet.</p>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+                    <p className="text-xs uppercase tracking-tight text-amber-800">Next best actions</p>
+                    <div className="mt-2 space-y-1.5">
+                      {nextBestActions.map((item) => (
+                        <p key={item} className="text-sm text-amber-900">
+                          - {item}
+                        </p>
+                      ))}
                     </div>
-                  ) : (
-                    <p className="mt-2 text-sm text-slate-600">No screening submitted yet.</p>
-                  )}
+                  </div>
                 </div>
 
                 <div className="rounded-2xl border border-white/60 bg-white/30 p-4">
@@ -469,6 +671,21 @@ export function Candidate360OverviewSection({
                       <p className="mt-2 text-[11px] text-amber-700">Use only when skipping is required by leadership.</p>
                     </div>
                   ) : null}
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white/60 p-4 lg:col-span-2">
+                  <p className="text-xs uppercase tracking-tight text-slate-500">Pipeline replay</p>
+                  {pipelineReplay.length === 0 ? (
+                    <p className="mt-2 text-sm text-slate-600">No replay events yet.</p>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {pipelineReplay.map((event) => (
+                        <div key={event.event_id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5">
+                          <span className="text-[11px] font-semibold text-slate-800">{event.action_type.replace(/_/g, " ")}</span>
+                          <span className="text-[10px] text-slate-500">{formatDateTime(event.created_at)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -38,6 +38,28 @@
   --text-secondary: #5d5552;
 }
 
+:root.rec-theme-classic {
+  --surface-base: #f4f4f4;
+  --surface-card: #f6f6f6;
+  --surface-panel: #ffffff;
+  --border-soft: #e3dedc;
+  --shadow-soft: 0 2px 8px -5px rgba(93, 85, 82, 0.25);
+  --shadow-soft-hover: 0 9px 22px -14px rgba(93, 85, 82, 0.32);
+  --text-primary: #2f2927;
+  --text-secondary: #5d5552;
+}
+
+:root.rec-theme-warm-executive {
+  --surface-base: #efe8e4;
+  --surface-card: #f7f2ef;
+  --surface-panel: rgba(255, 255, 255, 0.96);
+  --border-soft: #ddd1ca;
+  --shadow-soft: 0 14px 32px -26px rgba(64, 42, 34, 0.35);
+  --shadow-soft-hover: 0 20px 40px -24px rgba(64, 42, 34, 0.42);
+  --text-primary: #2d2421;
+  --text-secondary: #5a4a43;
+}
+
 @media (min-width: 1440px) {
   :root {
     --page-width: 1850px;
@@ -156,6 +178,21 @@ a {
 .section-card:hover {
   transform: translate3d(0, -2px, 0);
   box-shadow: var(--shadow-soft-hover);
+}
+
+.rec-theme-warm-executive .glass,
+.rec-theme-warm-executive .glass-panel {
+  background:
+    linear-gradient(140deg, rgba(255, 255, 255, 0.94), rgba(248, 241, 236, 0.9)),
+    radial-gradient(circle at 100% 0%, rgba(231, 64, 17, 0.08), transparent 48%);
+  border-color: rgba(136, 105, 91, 0.2);
+}
+
+.rec-theme-warm-executive .section-card {
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.94), rgba(252, 248, 245, 0.9)),
+    radial-gradient(circle at 95% 0%, rgba(231, 64, 17, 0.08), transparent 42%);
+  border-color: rgba(136, 105, 91, 0.2);
 }
 
 .apply-font-override,
@@ -503,8 +540,8 @@ a {
 }
 
 .stage-connector {
-  height: 2px;
-  width: 42px;
+  height: 3px;
+  width: 58px;
   border-radius: 999px;
   background: linear-gradient(90deg, rgba(93, 85, 82, 0.25), rgba(231, 64, 17, 0.68), rgba(231, 64, 17, 0.4));
   background-size: 200% 100%;
@@ -525,7 +562,7 @@ a {
   position: relative;
   overflow: hidden;
   border-radius: 18px;
-  background: linear-gradient(120deg, rgba(231, 64, 17, 0.08), rgba(93, 85, 82, 0.05), rgba(231, 64, 17, 0.1));
+  background: linear-gradient(120deg, rgba(231, 64, 17, 0.14), rgba(93, 85, 82, 0.06), rgba(231, 64, 17, 0.14));
 }
 
 .stage-rail::before {

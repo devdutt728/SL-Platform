@@ -57,6 +57,7 @@ type Props = {
   offersBusy: boolean;
   candidateOffers: CandidateOffer[] | null;
   latestOffer: CandidateOffer | null;
+  reviseOfferEligibility: { allowed: boolean; reason: string | null };
   canDelete: boolean;
   canSkip: boolean;
   canSendApprovedOffer: boolean;
@@ -87,6 +88,7 @@ export function Candidate360OfferSection({
   offersBusy,
   candidateOffers,
   latestOffer,
+  reviseOfferEligibility,
   canDelete,
   canSkip,
   canSendApprovedOffer,
@@ -107,6 +109,8 @@ export function Candidate360OfferSection({
   formatDateTime,
 }: Props) {
   if (!canAccessOffers) return null;
+  const latestOfferStatus = String(latestOffer?.offer_status || "").toLowerCase();
+  const canCreateRevisionFromLatestOffer = Boolean(latestOffer && !["draft", "pending_approval"].includes(latestOfferStatus));
 
   return (
     <div ref={offerRef} className="section-card">
@@ -278,15 +282,23 @@ export function Candidate360OfferSection({
                     </button>
                   </>
                 ) : null}
-                {canAccessOffers && ["declined", "withdrawn"].includes(latestOffer.offer_status) ? (
-                  <button
-                    type="button"
-                    className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
-                    onClick={() => void actions.handleReviseOffer(latestOffer.candidate_offer_id)}
-                    disabled={offersBusy}
-                  >
-                    Create revised offer
-                  </button>
+                {canAccessOffers && canCreateRevisionFromLatestOffer ? (
+                  <>
+                    <button
+                      type="button"
+                      className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                      onClick={() => void actions.handleReviseOffer(latestOffer.candidate_offer_id)}
+                      disabled={offersBusy || !reviseOfferEligibility.allowed}
+                      title={reviseOfferEligibility.allowed ? "Create revised editable draft offer" : reviseOfferEligibility.reason || "Revision is not allowed"}
+                    >
+                      Create revised offer draft
+                    </button>
+                    {!reviseOfferEligibility.allowed ? (
+                      <p className="text-xs text-amber-700">{reviseOfferEligibility.reason || "Revision is not allowed in the current stage."}</p>
+                    ) : (
+                      <p className="text-xs text-slate-600">Creates a new editable draft from the latest generated offer letter.</p>
+                    )}
+                  </>
                 ) : null}
                 {latestOffer.offer_status === "accepted" ? (
                   <button

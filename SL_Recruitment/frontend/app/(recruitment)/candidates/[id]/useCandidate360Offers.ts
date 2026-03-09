@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CandidateFull, CandidateOffer } from "@/lib/types";
 import * as candidate360Api from "./candidate360.api";
 import { cleanLetterOverrides, normalizeOfferStatus, suggestOfferTemplate } from "./candidate360.client-utils";
 import { principalApproverOptions } from "./candidate360.constants";
+import { normalizeRecruitmentStage, recruitmentStageLabel } from "@/lib/recruitment-stages";
 
 type DialogConfig = {
   title: string;
@@ -100,8 +101,39 @@ export function useCandidate360Offers({
   const latestOffer = candidateOffers && candidateOffers.length > 0 ? candidateOffers[0] : null;
   const latestOfferStatus = normalizeOfferStatus(latestOffer?.offer_status);
   const latestOfferApprovalDecision = normalizeOfferStatus(latestOffer?.approval_decision);
+  const currentStageKey = normalizeRecruitmentStage(candidate.current_stage);
+  const candidateStatus = normalizeOfferStatus(candidate.status);
+  const canCreateRevisionFromLatestOffer = useMemo(() => {
+    if (!latestOffer) return false;
+    return !["draft", "pending_approval"].includes(latestOfferStatus);
+  }, [latestOffer, latestOfferStatus]);
   const canSendApprovedOffer =
     latestOfferStatus === "approved" || (latestOfferStatus === "pending_approval" && latestOfferApprovalDecision === "approved");
+
+  const reviseOfferEligibility = useMemo(() => {
+    if (!canAccessOffers) {
+      return { allowed: false, reason: "Offer access is not available in this view." };
+    }
+    if (!latestOffer) {
+      return { allowed: false, reason: "No offer found for revision." };
+    }
+    if (!canCreateRevisionFromLatestOffer) {
+      return {
+        allowed: false,
+        reason:
+          latestOfferStatus === "draft"
+            ? "Current offer is already a draft. Use Edit under Appointment letter variables."
+            : "Pending approval offer cannot be revised. Complete approval/rejection first.",
+      };
+    }
+    if (currentStageKey === "hired" || candidateStatus === "hired") {
+      return {
+        allowed: false,
+        reason: "Candidate is already marked as Hired; revision is not allowed.",
+      };
+    }
+    return { allowed: true as const, reason: null as string | null };
+  }, [canAccessOffers, canCreateRevisionFromLatestOffer, currentStageKey, candidateStatus, latestOffer, latestOfferStatus]);
 
   useEffect(() => {
     if (!latestOffer) {
@@ -326,9 +358,15 @@ export function useCandidate360Offers({
 
   const handleReviseOffer = useCallback(
     async (offerId: number) => {
+      if (!reviseOfferEligibility.allowed) {
+        const reason = reviseOfferEligibility.reason || "Offer revision is not allowed in the current stage.";
+        setOffersError(reason);
+        pushToast({ tone: "warning", title: "Revision blocked", description: reason });
+        return;
+      }
       openDialog({
         title: "Create offer revision",
-        description: "This will create a new draft offer version and reopen the offer stage.",
+        description: "This will create a new editable draft offer version. Offer stage will be reopened automatically when needed.",
         confirmLabel: "Create revision",
         tone: "success",
         requireReason: true,
@@ -338,21 +376,39 @@ export function useCandidate360Offers({
           setOffersBusy(true);
           setOffersError(null);
           try {
+            const shouldReopenOfferStage =
+              currentStageKey === "rejected" ||
+              currentStageKey === "declined" ||
+              candidateStatus === "rejected" ||
+              candidateStatus === "declined";
+            if (shouldReopenOfferStage) {
+              await candidate360Api.transition(candidateId, {
+                to_stage: "offer",
+                decision: "skip",
+                note: "offer_revision_reopen",
+              });
+            }
             await candidate360Api.reviseOffer(offerId, value);
             await refreshOffers();
             await refreshAll();
+            setDraftOverridesOpen(true);
             pushToast({ tone: "success", title: "Offer revision draft created" });
             closeDialog();
           } catch (e: any) {
-            setOffersError(e?.message || "Could not create revision.");
-            setDialogError(e?.message || "Could not create revision.");
+            const rawMessage = e?.message || "Could not create revision.";
+            const message =
+              rawMessage.toLowerCase().includes("invalid stage transition") && currentStageKey
+                ? `Revision blocked: candidate is in ${recruitmentStageLabel(currentStageKey)} stage and could not be reopened to Offer.`
+                : rawMessage;
+            setOffersError(message);
+            setDialogError(message);
           } finally {
             setOffersBusy(false);
           }
         },
       });
     },
-    [closeDialog, openDialog, pushToast, refreshAll, refreshOffers, setDialogError]
+    [candidateId, candidateStatus, closeDialog, currentStageKey, openDialog, pushToast, refreshAll, refreshOffers, reviseOfferEligibility, setDialogError]
   );
 
   const handleConvertCandidate = useCallback(async () => {
@@ -408,6 +464,7 @@ export function useCandidate360Offers({
     offerPreviewBusy,
     offerPreviewError,
     latestOffer,
+    reviseOfferEligibility,
     canSendApprovedOffer,
     refreshOffers,
     handleCreateOffer,

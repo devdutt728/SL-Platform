@@ -30,6 +30,7 @@ type Props = {
   canSkip: boolean;
   sprintDeleteBusy: boolean;
   onDeleteSprint: (candidateSprintId: number) => void;
+  onSuperadminSprintDecision: (candidateSprintId: number, decision: "advance" | "reject", reason?: string) => void;
   onOpenAssignSprint: () => void;
   assignOpen: boolean;
   onCloseAssign: () => void;
@@ -67,6 +68,7 @@ export function Candidate360SprintSection({
   canSkip,
   sprintDeleteBusy,
   onDeleteSprint,
+  onSuperadminSprintDecision,
   onOpenAssignSprint,
   assignOpen,
   onCloseAssign,
@@ -232,6 +234,33 @@ export function Candidate360SprintSection({
                         <Chip className={chipTone(sprint.status === "submitted" ? "amber" : sprint.status === "completed" ? "green" : "neutral")}>
                           {sprint.status.replace("_", " ")}
                         </Chip>
+                        {canSkip && String(sprint.status || "").toLowerCase() !== "deleted" ? (
+                          <>
+                            <button
+                              type="button"
+                              className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                              onClick={() => {
+                                const reason = window.prompt("Approval note (optional):", "Approved by superadmin override") || undefined;
+                                onSuperadminSprintDecision(sprint.candidate_sprint_id, "advance", reason);
+                              }}
+                              disabled={sprintsBusy}
+                            >
+                              Approve sprint
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                              onClick={() => {
+                                const reason = window.prompt("Rejection reason:", "Rejected by superadmin override");
+                                if (!reason || !reason.trim()) return;
+                                onSuperadminSprintDecision(sprint.candidate_sprint_id, "reject", reason.trim());
+                              }}
+                              disabled={sprintsBusy}
+                            >
+                              Reject sprint
+                            </button>
+                          </>
+                        ) : null}
                         {canSkip ? (
                           <button
                             type="button"

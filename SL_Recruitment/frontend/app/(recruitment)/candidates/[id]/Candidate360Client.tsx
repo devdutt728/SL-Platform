@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CandidateAssessment, CandidateFull, JoiningDoc, Screening } from "@/lib/types";
 import { ExternalLink } from "lucide-react";
+import { defaultTransitionDecision, normalizeRecruitmentStage } from "@/lib/recruitment-stages";
 import { DeleteCandidateButton } from "./DeleteCandidateButton";
 import { ActionDialog } from "@/components/ui/action-dialog";
 import { useToast } from "@/components/ui/toast-provider";
@@ -263,6 +264,7 @@ export function Candidate360Client({
     offerPreviewBusy,
     offerPreviewError,
     latestOffer,
+    reviseOfferEligibility,
     canSendApprovedOffer,
     refreshOffers,
     handleCreateOffer,
@@ -315,6 +317,7 @@ export function Candidate360Client({
     openAssignSprint,
     handleTemplateSelect,
     handleAssignSprint,
+    handleSuperadminSprintDecision,
   } = useCandidate360Sprints({
     candidateId,
     canSkip,
@@ -575,8 +578,12 @@ export function Candidate360Client({
     hasApprovedSprint,
     joiningDocsComplete,
     offersBusy,
+    canReviseOffer: reviseOfferEligibility.allowed,
+    latestOfferStatus: latestOffer?.offer_status || null,
+    latestOfferId: latestOffer?.candidate_offer_id || null,
     handleTransition,
     handleConvertCandidate,
+    handleReviseOffer,
     focusSection: (section) => {
       if (section === "screening") {
         focusSection("screening", screeningRef);
@@ -620,11 +627,49 @@ export function Candidate360Client({
 
     return steps
       .map((key) => stageOrder.find((stage) => stage.key === key))
-      .filter((step): step is { key: string; label: string } => Boolean(step));
+      .filter(Boolean) as Array<{ key: string; label: string }>;
   }, [candidate.status, data.stages, latestOffer?.offer_status]);
 
+  const nextBestActions = useMemo(() => {
+    const actions: string[] = [];
+    if (!candidate.l2_owner_email && currentStageKey === "enquiry") {
+      actions.push("Assign GL/L2 owner to unlock HR screening.");
+    }
+    if (cafLocked) {
+      actions.push("Collect CAF submission before moving to non-terminal stages.");
+    }
+    if (currentStageKey === "l2_feedback") {
+      actions.push("Finalize L2 decision and move to Sprint or Reject.");
+    }
+    if (currentStageKey === "sprint" && !hasApprovedSprint) {
+      actions.push("Get at least one approved sprint before L1 shortlist.");
+    }
+    if (currentStageKey === "offer" && canAccessOffers) {
+      actions.push("Push offer decision follow-up to close this candidate.");
+    }
+    if (currentStageKey === "joining_documents" && !joiningDocsComplete) {
+      actions.push("Collect mandatory joining docs to unlock final hire.");
+    }
+    if (!actions.length) actions.push("Continue progression based on latest interview/sprint feedback.");
+    return actions;
+  }, [candidate.l2_owner_email, canAccessOffers, cafLocked, currentStageKey, hasApprovedSprint, joiningDocsComplete]);
+
+  const pipelineReplay = useMemo(() => {
+    return [...(data.events || [])]
+      .filter((event) => {
+        const action = (event.action_type || "").toLowerCase();
+        return action.includes("stage") || action.includes("offer") || action.includes("interview") || action.includes("sprint");
+      })
+      .sort((a, b) => {
+        const aTs = Date.parse(a.created_at || "");
+        const bTs = Date.parse(b.created_at || "");
+        return (Number.isFinite(aTs) ? aTs : 0) - (Number.isFinite(bTs) ? bTs : 0);
+      })
+      .slice(-14);
+  }, [data.events]);
+
   return (
-    <main className="content-pad space-y-4">
+    <main className="content-pad w-full space-y-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <p className="text-xs uppercase tracking-tight text-slate-500">Candidate 360</p>
@@ -733,6 +778,23 @@ export function Candidate360Client({
         onSkip={() => {
           void handleSkip();
         }}
+        onStageTransition={(toStage) => {
+          const normalized = normalizeRecruitmentStage(toStage);
+          if (!normalized || normalized === currentStageKey) return;
+          const from = currentStageKey || null;
+          const fromTerminal = from === "rejected" || from === "declined" || from === "hired";
+          const toTerminal = normalized === "rejected" || normalized === "declined" || normalized === "hired";
+          const decision = fromTerminal && !toTerminal ? "skip" : defaultTransitionDecision(normalized);
+          void handleTransition(normalized, decision);
+        }}
+        nextBestActions={nextBestActions}
+        pipelineReplay={pipelineReplay}
+        onJumpTimeline={() => focusSection("timeline", timelineRef)}
+        onJumpScreening={() => focusSection("screening", screeningRef)}
+        onJumpDocuments={() => focusSection("documents", documentsRef)}
+        onJumpInterviews={() => focusSection("interviews", interviewsRef)}
+        onJumpSprint={() => focusSection("sprint", sprintRef)}
+        onJumpOffer={() => focusSection("offer", offerRef)}
       />
 
       <section className="space-y-4">
@@ -889,6 +951,9 @@ export function Candidate360Client({
             onDeleteSprint={(candidateSprintId) => {
               void handleDeleteSprint(candidateSprintId);
             }}
+            onSuperadminSprintDecision={(candidateSprintId, decision, reason) => {
+              void handleSuperadminSprintDecision(candidateSprintId, decision, reason);
+            }}
             onOpenAssignSprint={() => {
               void openAssignSprint();
             }}
@@ -926,6 +991,7 @@ export function Candidate360Client({
             offersBusy={offersBusy}
             candidateOffers={candidateOffers}
             latestOffer={latestOffer}
+            reviseOfferEligibility={reviseOfferEligibility}
             canDelete={canDelete}
             canSkip={canSkip}
             canSendApprovedOffer={canSendApprovedOffer}

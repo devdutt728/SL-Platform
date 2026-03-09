@@ -12,6 +12,14 @@ import RecentActivityCard from "./RecentActivityCard";
 import { ActionDialog } from "@/components/ui/action-dialog";
 import { useToast } from "@/components/ui/toast-provider";
 import { trackUxMetric } from "@/lib/ux-metrics";
+import {
+  normalizeRecruitmentStage,
+  recruitmentOutcomeStageKeys,
+  recruitmentPipelineStageKeys,
+  recruitmentPostOfferStageKeys,
+  recruitmentStageLabel,
+  recruitmentStageOrder,
+} from "@/lib/recruitment-stages";
 
 type Props = {
   initialMetrics: DashboardMetrics | null;
@@ -29,52 +37,19 @@ type Props = {
   lockWorkspacePreset?: boolean;
 };
 
-const stageOrder = [
-  { key: "enquiry", label: "Enquiry" },
-  { key: "hr_screening", label: "HR screening" },
-  { key: "l2_shortlist", label: "L2 shortlist" },
-  { key: "l2_interview", label: "L2 interview" },
-  { key: "l2_feedback", label: "L2 feedback" },
-  { key: "sprint", label: "Sprint" },
-  { key: "l1_shortlist", label: "L1 shortlist" },
-  { key: "l1_interview", label: "L1 interview" },
-  { key: "l1_feedback", label: "L1 feedback" },
-  { key: "offer", label: "Offer" },
-  { key: "joining_documents", label: "Joining documents" },
-  { key: "hired", label: "Hired" },
-  { key: "declined", label: "Declined" },
-  { key: "rejected", label: "Rejected" },
-];
-
-const pipelineStages = [
-  "enquiry",
-  "hr_screening",
-  "l2_shortlist",
-  "l2_interview",
-  "l2_feedback",
-  "sprint",
-  "l1_shortlist",
-  "l1_interview",
-  "l1_feedback",
-  "offer",
-];
-
-const postOfferStages = ["joining_documents"];
-const outcomeStages = ["hired", "declined", "rejected"];
+const stageOrder = recruitmentStageOrder.map((item) => ({ key: item.key, label: item.label }));
+const pipelineStages: string[] = [...recruitmentPipelineStageKeys];
+const postOfferStages: string[] = [...recruitmentPostOfferStageKeys];
+const outcomeStages: string[] = [...recruitmentOutcomeStageKeys];
 const openingHoverStageKeys = stageOrder.map((item) => item.key);
 
 function normalizeStage(raw?: string | null) {
-  const value = (raw || "").trim().toLowerCase();
-  if (!value) return "";
-  if (value === "caf") return "hr_screening";
-  if (value === "l2") return "l2_interview";
-  if (value === "l1") return "l1_interview";
-  return value.replace(/\s+/g, "_");
+  return normalizeRecruitmentStage(raw) || "";
 }
 
 function stageLabel(raw?: string | null) {
   const key = normalizeStage(raw);
-  return stageOrder.find((s) => s.key === key)?.label || key.replace(/_/g, " ");
+  return recruitmentStageLabel(key) || stageOrder.find((s) => s.key === key)?.label || key.replace(/_/g, " ");
 }
 
 function formatRequestTime(raw?: string | null) {
@@ -208,7 +183,7 @@ export default function DashboardClient({
 
   const perStage = metrics?.candidates_per_stage || [];
   const stageCounts = new Map(perStage.map((row) => [normalizeStage(row.stage), row.count]));
-  const knownKeys = new Set(stageOrder.map((s) => s.key));
+  const knownKeys = new Set<string>(stageOrder.map((s) => s.key));
   const extraStages = perStage
     .filter((row) => !knownKeys.has(normalizeStage(row.stage)))
     .map((row) => ({ key: normalizeStage(row.stage) || row.stage, label: stageLabel(row.stage), count: row.count }));

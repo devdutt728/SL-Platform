@@ -21,7 +21,7 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className="rec-theme-warm-executive">
       <body className={`${roboto.variable} relative min-h-screen text-slate-900 antialiased`}>
         <GlobalUxShell>
           <BasePathGuard />

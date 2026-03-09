@@ -1,56 +1,24 @@
 import { CandidateStage, Interview } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
+import {
+  normalizeRecruitmentStage,
+  recruitmentPipelineStageKeys,
+  recruitmentPostOfferStageKeys,
+  recruitmentOutcomeStageKeys,
+  recruitmentSkipStageOptions,
+  recruitmentStageLabel,
+  recruitmentStageOrder,
+} from "@/lib/recruitment-stages";
 
-export const stageOrder = [
-  { key: "enquiry", label: "Enquiry" },
-  { key: "hr_screening", label: "HR screening" },
-  { key: "l2_shortlist", label: "L2 shortlist" },
-  { key: "l2_interview", label: "L2 interview" },
-  { key: "l2_feedback", label: "L2 feedback" },
-  { key: "sprint", label: "Sprint" },
-  { key: "l1_shortlist", label: "L1 shortlist" },
-  { key: "l1_interview", label: "L1 interview" },
-  { key: "l1_feedback", label: "L1 feedback" },
-  { key: "offer", label: "Offer" },
-  { key: "joining_documents", label: "Joining documents" },
-  { key: "hired", label: "Hired" },
-  { key: "declined", label: "Declined" },
-  { key: "rejected", label: "Rejected" },
-];
+export const stageOrder = recruitmentStageOrder.map((item) => ({ key: item.key, label: item.label }));
 
-export const pipelineStages = [
-  "enquiry",
-  "hr_screening",
-  "l2_shortlist",
-  "l2_interview",
-  "l2_feedback",
-  "sprint",
-  "l1_shortlist",
-  "l1_interview",
-  "l1_feedback",
-  "offer",
-];
+export const pipelineStages: string[] = [...recruitmentPipelineStageKeys];
 
-export const postAcceptanceStages = ["joining_documents", "hired"];
-export const postDeclineStages = ["declined"];
-export const postRejectStages = ["rejected"];
+export const postAcceptanceStages: string[] = [...recruitmentPostOfferStageKeys, "hired"];
+export const postDeclineStages: string[] = recruitmentOutcomeStageKeys.filter((item) => item === "declined");
+export const postRejectStages: string[] = recruitmentOutcomeStageKeys.filter((item) => item === "rejected");
 
-export const skipStageOptions = [
-  { value: "enquiry", label: "Enquiry" },
-  { value: "hr_screening", label: "HR screening" },
-  { value: "l2_shortlist", label: "L2 shortlist" },
-  { value: "l2_interview", label: "L2 interview" },
-  { value: "l2_feedback", label: "L2 feedback" },
-  { value: "sprint", label: "Sprint" },
-  { value: "l1_shortlist", label: "L1 shortlist" },
-  { value: "l1_interview", label: "L1 interview" },
-  { value: "l1_feedback", label: "L1 feedback" },
-  { value: "offer", label: "Offer" },
-  { value: "joining_documents", label: "Joining documents" },
-  { value: "hired", label: "Hired" },
-  { value: "declined", label: "Declined" },
-  { value: "rejected", label: "Rejected" },
-];
+export const skipStageOptions = recruitmentSkipStageOptions();
 
 export const joiningDocOptions = [
   { value: "pan", label: "PAN card" },
@@ -64,13 +32,7 @@ export const joiningDocOptions = [
 export const requiredJoiningDocTypes = ["pan", "aadhaar", "marksheets", "experience_letters", "salary_slips"] as const;
 
 export function normalizeStage(raw?: string | null) {
-  const s = (raw || "").trim().toLowerCase();
-  if (!s) return null;
-  const normalized = s.replace(/\s+/g, "_");
-  if (normalized === "caf") return "hr_screening";
-  if (normalized === "l2") return "l2_interview";
-  if (normalized === "l1") return "l1_interview";
-  return normalized;
+  return normalizeRecruitmentStage(raw);
 }
 
 export function normalizeOfferStatus(raw?: string | null) {
@@ -78,9 +40,9 @@ export function normalizeOfferStatus(raw?: string | null) {
 }
 
 export function stageLabel(raw?: string | null) {
-  const key = normalizeStage(raw);
-  if (!key) return "?";
-  return stageOrder.find((s) => s.key === key)?.label || key.split("_").join(" ");
+  const label = recruitmentStageLabel(raw);
+  if (!label) return "?";
+  return label;
 }
 
 export function formatDateTime(raw?: string | null) {

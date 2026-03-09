@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { LogOut, Sparkles, User } from "lucide-react";
 import type { InterviewNotificationCounts } from "@/lib/types";
+import { RecruitmentModeToggle } from "@/components/recruitment-mode-toggle";
 
 type Me = {
   email?: string;
@@ -142,6 +143,7 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          <RecruitmentModeToggle />
           <details className="relative hidden lg:block">
             <summary className="cursor-pointer list-none rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/70 px-3 py-2 text-xs font-semibold text-[var(--dim-grey)] backdrop-blur">
               Apps

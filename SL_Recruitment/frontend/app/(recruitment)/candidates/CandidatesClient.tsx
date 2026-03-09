@@ -1,15 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
 import { CandidateListItem, OpeningListItem } from "@/lib/types";
-import { AlertTriangle, CheckCircle2, Filter, XCircle, Bookmark, Eye } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Filter, XCircle, Bookmark, Eye, LayoutGrid, Rows3, MoveRight } from "lucide-react";
 import { parseDateUtc } from "@/lib/datetime";
 import { redirectToLogin } from "@/lib/auth-client";
 import { useToast } from "@/components/ui/toast-provider";
 import { trackUxMetric } from "@/lib/ux-metrics";
+import {
+  defaultTransitionDecision,
+  normalizeRecruitmentStage,
+  recruitmentStageLabel,
+  recruitmentStageOrder,
+  type RecruitmentStageKey,
+} from "@/lib/recruitment-stages";
 
 type Props = {
   initialCandidates: CandidateListItem[];
@@ -55,18 +62,12 @@ const stageLabels: Record<string, string> = {
 };
 
 function normalizeStage(raw?: string | null) {
-  const value = (raw || "").trim().toLowerCase();
-  if (!value) return "";
-  const normalized = value.replace(/\s+/g, "_");
-  if (normalized === "caf") return "hr_screening";
-  if (normalized === "l2") return "l2_interview";
-  if (normalized === "l1") return "l1_interview";
-  return normalized;
+  return normalizeRecruitmentStage(raw) || "";
 }
 
 function stageLabel(raw?: string | null) {
   const key = normalizeStage(raw);
-  return stageLabels[key] || (key ? key.replace(/_/g, " ") : "");
+  return recruitmentStageLabel(key) || stageLabels[key] || (key ? key.replace(/_/g, " ") : "");
 }
 
 function sourceLabel(candidate: CandidateListItem) {
@@ -131,22 +132,24 @@ function isAttentionCandidate(candidate: CandidateListItem) {
   return isHighAge || isHigh || isMedium || isLow || cafPendingTooLong || !!candidate.needs_hr_review;
 }
 
-const STAGE_OPTIONS = [
-  "enquiry",
-  "hr_screening",
-  "l2_shortlist",
-  "l2_interview",
-  "l2_feedback",
-  "sprint",
-  "l1_shortlist",
-  "l1_interview",
-  "l1_feedback",
-  "offer",
-  "joining_documents",
-  "hired",
-  "declined",
-  "rejected",
-];
+const STAGE_OPTIONS = recruitmentStageOrder.map((item) => item.key);
+const BOARD_COLUMNS = recruitmentStageOrder;
+const STAGE_SLA_DAYS: Record<string, number> = {
+  enquiry: 2,
+  hr_screening: 2,
+  l2_shortlist: 2,
+  l2_interview: 3,
+  l2_feedback: 2,
+  sprint: 3,
+  l1_shortlist: 2,
+  l1_interview: 3,
+  l1_feedback: 2,
+  offer: 3,
+  joining_documents: 5,
+  hired: 7,
+  declined: 7,
+  rejected: 7,
+};
 
 type SavedView = {
   id: string;
@@ -185,6 +188,55 @@ async function fetchCandidates(params: {
   return (await res.json()) as CandidateListItem[];
 }
 
+async function transitionCandidateStage(params: {
+  candidateId: number;
+  toStage: RecruitmentStageKey;
+  decision?: string;
+  reason?: string;
+  note?: string;
+}) {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(String(params.candidateId))}/transition`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      to_stage: params.toStage,
+      decision: params.decision || defaultTransitionDecision(params.toStage),
+      reason: params.reason || undefined,
+      note: params.note || "candidate_board_transition",
+    }),
+  });
+  if (res.status === 401) {
+    redirectToLogin();
+    return;
+  }
+  if (!res.ok) throw new Error(await res.text());
+}
+
+function canTransitionCandidate(candidate: CandidateListItem, toStage: RecruitmentStageKey) {
+  const current = normalizeStage(candidate.current_stage);
+  if (!current) return { ok: true as const };
+  if (current === toStage) return { ok: false as const, reason: "Candidate is already in this stage." };
+  const cafLocked = !!candidate.caf_sent_at && !candidate.caf_submitted_at;
+  if (cafLocked && toStage !== "rejected" && toStage !== "declined" && toStage !== "hired") {
+    return { ok: false as const, reason: "CAF is pending. Only terminal transitions are allowed." };
+  }
+  if (toStage === "hr_screening" && !candidate.l2_owner_email) {
+    return { ok: false as const, reason: "GL/L2 owner is required before HR screening." };
+  }
+  return { ok: true as const };
+}
+
+function nextBestAction(candidate: CandidateListItem) {
+  const stage = normalizeStage(candidate.current_stage);
+  if (!candidate.l2_owner_email && stage === "enquiry") return "Assign GL/L2 owner to unlock HR screening.";
+  if (!!candidate.caf_sent_at && !candidate.caf_submitted_at) return "Follow up for CAF submission before progressing.";
+  if (stage === "l2_feedback") return "Capture decision quickly and move to Sprint/Reject.";
+  if (stage === "l1_feedback") return "Create and send offer draft immediately.";
+  if (stage === "offer") return "Follow up on offer decision and timeline.";
+  if ((candidate.ageing_days || 0) >= 3) return "Aging breach risk. Prioritize this candidate today.";
+  return "Continue stage progression based on latest feedback.";
+}
+
 export function CandidatesClient({
   initialCandidates,
   openings,
@@ -199,6 +251,12 @@ export function CandidatesClient({
   const [initialized, setInitialized] = useState(false);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<"table" | "board">("table");
+  const [dragCandidateId, setDragCandidateId] = useState<number | null>(null);
+  const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<number>>(new Set());
+  const [bulkTargetStage, setBulkTargetStage] = useState<RecruitmentStageKey | "">("");
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const tableGrid =
     "grid grid-cols-[minmax(200px,2.4fr)_minmax(140px,1.2fr)_minmax(170px,1.5fr)_minmax(200px,1.9fr)_minmax(80px,0.7fr)_minmax(80px,0.7fr)_minmax(95px,0.8fr)]";
@@ -208,6 +266,19 @@ export function CandidatesClient({
   const [statusView, setStatusView] = useState<"all" | "active" | "hired" | "rejected">("active");
   const [needsAttention, setNeedsAttention] = useState(false);
   const [cafToday, setCafToday] = useState(false);
+
+  const reloadCandidates = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchCandidates({ stage: selectedStages, openingId, statusView });
+      setCandidates(data);
+    } catch (e: any) {
+      setError(e?.message || "Failed to load candidates");
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedStages, openingId, statusView]);
 
   function resetFilters() {
     setSelectedStages([]);
@@ -297,26 +368,19 @@ export function CandidatesClient({
   }, [savedViews]);
 
   useEffect(() => {
-    let cancelled = false;
     const handle = window.setTimeout(() => {
       (async () => {
-        setLoading(true);
-        setError(null);
         try {
-          const data = await fetchCandidates({ stage: selectedStages, openingId, statusView });
-          if (!cancelled) setCandidates(data);
-        } catch (e: any) {
-          if (!cancelled) setError(e?.message || "Failed to load candidates");
+          await reloadCandidates();
         } finally {
-          if (!cancelled) setLoading(false);
+          // no-op
         }
       })();
     }, 150);
     return () => {
-      cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [selectedStages, openingId, statusView]);
+  }, [reloadCandidates]);
 
   useEffect(() => {
     let cancelled = false;
@@ -330,15 +394,9 @@ export function CandidatesClient({
         return;
       }
       inFlight = true;
-      setLoading(true);
-      setError(null);
       try {
-        const data = await fetchCandidates({ stage: selectedStages, openingId, statusView });
-        if (!cancelled) setCandidates(data);
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || "Failed to load candidates");
+        await reloadCandidates();
       } finally {
-        if (!cancelled) setLoading(false);
         inFlight = false;
         if (pending && !cancelled) {
           pending = false;
@@ -355,7 +413,7 @@ export function CandidatesClient({
       cancelled = true;
       source.close();
     };
-  }, [selectedStages, openingId, statusView]);
+  }, [reloadCandidates]);
 
   const filtered = useMemo(() => {
     let current = candidates;
@@ -381,6 +439,18 @@ export function CandidatesClient({
       setSelectedCandidateId(filtered[0].candidate_id);
     }
   }, [filtered, selectedCandidateId]);
+
+  useEffect(() => {
+    setSelectedCandidateIds((prev) => {
+      if (prev.size === 0) return prev;
+      const allowed = new Set(filtered.map((candidate) => candidate.candidate_id));
+      const next = new Set<number>();
+      for (const candidateId of prev) {
+        if (allowed.has(candidateId)) next.add(candidateId);
+      }
+      return next;
+    });
+  }, [filtered]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -444,6 +514,128 @@ export function CandidatesClient({
     () => filtered.filter((candidate) => isAttentionCandidate(candidate)).length,
     [filtered]
   );
+
+  const boardBuckets = useMemo(() => {
+    const grouped = new Map<string, CandidateListItem[]>();
+    for (const column of BOARD_COLUMNS) grouped.set(column.key, []);
+    for (const candidate of filtered) {
+      const key = normalizeStage(candidate.current_stage) || "enquiry";
+      const list = grouped.get(key);
+      if (list) list.push(candidate);
+    }
+    return BOARD_COLUMNS.map((column) => {
+      const items = grouped.get(column.key) || [];
+      const avgAge = items.length
+        ? Math.round(items.reduce((sum, item) => sum + Number(item.ageing_days || 0), 0) / items.length)
+        : 0;
+      const breachCount = items.filter((item) => Number(item.ageing_days || 0) > (STAGE_SLA_DAYS[column.key] || 3)).length;
+      return { column, items, avgAge, breachCount };
+    });
+  }, [filtered]);
+
+  const selectedCandidates = useMemo(
+    () => filtered.filter((candidate) => selectedCandidateIds.has(candidate.candidate_id)),
+    [filtered, selectedCandidateIds]
+  );
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every((candidate) => selectedCandidateIds.has(candidate.candidate_id));
+
+  function toggleCandidateSelection(candidateId: number) {
+    setSelectedCandidateIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(candidateId)) next.delete(candidateId);
+      else next.add(candidateId);
+      return next;
+    });
+  }
+
+  async function moveCandidate(candidate: CandidateListItem, toStage: RecruitmentStageKey, source: "drag_drop" | "bulk") {
+    const eligibility = canTransitionCandidate(candidate, toStage);
+    if (!eligibility.ok) {
+      pushToast({ tone: "warning", title: "Transition blocked", description: eligibility.reason });
+      return false;
+    }
+    const decision = defaultTransitionDecision(toStage);
+    let reason: string | undefined;
+    if (decision === "reject" || decision === "decline") {
+      const prompted = window.prompt("Reason for this terminal transition:", "");
+      if (!prompted || !prompted.trim()) {
+        pushToast({ tone: "warning", title: "Reason required", description: "Transition cancelled." });
+        return false;
+      }
+      reason = prompted.trim();
+    }
+    try {
+      await transitionCandidateStage({
+        candidateId: candidate.candidate_id,
+        toStage,
+        decision,
+        reason,
+        note: source === "drag_drop" ? "candidate_board_drag_drop" : "candidate_bulk_transition",
+      });
+      pushToast({
+        tone: "success",
+        title: `${candidate.name} moved`,
+        description: `Updated to ${stageLabel(toStage)}.`,
+      });
+      trackUxMetric({
+        event_name: source === "drag_drop" ? "candidate_stage_drag_drop" : "candidate_stage_bulk_transition_item",
+        entity_type: "candidate",
+        entity_id: String(candidate.candidate_id),
+        metadata: { to_stage: toStage },
+      });
+      return true;
+    } catch (e: any) {
+      pushToast({
+        tone: "error",
+        title: `Could not move ${candidate.name}`,
+        description: e?.message || "Transition failed.",
+      });
+      return false;
+    } finally {
+      // no-op
+    }
+  }
+
+  async function runBulkTransition() {
+    if (!bulkTargetStage) return;
+    if (!selectedCandidates.length) {
+      pushToast({ tone: "warning", title: "No candidates selected" });
+      return;
+    }
+    setBulkBusy(true);
+    let ok = 0;
+    let failed = 0;
+    for (const candidate of selectedCandidates) {
+      const moved = await moveCandidate(candidate, bulkTargetStage, "bulk");
+      if (moved) ok += 1;
+      else failed += 1;
+    }
+    setBulkBusy(false);
+    await reloadCandidates();
+    pushToast({
+      tone: failed ? "warning" : "success",
+      title: "Bulk transition complete",
+      description: `${ok} moved, ${failed} failed.`,
+    });
+    trackUxMetric({
+      event_name: "candidate_stage_bulk_transition",
+      entity_type: "candidate_bulk",
+      entity_id: String(Date.now()),
+      metadata: { moved: ok, failed, to_stage: bulkTargetStage },
+    });
+    if (!failed) setSelectedCandidateIds(new Set());
+  }
+
+  async function handleDropToStage(toStage: RecruitmentStageKey) {
+    if (!dragCandidateId) return;
+    const candidate = filtered.find((item) => item.candidate_id === dragCandidateId);
+    setDragOverStage(null);
+    setDragCandidateId(null);
+    if (!candidate) return;
+    const moved = await moveCandidate(candidate, toStage, "drag_drop");
+    if (moved) await reloadCandidates();
+  }
 
   return (
     <main className="content-pad space-y-3">
@@ -536,6 +728,30 @@ export function CandidatesClient({
             <XCircle className="h-3.5 w-3.5" />
             Reset
           </button>
+          <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1">
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              className={clsx(
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
+                viewMode === "table" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
+              )}
+            >
+              <Rows3 className="h-3.5 w-3.5" />
+              Table
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("board")}
+              className={clsx(
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
+                viewMode === "board" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
+              )}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Board
+            </button>
+          </div>
         </div>
 
         <div className="mt-2 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-1">
@@ -588,9 +804,52 @@ export function CandidatesClient({
           )}
           <span className="ml-auto text-[11px] text-slate-500">Shortcuts: J/K move · E open profile</span>
         </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-2.5 py-2">
+          <span className="text-[11px] font-semibold text-amber-900">Bulk transition</span>
+          <button
+            type="button"
+            className="rounded-full border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100"
+            onClick={() => {
+              if (allFilteredSelected) {
+                setSelectedCandidateIds(new Set());
+                return;
+              }
+              setSelectedCandidateIds(new Set(filtered.map((candidate) => candidate.candidate_id)));
+            }}
+          >
+            {allFilteredSelected ? "Clear selection" : "Select filtered"}
+          </button>
+          <span className="text-[11px] text-amber-800">{selectedCandidateIds.size} selected</span>
+          <select
+            value={bulkTargetStage}
+            onChange={(e) => setBulkTargetStage((e.target.value || "") as RecruitmentStageKey | "")}
+            className="rounded-lg border border-amber-300 bg-white px-2 py-1 text-[11px] text-slate-700"
+          >
+            <option value="">Move selected to...</option>
+            {BOARD_COLUMNS.map((stage) => (
+              <option key={stage.key} value={stage.key}>
+                {stage.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => {
+              void runBulkTransition();
+            }}
+            disabled={bulkBusy || !bulkTargetStage || selectedCandidateIds.size === 0}
+            className="inline-flex items-center gap-1.5 rounded-full bg-amber-700 px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
+          >
+            <MoveRight className="h-3.5 w-3.5" />
+            {bulkBusy ? "Moving..." : "Run bulk move"}
+          </button>
+          <span className="ml-auto text-[11px] text-amber-800">Reversible: switch to Table/Classic anytime</span>
+        </div>
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
+        {viewMode === "table" ? (
         <div className="overflow-x-auto overflow-y-hidden rounded-2xl border border-slate-200 bg-white/70">
           <div
             className={clsx(
@@ -711,6 +970,110 @@ export function CandidatesClient({
             ) : null}
           </div>
         </div>
+        ) : (
+          <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white/70 p-3">
+            <div className="flex min-w-max gap-3 pb-2">
+              {boardBuckets.map(({ column, items, avgAge, breachCount }) => (
+                <div
+                  key={column.key}
+                  className={clsx(
+                    "w-[290px] shrink-0 rounded-2xl border p-2",
+                    dragOverStage === column.key ? "border-[rgba(231,64,17,0.55)] bg-[rgba(231,64,17,0.07)]" : "border-slate-200 bg-white/80"
+                  )}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDragOverStage(column.key);
+                  }}
+                  onDragLeave={() => setDragOverStage((prev) => (prev === column.key ? null : prev))}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    void handleDropToStage(column.key);
+                  }}
+                >
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold text-slate-900">{column.label}</p>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700">{items.length}</span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-[11px] text-slate-600">
+                      <span>Avg age: {avgAge}d</span>
+                      <span className={clsx("font-semibold", breachCount > 0 ? "text-rose-700" : "text-emerald-700")}>
+                        SLA breach: {breachCount}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 space-y-2">
+                    {items.map((candidate) => {
+                      const selected = selectedCandidateIds.has(candidate.candidate_id);
+                      const canMoveText = (() => {
+                        const check = canTransitionCandidate(candidate, column.key);
+                        return check.ok ? null : check.reason;
+                      })();
+                      return (
+                        <div
+                          key={candidate.candidate_id}
+                          draggable
+                          onDragStart={() => setDragCandidateId(candidate.candidate_id)}
+                          onDragEnd={() => {
+                            setDragCandidateId(null);
+                            setDragOverStage(null);
+                          }}
+                          className={clsx(
+                            "cursor-grab rounded-xl border p-2.5 shadow-sm transition active:cursor-grabbing",
+                            selected ? "border-amber-300 bg-amber-50/80" : "border-slate-200 bg-white hover:bg-slate-50"
+                          )}
+                          onClick={() => {
+                            setSelectedCandidateId(candidate.candidate_id);
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-900">{candidate.name}</p>
+                              <p className="text-[11px] text-slate-600">{candidate.candidate_code}</p>
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() => toggleCandidateSelection(candidate.candidate_id)}
+                              onClick={(event) => event.stopPropagation()}
+                              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[var(--brand-color)] focus:ring-[var(--brand-color)]"
+                              title="Select for bulk action"
+                            />
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", cafChip(candidate).tone)}>
+                              {cafChip(candidate).label}
+                            </span>
+                            <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", chipTone((candidate.ageing_days || 0) > (STAGE_SLA_DAYS[column.key] || 3) ? "red" : "green"))}>
+                              Age {candidate.ageing_days || 0}d
+                            </span>
+                          </div>
+                          {canMoveText ? <p className="mt-2 text-[11px] text-amber-700">{canMoveText}</p> : null}
+                          <p className="mt-2 text-[11px] text-slate-600">{nextBestAction(candidate)}</p>
+                          {canNavigate ? (
+                            <Link
+                              href={`/candidates/${candidate.candidate_id}`}
+                              onClick={(event) => event.stopPropagation()}
+                              className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700 underline underline-offset-2"
+                            >
+                              Open 360
+                            </Link>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                    {items.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-300 bg-white/60 px-2.5 py-4 text-center text-[11px] text-slate-500">
+                        Drop candidate here
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <aside className="space-y-3 xl:sticky xl:top-3">
           <div className="rounded-2xl border border-slate-200 bg-white/75 p-3">
@@ -743,6 +1106,10 @@ export function CandidatesClient({
                     <p className="text-slate-500">Status</p>
                     <p className="text-right font-medium capitalize text-slate-800">{selectedCandidate.status.split("_").join(" ")}</p>
                   </div>
+                </div>
+                <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50/80 p-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-amber-900">Next best action</p>
+                  <p className="mt-1 text-[11px] text-amber-900">{nextBestAction(selectedCandidate)}</p>
                 </div>
                 {canViewBasicDetails ? (
                   <div className="mt-2 rounded-xl border border-slate-200 bg-white p-2.5">
