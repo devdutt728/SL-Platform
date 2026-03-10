@@ -16,7 +16,10 @@ type BuildStageButtonsParams = {
   canManageCandidate360: boolean;
   canSchedule: boolean;
   canAccessOffers: boolean;
+  canSkip: boolean;
   cafLocked: boolean;
+  hasL2FeedbackSubmitted: boolean;
+  hasL1FeedbackSubmitted: boolean;
   candidateL2OwnerEmail?: string | null;
   sprintAssignDisabled: boolean;
   hasApprovedSprint: boolean;
@@ -38,7 +41,10 @@ export function buildCandidate360StageButtons({
   canManageCandidate360,
   canSchedule,
   canAccessOffers,
+  canSkip,
   cafLocked,
+  hasL2FeedbackSubmitted,
+  hasL1FeedbackSubmitted,
   candidateL2OwnerEmail,
   sprintAssignDisabled,
   hasApprovedSprint,
@@ -170,19 +176,22 @@ export function buildCandidate360StageButtons({
     return actions;
   }
   if (current === "l2_feedback") {
+    const feedbackPending = !hasL2FeedbackSubmitted;
     return [
       {
-        label: "Advance to sprint",
+        label: feedbackPending ? "Advance to sprint (locked)" : "Advance to sprint",
         tone: "btn-action-success",
         icon: <CheckCircle2 className="h-4 w-4" />,
         intent: "advance",
+        disabled: feedbackPending,
         action: () => handleTransition("sprint", "advance"),
       },
       {
-        label: "Reject after L2 feedback",
+        label: feedbackPending ? "Reject after L2 feedback (locked)" : "Reject after L2 feedback",
         tone: "btn-action-danger",
         icon: <XCircle className="h-4 w-4" />,
         intent: "reject",
+        disabled: feedbackPending,
         action: () => handleTransition("rejected", "reject"),
       },
       {
@@ -251,19 +260,22 @@ export function buildCandidate360StageButtons({
     return actions;
   }
   if (current === "l1_feedback") {
+    const feedbackPending = !hasL1FeedbackSubmitted;
     return [
       {
-        label: "Advance to offer",
+        label: feedbackPending ? "Advance to offer (locked)" : "Advance to offer",
         tone: "btn-action-success",
         icon: <CheckCircle2 className="h-4 w-4" />,
         intent: "advance",
+        disabled: feedbackPending,
         action: () => handleTransition("offer", "advance"),
       },
       {
-        label: "Reject after L1 feedback",
+        label: feedbackPending ? "Reject after L1 feedback (locked)" : "Reject after L1 feedback",
         tone: "btn-action-danger",
         icon: <XCircle className="h-4 w-4" />,
         intent: "reject",
+        disabled: feedbackPending,
         action: () => handleTransition("rejected", "reject"),
       },
       {
@@ -371,13 +383,15 @@ export function buildCandidate360StageButtons({
           action: () => handleReviseOffer(latestOfferId),
         });
       }
-      actions.push({
-        label: "Reopen stage to offer",
-        tone: "btn-action-neutral",
-        icon: <CheckCircle2 className="h-4 w-4" />,
-        intent: "advance",
-        action: () => handleTransition("offer", "skip"),
-      });
+      if (canSkip) {
+        actions.push({
+          label: "Reopen stage to offer",
+          tone: "btn-action-neutral",
+          icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "advance",
+          action: () => handleTransition("offer", "skip"),
+        });
+      }
     }
     return actions;
   }

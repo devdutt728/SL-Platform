@@ -9,7 +9,7 @@ type Props = {
   onToggle: () => void;
   events: CandidateFull["events"];
   bestEffortFromMeta: (meta: Record<string, unknown>, key: string) => string;
-  formatDateTime: (raw?: string | null) => string;
+  formatEventDateTime: (raw?: string | null) => string;
   chipTone: (kind: "neutral" | "green" | "amber" | "red" | "blue") => string;
 };
 
@@ -19,7 +19,7 @@ export function Candidate360TimelineSection({
   onToggle,
   events,
   bestEffortFromMeta,
-  formatDateTime,
+  formatEventDateTime,
   chipTone,
 }: Props) {
   return (
@@ -54,7 +54,7 @@ export function Candidate360TimelineSection({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-slate-900">{title}</p>
-                    <p className="mt-1 text-xs text-slate-600">{formatDateTime(ev.created_at)} · {actor}</p>
+                    <p className="mt-1 text-xs text-slate-600">{formatEventDateTime(ev.created_at)} · {actor}</p>
                   </div>
                   <Chip className={chipTone("neutral")}>{ev.action_type}</Chip>
                 </div>

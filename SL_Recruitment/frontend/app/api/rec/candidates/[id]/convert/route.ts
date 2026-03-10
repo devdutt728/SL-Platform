@@ -4,11 +4,13 @@ import { authHeaderFromCookie } from "@/lib/auth-server";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function POST(_request: NextRequest, context: Params) {
+export async function POST(request: NextRequest, context: Params) {
   const params = await context.params;
+  const body = await request.text();
   const res = await fetch(backendUrl(`/rec/candidates/${encodeURIComponent(params.id)}/convert`), {
     method: "POST",
-    headers: { ...await authHeaderFromCookie() },
+    headers: { "content-type": request.headers.get("content-type") || "application/json", ...await authHeaderFromCookie() },
+    body,
   });
   const data = await res.text();
   return new NextResponse(data, {

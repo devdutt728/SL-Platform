@@ -241,6 +241,35 @@ export type CandidateEvent = {
   created_at: string;
 };
 
+export type CandidateCommunicationLink = {
+  label: string;
+  url: string;
+};
+
+export type CandidateCommunicationItem = {
+  event_id: number;
+  candidate_id: number;
+  candidate_code: string;
+  candidate_name: string;
+  candidate_email?: string | null;
+  opening_title?: string | null;
+  action_type: string;
+  email_type?: string | null;
+  subject?: string | null;
+  status?: string | null;
+  recipients_to: string[];
+  recipients_cc: string[];
+  links: CandidateCommunicationLink[];
+  created_at: string;
+};
+
+export type CandidateCommunicationFeed = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: CandidateCommunicationItem[];
+};
+
 export type Interview = {
   candidate_interview_id: number;
   candidate_id: number;
@@ -704,6 +733,30 @@ export type CandidateOffer = {
   candidate_name?: string | null;
   candidate_code?: string | null;
   opening_title?: string | null;
+};
+
+export type CandidateEmployeeProfileInput = {
+  person_code: string;
+  personal_id?: string | null;
+  first_name: string;
+  last_name?: string | null;
+  email: string;
+  mobile_number?: string | null;
+  role_id?: number | null;
+  grade_id?: number | null;
+  department_id?: number | null;
+  manager_id?: string | null;
+  employment_type: string;
+  join_date?: string | null;
+  exit_date?: string | null;
+  status?: string | null;
+  source_system?: string | null;
+  full_name?: string | null;
+  display_name?: string | null;
+};
+
+export type CandidateConvertPayload = {
+  employee_profile: CandidateEmployeeProfileInput;
 };
 
 export type OfferPublic = {

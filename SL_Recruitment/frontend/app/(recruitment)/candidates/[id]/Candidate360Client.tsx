@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { CandidateAssessment, CandidateFull, JoiningDoc, Screening } from "@/lib/types";
+import { CandidateAssessment, CandidateConvertPayload, CandidateFull, JoiningDoc, Screening } from "@/lib/types";
 import { ExternalLink } from "lucide-react";
 import { defaultTransitionDecision, normalizeRecruitmentStage } from "@/lib/recruitment-stages";
 import { DeleteCandidateButton } from "./DeleteCandidateButton";
@@ -11,6 +11,7 @@ import { ActionDialog } from "@/components/ui/action-dialog";
 import { useToast } from "@/components/ui/toast-provider";
 import * as candidate360Api from "./candidate360.api";
 import { Candidate360HtmlPreviewModal } from "./Candidate360HtmlPreviewModal";
+import { Candidate360ConvertDialog, type CandidateConvertFormState } from "./Candidate360ConvertDialog";
 import { Candidate360OfferSection } from "./Candidate360OfferSection";
 import { Chip } from "./Candidate360Primitives";
 import { Candidate360TimelineSection } from "./Candidate360TimelineSection";
@@ -36,6 +37,7 @@ import {
   formatBytes,
   formatDate,
   formatDateTime,
+  formatEventDateTime,
   formatInviteExpiry,
   formatMoney,
   formatRelativeDue,
@@ -95,6 +97,57 @@ const fetchCandidateSprints = candidate360Api.fetchCandidateSprints;
 const deleteCandidateSprint = candidate360Api.deleteCandidateSprint;
 const fetchJoiningDocs = candidate360Api.fetchJoiningDocs;
 const uploadJoiningDoc = candidate360Api.uploadJoiningDoc;
+
+const STUDIOLOTUS_EMAIL_DOMAIN = "studiolotus.in";
+
+function normalizeOptionalText(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function parseOptionalInteger(value: string, label: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`${label} must be a whole number.`);
+  }
+  return parsed;
+}
+
+function splitFullName(name: string): { firstName: string; lastName: string } {
+  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+  const firstName = parts[0] || "";
+  const lastName = parts.length > 1 ? parts.slice(1).join(" ") : "";
+  return { firstName, lastName };
+}
+
+function looksLikeIntern(value: string | null | undefined): boolean {
+  return (value || "").toLowerCase().includes("intern");
+}
+
+function emptyConvertForm(): CandidateConvertFormState {
+  return {
+    person_code: "",
+    personal_id: "",
+    first_name: "",
+    last_name: "",
+    email: "",
+    mobile_number: "",
+    role_id: "",
+    grade_id: "",
+    department_id: "",
+    manager_id: "",
+    employment_type: "",
+    join_date: "",
+    exit_date: "",
+    status: "working",
+    source_system: "recruitment",
+    full_name: "",
+    display_name: "",
+  };
+}
+
 export function Candidate360Client({
   candidateId,
   initial,
@@ -131,6 +184,10 @@ export function Candidate360Client({
   const [joiningDocsNotice, setJoiningDocsNotice] = useState<string | null>(null);
   const [joiningDocType, setJoiningDocType] = useState(joiningDocOptions[0]?.value || "pan");
   const [joiningDocFile, setJoiningDocFile] = useState<File | null>(null);
+  const [convertDialogOpen, setConvertDialogOpen] = useState(false);
+  const [convertDialogBusy, setConvertDialogBusy] = useState(false);
+  const [convertDialogError, setConvertDialogError] = useState<string | null>(null);
+  const [convertForm, setConvertForm] = useState<CandidateConvertFormState>(emptyConvertForm);
   const [sprintDeleteBusy, setSprintDeleteBusy] = useState(false);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const screeningRef = useRef<HTMLDivElement | null>(null);
@@ -291,6 +348,114 @@ export function Candidate360Client({
     pushToast,
   });
 
+  const openConvertDialog = useCallback(() => {
+    const splitFromName = splitFullName(candidate.name || "");
+    const firstName = (candidate.first_name || splitFromName.firstName || "").trim();
+    const lastName = (candidate.last_name || splitFromName.lastName || "").trim();
+    const fullName = (candidate.name || [firstName, lastName].filter(Boolean).join(" ")).trim();
+    const internByRole = looksLikeIntern(latestOffer?.designation_title) || looksLikeIntern(candidate.opening_title);
+    const offerGradeId = latestOffer?.grade_id_platform != null ? String(latestOffer.grade_id_platform) : "";
+    const offerJoinDate = latestOffer?.joining_date ? latestOffer.joining_date.slice(0, 10) : "";
+
+    setConvertForm({
+      person_code: (candidate.candidate_code || "").trim(),
+      personal_id: "",
+      first_name: firstName,
+      last_name: lastName,
+      email: (candidate.email || "").trim().toLowerCase(),
+      mobile_number: (candidate.phone || "").trim(),
+      role_id: offerGradeId,
+      grade_id: offerGradeId,
+      department_id: "",
+      manager_id: "",
+      employment_type: internByRole ? "intern" : "permanent",
+      join_date: offerJoinDate,
+      exit_date: "",
+      status: "working",
+      source_system: "recruitment",
+      full_name: fullName,
+      display_name: fullName,
+    });
+    setConvertDialogError(null);
+    setConvertDialogOpen(true);
+  }, [
+    candidate.candidate_code,
+    candidate.email,
+    candidate.first_name,
+    candidate.last_name,
+    candidate.name,
+    candidate.opening_title,
+    candidate.phone,
+    latestOffer?.designation_title,
+    latestOffer?.grade_id_platform,
+    latestOffer?.joining_date,
+  ]);
+
+  const convertInternRoleDetected = useMemo(() => {
+    return looksLikeIntern(convertForm.employment_type) || looksLikeIntern(latestOffer?.designation_title);
+  }, [convertForm.employment_type, latestOffer?.designation_title]);
+
+  const convertRequiresStudioLotusDomain = useMemo(() => {
+    const employmentType = (convertForm.employment_type || "").toLowerCase();
+    const permanent = employmentType.includes("permanent");
+    return permanent && !convertInternRoleDetected;
+  }, [convertForm.employment_type, convertInternRoleDetected]);
+
+  const handleSubmitConvertDialog = useCallback(async () => {
+    setConvertDialogBusy(true);
+    setConvertDialogError(null);
+    try {
+      const personCode = (convertForm.person_code || "").trim();
+      const firstName = (convertForm.first_name || "").trim();
+      const employmentType = (convertForm.employment_type || "").trim();
+      const email = (convertForm.email || "").trim().toLowerCase();
+      const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+      if (!personCode) throw new Error("Employee ID is required.");
+      if (!firstName) throw new Error("First name is required.");
+      if (!employmentType) throw new Error("Employment type is required.");
+      if (!email || !emailValid) throw new Error("Enter a valid email address.");
+      if (convertRequiresStudioLotusDomain && !email.endsWith(`@${STUDIOLOTUS_EMAIL_DOMAIN}`)) {
+        throw new Error("Permanent employees must use a @studiolotus.in email.");
+      }
+
+      const lastName = normalizeOptionalText(convertForm.last_name);
+      const fallbackFullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+      const fullName = normalizeOptionalText(convertForm.full_name) || fallbackFullName;
+      const displayName = normalizeOptionalText(convertForm.display_name) || fullName || firstName;
+
+      const payload: CandidateConvertPayload = {
+        employee_profile: {
+          person_code: personCode,
+          personal_id: normalizeOptionalText(convertForm.personal_id),
+          first_name: firstName,
+          last_name: lastName,
+          email,
+          mobile_number: normalizeOptionalText(convertForm.mobile_number),
+          role_id: parseOptionalInteger(convertForm.role_id, "Role ID"),
+          grade_id: parseOptionalInteger(convertForm.grade_id, "Grade ID"),
+          department_id: parseOptionalInteger(convertForm.department_id, "Department ID"),
+          manager_id: normalizeOptionalText(convertForm.manager_id),
+          employment_type: employmentType,
+          join_date: normalizeOptionalText(convertForm.join_date),
+          exit_date: normalizeOptionalText(convertForm.exit_date),
+          status: normalizeOptionalText(convertForm.status) || "working",
+          source_system: normalizeOptionalText(convertForm.source_system) || "recruitment",
+          full_name: fullName || null,
+          display_name: displayName || null,
+        },
+      };
+
+      await handleConvertCandidate(payload);
+      setConvertDialogOpen(false);
+      pushToast({ tone: "success", title: "Candidate marked as joined" });
+    } catch (e: any) {
+      setConvertDialogError(e?.message || "Conversion failed.");
+    } finally {
+      setConvertDialogBusy(false);
+    }
+  }, [convertForm, convertRequiresStudioLotusDomain, handleConvertCandidate, pushToast]);
+
   const {
     candidateSprints,
     setCandidateSprints,
@@ -421,6 +586,7 @@ export function Candidate360Client({
     canSchedule,
     canSkip,
     currentStageKey,
+    refreshAll,
     candidateL2OwnerEmail: candidate.l2_owner_email,
     candidateL2OwnerName: candidate.l2_owner_name,
     searchParams,
@@ -434,6 +600,16 @@ export function Candidate360Client({
     pushToast,
   });
 
+  const hasL2FeedbackSubmitted = useMemo(() => {
+    const list = interviews || [];
+    return list.some((item) => item.feedback_submitted && item.round_type.toLowerCase().includes("l2"));
+  }, [interviews]);
+
+  const hasL1FeedbackSubmitted = useMemo(() => {
+    const list = interviews || [];
+    return list.some((item) => item.feedback_submitted && item.round_type.toLowerCase().includes("l1"));
+  }, [interviews]);
+
   const l2FeedbackEvent = useMemo(() => {
     const list = interviews || [];
     const submitted = list
@@ -446,7 +622,13 @@ export function Candidate360Client({
     const matches = events.filter((ev) => {
       if (ev.action_type !== "interview_feedback_submitted") return false;
       const roundType = (ev.meta_json as { round_type?: unknown })?.round_type;
-      return typeof roundType === "string" && roundType.toLowerCase().includes("l2");
+      const feedbackSubmitted = (ev.meta_json as { feedback_submitted?: unknown })?.feedback_submitted;
+      const isFeedbackSubmitted =
+        feedbackSubmitted === true ||
+        feedbackSubmitted === "true" ||
+        feedbackSubmitted === 1 ||
+        feedbackSubmitted === "1";
+      return isFeedbackSubmitted && typeof roundType === "string" && roundType.toLowerCase().includes("l2");
     });
     if (matches.length === 0) return null;
     return matches.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
@@ -464,7 +646,13 @@ export function Candidate360Client({
     const matches = events.filter((ev) => {
       if (ev.action_type !== "interview_feedback_submitted") return false;
       const roundType = (ev.meta_json as { round_type?: unknown })?.round_type;
-      return typeof roundType === "string" && roundType.toLowerCase().includes("l1");
+      const feedbackSubmitted = (ev.meta_json as { feedback_submitted?: unknown })?.feedback_submitted;
+      const isFeedbackSubmitted =
+        feedbackSubmitted === true ||
+        feedbackSubmitted === "true" ||
+        feedbackSubmitted === 1 ||
+        feedbackSubmitted === "1";
+      return isFeedbackSubmitted && typeof roundType === "string" && roundType.toLowerCase().includes("l1");
     });
     if (matches.length === 0) return null;
     return matches.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
@@ -528,6 +716,7 @@ export function Candidate360Client({
           await deleteCandidateSprint(candidateSprintId);
           const list = await fetchCandidateSprints(candidateId);
           setCandidateSprints(list);
+          await refreshAll();
           if (deleted) {
             setLastSprintNotice({
               template_name: deleted.template_name,
@@ -572,7 +761,10 @@ export function Candidate360Client({
     canManageCandidate360,
     canSchedule,
     canAccessOffers,
+    canSkip,
     cafLocked,
+    hasL2FeedbackSubmitted,
+    hasL1FeedbackSubmitted,
     candidateL2OwnerEmail: candidate.l2_owner_email,
     sprintAssignDisabled,
     hasApprovedSprint,
@@ -582,7 +774,7 @@ export function Candidate360Client({
     latestOfferStatus: latestOffer?.offer_status || null,
     latestOfferId: latestOffer?.candidate_offer_id || null,
     handleTransition,
-    handleConvertCandidate,
+    handleConvertCandidate: openConvertDialog,
     handleReviseOffer,
     focusSection: (section) => {
       if (section === "screening") {
@@ -611,10 +803,10 @@ export function Candidate360Client({
   const stageProgressSteps = useMemo(() => {
     const hasStage = (key: string) => data.stages.some((stage) => normalizeStage(stage.stage_name) === key);
     const status = (candidate.status || "").toLowerCase();
-    const offerStatus = (latestOffer?.offer_status || "").toLowerCase();
-    const isDeclined = status === "declined" || offerStatus === "declined" || hasStage("declined");
+    const isDeclined = status === "declined" || hasStage("declined");
     const isRejected = status === "rejected" || hasStage("rejected");
-    const isAccepted = offerStatus === "accepted" || hasStage("joining_documents") || hasStage("hired") || status === "hired";
+    const isAccepted =
+      (latestOffer?.offer_status || "").toLowerCase() === "accepted" || hasStage("joining_documents") || hasStage("hired") || status === "hired";
 
     let steps = [...pipelineStages];
     if (isRejected) {
@@ -638,21 +830,44 @@ export function Candidate360Client({
     if (cafLocked) {
       actions.push("Collect CAF submission before moving to non-terminal stages.");
     }
-    if (currentStageKey === "l2_feedback") {
+    if (currentStageKey === "l2_feedback" && !hasL2FeedbackSubmitted) {
+      actions.push("Submit at least one L2 interview feedback to unlock stage transitions.");
+    }
+    if (currentStageKey === "l2_feedback" && hasL2FeedbackSubmitted) {
       actions.push("Finalize L2 decision and move to Sprint or Reject.");
     }
     if (currentStageKey === "sprint" && !hasApprovedSprint) {
       actions.push("Get at least one approved sprint before L1 shortlist.");
     }
+    if (currentStageKey === "l1_feedback" && !hasL1FeedbackSubmitted) {
+      actions.push("Submit at least one L1 interview feedback to unlock Offer/Reject actions.");
+    }
+    if (currentStageKey === "l1_feedback" && hasL1FeedbackSubmitted) {
+      actions.push("Finalize L1 decision and move to Offer or Reject.");
+    }
     if (currentStageKey === "offer" && canAccessOffers) {
-      actions.push("Push offer decision follow-up to close this candidate.");
+      if ((latestOffer?.offer_status || "").toLowerCase() === "declined") {
+        actions.push("Candidate declined latest offer. Negotiate and create revised draft, or close explicitly as Rejected with a reason.");
+      } else {
+        actions.push("Push offer decision follow-up to close this candidate.");
+      }
     }
     if (currentStageKey === "joining_documents" && !joiningDocsComplete) {
       actions.push("Collect mandatory joining docs to unlock final hire.");
     }
     if (!actions.length) actions.push("Continue progression based on latest interview/sprint feedback.");
     return actions;
-  }, [candidate.l2_owner_email, canAccessOffers, cafLocked, currentStageKey, hasApprovedSprint, joiningDocsComplete]);
+  }, [
+    candidate.l2_owner_email,
+    canAccessOffers,
+    cafLocked,
+    currentStageKey,
+    hasApprovedSprint,
+    hasL1FeedbackSubmitted,
+    hasL2FeedbackSubmitted,
+    joiningDocsComplete,
+    latestOffer?.offer_status,
+  ]);
 
   const pipelineReplay = useMemo(() => {
     return [...(data.events || [])]
@@ -739,6 +954,7 @@ export function Candidate360Client({
         docTone={docTone}
         chipTone={chipTone}
         formatDateTime={formatDateTime}
+        formatEventDateTime={formatEventDateTime}
         formatDate={formatDate}
         onExpandAll={() => setAllSections(false)}
         onCollapseAll={() => setAllSections(true)}
@@ -804,7 +1020,7 @@ export function Candidate360Client({
             onToggle={() => toggleSection("timeline")}
             events={data.events}
             bestEffortFromMeta={bestEffortFromMeta}
-            formatDateTime={formatDateTime}
+            formatEventDateTime={formatEventDateTime}
             chipTone={chipTone}
           />
 
@@ -1038,7 +1254,7 @@ export function Candidate360Client({
               handleSendOffer,
               handleAdminDecision,
               handleReviseOffer,
-              handleConvertCandidate,
+              handleConvertCandidate: openConvertDialog,
               handleSaveDraftOverrides,
               handleCreateOffer,
             }}
@@ -1059,6 +1275,25 @@ export function Candidate360Client({
         title={offerPreviewTitle}
         html={offerPreviewHtml}
         onClose={() => setOfferPreviewOpen(false)}
+      />
+      <Candidate360ConvertDialog
+        open={convertDialogOpen}
+        busy={convertDialogBusy || offersBusy}
+        error={convertDialogError}
+        requiresStudioLotusDomain={convertRequiresStudioLotusDomain}
+        form={convertForm}
+        onChange={(patch) => {
+          setConvertForm((prev) => ({ ...prev, ...patch }));
+          if (convertDialogError) setConvertDialogError(null);
+        }}
+        onClose={() => {
+          if (convertDialogBusy || offersBusy) return;
+          setConvertDialogOpen(false);
+          setConvertDialogError(null);
+        }}
+        onSubmit={() => {
+          void handleSubmitConvertDialog();
+        }}
       />
       <ActionDialog
         open={dialog.open}

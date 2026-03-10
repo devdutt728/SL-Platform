@@ -36,7 +36,13 @@ from app.models.opening import RecOpening
 from app.models.screening import RecCandidateScreening
 from app.models.stage import RecCandidateStage
 from app.models.interview import RecCandidateInterview
-from app.schemas.candidate import CandidateCreate, CandidateDetailOut, CandidateListItem, CandidateUpdate
+from app.schemas.candidate import (
+    CandidateConvertIn,
+    CandidateCreate,
+    CandidateDetailOut,
+    CandidateListItem,
+    CandidateUpdate,
+)
 from app.schemas.event import CandidateEventOut
 from app.schemas.offer import OfferCreateIn, OfferOut
 from app.schemas.candidate_full import CandidateFullOut
@@ -82,6 +88,15 @@ INGEST_ALLOWED_STATES = {
 }
 INGEST_DEFAULT_TRANSIENT_HINT = "Retry later. If the issue repeats, inspect payload and external dependencies."
 INGEST_DEFAULT_PERMANENT_HINT = "Fix the row data and retry, or mark resolved if no action is needed."
+COMMUNICATION_ACTION_TYPES = {"email_sent", "caf_link_generated", "assessment_link_generated"}
+COMMUNICATION_LINK_SEGMENTS = (
+    "/caf/",
+    "/assessment/",
+    "/offer/",
+    "/sprint/",
+    "/joining/",
+    "/interview/slots/",
+)
 
 
 def _strip_optional(value: str | None) -> str | None:
@@ -428,6 +443,35 @@ class IngestRetryTransientIn(BaseModel):
 class IngestMarkResolvedIn(BaseModel):
     candidate_ingest_attempt_id: int = Field(..., ge=1)
     note: str | None = None
+
+
+class CandidateCommunicationLinkOut(BaseModel):
+    label: str
+    url: str
+
+
+class CandidateCommunicationItemOut(BaseModel):
+    event_id: int
+    candidate_id: int
+    candidate_code: str
+    candidate_name: str
+    candidate_email: str | None = None
+    opening_title: str | None = None
+    action_type: str
+    email_type: str | None = None
+    subject: str | None = None
+    status: str | None = None
+    recipients_to: list[str] = Field(default_factory=list)
+    recipients_cc: list[str] = Field(default_factory=list)
+    links: list[CandidateCommunicationLinkOut] = Field(default_factory=list)
+    created_at: datetime
+
+
+class CandidateCommunicationFeedOut(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    items: list[CandidateCommunicationItemOut]
 
 
 def _candidate_code(candidate_id: int) -> str:
@@ -1343,6 +1387,140 @@ async def _latest_email_meta(
                 continue
         return meta
     return None
+
+
+def _clean_string_list(value: object) -> list[str]:
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list):
+        out: list[str] = []
+        for item in value:
+            text = _strip_optional(str(item or ""))
+            if text:
+                out.append(text)
+        return out
+    return []
+
+
+def _is_public_link_value(raw: str) -> bool:
+    lowered = raw.lower()
+    return any(segment in lowered for segment in COMMUNICATION_LINK_SEGMENTS)
+
+
+def _link_label_from_key(key: str) -> str:
+    normalized = key.replace("_", " ").replace("-", " ").strip()
+    if not normalized:
+        return "Public link"
+    return normalized.title()
+
+
+def _extract_communication_links(
+    *,
+    action_type: str,
+    meta: dict,
+    offer_public_tokens: dict[int, str],
+    sprint_public_tokens: dict[int, str],
+) -> list[CandidateCommunicationLinkOut]:
+    links: list[CandidateCommunicationLinkOut] = []
+    seen_urls: set[str] = set()
+
+    def add_link(label: str, raw_url: str | None):
+        cleaned = _strip_optional(raw_url)
+        if not cleaned:
+            return
+        if cleaned.startswith("/"):
+            if not _is_public_link_value(cleaned):
+                return
+            cleaned = build_public_path(cleaned)
+        elif cleaned.startswith("http://") or cleaned.startswith("https://"):
+            if not _is_public_link_value(cleaned):
+                return
+        else:
+            return
+        if cleaned in seen_urls:
+            return
+        seen_urls.add(cleaned)
+        links.append(CandidateCommunicationLinkOut(label=label, url=cleaned))
+
+    caf_token = _strip_optional(str(meta.get("caf_token") or ""))
+    if caf_token:
+        add_link("CAF form", build_public_path(f"/caf/{caf_token}"))
+
+    assessment_token = _strip_optional(str(meta.get("assessment_token") or ""))
+    if assessment_token:
+        add_link("Assessment form", build_public_path(f"/assessment/{assessment_token}"))
+
+    offer_raw = _strip_optional(str(meta.get("offer_id") or ""))
+    if offer_raw:
+        try:
+            offer_id = int(offer_raw)
+        except Exception:
+            offer_id = None
+        if offer_id is not None and offer_id in offer_public_tokens:
+            token = offer_public_tokens[offer_id]
+            add_link("Offer page", build_public_path(f"/offer/{token}"))
+
+    sprint_raw = _strip_optional(str(meta.get("sprint_id") or ""))
+    if sprint_raw:
+        try:
+            sprint_id = int(sprint_raw)
+        except Exception:
+            sprint_id = None
+        if sprint_id is not None and sprint_id in sprint_public_tokens:
+            token = sprint_public_tokens[sprint_id]
+            add_link("Sprint page", build_public_path(f"/sprint/{token}"))
+
+    if action_type == "caf_link_generated" and caf_token:
+        add_link("CAF form", build_public_path(f"/caf/{caf_token}"))
+    if action_type == "assessment_link_generated" and assessment_token:
+        add_link("Assessment form", build_public_path(f"/assessment/{assessment_token}"))
+
+    for key, value in meta.items():
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if not text:
+            continue
+        add_link(_link_label_from_key(key), text)
+
+    return links
+
+
+async def _load_offer_public_tokens(session: AsyncSession, offer_ids: set[int]) -> dict[int, str]:
+    if not offer_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(RecCandidateOffer.candidate_offer_id, RecCandidateOffer.public_token).where(
+                RecCandidateOffer.candidate_offer_id.in_(list(offer_ids))
+            )
+        )
+    ).all()
+    out: dict[int, str] = {}
+    for offer_id, token in rows:
+        clean_token = _strip_optional(token)
+        if clean_token:
+            out[int(offer_id)] = clean_token
+    return out
+
+
+async def _load_sprint_public_tokens(session: AsyncSession, sprint_ids: set[int]) -> dict[int, str]:
+    if not sprint_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(RecCandidateSprint.candidate_sprint_id, RecCandidateSprint.public_token).where(
+                RecCandidateSprint.candidate_sprint_id.in_(list(sprint_ids))
+            )
+        )
+    ).all()
+    out: dict[int, str] = {}
+    for sprint_id, token in rows:
+        clean_token = _strip_optional(token)
+        if clean_token:
+            out[int(sprint_id)] = clean_token
+    return out
 
 
 def _attempt_row_identity(attempt: RecCandidateIngestAttempt) -> str:
@@ -3701,6 +3879,129 @@ async def list_candidates(
     ]
 
 
+@router.get("/communications", response_model=CandidateCommunicationFeedOut)
+async def list_candidate_communications(
+    q: str | None = Query(default=None),
+    candidate_id: int | None = Query(default=None),
+    action_type: str | None = Query(default=None),
+    email_type: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(deps.get_db_session),
+    _user: UserContext = Depends(require_superadmin()),
+):
+    normalized_query = _strip_optional(q)
+    normalized_action_type = _strip_optional(action_type)
+    normalized_email_type = _strip_optional(email_type)
+
+    event_filters = [RecCandidateEvent.action_type.in_(list(COMMUNICATION_ACTION_TYPES))]
+    if candidate_id is not None:
+        event_filters.append(RecCandidateEvent.candidate_id == candidate_id)
+    if normalized_action_type:
+        normalized_action_type = normalized_action_type.lower()
+        if normalized_action_type not in COMMUNICATION_ACTION_TYPES:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported action_type filter.")
+        event_filters.append(RecCandidateEvent.action_type == normalized_action_type)
+    if normalized_email_type:
+        email_pattern = f'%\"email_type\":\"{normalized_email_type.lower()}\"%'
+        event_filters.append(func.lower(func.coalesce(RecCandidateEvent.meta_json, "")).like(email_pattern))
+
+    if normalized_query:
+        like = f"%{normalized_query.lower()}%"
+        event_filters.append(
+            or_(
+                func.lower(func.coalesce(RecCandidate.full_name, "")).like(like),
+                func.lower(func.coalesce(RecCandidate.candidate_code, "")).like(like),
+                func.lower(func.coalesce(RecCandidate.email, "")).like(like),
+                func.lower(func.coalesce(RecCandidateEvent.action_type, "")).like(like),
+                func.lower(func.coalesce(RecCandidateEvent.meta_json, "")).like(like),
+            )
+        )
+
+    base_query = (
+        select(
+            RecCandidateEvent,
+            RecCandidate.full_name,
+            RecCandidate.candidate_code,
+            RecCandidate.email,
+            RecOpening.title,
+        )
+        .join(RecCandidate, RecCandidate.candidate_id == RecCandidateEvent.candidate_id)
+        .outerjoin(RecOpening, RecOpening.opening_id == RecCandidate.opening_id)
+        .where(*event_filters)
+    )
+
+    total = (
+        await session.execute(
+            select(func.count())
+            .select_from(RecCandidateEvent)
+            .join(RecCandidate, RecCandidate.candidate_id == RecCandidateEvent.candidate_id)
+            .outerjoin(RecOpening, RecOpening.opening_id == RecCandidate.opening_id)
+            .where(*event_filters)
+        )
+    ).scalar_one()
+
+    rows = (
+        await session.execute(
+            base_query
+            .order_by(RecCandidateEvent.created_at.desc(), RecCandidateEvent.candidate_event_id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+
+    parsed_meta: dict[int, dict] = {}
+    offer_ids: set[int] = set()
+    sprint_ids: set[int] = set()
+    for event, _name, _code, _email, _opening_title in rows:
+        meta = _event_meta_to_dict(event.meta_json)
+        parsed_meta[event.candidate_event_id] = meta
+        offer_raw = _strip_optional(str(meta.get("offer_id") or ""))
+        if offer_raw:
+            try:
+                offer_ids.add(int(offer_raw))
+            except Exception:
+                pass
+        sprint_raw = _strip_optional(str(meta.get("sprint_id") or ""))
+        if sprint_raw:
+            try:
+                sprint_ids.add(int(sprint_raw))
+            except Exception:
+                pass
+
+    offer_public_tokens = await _load_offer_public_tokens(session, offer_ids)
+    sprint_public_tokens = await _load_sprint_public_tokens(session, sprint_ids)
+
+    items: list[CandidateCommunicationItemOut] = []
+    for event, full_name, candidate_code, candidate_email, opening_title in rows:
+        meta = parsed_meta.get(event.candidate_event_id, {})
+        items.append(
+            CandidateCommunicationItemOut(
+                event_id=event.candidate_event_id,
+                candidate_id=event.candidate_id,
+                candidate_code=candidate_code or _candidate_code(event.candidate_id),
+                candidate_name=full_name or "Candidate",
+                candidate_email=candidate_email,
+                opening_title=opening_title,
+                action_type=event.action_type,
+                email_type=_strip_optional(str(meta.get("email_type") or "")),
+                subject=_strip_optional(str(meta.get("subject") or "")),
+                status=_strip_optional(str(meta.get("status") or "")),
+                recipients_to=_clean_string_list(meta.get("to")),
+                recipients_cc=_clean_string_list(meta.get("cc")),
+                links=_extract_communication_links(
+                    action_type=event.action_type,
+                    meta=meta,
+                    offer_public_tokens=offer_public_tokens,
+                    sprint_public_tokens=sprint_public_tokens,
+                ),
+                created_at=event.created_at,
+            )
+        )
+
+    return CandidateCommunicationFeedOut(total=int(total or 0), limit=limit, offset=offset, items=items)
+
+
 @router.get("/{candidate_id}", response_model=CandidateDetailOut)
 async def get_candidate(
     candidate_id: int,
@@ -4286,6 +4587,19 @@ async def transition_stage(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 actions are restricted for this account.")
     current_stage = (await _get_current_stage_name(session, candidate_id=candidate_id) or "").strip().lower()
     target_stage = (payload.to_stage or "").strip().lower()
+    reason = (payload.reason or "").strip()
+
+    if target_stage == "declined":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use 'rejected' with a reason to close a candidate after offer decline.",
+        )
+    if target_stage == "rejected" and not reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rejection reason is required when closing candidate as rejected.",
+        )
+
     if current_stage == "sprint" and target_stage == "l1_shortlist":
         has_approval = await _has_l2_sprint_approval(session, candidate_id=candidate_id)
         if not has_approval:
@@ -4305,6 +4619,12 @@ async def transition_stage(
         source="candidate_transition",
     )
 
+    normalized_to_stage = (result.to_stage or "").strip().lower()
+    if normalized_to_stage in {"hired", "rejected", "declined"}:
+        candidate.final_decision = normalized_to_stage
+    elif candidate.final_decision in {"hired", "rejected", "declined"}:
+        candidate.final_decision = "pending"
+
     if result.changed and result.to_stage == "l2_shortlist":
         await _send_assessment_link_for_l2_shortlist(session, candidate=candidate, user=user)
 
@@ -4320,6 +4640,7 @@ async def transition_stage(
 @router.post("/{candidate_id}/convert", status_code=status.HTTP_200_OK)
 async def convert_candidate(
     candidate_id: int,
+    payload: CandidateConvertIn,
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
@@ -4336,6 +4657,12 @@ async def convert_candidate(
     ).scalars().first()
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No accepted offer found")
-    await convert_candidate_to_employee(session, candidate=candidate, offer=offer, user=user)
+    await convert_candidate_to_employee(
+        session,
+        candidate=candidate,
+        offer=offer,
+        user=user,
+        employee_profile=payload.employee_profile.model_dump(),
+    )
     await session.commit()
     return {"candidate_id": candidate_id, "status": candidate.status, "final_decision": candidate.final_decision}

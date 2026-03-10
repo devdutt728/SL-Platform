@@ -1,4 +1,5 @@
 import {
+  CandidateConvertPayload,
   CandidateDetail,
   CandidateFull,
   CandidateOffer,
@@ -197,9 +198,13 @@ export async function reviseOffer(offerId: number, reason?: string) {
   return (await res.json()) as CandidateOffer;
 }
 
-export async function convertCandidate(candidateId: string) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/convert`, { method: "POST" });
-  if (!res.ok) throw new Error(await res.text());
+export async function convertCandidate(candidateId: string, payload: CandidateConvertPayload) {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/convert`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
   return await res.json();
 }
 

@@ -38,7 +38,34 @@ def _safe_load_json(raw: str | None) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _actor_role_ids(user: UserContext) -> set[int]:
+    values: list[object] = []
+    if user.platform_role_id is not None:
+        values.append(user.platform_role_id)
+    values.extend(user.platform_role_ids or [])
+    role_ids: set[int] = set()
+    for value in values:
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        try:
+            role_ids.add(int(raw))
+        except Exception:
+            continue
+    return role_ids
+
+
+def _is_role_5_or_6_actor(user: UserContext) -> bool:
+    role_ids = _actor_role_ids(user)
+    return 5 in role_ids or 6 in role_ids
+
+
 def _assert_assessment_access(user: UserContext, interview: RecCandidateInterview) -> None:
+    if _is_role_5_or_6_actor(user) and not _is_superadmin(user):
+        if user.person_id_platform and interview.interviewer_person_id_platform:
+            if _clean_platform_person_id(user.person_id_platform) == _clean_platform_person_id(interview.interviewer_person_id_platform):
+                return
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     if Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles:
         return
     if Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles:
@@ -100,7 +127,7 @@ async def get_l2_assessment(
             )
         )
     ).scalar_one_or_none()
-    readonly = (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user)
+    readonly = (Role.HR_EXEC in user.roles and Role.HR_ADMIN not in user.roles) and not _is_superadmin(user)
     locked = bool((assessment and assessment.status == "submitted" and not _is_superadmin(user)) or readonly)
     return _build_out(assessment, interview=interview, locked=locked)
 
@@ -114,7 +141,7 @@ async def save_l2_assessment(
 ):
     interview = await _get_interview(session, candidate_interview_id)
     _assert_assessment_access(user, interview)
-    if (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user):
+    if (Role.HR_EXEC in user.roles and Role.HR_ADMIN not in user.roles) and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to edit assessments")
     if not _round_matches(interview, "l2") and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L2 assessments are only for L2 interviews")
@@ -161,7 +188,7 @@ async def submit_l2_assessment(
 ):
     interview = await _get_interview(session, candidate_interview_id)
     _assert_assessment_access(user, interview)
-    if (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user):
+    if (Role.HR_EXEC in user.roles and Role.HR_ADMIN not in user.roles) and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to submit assessments")
     if not _round_matches(interview, "l2") and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L2 assessments are only for L2 interviews")
@@ -294,7 +321,7 @@ async def get_l1_assessment(
             )
         )
     ).scalar_one_or_none()
-    readonly = (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user)
+    readonly = (Role.HR_EXEC in user.roles and Role.HR_ADMIN not in user.roles) and not _is_superadmin(user)
     locked = bool((assessment and assessment.status == "submitted" and not _is_superadmin(user)) or readonly)
     return _build_out(assessment, interview=interview, locked=locked)
 
@@ -308,7 +335,7 @@ async def save_l1_assessment(
 ):
     interview = await _get_interview(session, candidate_interview_id)
     _assert_assessment_access(user, interview)
-    if (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user):
+    if (Role.HR_EXEC in user.roles and Role.HR_ADMIN not in user.roles) and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to edit assessments")
     if not _round_matches(interview, "l1") and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L1 assessments are only for L1 interviews")
@@ -355,7 +382,7 @@ async def submit_l1_assessment(
 ):
     interview = await _get_interview(session, candidate_interview_id)
     _assert_assessment_access(user, interview)
-    if (Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles) and not _is_superadmin(user):
+    if (Role.HR_EXEC in user.roles and Role.HR_ADMIN not in user.roles) and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to submit assessments")
     if not _round_matches(interview, "l1") and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L1 assessments are only for L1 interviews")

@@ -80,6 +80,40 @@ def _is_superadmin_actor(user: UserContext) -> bool:
     return bool({"2", "superadmin", "super_admin", "s_admin"} & role_tokens)
 
 
+def _actor_role_ids(user: UserContext) -> set[int]:
+    values: list[object] = []
+    if user.platform_role_id is not None:
+        values.append(user.platform_role_id)
+    values.extend(user.platform_role_ids or [])
+    role_ids: set[int] = set()
+    for value in values:
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        try:
+            role_ids.add(int(raw))
+        except Exception:
+            continue
+    return role_ids
+
+
+def _is_role_5_or_6_actor(user: UserContext) -> bool:
+    role_ids = _actor_role_ids(user)
+    return 5 in role_ids or 6 in role_ids
+
+
+def _is_sprint_assigned_to_user(user: UserContext, sprint: RecCandidateSprint, candidate: RecCandidate | None) -> bool:
+    user_person_id = _normalize_person_id(user.person_id_platform)
+    sprint_reviewer_id = _normalize_person_id(sprint.reviewed_by_person_id_platform)
+    if user_person_id and sprint_reviewer_id and user_person_id == sprint_reviewer_id:
+        return True
+    user_email = (user.email or "").strip().lower()
+    owner_email = (candidate.l2_owner_email or "").strip().lower() if candidate else ""
+    if user_email and owner_email and user_email == owner_email:
+        return True
+    return False
+
+
 async def _resolve_person_id_by_email(email: str | None) -> str | None:
     email_norm = (email or "").strip().lower()
     if not email_norm:
@@ -312,7 +346,9 @@ async def _load_public_attachments(
 async def list_sprint_templates(
     include_inactive: bool = False,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    _user: UserContext = Depends(
+        require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])
+    ),
 ):
     rows = (await session.execute(select(RecSprintTemplate).order_by(RecSprintTemplate.updated_at.desc()))).scalars().all()
     return [
@@ -427,7 +463,9 @@ async def list_sprint_template_attachments(
     sprint_template_id: int,
     include_inactive: bool = False,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    _user: UserContext = Depends(
+        require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])
+    ),
 ):
     query = (
         select(RecSprintTemplateAttachment, RecSprintAttachment)
@@ -691,21 +729,34 @@ async def assign_sprint(
 async def list_candidate_sprints(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(
+        require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])
+    ),
 ):
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    role_5_or_6_scope = _is_role_5_or_6_actor(user) and not _is_superadmin_actor(user)
 
     try:
-        rows = (
-            await session.execute(
-                select(RecCandidateSprint, RecSprintTemplate)
-                .join(RecSprintTemplate, RecSprintTemplate.sprint_template_id == RecCandidateSprint.sprint_template_id)
-                .where(RecCandidateSprint.candidate_id == candidate_id)
-                .order_by(RecCandidateSprint.assigned_at.desc(), RecCandidateSprint.candidate_sprint_id.desc())
-            )
-        ).all()
+        query = (
+            select(RecCandidateSprint, RecSprintTemplate)
+            .join(RecSprintTemplate, RecSprintTemplate.sprint_template_id == RecCandidateSprint.sprint_template_id)
+            .join(RecCandidate, RecCandidate.candidate_id == RecCandidateSprint.candidate_id)
+            .where(RecCandidateSprint.candidate_id == candidate_id)
+        )
+        if role_5_or_6_scope:
+            scope_filter = None
+            if user.person_id_platform:
+                scope_filter = RecCandidateSprint.reviewed_by_person_id_platform == _normalize_person_id(user.person_id_platform)
+            if user.email:
+                owner_filter = func.lower(RecCandidate.l2_owner_email) == user.email.lower()
+                scope_filter = owner_filter if scope_filter is None else or_(scope_filter, owner_filter)
+            if scope_filter is None and settings.environment == "production":
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user has no assignment identity")
+            if scope_filter is not None:
+                query = query.where(scope_filter)
+        rows = (await session.execute(query.order_by(RecCandidateSprint.assigned_at.desc(), RecCandidateSprint.candidate_sprint_id.desc()))).all()
     except OperationalError:
         # Sprint tables missing or migration not applied.
         return []
@@ -735,7 +786,9 @@ async def list_candidate_sprints(
 async def get_sprint(
     candidate_sprint_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(
+        require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])
+    ),
 ):
     row = (
         await session.execute(
@@ -749,6 +802,8 @@ async def get_sprint(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint not found")
     sprint, template, candidate, opening = row
+    if (_is_role_5_or_6_actor(user) and not _is_superadmin_actor(user)) and not _is_sprint_assigned_to_user(user, sprint, candidate):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     reviewer_meta = await _fetch_platform_people({_normalize_person_id(sprint.reviewed_by_person_id_platform) or ""})
     return await _build_candidate_sprint(
         session,
@@ -767,6 +822,7 @@ async def list_sprints(
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD])),
 ):
+    role_5_or_6_scope = _is_role_5_or_6_actor(user) and not _is_superadmin_actor(user)
     query = (
         select(RecCandidateSprint, RecSprintTemplate, RecCandidate, RecOpening)
         .join(RecSprintTemplate, RecSprintTemplate.sprint_template_id == RecCandidateSprint.sprint_template_id)
@@ -774,6 +830,17 @@ async def list_sprints(
         .outerjoin(RecOpening, RecOpening.opening_id == RecCandidate.opening_id)
         .order_by(RecCandidateSprint.assigned_at.desc(), RecCandidateSprint.candidate_sprint_id.desc())
     )
+    if role_5_or_6_scope:
+        scope_filter = None
+        if user.person_id_platform:
+            scope_filter = RecCandidateSprint.reviewed_by_person_id_platform == _normalize_person_id(user.person_id_platform)
+        if user.email:
+            owner_filter = func.lower(RecCandidate.l2_owner_email) == user.email.lower()
+            scope_filter = owner_filter if scope_filter is None else or_(scope_filter, owner_filter)
+        if scope_filter is None and settings.environment == "production":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user has no assignment identity")
+        if scope_filter is not None:
+            query = query.where(scope_filter)
     if status_filter:
         query = query.where(RecCandidateSprint.status == status_filter)
     if reviewer == "me":
@@ -812,6 +879,11 @@ async def update_sprint(
     sprint = await session.get(RecCandidateSprint, candidate_sprint_id)
     if not sprint:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint not found")
+    candidate = await session.get(RecCandidate, sprint.candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    if (_is_role_5_or_6_actor(user) and not _is_superadmin_actor(user)) and not _is_sprint_assigned_to_user(user, sprint, candidate):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
 
     updates = payload.model_dump(exclude_none=True)
     if not updates:
@@ -838,10 +910,6 @@ async def update_sprint(
     )
 
     if sprint.decision in {"advance", "reject"}:
-        candidate = await session.get(RecCandidate, sprint.candidate_id)
-        if not candidate:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
-
         current_stage = await _current_stage_name(session, candidate_id=sprint.candidate_id)
         if current_stage == "sprint":
             to_stage = "l1_shortlist" if sprint.decision == "advance" else "rejected"
@@ -1157,8 +1225,23 @@ async def download_sprint_attachment(
     candidate_sprint_id: int,
     attachment_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
-    _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+    user: UserContext = Depends(
+        require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])
+    ),
 ):
+    sprint_row = (
+        await session.execute(
+            select(RecCandidateSprint, RecCandidate)
+            .join(RecCandidate, RecCandidate.candidate_id == RecCandidateSprint.candidate_id)
+            .where(RecCandidateSprint.candidate_sprint_id == candidate_sprint_id)
+        )
+    ).first()
+    if not sprint_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sprint not found")
+    sprint, candidate = sprint_row
+    if (_is_role_5_or_6_actor(user) and not _is_superadmin_actor(user)) and not _is_sprint_assigned_to_user(user, sprint, candidate):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+
     row = (
         await session.execute(
             select(RecSprintAttachment)

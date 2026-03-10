@@ -87,6 +87,28 @@ def _normalize_person_id_int(raw: int | str | None) -> int | None:
         return None
 
 
+def _actor_role_ids(user: UserContext) -> set[int]:
+    values: list[object] = []
+    if user.platform_role_id is not None:
+        values.append(user.platform_role_id)
+    values.extend(user.platform_role_ids or [])
+    role_ids: set[int] = set()
+    for value in values:
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        try:
+            role_ids.add(int(raw))
+        except Exception:
+            continue
+    return role_ids
+
+
+def _is_role_5_or_6_actor(user: UserContext) -> bool:
+    role_ids = _actor_role_ids(user)
+    return 5 in role_ids or 6 in role_ids
+
+
 def _normalize_round(raw: str | None) -> str:
     return (raw or "").strip().lower()
 
@@ -430,6 +452,11 @@ def _build_interview_out(
 
 
 def _assert_interviewer_access(user: UserContext, interview: RecCandidateInterview) -> None:
+    if _is_role_5_or_6_actor(user) and not _is_superadmin(user):
+        if user.person_id_platform and interview.interviewer_person_id_platform:
+            if _clean_platform_person_id(user.person_id_platform) == _clean_platform_person_id(interview.interviewer_person_id_platform):
+                return
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     if Role.HR_ADMIN in user.roles or Role.HR_EXEC in user.roles or Role.HIRING_MANAGER in user.roles:
         return
     if Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles:
@@ -1763,8 +1790,14 @@ async def list_interviews(
         .outerjoin(RecOpening, RecOpening.opening_id == RecCandidate.opening_id)
     )
 
+    role_5_or_6_scope = _is_role_5_or_6_actor(user) and not _is_superadmin(user)
     interviewer_filter = interviewer_person_id_platform
-    if interviewer == "me":
+    if role_5_or_6_scope:
+        if user.person_id_platform:
+            interviewer_filter = user.person_id_platform
+        elif settings.environment == "production":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user has no platform person id")
+    elif interviewer == "me":
         if user.person_id_platform:
             interviewer_filter = user.person_id_platform
         elif not user.email and settings.environment == "production":
@@ -1779,10 +1812,10 @@ async def list_interviews(
 
     if interviewer_filter:
         base_filter = RecCandidateInterview.interviewer_person_id_platform == _clean_platform_person_id(interviewer_filter)
-        if (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and user.email:
+        if not role_5_or_6_scope and (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and user.email:
             base_filter = or_(base_filter, func.lower(RecCandidate.l2_owner_email) == user.email.lower())
         query = query.where(base_filter)
-    elif (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and user.email:
+    elif not role_5_or_6_scope and (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and user.email:
         # Fallback: show interviews for candidates assigned to the interviewer via L2 owner email.
         query = query.where(func.lower(RecCandidate.l2_owner_email) == user.email.lower())
 
@@ -1842,8 +1875,14 @@ async def get_interview_notifications(
         .join(RecCandidate, RecCandidate.candidate_id == RecCandidateInterview.candidate_id)
     )
 
+    role_5_or_6_scope = _is_role_5_or_6_actor(user) and not _is_superadmin(user)
     interviewer_filter = interviewer_person_id_platform
-    if interviewer == "me":
+    if role_5_or_6_scope:
+        if user.person_id_platform:
+            interviewer_filter = user.person_id_platform
+        elif settings.environment == "production":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current user has no platform person id")
+    elif interviewer == "me":
         if user.person_id_platform:
             interviewer_filter = user.person_id_platform
         elif not user.email and settings.environment == "production":
@@ -1858,10 +1897,10 @@ async def get_interview_notifications(
 
     if interviewer_filter:
         base_filter = RecCandidateInterview.interviewer_person_id_platform == _clean_platform_person_id(interviewer_filter)
-        if (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and user.email:
+        if not role_5_or_6_scope and (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and user.email:
             base_filter = or_(base_filter, func.lower(RecCandidate.l2_owner_email) == user.email.lower())
         query = query.where(base_filter)
-    elif (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and user.email:
+    elif not role_5_or_6_scope and (Role.INTERVIEWER in user.roles or Role.GROUP_LEAD in user.roles) and user.email:
         query = query.where(func.lower(RecCandidate.l2_owner_email) == user.email.lower())
 
     rows = (await session.execute(query)).all()
@@ -1946,11 +1985,12 @@ async def update_interview(
     for key, value in updates.items():
         setattr(interview, key, value)
     interview.updated_at = datetime.utcnow()
+    feedback_submitted = payload.feedback_submitted is True
 
     await log_event(
         session,
         candidate_id=interview.candidate_id,
-        action_type="interview_feedback_submitted",
+        action_type="interview_feedback_submitted" if feedback_submitted else "interview_feedback_updated",
         performed_by_person_id_platform=_platform_person_id_int(user),
         related_entity_type="interview",
         related_entity_id=interview.candidate_interview_id,

@@ -33,6 +33,7 @@ type Props = {
   docTone: (status?: string | null) => string;
   chipTone: (kind: "neutral" | "green" | "amber" | "red" | "blue") => string;
   formatDateTime: (raw?: string | null) => string;
+  formatEventDateTime: (raw?: string | null) => string;
   formatDate: (raw?: string | null) => string;
   onExpandAll: () => void;
   onCollapseAll: () => void;
@@ -96,6 +97,7 @@ export function Candidate360OverviewSection({
   docTone,
   chipTone,
   formatDateTime,
+  formatEventDateTime,
   formatDate,
   onExpandAll,
   onCollapseAll,
@@ -577,7 +579,7 @@ export function Candidate360OverviewSection({
 
                   <p className="mt-3 text-xs text-slate-500">
                     {latestOffer?.offer_status === "declined"
-                      ? "Offer declined. Joining documents and hiring steps are closed."
+                      ? "Latest offer was declined. Candidate stays active for negotiation until HR closes as Rejected with a reason or marks Hired."
                       : latestOffer?.offer_status === "accepted"
                         ? "Offer accepted. Collect joining documents before final hire."
                         : "Offer decision will unlock the next path."}
@@ -681,7 +683,7 @@ export function Candidate360OverviewSection({
                       {pipelineReplay.map((event) => (
                         <div key={event.event_id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5">
                           <span className="text-[11px] font-semibold text-slate-800">{event.action_type.replace(/_/g, " ")}</span>
-                          <span className="text-[10px] text-slate-500">{formatDateTime(event.created_at)}</span>
+                          <span className="text-[10px] text-slate-500">{formatEventDateTime(event.created_at)}</span>
                         </div>
                       ))}
                     </div>

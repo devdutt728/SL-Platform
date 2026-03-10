@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
-import { BriefcaseBusiness, CalendarCheck2, ClipboardCheck, FileDown, Loader2, UserRound } from "lucide-react";
+import { BriefcaseBusiness, CalendarCheck2, ClipboardCheck, ExternalLink, FileDown, Loader2, UserRound } from "lucide-react";
 import type { CandidateDetail, CandidateSprint, Interview, L2Assessment, OpeningListItem, Screening } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
 import { OpeningRequestsWorkspace } from "./OpeningRequestsWorkspace";
@@ -329,6 +329,21 @@ function formatDateTime(raw?: string | null) {
   });
 }
 
+function formatBytes(raw?: number | null) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return "-";
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function stripHtml(raw?: string | null) {
+  return String(raw || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function interviewLabel(interview: Interview) {
   return `${interview.round_type} - ${formatDateTime(interview.scheduled_start_at)}`;
 }
@@ -629,7 +644,7 @@ export function GLPortalClient({
     setSprintsError(null);
     try {
       const next = await fetchSprints({ ...(useMeFilter ? { reviewer: "me" } : {}), status_filter: "submitted" });
-      setSprints(next);
+      setSprints(next.filter((sprint) => isPendingSprintReview(sprint)));
     } catch (e: any) {
       setSprintsError(e?.message || "Could not load sprint reviews.");
     } finally {
@@ -1406,7 +1421,9 @@ export function GLPortalClient({
 
               {locked ? (
                 <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-1.5 text-xs text-amber-700">
-                  This assessment is locked after submission.
+                  {isSubmitted
+                    ? "This assessment is locked after submission."
+                    : "This assessment is read-only in your access mode."}
                 </div>
               ) : null}
               {!isInterviewTaken && !isInterviewNotTaken ? (
@@ -1563,6 +1580,72 @@ export function GLPortalClient({
               </button>
             </div>
             <div className="mt-3 grid gap-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-tight text-slate-500">Submitted work</p>
+                <div className="mt-2 grid gap-2 text-xs text-slate-700 md:grid-cols-3">
+                  <div>
+                    <p className="text-slate-500">Status</p>
+                    <p className="font-semibold">{(activeSprint.status || "-").replace(/_/g, " ")}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Due</p>
+                    <p className="font-semibold">{formatDateTime(activeSprint.due_at) || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Submitted</p>
+                    <p className="font-semibold">{formatDateTime(activeSprint.submitted_at) || "-"}</p>
+                  </div>
+                </div>
+                {stripHtml(activeSprint.template_description) ? (
+                  <p className="mt-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                    {stripHtml(activeSprint.template_description)}
+                  </p>
+                ) : null}
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-700">
+                  {activeSprint.instructions_url ? (
+                    <a
+                      className="inline-flex items-center gap-1 underline decoration-dotted underline-offset-2"
+                      href={activeSprint.instructions_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Sprint brief
+                    </a>
+                  ) : null}
+                  {activeSprint.submission_url ? (
+                    <a
+                      className="inline-flex items-center gap-1 underline decoration-dotted underline-offset-2"
+                      href={activeSprint.submission_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Candidate submission
+                    </a>
+                  ) : (
+                    <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">
+                      Submission link missing
+                    </span>
+                  )}
+                </div>
+                {(activeSprint.attachments || []).length > 0 ? (
+                  <div className="mt-2 space-y-1">
+                    {(activeSprint.attachments || []).map((attachment) => (
+                      <a
+                        key={attachment.sprint_attachment_id}
+                        className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs underline decoration-dotted underline-offset-2"
+                        href={attachment.download_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <span className="truncate">{attachment.file_name}</span>
+                        <span className="text-slate-500">{formatBytes(attachment.file_size)}</span>
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <label className="space-y-1 text-xs text-slate-600">
                 Score (0-10)
                 <input

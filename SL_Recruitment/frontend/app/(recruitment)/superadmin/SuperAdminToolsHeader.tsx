@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-type SuperAdminTool = "ingest-ops" | "roles" | "people" | "sprint-templates";
+type SuperAdminTool = "ingest-ops" | "roles" | "people" | "sprint-templates" | "candidate-communications";
 
 type Props = {
   active: SuperAdminTool;
@@ -8,6 +8,7 @@ type Props = {
 
 const TOOL_LINKS: Array<{ key: SuperAdminTool; href: string; label: string }> = [
   { key: "ingest-ops", href: "/superadmin/ingest-ops", label: "Ingest Operations" },
+  { key: "candidate-communications", href: "/superadmin/candidate-communications", label: "Candidate Communications" },
   { key: "roles", href: "/superadmin/roles", label: "Role Management" },
   { key: "people", href: "/superadmin/people", label: "People Management" },
   { key: "sprint-templates", href: "/superadmin/sprint-templates", label: "Sprint Templates" },

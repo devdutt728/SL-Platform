@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CandidateFull, CandidateOffer } from "@/lib/types";
+import { CandidateConvertPayload, CandidateFull, CandidateOffer } from "@/lib/types";
 import * as candidate360Api from "./candidate360.api";
 import { cleanLetterOverrides, normalizeOfferStatus, suggestOfferTemplate } from "./candidate360.client-utils";
 import { principalApproverOptions } from "./candidate360.constants";
@@ -81,6 +81,11 @@ export function useCandidate360Offers({
     }
   }, [candidateId]);
 
+  const syncOfferAndCandidate = useCallback(async () => {
+    await refreshOffers();
+    await refreshAll();
+  }, [refreshAll, refreshOffers]);
+
   useEffect(() => {
     if (candidate.opening_title && !offerDesignation) {
       setOfferDesignation(candidate.opening_title);
@@ -118,14 +123,14 @@ export function useCandidate360Offers({
       return { allowed: false, reason: "No offer found for revision." };
     }
     if (!canCreateRevisionFromLatestOffer) {
-      return {
-        allowed: false,
-        reason:
-          latestOfferStatus === "draft"
-            ? "Current offer is already a draft. Use Edit under Appointment letter variables."
+        return {
+          allowed: false,
+          reason:
+            latestOfferStatus === "draft"
+            ? "Current offer is already a draft. Use Edit draft offer to update compensation and letter fields."
             : "Pending approval offer cannot be revised. Complete approval/rejection first.",
-      };
-    }
+        };
+      }
     if (currentStageKey === "hired" || candidateStatus === "hired") {
       return {
         allowed: false,
@@ -143,6 +148,20 @@ export function useCandidate360Offers({
     }
     setDraftLetterOverrides(latestOffer.letter_overrides || {});
   }, [latestOffer]);
+
+  useEffect(() => {
+    if (!latestOffer || latestOfferStatus !== "draft") return;
+    setOfferTemplateCode(latestOffer.offer_template_code || "STD_OFFER");
+    setOfferDesignation(latestOffer.designation_title || candidate.opening_title || candidate.current_stage || "");
+    setOfferCurrency((latestOffer.currency || "INR").trim() || "INR");
+    setOfferGross(latestOffer.gross_ctc_annual != null ? String(latestOffer.gross_ctc_annual) : "");
+    setOfferFixed(latestOffer.fixed_ctc_annual != null ? String(latestOffer.fixed_ctc_annual) : "");
+    setOfferVariable(latestOffer.variable_ctc_annual != null ? String(latestOffer.variable_ctc_annual) : "");
+    setOfferJoiningDate((latestOffer.joining_date || "").slice(0, 10));
+    setOfferProbationMonths(latestOffer.probation_months != null ? String(latestOffer.probation_months) : "");
+    setOfferGradeId(latestOffer.grade_id_platform != null ? String(latestOffer.grade_id_platform) : "");
+    setOfferNotes(latestOffer.notes_internal || "");
+  }, [candidate.current_stage, candidate.opening_title, latestOffer, latestOfferStatus]);
 
   const handleCreateOffer = useCallback(async () => {
     setOffersError(null);
@@ -166,7 +185,7 @@ export function useCandidate360Offers({
         notes_internal: offerNotes.trim() || null,
         letter_overrides: Object.keys(overrides).length ? overrides : {},
       });
-      await refreshOffers();
+      await syncOfferAndCandidate();
     } catch (e: any) {
       setOffersError(e?.message || "Offer creation failed.");
     } finally {
@@ -187,7 +206,7 @@ export function useCandidate360Offers({
     offerProbationMonths,
     offerTemplateCode,
     offerVariable,
-    refreshOffers,
+    syncOfferAndCandidate,
   ]);
 
   const handleOfferPreview = useCallback(async (offerId: number, kind: "letter" | "email") => {
@@ -221,14 +240,14 @@ export function useCandidate360Offers({
           submit_for_approval: true,
           approval_principal_email: offerApprovalPrincipal,
         });
-        await refreshOffers();
+        await syncOfferAndCandidate();
       } catch (e: any) {
         setOffersError(e?.message || "Offer submission failed.");
       } finally {
         setOffersBusy(false);
       }
     },
-    [offerApprovalPrincipal, refreshOffers]
+    [offerApprovalPrincipal, syncOfferAndCandidate]
   );
 
   const handleApproveOffer = useCallback(
@@ -237,14 +256,14 @@ export function useCandidate360Offers({
       setOffersError(null);
       try {
         await candidate360Api.approveOffer(offerId);
-        await refreshOffers();
+        await syncOfferAndCandidate();
       } catch (e: any) {
         setOffersError(e?.message || "Offer approval failed.");
       } finally {
         setOffersBusy(false);
       }
     },
-    [refreshOffers]
+    [syncOfferAndCandidate]
   );
 
   const handleRejectOffer = useCallback(
@@ -253,14 +272,14 @@ export function useCandidate360Offers({
       setOffersError(null);
       try {
         await candidate360Api.rejectOffer(offerId);
-        await refreshOffers();
+        await syncOfferAndCandidate();
       } catch (e: any) {
         setOffersError(e?.message || "Offer rejection failed.");
       } finally {
         setOffersBusy(false);
       }
     },
-    [refreshOffers]
+    [syncOfferAndCandidate]
   );
 
   const handleSendOffer = useCallback(
@@ -274,14 +293,14 @@ export function useCandidate360Offers({
           await candidate360Api.approveOffer(offer.candidate_offer_id);
         }
         await candidate360Api.sendOffer(offer.candidate_offer_id);
-        await refreshOffers();
+        await syncOfferAndCandidate();
       } catch (e: any) {
         setOffersError(e?.message || "Offer send failed.");
       } finally {
         setOffersBusy(false);
       }
     },
-    [refreshOffers]
+    [syncOfferAndCandidate]
   );
 
   const handleAdminDecision = useCallback(
@@ -314,19 +333,62 @@ export function useCandidate360Offers({
 
   const handleSaveDraftOverrides = useCallback(
     async (offerId: number) => {
+      const parseNullableNumber = (raw: string, label: string) => {
+        const trimmed = raw.trim();
+        if (!trimmed) return null;
+        const parsed = Number(trimmed);
+        if (!Number.isFinite(parsed)) {
+          throw new Error(`${label} must be a valid number.`);
+        }
+        return parsed;
+      };
+      const parseNullableInteger = (raw: string, label: string) => {
+        const trimmed = raw.trim();
+        if (!trimmed) return null;
+        const parsed = Number(trimmed);
+        if (!Number.isInteger(parsed)) {
+          throw new Error(`${label} must be a valid whole number.`);
+        }
+        return parsed;
+      };
       setOffersBusy(true);
       setOffersError(null);
       try {
         const overrides = cleanLetterOverrides(draftLetterOverrides);
-        await candidate360Api.updateOffer(offerId, { letter_overrides: overrides });
-        await refreshOffers();
+        await candidate360Api.updateOffer(offerId, {
+          offer_template_code: offerTemplateCode.trim() || undefined,
+          designation_title: offerDesignation.trim() || undefined,
+          currency: offerCurrency.trim() || undefined,
+          gross_ctc_annual: parseNullableNumber(offerGross, "Gross CTC"),
+          fixed_ctc_annual: parseNullableNumber(offerFixed, "Fixed CTC"),
+          variable_ctc_annual: parseNullableNumber(offerVariable, "Variable CTC"),
+          joining_date: offerJoiningDate.trim() || undefined,
+          probation_months: parseNullableInteger(offerProbationMonths, "Probation months"),
+          grade_id_platform: parseNullableInteger(offerGradeId, "Grade ID"),
+          notes_internal: offerNotes.trim() || undefined,
+          letter_overrides: overrides,
+        });
+        await syncOfferAndCandidate();
       } catch (e: any) {
         setOffersError(e?.message || "Offer update failed.");
       } finally {
         setOffersBusy(false);
       }
     },
-    [draftLetterOverrides, refreshOffers]
+    [
+      draftLetterOverrides,
+      offerCurrency,
+      offerDesignation,
+      offerFixed,
+      offerGradeId,
+      offerGross,
+      offerJoiningDate,
+      offerNotes,
+      offerProbationMonths,
+      offerTemplateCode,
+      offerVariable,
+      syncOfferAndCandidate,
+    ]
   );
 
   const handleDeleteOffer = useCallback(
@@ -341,7 +403,7 @@ export function useCandidate360Offers({
           setOffersError(null);
           try {
             await candidate360Api.deleteOffer(offerId);
-            await refreshOffers();
+            await syncOfferAndCandidate();
             pushToast({ tone: "success", title: "Draft offer deleted" });
             closeDialog();
           } catch (e: any) {
@@ -353,7 +415,7 @@ export function useCandidate360Offers({
         },
       });
     },
-    [closeDialog, openDialog, pushToast, refreshOffers, setDialogError]
+    [closeDialog, openDialog, pushToast, syncOfferAndCandidate, setDialogError]
   );
 
   const handleReviseOffer = useCallback(
@@ -376,18 +438,6 @@ export function useCandidate360Offers({
           setOffersBusy(true);
           setOffersError(null);
           try {
-            const shouldReopenOfferStage =
-              currentStageKey === "rejected" ||
-              currentStageKey === "declined" ||
-              candidateStatus === "rejected" ||
-              candidateStatus === "declined";
-            if (shouldReopenOfferStage) {
-              await candidate360Api.transition(candidateId, {
-                to_stage: "offer",
-                decision: "skip",
-                note: "offer_revision_reopen",
-              });
-            }
             await candidate360Api.reviseOffer(offerId, value);
             await refreshOffers();
             await refreshAll();
@@ -408,17 +458,19 @@ export function useCandidate360Offers({
         },
       });
     },
-    [candidateId, candidateStatus, closeDialog, currentStageKey, openDialog, pushToast, refreshAll, refreshOffers, reviseOfferEligibility, setDialogError]
+    [closeDialog, currentStageKey, openDialog, pushToast, refreshAll, refreshOffers, reviseOfferEligibility, setDialogError]
   );
 
-  const handleConvertCandidate = useCallback(async () => {
+  const handleConvertCandidate = useCallback(async (payload: CandidateConvertPayload) => {
     setOffersBusy(true);
     setOffersError(null);
     try {
-      await candidate360Api.convertCandidate(candidateId);
+      await candidate360Api.convertCandidate(candidateId, payload);
       await refreshAll();
     } catch (e: any) {
-      setOffersError(e?.message || "Conversion failed.");
+      const message = e?.message || "Conversion failed.";
+      setOffersError(message);
+      throw new Error(message);
     } finally {
       setOffersBusy(false);
     }

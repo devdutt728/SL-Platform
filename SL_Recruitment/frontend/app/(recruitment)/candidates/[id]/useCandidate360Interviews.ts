@@ -29,6 +29,7 @@ type Args = {
   canSchedule: boolean;
   canSkip: boolean;
   currentStageKey: string | null;
+  refreshAll: () => Promise<void>;
   candidateL2OwnerEmail?: string | null;
   candidateL2OwnerName?: string | null;
   searchParams: ReadonlyURLSearchParams | null;
@@ -47,6 +48,7 @@ export function useCandidate360Interviews({
   canSchedule,
   canSkip,
   currentStageKey,
+  refreshAll,
   candidateL2OwnerEmail,
   candidateL2OwnerName,
   searchParams,
@@ -249,6 +251,7 @@ export function useCandidate360Interviews({
         setSelectedSlot(null);
         setRescheduleInterviewId(null);
         await refreshInterviews();
+        await refreshAll();
         return;
       }
       await candidate360Api.createInterview(candidateId, {
@@ -263,6 +266,7 @@ export function useCandidate360Interviews({
       setSelectedSlot(null);
       setRescheduleInterviewId(null);
       await refreshInterviews();
+      await refreshAll();
     } catch (e: any) {
       setInterviewsError(e?.message || "Could not schedule interview.");
     } finally {
@@ -278,6 +282,7 @@ export function useCandidate360Interviews({
     scheduleReason,
     scheduleRound,
     selectedSlot,
+    refreshAll,
   ]);
 
   const handleScheduleEmailPreview = useCallback(async () => {
@@ -378,12 +383,13 @@ export function useCandidate360Interviews({
       }
       setInterviewsNotice("Slot invite email sent to the candidate.");
       await refreshActiveSlotInvites();
+      await refreshAll();
     } catch (e: any) {
       setInterviewsError(e?.message || "Could not send slot invite.");
     } finally {
       setSlotInviteBusy(false);
     }
-  }, [candidateId, refreshActiveSlotInvites, scheduleInterviewer, scheduleRound, slotPreviewDate]);
+  }, [candidateId, refreshActiveSlotInvites, scheduleInterviewer, scheduleRound, slotPreviewDate, refreshAll]);
 
   const handleCancelSlotInvite = useCallback(
     async (roundOverride?: string) => {
@@ -404,13 +410,14 @@ export function useCandidate360Interviews({
         setInterviewsNotice("Slot invite cancelled. You can send a new invite now.");
         setSlotInviteRound(null);
         await refreshActiveSlotInvites();
+        await refreshAll();
       } catch (e: any) {
         setInterviewsError(e?.message || "Could not cancel slot invite.");
       } finally {
         setSlotInviteCancelBusy(false);
       }
     },
-    [candidateId, refreshActiveSlotInvites, slotInviteRound]
+    [candidateId, refreshActiveSlotInvites, slotInviteRound, refreshAll]
   );
 
   useEffect(() => {
@@ -588,6 +595,7 @@ export function useCandidate360Interviews({
             await candidate360Api.cancelInterview(item.candidate_interview_id, value.trim());
             const next = await candidate360Api.fetchInterviews(candidateId);
             setInterviews(next);
+            await refreshAll();
             setInterviewsNotice("Interview cancelled.");
             pushToast({ tone: "success", title: "Interview cancelled" });
             closeDialog();
@@ -600,7 +608,7 @@ export function useCandidate360Interviews({
         },
       });
     },
-    [candidateId, closeDialog, openDialog, pushToast, setBusy, setDialogError]
+    [candidateId, closeDialog, openDialog, pushToast, setBusy, setDialogError, refreshAll]
   );
 
   const handleToggleExpandedInterview = useCallback((candidateInterviewId: number) => {

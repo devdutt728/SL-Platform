@@ -55,8 +55,20 @@ export function formatDateTime(raw?: string | null) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
     timeZone: "Asia/Kolkata",
   });
+}
+
+export function normalizeEventDateTimeRaw(raw?: string | null) {
+  if (!raw) return "";
+  const normalized = raw.includes(" ") ? raw.replace(" ", "T") : raw;
+  return normalized.replace(/[zZ]$|[+\-]\d{2}:\d{2}$/, "");
+}
+
+export function formatEventDateTime(raw?: string | null) {
+  const normalized = normalizeEventDateTimeRaw(raw);
+  return formatDateTime(normalized || raw);
 }
 
 export function formatInviteExpiry(raw?: string | null) {

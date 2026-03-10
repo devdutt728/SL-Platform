@@ -42,7 +42,7 @@ type OfferSectionActions = {
   handleSendOffer: (offer: CandidateOffer) => Promise<void>;
   handleAdminDecision: (offerId: number, decision: "accept" | "decline") => Promise<void>;
   handleReviseOffer: (offerId: number) => Promise<void>;
-  handleConvertCandidate: () => Promise<void>;
+  handleConvertCandidate: () => void | Promise<void>;
   handleSaveDraftOverrides: (offerId: number) => Promise<void>;
   handleCreateOffer: () => Promise<void>;
 };
@@ -110,6 +110,9 @@ export function Candidate360OfferSection({
 }: Props) {
   if (!canAccessOffers) return null;
   const latestOfferStatus = String(latestOffer?.offer_status || "").toLowerCase();
+  const isDraft = latestOfferStatus === "draft";
+  const isPendingApproval = latestOfferStatus === "pending_approval";
+  const isAccepted = latestOfferStatus === "accepted";
   const canCreateRevisionFromLatestOffer = Boolean(latestOffer && !["draft", "pending_approval"].includes(latestOfferStatus));
 
   return (
@@ -145,14 +148,20 @@ export function Candidate360OfferSection({
                   <p className="text-sm font-semibold">{latestOffer.offer_template_code}</p>
                   <p className="text-xs text-slate-600">{latestOffer.designation_title || candidateOpeningTitle || "Offer role"}</p>
                 </div>
-                <Chip className={chipTone(latestOffer.offer_status === "accepted" ? "green" : latestOffer.offer_status === "declined" ? "red" : "neutral")}>
-                  {latestOffer.offer_status.replace("_", " ")}
+                <Chip className={chipTone(isAccepted ? "green" : latestOfferStatus === "declined" ? "red" : "neutral")}>
+                  {latestOfferStatus.replace("_", " ")}
                 </Chip>
               </div>
               <div className="mt-3 grid gap-2 md:grid-cols-3">
                 <Metric label="Gross CTC" value={latestOffer.gross_ctc_annual != null ? formatMoney(latestOffer.gross_ctc_annual) : "-"} />
                 <Metric label="Joining date" value={latestOffer.joining_date ? formatDate(latestOffer.joining_date) : "-"} />
                 <Metric label="Probation" value={latestOffer.probation_months != null ? `${latestOffer.probation_months} months` : "-"} />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <Chip className={chipTone("neutral")}>Offer v{Math.max(1, Number(latestOffer.offer_version || 1))}</Chip>
+                <Chip className={chipTone("neutral")}>
+                  Recreated {Math.max(0, Number(latestOffer.offer_version || 1) - 1)} time{Math.max(0, Number(latestOffer.offer_version || 1) - 1) === 1 ? "" : "s"}
+                </Chip>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                 {latestOffer.fixed_ctc_annual != null ? <Chip className={chipTone("blue")}>Fixed {formatMoney(latestOffer.fixed_ctc_annual)}</Chip> : null}
@@ -187,7 +196,7 @@ export function Candidate360OfferSection({
                 >
                   Preview email
                 </button>
-                {latestOffer.offer_status === "draft" ? (
+                {isDraft ? (
                   <>
                     <label className="min-w-[280px] space-y-1 text-xs text-slate-600">
                       Principal approver
@@ -223,7 +232,7 @@ export function Candidate360OfferSection({
                     ) : null}
                   </>
                 ) : null}
-                {latestOffer.offer_status === "pending_approval" ? (
+                {isPendingApproval ? (
                   <>
                     <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                       Awaiting principal decision from{" "}
@@ -262,7 +271,7 @@ export function Candidate360OfferSection({
                     Send to candidate
                   </button>
                 ) : null}
-                {canSkip && ["approved", "sent", "viewed"].includes(latestOffer.offer_status) ? (
+                {canSkip && ["approved", "sent", "viewed"].includes(latestOfferStatus) ? (
                   <>
                     <button
                       type="button"
@@ -300,7 +309,7 @@ export function Candidate360OfferSection({
                     )}
                   </>
                 ) : null}
-                {latestOffer.offer_status === "accepted" ? (
+                {isAccepted ? (
                   <button
                     type="button"
                     className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
@@ -311,9 +320,106 @@ export function Candidate360OfferSection({
                   </button>
                 ) : null}
               </div>
-              {latestOffer.offer_status === "draft" ? (
+              {isDraft ? (
                 <div className="mt-4 rounded-2xl border border-slate-200 bg-white/70 p-3">
-                  <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Edit draft offer</p>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <label className="space-y-1 text-xs text-slate-600">
+                      Template
+                      <select
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={form.offerTemplateCode}
+                        onChange={(e) => formSetters.setOfferTemplateCode(e.target.value)}
+                      >
+                        {offerTemplateOptions.map((opt) => (
+                          <option key={opt.code} value={opt.code}>
+                            {opt.code} - {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1 text-xs text-slate-600">
+                      Designation
+                      <input
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={form.offerDesignation}
+                        onChange={(e) => formSetters.setOfferDesignation(e.target.value)}
+                        placeholder="Architect - Level 2"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs text-slate-600">
+                      Gross CTC (annual)
+                      <input
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={form.offerGross}
+                        onChange={(e) => formSetters.setOfferGross(e.target.value)}
+                        placeholder="1200000"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs text-slate-600">
+                      Fixed CTC (annual)
+                      <input
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={form.offerFixed}
+                        onChange={(e) => formSetters.setOfferFixed(e.target.value)}
+                        placeholder="1000000"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs text-slate-600">
+                      Variable CTC (annual)
+                      <input
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={form.offerVariable}
+                        onChange={(e) => formSetters.setOfferVariable(e.target.value)}
+                        placeholder="200000"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs text-slate-600">
+                      Currency
+                      <input
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={form.offerCurrency}
+                        onChange={(e) => formSetters.setOfferCurrency(e.target.value)}
+                        placeholder="INR"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs text-slate-600">
+                      Joining date
+                      <input
+                        type="date"
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={form.offerJoiningDate}
+                        onChange={(e) => formSetters.setOfferJoiningDate(e.target.value)}
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs text-slate-600">
+                      Probation (months)
+                      <input
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={form.offerProbationMonths}
+                        onChange={(e) => formSetters.setOfferProbationMonths(e.target.value)}
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs text-slate-600">
+                      Grade ID
+                      <input
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={form.offerGradeId}
+                        onChange={(e) => formSetters.setOfferGradeId(e.target.value)}
+                        placeholder="3"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs text-slate-600 md:col-span-2">
+                      Notes (internal)
+                      <textarea
+                        className="min-h-20 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={form.offerNotes}
+                        onChange={(e) => formSetters.setOfferNotes(e.target.value)}
+                        placeholder="Offer notes for HR"
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between gap-2">
                     <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Appointment letter variables</p>
                     <button
                       type="button"
@@ -350,11 +456,22 @@ export function Candidate360OfferSection({
                           onClick={() => void actions.handleSaveDraftOverrides(latestOffer.candidate_offer_id)}
                           disabled={offersBusy}
                         >
-                          Save letter fields
+                          Save draft offer
                         </button>
                       </div>
                     </>
-                  ) : null}
+                  ) : (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
+                        onClick={() => void actions.handleSaveDraftOverrides(latestOffer.candidate_offer_id)}
+                        disabled={offersBusy}
+                      >
+                        Save draft offer
+                      </button>
+                    </div>
+                  )}
                 </div>
               ) : null}
             </div>

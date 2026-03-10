@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,8 @@ from app.core.stage_machine import (
     HIRED,
     HR_SCREENING,
     JOINING_DOCUMENTS,
+    L1_FEEDBACK,
+    L2_FEEDBACK,
     L2_SHORTLIST,
     REJECTED,
     can_transition,
@@ -22,6 +24,7 @@ from app.core.stage_machine import (
 )
 from app.models.candidate_assessment import RecCandidateAssessment
 from app.models.candidate import RecCandidate
+from app.models.interview import RecCandidateInterview
 from app.models.stage import RecCandidateStage
 from app.schemas.user import UserContext
 from app.services.events import log_event
@@ -94,6 +97,29 @@ async def _assessment_gate_state(session: AsyncSession, *, candidate_id: int) ->
     return assessment.assessment_sent_at is not None, assessment.assessment_submitted_at is not None
 
 
+async def _has_submitted_interview_feedback(
+    session: AsyncSession,
+    *,
+    candidate_id: int,
+    round_token: str,
+) -> bool:
+    normalized_round = (round_token or "").strip().lower()
+    if normalized_round not in {"l1", "l2"}:
+        return False
+    count = (
+        await session.execute(
+            select(func.count())
+            .select_from(RecCandidateInterview)
+            .where(
+                RecCandidateInterview.candidate_id == candidate_id,
+                RecCandidateInterview.feedback_submitted.is_(True),
+                func.lower(func.coalesce(RecCandidateInterview.round_type, "")).like(f"%{normalized_round}%"),
+            )
+        )
+    ).scalar_one_or_none()
+    return bool(count or 0)
+
+
 async def apply_stage_transition(
     session: AsyncSession,
     *,
@@ -146,6 +172,25 @@ async def apply_stage_transition(
     current_stage = await _current_stage_row(session, candidate_id=candidate.candidate_id)
     from_stage = current_stage.stage_name if current_stage else None
     normalized_from_stage = normalize_stage_name(from_stage)
+
+    feedback_guard_bypass = skip_flag and is_superadmin
+    if (
+        normalized_from_stage in {L1_FEEDBACK, L2_FEEDBACK}
+        and normalized_from_stage != normalized_to_stage
+        and not feedback_guard_bypass
+    ):
+        round_token = "l1" if normalized_from_stage == L1_FEEDBACK else "l2"
+        has_round_feedback = await _has_submitted_interview_feedback(
+            session,
+            candidate_id=candidate.candidate_id,
+            round_token=round_token,
+        )
+        if not has_round_feedback:
+            round_label = "L1" if round_token == "l1" else "L2"
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Submit at least one {round_label} interview feedback before leaving {round_label} feedback stage.",
+            )
 
     if normalized_from_stage == normalized_to_stage:
         if allow_noop:

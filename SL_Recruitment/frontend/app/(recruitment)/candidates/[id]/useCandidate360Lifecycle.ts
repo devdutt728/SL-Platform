@@ -129,12 +129,13 @@ export function useCandidate360Lifecycle({
       });
       setL2OwnerQuery("");
       setL2OwnerOptions([]);
+      await refreshAll();
     } catch (e: any) {
       setL2OwnerError(e?.message || "Could not save GL/L2 owner.");
     } finally {
       setL2OwnerSaving(false);
     }
-  }, [canManageCandidate360, l2OwnerSelected, l2OwnerQuery, candidateId, setData]);
+  }, [canManageCandidate360, l2OwnerSelected, l2OwnerQuery, candidateId, setData, refreshAll]);
 
   const performTransition = useCallback(
     async (toStage: string, decision: string, reasonOverride?: string) => {

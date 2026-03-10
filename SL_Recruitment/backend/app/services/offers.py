@@ -528,6 +528,8 @@ async def create_offer_revision(
         user=user,
         source="offer_revision",
         allow_noop=True,
+        skip_requested=True,
+        skip_requires_superadmin=False,
     )
     await log_event(
         session,
@@ -839,17 +841,20 @@ async def record_candidate_response(
         offer.acceptance_user_agent = None
         action = "offer_declined"
         if candidate:
-            candidate.status = "declined"
-            candidate.final_decision = "declined"
+            # Keep candidate active for negotiation; HR will explicitly close as rejected/declined/hired.
+            candidate.status = "offer"
+            candidate.final_decision = "pending"
             candidate.updated_at = now
             await apply_stage_transition(
                 session,
                 candidate=candidate,
-                to_stage="declined",
+                to_stage="offer",
                 decision="decline",
                 reason=reason,
-                note="offer_flow",
+                note="offer_declined_negotiation",
                 source="offer_response",
+                allow_noop=True,
+                allow_terminal_reopen=True,
             )
     offer.updated_at = now
     await log_event(
@@ -864,7 +869,45 @@ async def record_candidate_response(
     return offer
 
 
-async def convert_candidate_to_employee(session: AsyncSession, *, candidate: RecCandidate, offer: RecCandidateOffer, user: UserContext) -> RecCandidate:
+def _clean_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _coerce_optional_int(value: Any, *, field_label: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_label} must be a valid integer.")
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_label} must be a valid integer.") from exc
+
+
+def _is_intern_role(*values: str | None) -> bool:
+    for value in values:
+        normalized = (value or "").strip().lower()
+        if "intern" in normalized:
+            return True
+    return False
+
+
+async def convert_candidate_to_employee(
+    session: AsyncSession,
+    *,
+    candidate: RecCandidate,
+    offer: RecCandidateOffer,
+    user: UserContext,
+    employee_profile: dict[str, Any],
+) -> RecCandidate:
     if offer.offer_status != "accepted":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer must be accepted before conversion.")
     docs_complete = await _candidate_has_required_joining_docs(session, candidate_id=candidate.candidate_id)
@@ -872,30 +915,136 @@ async def convert_candidate_to_employee(session: AsyncSession, *, candidate: Rec
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Joining documents are not complete.")
     candidate.joining_docs_status = "complete"
 
+    profile = employee_profile or {}
+    person_code = _clean_optional_text(profile.get("person_code"))
+    first_name = _clean_optional_text(profile.get("first_name"))
+    employment_type = _clean_optional_text(profile.get("employment_type"))
+    email = (_clean_optional_text(profile.get("email")) or "").lower()
+
+    if not person_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee ID is required.")
+    if not first_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="First name is required.")
+    if not employment_type:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employment type is required.")
+    if not email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required.")
+
+    email_domain = email.split("@")[-1] if "@" in email else ""
+    is_intern = _is_intern_role(employment_type, offer.designation_title)
+    is_permanent = "permanent" in employment_type.lower()
+    if is_permanent and not is_intern and email_domain != "studiolotus.in":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Permanent employees must use a @studiolotus.in email.",
+        )
+
+    last_name = _clean_optional_text(profile.get("last_name")) or candidate.last_name
+    personal_id = _clean_optional_text(profile.get("personal_id"))
+    mobile_number = _clean_optional_text(profile.get("mobile_number")) or candidate.phone
+    manager_id = _clean_optional_text(profile.get("manager_id"))
+    role_id = _coerce_optional_int(profile.get("role_id"), field_label="Role ID")
+    grade_id = _coerce_optional_int(profile.get("grade_id"), field_label="Grade ID")
+    if role_id is None and offer.grade_id_platform is not None:
+        role_id = int(offer.grade_id_platform)
+    if grade_id is None and offer.grade_id_platform is not None:
+        grade_id = int(offer.grade_id_platform)
+    department_id = _coerce_optional_int(profile.get("department_id"), field_label="Department ID")
+    join_date = profile.get("join_date") or offer.joining_date
+    exit_date = profile.get("exit_date")
+    person_status = _clean_optional_text(profile.get("status")) or "working"
+    source_system = _clean_optional_text(profile.get("source_system")) or "recruitment"
+
+    full_name = _clean_optional_text(profile.get("full_name"))
+    if not full_name:
+        full_name = " ".join(part for part in [first_name, last_name] if part).strip()
+    display_name = _clean_optional_text(profile.get("display_name")) or full_name
+
     person_id = f"REC_{candidate.candidate_id}"
+    now = datetime.utcnow()
     async with PlatformSessionLocal() as platform_session:
+        person_code_conflict = (
+            await platform_session.execute(
+                select(DimPerson.person_id).where(
+                    DimPerson.person_code == person_code,
+                    DimPerson.person_id != person_id,
+                    active_status_filter(),
+                )
+            )
+        ).scalars().first()
+        if person_code_conflict:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Employee ID is already assigned to another active employee.",
+            )
+
+        email_conflict = (
+            await platform_session.execute(
+                select(DimPerson.person_id).where(
+                    DimPerson.email == email,
+                    DimPerson.person_id != person_id,
+                    active_status_filter(),
+                )
+            )
+        ).scalars().first()
+        if email_conflict:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email is already assigned to another active employee.",
+            )
+
         existing = await platform_session.get(DimPerson, person_id)
-        if not existing:
+        if existing:
+            existing.person_code = person_code
+            existing.personal_id = personal_id
+            existing.email = email
+            existing.first_name = first_name
+            existing.last_name = last_name
+            existing.mobile_number = mobile_number
+            existing.role_id = role_id
+            existing.grade_id = grade_id
+            existing.department_id = department_id
+            existing.manager_id = manager_id
+            existing.employment_type = employment_type
+            existing.join_date = join_date
+            existing.exit_date = exit_date
+            existing.status = person_status
+            existing.source_system = source_system
+            existing.full_name = full_name
+            existing.display_name = display_name
+            existing.is_deleted = 0
+            existing.updated_at = now
+        else:
             person = DimPerson(
                 person_id=person_id,
-                person_code=candidate.candidate_code,
-                email=candidate.email,
-                first_name=candidate.first_name,
-                last_name=candidate.last_name,
-                full_name=candidate.full_name,
-                display_name=candidate.full_name,
-                role_id=offer.grade_id_platform,
-                mobile_number=candidate.phone,
-                status="working",
+                person_code=person_code,
+                personal_id=personal_id,
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                mobile_number=mobile_number,
+                role_id=role_id,
+                grade_id=grade_id,
+                department_id=department_id,
+                manager_id=manager_id,
+                employment_type=employment_type,
+                join_date=join_date,
+                exit_date=exit_date,
+                status=person_status,
                 is_deleted=0,
+                created_at=now,
+                updated_at=now,
+                source_system=source_system,
+                full_name=full_name,
+                display_name=display_name,
             )
             platform_session.add(person)
-            await platform_session.commit()
+        await platform_session.commit()
 
     candidate.hired_person_id_platform = int("".join(filter(str.isdigit, person_id)) or candidate.candidate_id)
     candidate.final_decision = "hired"
     candidate.status = "hired"
-    candidate.updated_at = datetime.utcnow()
+    candidate.updated_at = now
 
     await apply_stage_transition(
         session,
@@ -951,6 +1100,6 @@ async def convert_candidate_to_employee(session: AsyncSession, *, candidate: Rec
         performed_by_person_id_platform=_platform_person_id(user),
         related_entity_type="candidate",
         related_entity_id=candidate.candidate_id,
-        meta_json=_event_meta(user, {"person_id_platform": person_id}),
+        meta_json=_event_meta(user, {"person_id_platform": person_id, "person_code": person_code, "email": email}),
     )
     return candidate

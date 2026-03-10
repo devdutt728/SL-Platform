@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, model_validator
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
 
 class CandidateCreate(BaseModel):
@@ -132,3 +132,57 @@ class CandidateDetailOut(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+
+
+class CandidateEmployeeProfileIn(BaseModel):
+    person_code: str
+    personal_id: Optional[str] = None
+    first_name: str
+    last_name: Optional[str] = None
+    email: EmailStr
+    mobile_number: Optional[str] = None
+    role_id: Optional[int] = None
+    grade_id: Optional[int] = None
+    department_id: Optional[int] = None
+    manager_id: Optional[str] = None
+    employment_type: str
+    join_date: Optional[date] = None
+    exit_date: Optional[date] = None
+    status: Optional[str] = "working"
+    source_system: Optional[str] = "recruitment"
+    full_name: Optional[str] = None
+    display_name: Optional[str] = None
+
+    @field_validator(
+        "person_code",
+        "personal_id",
+        "first_name",
+        "last_name",
+        "mobile_number",
+        "manager_id",
+        "employment_type",
+        "status",
+        "source_system",
+        "full_name",
+        "display_name",
+        mode="before",
+    )
+    @classmethod
+    def _strip_text(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        return value
+
+    @field_validator("person_code", "first_name", "employment_type")
+    @classmethod
+    def _required_text(cls, value: str | None):
+        if not value:
+            raise ValueError("This field is required.")
+        return value
+
+
+class CandidateConvertIn(BaseModel):
+    employee_profile: CandidateEmployeeProfileIn

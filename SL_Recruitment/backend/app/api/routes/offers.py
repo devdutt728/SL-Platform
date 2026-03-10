@@ -53,10 +53,9 @@ from app.services.offers import (
     update_offer_details,
 )
 from app.services.events import log_event
-from app.services.drive import delete_drive_item, download_drive_file, move_candidate_folder, upload_offer_doc
+from app.services.drive import delete_drive_item, download_drive_file, upload_offer_doc
 from app.services.email import render_template, send_email
-from app.services.operation_queue import OP_DRIVE_DELETE_ITEM, OP_DRIVE_MOVE_FOLDER, enqueue_operation
-from app.services.stage_transitions import apply_stage_transition
+from app.services.operation_queue import OP_DRIVE_DELETE_ITEM, enqueue_operation
 
 router = APIRouter(prefix="/rec/offers", tags=["offers"])
 public_router = APIRouter(prefix="/offer", tags=["offers-public"])
@@ -130,6 +129,21 @@ def _request_ip(request: Request) -> str | None:
     if real_ip:
         return real_ip
     return request.client.host if request.client else None
+
+
+def _hr_notification_recipients() -> list[str]:
+    hr_email = normalize_principal_email(settings.gmail_sender_email) or "hr@studiolotus.in"
+    return [hr_email]
+
+
+def _system_offer_user() -> UserContext:
+    hr_email = normalize_principal_email(settings.gmail_sender_email) or "hr@studiolotus.in"
+    return UserContext(
+        user_id="system_offer_flow",
+        email=hr_email,
+        roles=[Role.HR_ADMIN],
+        full_name="Studio Lotus Recruitment System",
+    )
 
 
 def _offer_base_payload(offer: RecCandidateOffer) -> dict:
@@ -219,6 +233,109 @@ async def _send_joining_documents_request_email(
             "joining_link": joining_link,
         },
     )
+
+
+async def _send_offer_decline_revision_email_to_hr(
+    session: AsyncSession,
+    *,
+    source_offer: RecCandidateOffer,
+    revised_offer: RecCandidateOffer,
+    candidate: RecCandidate | None,
+    opening: RecOpening | None,
+    decision_reason: str | None = None,
+) -> None:
+    await send_email(
+        session,
+        candidate_id=source_offer.candidate_id,
+        to_emails=_hr_notification_recipients(),
+        subject=f"Offer declined: revision v{revised_offer.offer_version} created for {candidate.full_name if candidate else 'Candidate'}",
+        template_name="offer_decline_revision_hr",
+        context={
+            "candidate_name": candidate.full_name if candidate else "",
+            "candidate_code": candidate.candidate_code if candidate else "",
+            "opening_title": opening.title if opening else "",
+            "designation_title": source_offer.designation_title or "",
+            "declined_offer_version": source_offer.offer_version,
+            "revised_offer_version": revised_offer.offer_version,
+            "decision_reason": (decision_reason or "").strip() or "-",
+            "offer_link": _offer_public_link(revised_offer.public_token),
+            "offer_file_url": offer_pdf_signed_url(revised_offer.public_token),
+            "sender_name": "Studio Lotus Recruitment Team",
+        },
+        email_type="offer_decline_revision_hr",
+        related_entity_type="offer",
+        related_entity_id=revised_offer.candidate_offer_id,
+        meta_extra={
+            "offer_id": revised_offer.candidate_offer_id,
+            "source_offer_id": source_offer.candidate_offer_id,
+            "source_offer_version": source_offer.offer_version,
+            "revised_offer_version": revised_offer.offer_version,
+        },
+    )
+
+
+async def _auto_recreate_offer_on_decline(
+    session: AsyncSession,
+    *,
+    source_offer: RecCandidateOffer,
+    acting_user: UserContext | None,
+    decision_reason: str | None = None,
+    source: str = "offer_decision",
+) -> RecCandidateOffer | None:
+    candidate = await session.get(RecCandidate, source_offer.candidate_id)
+    if not candidate:
+        return None
+    opening = await session.get(RecOpening, source_offer.opening_id) if source_offer.opening_id else None
+    revision_user = acting_user or _system_offer_user()
+    try:
+        revised = await create_offer_revision(
+            session,
+            source_offer=source_offer,
+            candidate=candidate,
+            opening=opening,
+            user=revision_user,
+            revision_reason=(decision_reason or "").strip() or "Candidate declined the offer.",
+        )
+    except Exception as exc:  # noqa: BLE001
+        await log_event(
+            session,
+            candidate_id=source_offer.candidate_id,
+            action_type="offer_decline_revision_create_failed",
+            performed_by_person_id_platform=_safe_person_id((acting_user.person_id_platform if acting_user else None)),
+            related_entity_type="offer",
+            related_entity_id=source_offer.candidate_offer_id,
+            meta_json={
+                "source": source,
+                "source_offer_id": source_offer.candidate_offer_id,
+                "error": str(exc),
+            },
+        )
+        return None
+    try:
+        await _send_offer_decline_revision_email_to_hr(
+            session,
+            source_offer=source_offer,
+            revised_offer=revised,
+            candidate=candidate,
+            opening=opening,
+            decision_reason=decision_reason,
+        )
+    except Exception as exc:  # noqa: BLE001
+        await log_event(
+            session,
+            candidate_id=source_offer.candidate_id,
+            action_type="offer_decline_revision_email_failed",
+            performed_by_person_id_platform=None,
+            related_entity_type="offer",
+            related_entity_id=revised.candidate_offer_id,
+            meta_json={
+                "source": source,
+                "source_offer_id": source_offer.candidate_offer_id,
+                "revised_offer_id": revised.candidate_offer_id,
+                "error": str(exc),
+            },
+        )
+    return revised
 
 
 @router.get("", response_model=list[OfferOut])
@@ -474,7 +591,8 @@ async def admin_offer_decision(
         reason=payload.reason,
         allow_override=True,
     )
-    if payload.decision.strip().lower() == "accept":
+    decision_normalized = payload.decision.strip().lower()
+    if decision_normalized == "accept":
         candidate = await session.get(RecCandidate, offer.candidate_id)
         opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
         try:
@@ -494,6 +612,14 @@ async def admin_offer_decision(
                 related_entity_id=offer.candidate_offer_id,
                 meta_json={"offer_id": offer.candidate_offer_id, "error": str(exc)},
             )
+    elif decision_normalized == "decline":
+        await _auto_recreate_offer_on_decline(
+            session,
+            source_offer=offer,
+            acting_user=user,
+            decision_reason=payload.reason,
+            source="admin_offer_decision",
+        )
     await session.commit()
     await session.refresh(offer)
     return OfferOut(
@@ -840,54 +966,14 @@ async def decide_public_offer(
                 related_entity_id=offer.candidate_offer_id,
                 meta_json={"offer_id": offer.candidate_offer_id, "error": str(exc)},
             )
-    if candidate and decision_normalized == "decline":
-        candidate.final_decision = "not_hired"
-        candidate.updated_at = datetime.utcnow()
-        await apply_stage_transition(
+    elif decision_normalized == "decline":
+        await _auto_recreate_offer_on_decline(
             session,
-            candidate=candidate,
-            to_stage="rejected",
-            decision="reject",
-            reason=payload.reason,
-            note="public_offer_decline_override",
+            source_offer=offer,
+            acting_user=None,
+            decision_reason=payload.reason,
             source="public_offer_decision",
-            skip_requested=True,
-            skip_requires_superadmin=False,
         )
-        if candidate.drive_folder_id:
-            try:
-                move_candidate_folder(candidate.drive_folder_id, "Not Appointed")
-                await log_event(
-                    session,
-                    candidate_id=candidate.candidate_id,
-                    action_type="drive_folder_moved",
-                    performed_by_person_id_platform=None,
-                    related_entity_type="candidate",
-                    related_entity_id=candidate.candidate_id,
-                    meta_json={"bucket": "Not Appointed"},
-                )
-            except Exception as exc:  # noqa: BLE001
-                await log_event(
-                    session,
-                    candidate_id=candidate.candidate_id,
-                    action_type="drive_folder_move_failed",
-                    performed_by_person_id_platform=None,
-                    related_entity_type="candidate",
-                    related_entity_id=candidate.candidate_id,
-                    meta_json={"bucket": "Not Appointed", "error": str(exc)},
-                )
-                await enqueue_operation(
-                    session,
-                    operation_type=OP_DRIVE_MOVE_FOLDER,
-                    payload={
-                        "folder_id": candidate.drive_folder_id,
-                        "target_bucket": "Not Appointed",
-                    },
-                    candidate_id=candidate.candidate_id,
-                    related_entity_type="candidate",
-                    related_entity_id=candidate.candidate_id,
-                    idempotency_key=f"drive_move_not_appointed:{candidate.candidate_id}",
-                )
     await session.commit()
     return OfferPublicOut(
         candidate_name=candidate.full_name if candidate else None,
