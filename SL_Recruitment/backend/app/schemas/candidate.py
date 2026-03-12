@@ -3,6 +3,8 @@ from typing import Optional
 
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
+from app.schemas.joining_docs import JoiningProfileReviewIn
+
 
 class CandidateCreate(BaseModel):
     name: Optional[str] = None
@@ -186,3 +188,4 @@ class CandidateEmployeeProfileIn(BaseModel):
 
 class CandidateConvertIn(BaseModel):
     employee_profile: CandidateEmployeeProfileIn
+    joining_profile_review: Optional[JoiningProfileReviewIn] = None

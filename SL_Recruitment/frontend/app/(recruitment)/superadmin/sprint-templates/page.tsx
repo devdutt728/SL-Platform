@@ -21,7 +21,9 @@ export default async function SuperAdminSprintTemplatesPage() {
   return (
     <>
       <SuperAdminToolsHeader active="sprint-templates" />
-      <SprintTemplatesClient initialTemplates={templates} initialIsSuperadmin />
+      <div className="superadmin-shell">
+        <SprintTemplatesClient initialTemplates={templates} initialIsSuperadmin />
+      </div>
     </>
   );
 }

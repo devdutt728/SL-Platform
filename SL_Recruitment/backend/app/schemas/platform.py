@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -78,11 +78,27 @@ class BulkUploadError(BaseModel):
     row: int
     message: str
     person_id: Optional[str] = None
+    person_code: Optional[str] = None
+    email: Optional[str] = None
+
+
+class BulkUploadWarning(BaseModel):
+    row: Optional[int] = None
+    message: str
+    person_id: Optional[str] = None
+    person_code: Optional[str] = None
+    email: Optional[str] = None
 
 
 class BulkUploadResult(BaseModel):
+    mode: Literal["dry_run", "apply"] = "apply"
+    batch_hash: Optional[str] = None
     total: int
+    processed: int = 0
     created: int
     updated: int
     skipped: int
+    unchanged: int = 0
+    conflicts: int = 0
     errors: list[BulkUploadError] = Field(default_factory=list)
+    warnings: list[BulkUploadWarning] = Field(default_factory=list)

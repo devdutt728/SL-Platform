@@ -185,14 +185,14 @@ export function RolesPanel() {
   }
 
   return (
-    <main className="content-pad space-y-5">
-      <section className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm">
+    <main className="content-pad mt-3 space-y-4">
+      <section className="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-slate-100/70 p-5 shadow-[0_22px_40px_-34px_rgba(15,23,42,0.58)]">
         <div className="absolute -right-10 top-6 h-40 w-40 rounded-full bg-sky-200/40 blur-3xl" aria-hidden="true" />
         <div className="absolute -left-8 bottom-6 h-28 w-28 rounded-full bg-cyan-200/40 blur-2xl" aria-hidden="true" />
         <div className="relative space-y-2">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Admin</p>
-          <h1 className="text-2xl font-semibold text-slate-900">Role Studio</h1>
-          <p className="max-w-2xl text-sm text-slate-600">
+          <p className="text-[10px] uppercase tracking-[0.28em] text-slate-500">Admin</p>
+          <h1 className="text-xl font-semibold text-slate-900">Role Studio</h1>
+          <p className="max-w-2xl text-xs text-slate-600">
             Create, edit, and assign platform roles.
           </p>
         </div>
@@ -202,7 +202,7 @@ export function RolesPanel() {
       {notice ? <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
 
       <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <section className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
+        <section className="rounded-3xl border border-slate-200/80 bg-white/85 p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs uppercase tracking-tight text-slate-500">Create role</p>
@@ -248,7 +248,7 @@ export function RolesPanel() {
           </div>
         </section>
 
-        <section className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
+        <section className="rounded-3xl border border-slate-200/80 bg-white/85 p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-tight text-slate-500">Assign role</p>
@@ -346,7 +346,7 @@ export function RolesPanel() {
         </section>
       </div>
 
-      <section className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
+      <section className="rounded-3xl border border-slate-200/80 bg-white/85 p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-tight text-slate-500">Roles</p>

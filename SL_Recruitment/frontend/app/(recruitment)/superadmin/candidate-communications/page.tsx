@@ -8,7 +8,7 @@ export default async function SuperAdminCandidateCommunicationsPage() {
   return (
     <>
       <SuperAdminToolsHeader active="candidate-communications" />
-      <div className="content-pad mt-4">
+      <div className="content-pad superadmin-shell mt-3">
         <CandidateCommunicationsPanel />
       </div>
     </>

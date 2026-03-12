@@ -31,6 +31,20 @@ const KNOWN_EMAIL_TYPES = [
   "offer_followup",
 ];
 
+type CandidateCommunicationCandidateRow = {
+  candidate_id: number;
+  candidate_code: string;
+  candidate_name: string;
+  candidate_email?: string | null;
+  opening_title?: string | null;
+  latest_created_at?: string | null;
+  latest_action_type?: string | null;
+  latest_email_type?: string | null;
+  latest_status?: string | null;
+  event_count: number;
+  links: CandidateCommunicationItem["links"];
+};
+
 function formatDateTime(raw?: string | null) {
   if (!raw) return "-";
   const value = new Date(raw);
@@ -46,9 +60,80 @@ function statusTone(status?: string | null) {
   return "border-slate-200 bg-slate-50 text-slate-700";
 }
 
-function joinList(values: string[]) {
-  if (!values.length) return "-";
-  return values.join(", ");
+function toTimeValue(raw?: string | null) {
+  if (!raw) return Number.NEGATIVE_INFINITY;
+  const value = new Date(raw).getTime();
+  return Number.isNaN(value) ? Number.NEGATIVE_INFINITY : value;
+}
+
+function aggregateCandidateRows(items: CandidateCommunicationItem[]): CandidateCommunicationCandidateRow[] {
+  const grouped = new Map<
+    number,
+    CandidateCommunicationCandidateRow & {
+      linkKeys: Set<string>;
+    }
+  >();
+
+  for (const item of items) {
+    const existing = grouped.get(item.candidate_id);
+    if (!existing) {
+      const linkKeys = new Set<string>();
+      const links: CandidateCommunicationItem["links"] = [];
+      for (const link of item.links) {
+        const key = `${link.label}::${link.url}`;
+        if (!link.url || linkKeys.has(key)) continue;
+        linkKeys.add(key);
+        links.push(link);
+      }
+      grouped.set(item.candidate_id, {
+        candidate_id: item.candidate_id,
+        candidate_code: item.candidate_code,
+        candidate_name: item.candidate_name,
+        candidate_email: item.candidate_email,
+        opening_title: item.opening_title,
+        latest_created_at: item.created_at,
+        latest_action_type: item.action_type,
+        latest_email_type: item.email_type,
+        latest_status: item.status,
+        event_count: 1,
+        links,
+        linkKeys,
+      });
+      continue;
+    }
+
+    existing.event_count += 1;
+    if (!existing.candidate_email && item.candidate_email) existing.candidate_email = item.candidate_email;
+    if (!existing.opening_title && item.opening_title) existing.opening_title = item.opening_title;
+    if (toTimeValue(item.created_at) > toTimeValue(existing.latest_created_at)) {
+      existing.latest_created_at = item.created_at;
+      existing.latest_action_type = item.action_type;
+      existing.latest_email_type = item.email_type;
+      existing.latest_status = item.status;
+    }
+    for (const link of item.links) {
+      const key = `${link.label}::${link.url}`;
+      if (!link.url || existing.linkKeys.has(key)) continue;
+      existing.linkKeys.add(key);
+      existing.links.push(link);
+    }
+  }
+
+  return Array.from(grouped.values())
+    .map((row) => ({
+      candidate_id: row.candidate_id,
+      candidate_code: row.candidate_code,
+      candidate_name: row.candidate_name,
+      candidate_email: row.candidate_email,
+      opening_title: row.opening_title,
+      latest_created_at: row.latest_created_at,
+      latest_action_type: row.latest_action_type,
+      latest_email_type: row.latest_email_type,
+      latest_status: row.latest_status,
+      event_count: row.event_count,
+      links: row.links,
+    }))
+    .sort((a, b) => toTimeValue(b.latest_created_at) - toTimeValue(a.latest_created_at));
 }
 
 export function CandidateCommunicationsPanel() {
@@ -97,20 +182,22 @@ export function CandidateCommunicationsPanel() {
     void loadFeed(0, false);
   }, [loadFeed]);
 
-  const displayedRows = useMemo(() => feed?.items || [], [feed]);
-  const loadedCount = displayedRows.length;
+  const communicationRows = useMemo(() => feed?.items || [], [feed]);
+  const displayedRows = useMemo(() => aggregateCandidateRows(communicationRows), [communicationRows]);
+  const loadedCount = communicationRows.length;
+  const loadedCandidates = displayedRows.length;
   const total = feed?.total || 0;
   const canLoadMore = loadedCount < total;
 
   const emailTypeOptions = useMemo(() => {
     const dynamic = new Set<string>();
-    for (const row of displayedRows) {
+    for (const row of communicationRows) {
       const value = (row.email_type || "").trim();
       if (value) dynamic.add(value);
     }
     for (const known of KNOWN_EMAIL_TYPES) dynamic.add(known);
     return Array.from(dynamic).sort((a, b) => a.localeCompare(b));
-  }, [displayedRows]);
+  }, [communicationRows]);
 
   function applyFilters() {
     setQuery(queryInput.trim());
@@ -125,17 +212,17 @@ export function CandidateCommunicationsPanel() {
 
   async function loadMore() {
     if (!feed) return;
-    await loadFeed(displayedRows.length, true);
+    await loadFeed(loadedCount, true);
   }
 
   return (
-    <section className="space-y-4">
-      <section className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
+    <section className="space-y-3.5">
+      <section className="rounded-3xl border border-slate-200/80 bg-white/85 p-4 shadow-[0_18px_32px_-30px_rgba(15,23,42,0.6)]">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Superadmin communications portal</p>
-            <h2 className="mt-1 text-2xl font-semibold text-slate-900">Candidate Mail & Link Access</h2>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Superadmin communications portal</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-900">Candidate Mail & Link Access</h2>
+            <p className="mt-1 text-xs text-slate-600">
               Single feed for all candidates. Every shared mail/link event is searchable with direct access links.
             </p>
           </div>
@@ -150,7 +237,7 @@ export function CandidateCommunicationsPanel() {
           </button>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <div className="mt-3 grid gap-2.5 md:grid-cols-4">
           <label className="space-y-1 text-xs text-slate-600 md:col-span-2">
             Search candidate/event
             <div className="relative">
@@ -215,7 +302,7 @@ export function CandidateCommunicationsPanel() {
             Clear
           </button>
           <span className="ml-auto text-xs text-slate-500">
-            Showing {loadedCount} of {total} records
+            Showing {loadedCandidates} candidates ({loadedCount} of {total} communication records)
           </span>
         </div>
       </section>
@@ -234,7 +321,7 @@ export function CandidateCommunicationsPanel() {
         ) : null}
 
         {displayedRows.map((item) => (
-          <CommunicationCard key={item.event_id} item={item} />
+          <CommunicationCard key={item.candidate_id} item={item} />
         ))}
 
         {loading ? (
@@ -258,7 +345,7 @@ export function CandidateCommunicationsPanel() {
   );
 }
 
-function CommunicationCard({ item }: { item: CandidateCommunicationItem }) {
+function CommunicationCard({ item }: { item: CandidateCommunicationCandidateRow }) {
   return (
     <article className="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -271,12 +358,14 @@ function CommunicationCard({ item }: { item: CandidateCommunicationItem }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-            {item.action_type}
-          </span>
-          {item.status ? (
-            <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusTone(item.status)}`}>
-              {item.status}
+          {item.latest_action_type ? (
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+              {item.latest_action_type}
+            </span>
+          ) : null}
+          {item.latest_status ? (
+            <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusTone(item.latest_status)}`}>
+              {item.latest_status}
             </span>
           ) : null}
         </div>
@@ -284,19 +373,13 @@ function CommunicationCard({ item }: { item: CandidateCommunicationItem }) {
 
       <div className="mt-3 grid gap-2 md:grid-cols-2">
         <p className="text-xs text-slate-600">
-          <span className="font-semibold text-slate-800">Email type:</span> {item.email_type || "-"}
+          <span className="font-semibold text-slate-800">Latest email type:</span> {item.latest_email_type || "-"}
         </p>
         <p className="text-xs text-slate-600">
-          <span className="font-semibold text-slate-800">Timestamp:</span> {formatDateTime(item.created_at)}
+          <span className="font-semibold text-slate-800">Latest timestamp:</span> {formatDateTime(item.latest_created_at)}
         </p>
-        <p className="text-xs text-slate-600 md:col-span-2">
-          <span className="font-semibold text-slate-800">Subject:</span> {item.subject || "-"}
-        </p>
-        <p className="text-xs text-slate-600 md:col-span-2">
-          <span className="font-semibold text-slate-800">To:</span> {joinList(item.recipients_to)}
-        </p>
-        <p className="text-xs text-slate-600 md:col-span-2">
-          <span className="font-semibold text-slate-800">CC:</span> {joinList(item.recipients_cc)}
+        <p className="text-xs text-slate-600">
+          <span className="font-semibold text-slate-800">Matched events:</span> {item.event_count}
         </p>
       </div>
 
@@ -306,7 +389,7 @@ function CommunicationCard({ item }: { item: CandidateCommunicationItem }) {
           <div className="mt-2 flex flex-wrap gap-2">
             {item.links.map((link) => (
               <a
-                key={`${item.event_id}:${link.label}:${link.url}`}
+                key={`${item.candidate_id}:${link.label}:${link.url}`}
                 href={link.url}
                 target="_blank"
                 rel="noreferrer"

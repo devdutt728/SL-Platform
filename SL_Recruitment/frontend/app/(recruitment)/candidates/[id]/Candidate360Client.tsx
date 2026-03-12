@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { CandidateAssessment, CandidateConvertPayload, CandidateFull, JoiningDoc, Screening } from "@/lib/types";
+import { CandidateAssessment, CandidateConvertPayload, CandidateFull, JoiningDoc, JoiningProfile, Screening } from "@/lib/types";
 import { ExternalLink } from "lucide-react";
 import { defaultTransitionDecision, normalizeRecruitmentStage } from "@/lib/recruitment-stages";
 import { DeleteCandidateButton } from "./DeleteCandidateButton";
@@ -130,6 +130,9 @@ function emptyConvertForm(): CandidateConvertFormState {
   return {
     person_code: "",
     personal_id: "",
+    aadhaar_number: "",
+    pan_verified: false,
+    aadhaar_verified: false,
     first_name: "",
     last_name: "",
     email: "",
@@ -199,6 +202,7 @@ export function Candidate360Client({
 
   const candidate = data.candidate;
   const assessment = data.assessment as CandidateAssessment | null | undefined;
+  const joiningProfile = data.joining_profile as JoiningProfile | null | undefined;
   const candidateInitials = useMemo(() => {
     const parts = (candidate.name || "").trim().split(/\s+/).filter(Boolean);
     const first = parts[0]?.[0] || "";
@@ -359,11 +363,14 @@ export function Candidate360Client({
 
     setConvertForm({
       person_code: (candidate.candidate_code || "").trim(),
-      personal_id: "",
+      personal_id: (joiningProfile?.personal_id || "").trim(),
+      aadhaar_number: (joiningProfile?.aadhaar_number || "").trim(),
+      pan_verified: Boolean(joiningProfile?.pan_verified),
+      aadhaar_verified: Boolean(joiningProfile?.aadhaar_verified),
       first_name: firstName,
       last_name: lastName,
       email: (candidate.email || "").trim().toLowerCase(),
-      mobile_number: (candidate.phone || "").trim(),
+      mobile_number: (joiningProfile?.mobile_number || assessment?.contact_number || candidate.phone || "").trim(),
       role_id: offerGradeId,
       grade_id: offerGradeId,
       department_id: "",
@@ -386,9 +393,15 @@ export function Candidate360Client({
     candidate.name,
     candidate.opening_title,
     candidate.phone,
+    joiningProfile?.aadhaar_number,
+    joiningProfile?.aadhaar_verified,
+    joiningProfile?.mobile_number,
+    joiningProfile?.pan_verified,
+    joiningProfile?.personal_id,
     latestOffer?.designation_title,
     latestOffer?.grade_id_platform,
     latestOffer?.joining_date,
+    assessment?.contact_number,
   ]);
 
   const convertInternRoleDetected = useMemo(() => {
@@ -418,6 +431,10 @@ export function Candidate360Client({
       if (convertRequiresStudioLotusDomain && !email.endsWith(`@${STUDIOLOTUS_EMAIL_DOMAIN}`)) {
         throw new Error("Permanent employees must use a @studiolotus.in email.");
       }
+      if (!convertForm.personal_id.trim()) throw new Error("PAN number is missing from the joining profile.");
+      if (!convertForm.aadhaar_number.trim()) throw new Error("Aadhaar number is missing from the joining profile.");
+      if (!convertForm.pan_verified) throw new Error("Verify PAN against the uploaded document before final hire.");
+      if (!convertForm.aadhaar_verified) throw new Error("Verify Aadhaar against the uploaded document before final hire.");
 
       const lastName = normalizeOptionalText(convertForm.last_name);
       const fallbackFullName = [firstName, lastName].filter(Boolean).join(" ").trim();
@@ -443,6 +460,10 @@ export function Candidate360Client({
           source_system: normalizeOptionalText(convertForm.source_system) || "recruitment",
           full_name: fullName || null,
           display_name: displayName || null,
+        },
+        joining_profile_review: {
+          pan_verified: convertForm.pan_verified,
+          aadhaar_verified: convertForm.aadhaar_verified,
         },
       };
 
@@ -1282,6 +1303,7 @@ export function Candidate360Client({
         error={convertDialogError}
         requiresStudioLotusDomain={convertRequiresStudioLotusDomain}
         form={convertForm}
+        joiningProfile={joiningProfile}
         onChange={(patch) => {
           setConvertForm((prev) => ({ ...prev, ...patch }));
           if (convertDialogError) setConvertDialogError(null);

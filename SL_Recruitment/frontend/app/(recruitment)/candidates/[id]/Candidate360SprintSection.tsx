@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { ExternalLink } from "lucide-react";
+import { createPortal } from "react-dom";
 import { CandidateSprint, SprintTemplate } from "@/lib/types";
 import { Chip, Metric } from "./Candidate360Primitives";
 
@@ -89,103 +91,114 @@ export function Candidate360SprintSection({
   stripHtml,
   formatBytes,
 }: Props) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   return (
     <>
-      {assignOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6">
-          <div className="w-full max-w-3xl rounded-3xl border border-white/20 bg-white/95 p-6 shadow-xl">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-tight text-slate-500">Assign sprint</p>
-                <h3 className="text-lg font-semibold">Select a template</h3>
-              </div>
-              <button
-                type="button"
-                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                onClick={onCloseAssign}
-              >
-                Close
-              </button>
-            </div>
+      {assignOpen && mounted
+        ? createPortal(
+            <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 px-4 py-6">
+              <div className="mx-auto flex min-h-full w-full max-w-3xl items-center justify-center">
+                <div className="w-full rounded-3xl border border-white/20 bg-white/95 p-6 shadow-xl">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-tight text-slate-500">Assign sprint</p>
+                      <h3 className="text-lg font-semibold">Select a template</h3>
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                      onClick={onCloseAssign}
+                    >
+                      Close
+                    </button>
+                  </div>
 
-            <div className="mt-4 grid gap-3">
-              <label className="space-y-1 text-xs text-slate-600">
-                Sprint template
-                <select
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                  value={selectedTemplateId}
-                  onChange={(e) => onSelectTemplate(e.target.value)}
-                >
-                  <option value="">Select template</option>
-                  {sprintTemplates.map((template) => (
-                    <option key={template.sprint_template_id} value={String(template.sprint_template_id)}>
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <div className="mt-4 grid gap-3">
+                    <label className="space-y-1 text-xs text-slate-600">
+                      Sprint template
+                      <select
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={selectedTemplateId}
+                        onChange={(e) => onSelectTemplate(e.target.value)}
+                      >
+                        <option value="">Select template</option>
+                        {sprintTemplates.map((template) => (
+                          <option key={template.sprint_template_id} value={String(template.sprint_template_id)}>
+                            {template.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-              <label className="space-y-1 text-xs text-slate-600">
-                Due date
-                <input
-                  type="datetime-local"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
-                  value={dueAt}
-                  onChange={(e) => setDueAt(e.target.value)}
-                />
-              </label>
+                    <label className="space-y-1 text-xs text-slate-600">
+                      Due date
+                      <input
+                        type="datetime-local"
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                        value={dueAt}
+                        onChange={(e) => setDueAt(e.target.value)}
+                      />
+                    </label>
 
-              <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 text-sm text-slate-700">
-                <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Email preview</p>
-                {templatePreviewBusy ? (
-                  <p className="mt-2 text-sm text-slate-600">Loading preview...</p>
-                ) : templatePreview ? (
-                  <div className="mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                    <div
-                      className="max-h-[520px] overflow-auto p-4"
-                      dangerouslySetInnerHTML={{ __html: sprintEmailPreviewHtml }}
-                    />
-                    <div className="border-t border-slate-200 px-4 py-2 text-[11px] text-slate-500">
-                      The sprint link activates after assignment.
+                    <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 text-sm text-slate-700">
+                      <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Email preview</p>
+                      {templatePreviewBusy ? (
+                        <p className="mt-2 text-sm text-slate-600">Loading preview...</p>
+                      ) : templatePreview ? (
+                        <div className="mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                          <div
+                            className="max-h-[520px] overflow-auto p-4"
+                            dangerouslySetInnerHTML={{ __html: sprintEmailPreviewHtml }}
+                          />
+                          <div className="border-t border-slate-200 px-4 py-2 text-[11px] text-slate-500">
+                            The sprint link activates after assignment.
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-sm text-slate-600">Select a template to preview the brief and attachments.</p>
+                      )}
+                      {templatePreviewError ? (
+                        <div className="mt-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-700">
+                          {templatePreviewError}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
-                ) : (
-                  <p className="mt-2 text-sm text-slate-600">Select a template to preview the brief and attachments.</p>
-                )}
-                {templatePreviewError ? (
-                  <div className="mt-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-700">
-                    {templatePreviewError}
+
+                  {sprintsError ? (
+                    <div className="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-700">
+                      {sprintsError}
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
+                      onClick={onCloseAssign}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
+                      onClick={onAssignSprint}
+                      disabled={sprintsBusy || sprintAssignDisabled}
+                    >
+                      {sprintsBusy ? "Assigning..." : "Assign sprint"}
+                    </button>
                   </div>
-                ) : null}
+                </div>
               </div>
-            </div>
-
-            {sprintsError ? (
-              <div className="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-700">
-                {sprintsError}
-              </div>
-            ) : null}
-
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700"
-                onClick={onCloseAssign}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
-                onClick={onAssignSprint}
-                disabled={sprintsBusy || sprintAssignDisabled}
-              >
-                {sprintsBusy ? "Assigning..." : "Assign sprint"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+            </div>,
+            document.body
+          )
+        : null}
 
       <div ref={sectionRef} className="section-card">
         <div className="flex items-center justify-between">

@@ -500,6 +500,7 @@ export type CandidateFull = {
   events: CandidateEvent[];
   screening?: Screening | null;
   assessment?: CandidateAssessment | null;
+  joining_profile?: JoiningProfile | null;
 };
 
 export type CandidateAssessment = {
@@ -755,8 +756,14 @@ export type CandidateEmployeeProfileInput = {
   display_name?: string | null;
 };
 
+export type CandidateJoiningProfileReviewInput = {
+  pan_verified?: boolean | null;
+  aadhaar_verified?: boolean | null;
+};
+
 export type CandidateConvertPayload = {
   employee_profile: CandidateEmployeeProfileInput;
+  joining_profile_review?: CandidateJoiningProfileReviewInput | null;
 };
 
 export type OfferPublic = {
@@ -816,12 +823,62 @@ export type JoiningDocPublic = {
   created_at: string;
 };
 
+export type JoiningProfileBase = {
+  personal_id?: string | null;
+  middle_name?: string | null;
+  date_of_birth?: string | null;
+  gender?: string | null;
+  marital_status?: string | null;
+  marriage_date?: string | null;
+  blood_group?: string | null;
+  physically_handicapped?: string | null;
+  nationality?: string | null;
+  mobile_number?: string | null;
+  personal_email?: string | null;
+  current_address_line_1?: string | null;
+  current_address_line_2?: string | null;
+  current_address_city?: string | null;
+  current_address_state?: string | null;
+  current_address_zip?: string | null;
+  current_address_country?: string | null;
+  permanent_address_line_1?: string | null;
+  permanent_address_line_2?: string | null;
+  permanent_address_city?: string | null;
+  permanent_address_state?: string | null;
+  permanent_address_zip?: string | null;
+  permanent_address_country?: string | null;
+  father_name?: string | null;
+  mother_name?: string | null;
+  spouse_name?: string | null;
+  children_names?: string | null;
+  aadhaar_number?: string | null;
+  pf_number?: string | null;
+  uan_number?: string | null;
+};
+
+export type JoiningProfile = JoiningProfileBase & {
+  candidate_id: number;
+  profile_status: string;
+  pan_verified: boolean;
+  aadhaar_verified: boolean;
+  submitted_at?: string | null;
+  verified_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type JoiningProfilePublic = JoiningProfileBase & {
+  profile_status: string;
+  submitted_at?: string | null;
+};
+
 export type JoiningDocsPublicContext = {
   candidate_id: number;
   candidate_name: string;
   opening_title?: string | null;
   joining_docs_status: string;
   required_doc_types: string[];
+  profile?: JoiningProfilePublic | null;
   docs: JoiningDocPublic[];
 };
 

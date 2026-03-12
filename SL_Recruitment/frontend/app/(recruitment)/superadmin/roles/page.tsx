@@ -8,7 +8,9 @@ export default async function SuperAdminRolesPage() {
   return (
     <>
       <SuperAdminToolsHeader active="roles" />
-      <RolesPanel />
+      <div className="superadmin-shell">
+        <RolesPanel />
+      </div>
     </>
   );
 }

@@ -14,8 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.platform_session import PlatformSessionLocal
 from app.models.candidate import RecCandidate
+from app.models.candidate_assessment import RecCandidateAssessment
 from app.models.candidate_offer import RecCandidateOffer
 from app.models.joining_doc import RecCandidateJoiningDoc
+from app.models.joining_profile import RecCandidateJoiningProfile
 from app.models.opening_event import RecOpeningEvent
 from app.models.opening import RecOpening
 from app.models.platform_person import DimPerson
@@ -900,6 +902,89 @@ def _is_intern_role(*values: str | None) -> bool:
     return False
 
 
+_JOINING_PROFILE_REQUIRED_FIELDS = (
+    "personal_id",
+    "aadhaar_number",
+    "date_of_birth",
+    "gender",
+    "current_address_line_1",
+    "current_address_city",
+    "current_address_state",
+    "current_address_country",
+    "permanent_address_line_1",
+    "permanent_address_city",
+    "permanent_address_state",
+    "permanent_address_country",
+)
+
+_JOINING_PROFILE_PERSON_FIELDS = (
+    "middle_name",
+    "date_of_birth",
+    "gender",
+    "marital_status",
+    "marriage_date",
+    "blood_group",
+    "physically_handicapped",
+    "nationality",
+    "current_address_line_1",
+    "current_address_line_2",
+    "current_address_city",
+    "current_address_state",
+    "current_address_zip",
+    "current_address_country",
+    "permanent_address_line_1",
+    "permanent_address_line_2",
+    "permanent_address_city",
+    "permanent_address_state",
+    "permanent_address_zip",
+    "permanent_address_country",
+    "father_name",
+    "mother_name",
+    "spouse_name",
+    "children_names",
+    "aadhaar_number",
+    "pf_number",
+    "uan_number",
+)
+
+
+def _is_missing_joining_profile_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
+def _missing_joining_profile_fields(profile: RecCandidateJoiningProfile | None) -> list[str]:
+    if profile is None:
+        return list(_JOINING_PROFILE_REQUIRED_FIELDS)
+    missing: list[str] = []
+    for field_name in _JOINING_PROFILE_REQUIRED_FIELDS:
+        if _is_missing_joining_profile_value(getattr(profile, field_name, None)):
+            missing.append(field_name)
+    return missing
+
+
+def _apply_joining_profile_to_person(
+    person: DimPerson,
+    *,
+    profile: RecCandidateJoiningProfile,
+    assessment: RecCandidateAssessment | None,
+    mobile_number: str | None,
+) -> None:
+    person.mobile_number = mobile_number
+    if profile.personal_email:
+        person.personal_email = profile.personal_email.strip().lower()
+    elif assessment and assessment.personal_email:
+        person.personal_email = str(assessment.personal_email).strip().lower()
+    for field_name in _JOINING_PROFILE_PERSON_FIELDS:
+        value = getattr(profile, field_name, None)
+        if isinstance(value, str):
+            value = value.strip() or None
+        setattr(person, field_name, value)
+
+
 async def convert_candidate_to_employee(
     session: AsyncSession,
     *,
@@ -907,6 +992,7 @@ async def convert_candidate_to_employee(
     offer: RecCandidateOffer,
     user: UserContext,
     employee_profile: dict[str, Any],
+    joining_profile_review: dict[str, Any] | None = None,
 ) -> RecCandidate:
     if offer.offer_status != "accepted":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer must be accepted before conversion.")
@@ -915,9 +1001,51 @@ async def convert_candidate_to_employee(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Joining documents are not complete.")
     candidate.joining_docs_status = "complete"
 
+    try:
+        joining_profile = await session.get(RecCandidateJoiningProfile, candidate.candidate_id)
+    except Exception as exc:  # noqa: BLE001
+        message = str(exc).lower()
+        if "doesn't exist" in message or "unknown table" in message:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Joining profile table is missing. Apply migration `backend/migrations/0041_rec_candidate_joining_profile.sql`.",
+            ) from exc
+        raise
+    if joining_profile is None or joining_profile.profile_status != "submitted":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Candidate joining profile is not submitted yet.")
+
+    assessment = (
+        await session.execute(
+            select(RecCandidateAssessment).where(RecCandidateAssessment.candidate_id == candidate.candidate_id)
+        )
+    ).scalars().first()
+
+    review = joining_profile_review or {}
+    if "pan_verified" in review:
+        joining_profile.pan_verified = bool(review["pan_verified"])
+    if "aadhaar_verified" in review:
+        joining_profile.aadhaar_verified = bool(review["aadhaar_verified"])
+    if not (joining_profile.personal_id or "").strip():
+        joining_profile.pan_verified = False
+    if not (joining_profile.aadhaar_number or "").strip():
+        joining_profile.aadhaar_verified = False
+    joining_profile.verified_at = datetime.utcnow() if joining_profile.pan_verified and joining_profile.aadhaar_verified else None
+
+    missing_profile_fields = _missing_joining_profile_fields(joining_profile)
+    if missing_profile_fields:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Candidate joining profile is incomplete. Missing: {', '.join(missing_profile_fields)}.",
+        )
+    if not joining_profile.pan_verified or not joining_profile.aadhaar_verified:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="PAN and Aadhaar must be verified by HR before final hire.",
+        )
+
     profile = employee_profile or {}
     person_code = _clean_optional_text(profile.get("person_code"))
-    first_name = _clean_optional_text(profile.get("first_name"))
+    first_name = _clean_optional_text(profile.get("first_name")) or candidate.first_name
     employment_type = _clean_optional_text(profile.get("employment_type"))
     email = (_clean_optional_text(profile.get("email")) or "").lower()
 
@@ -940,8 +1068,13 @@ async def convert_candidate_to_employee(
         )
 
     last_name = _clean_optional_text(profile.get("last_name")) or candidate.last_name
-    personal_id = _clean_optional_text(profile.get("personal_id"))
-    mobile_number = _clean_optional_text(profile.get("mobile_number")) or candidate.phone
+    personal_id = _clean_optional_text(profile.get("personal_id")) or _clean_optional_text(joining_profile.personal_id)
+    mobile_number = (
+        _clean_optional_text(profile.get("mobile_number"))
+        or _clean_optional_text(joining_profile.mobile_number)
+        or _clean_optional_text(getattr(assessment, "contact_number", None))
+        or candidate.phone
+    )
     manager_id = _clean_optional_text(profile.get("manager_id"))
     role_id = _coerce_optional_int(profile.get("role_id"), field_label="Role ID")
     grade_id = _coerce_optional_int(profile.get("grade_id"), field_label="Grade ID")
@@ -1014,6 +1147,12 @@ async def convert_candidate_to_employee(
             existing.display_name = display_name
             existing.is_deleted = 0
             existing.updated_at = now
+            _apply_joining_profile_to_person(
+                existing,
+                profile=joining_profile,
+                assessment=assessment,
+                mobile_number=mobile_number,
+            )
         else:
             person = DimPerson(
                 person_id=person_id,
@@ -1038,8 +1177,16 @@ async def convert_candidate_to_employee(
                 full_name=full_name,
                 display_name=display_name,
             )
+            _apply_joining_profile_to_person(
+                person,
+                profile=joining_profile,
+                assessment=assessment,
+                mobile_number=mobile_number,
+            )
             platform_session.add(person)
         await platform_session.commit()
+
+    joining_profile.updated_at = now
 
     candidate.hired_person_id_platform = int("".join(filter(str.isdigit, person_id)) or candidate.candidate_id)
     candidate.final_decision = "hired"

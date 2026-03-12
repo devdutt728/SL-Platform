@@ -625,6 +625,13 @@ a {
 }
 
 @layer utilities {
+  .superadmin-shell {
+    width: 100%;
+    max-width: min(1800px, 100%);
+    margin-left: 0;
+    margin-right: auto;
+  }
+
   .page-shell {
     width: 100%;
     max-width: var(--page-width);

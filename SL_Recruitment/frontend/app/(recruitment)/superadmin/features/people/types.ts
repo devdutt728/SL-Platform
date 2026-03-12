@@ -23,11 +23,17 @@ export type PersonForm = {
 };
 
 export type BulkResult = {
+  mode?: "dry_run" | "apply";
+  batch_hash?: string | null;
   total: number;
+  processed?: number;
   created: number;
   updated: number;
   skipped: number;
-  errors: { row: number; message: string; person_id?: string | null }[];
+  unchanged?: number;
+  conflicts?: number;
+  warnings?: { row?: number | null; message: string; person_id?: string | null; person_code?: string | null; email?: string | null }[];
+  errors: { row: number; message: string; person_id?: string | null; person_code?: string | null; email?: string | null }[];
 };
 
 export const emptyPersonForm: PersonForm = {

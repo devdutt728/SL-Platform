@@ -8,7 +8,7 @@ export default async function SuperAdminPeoplePage() {
   return (
     <>
       <SuperAdminToolsHeader active="people" />
-      <div className="content-pad mt-4">
+      <div className="content-pad superadmin-shell mt-3">
         <PeoplePanel />
       </div>
     </>

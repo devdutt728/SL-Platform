@@ -1,7 +1,7 @@
 from datetime import datetime
 
 import anyio
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +14,17 @@ from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, validate_upload
 from app.models.candidate import RecCandidate
 from app.models.candidate_offer import RecCandidateOffer
 from app.models.joining_doc import RecCandidateJoiningDoc
+from app.models.joining_profile import RecCandidateJoiningProfile
 from app.models.opening import RecOpening
-from app.schemas.joining_docs import JoiningDocOut, JoiningDocPublicOut, JoiningDocsPublicContext
+from app.schemas.joining_docs import (
+    JoiningDocOut,
+    JoiningDocPublicOut,
+    JoiningDocsPublicContext,
+    JoiningProfileInternalUpsertIn,
+    JoiningProfileOut,
+    JoiningProfilePublicIn,
+    JoiningProfilePublicOut,
+)
 from app.schemas.user import UserContext
 from app.services.drive import upload_joining_doc
 from app.services.events import log_event
@@ -40,6 +49,39 @@ REQUIRED_JOINING_DOC_TYPES = {
     "experience_letters",
     "salary_slips",
 }
+
+JOINING_PROFILE_FIELDS = (
+    "personal_id",
+    "middle_name",
+    "date_of_birth",
+    "gender",
+    "marital_status",
+    "marriage_date",
+    "blood_group",
+    "physically_handicapped",
+    "nationality",
+    "mobile_number",
+    "personal_email",
+    "current_address_line_1",
+    "current_address_line_2",
+    "current_address_city",
+    "current_address_state",
+    "current_address_zip",
+    "current_address_country",
+    "permanent_address_line_1",
+    "permanent_address_line_2",
+    "permanent_address_city",
+    "permanent_address_state",
+    "permanent_address_zip",
+    "permanent_address_country",
+    "father_name",
+    "mother_name",
+    "spouse_name",
+    "children_names",
+    "aadhaar_number",
+    "pf_number",
+    "uan_number",
+)
 
 
 def _canonical_doc_type(raw: str | None) -> str | None:
@@ -71,6 +113,98 @@ def _normalize_doc_type(raw: str | None) -> str:
     if value is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document type.")
     return value
+
+
+async def _get_joining_profile(
+    session: AsyncSession,
+    *,
+    candidate_id: int,
+) -> RecCandidateJoiningProfile | None:
+    try:
+        return await session.get(RecCandidateJoiningProfile, candidate_id)
+    except SQLAlchemyError as exc:
+        if "doesn't exist" in str(exc).lower():
+            return None
+        raise
+
+
+async def _get_or_create_joining_profile(
+    session: AsyncSession,
+    *,
+    candidate_id: int,
+) -> RecCandidateJoiningProfile:
+    existing = await _get_joining_profile(session, candidate_id=candidate_id)
+    if existing is not None:
+        return existing
+    profile = RecCandidateJoiningProfile(candidate_id=candidate_id, created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+    session.add(profile)
+    await session.flush()
+    return profile
+
+
+def _apply_joining_profile_payload(
+    profile: RecCandidateJoiningProfile,
+    payload: JoiningProfilePublicIn | JoiningProfileInternalUpsertIn,
+) -> None:
+    data = payload.model_dump(exclude_unset=True)
+    for field_name in JOINING_PROFILE_FIELDS:
+        if field_name in data:
+            setattr(profile, field_name, data[field_name])
+    if isinstance(payload, JoiningProfileInternalUpsertIn):
+        if "pan_verified" in data:
+            profile.pan_verified = bool(data["pan_verified"])
+        if "aadhaar_verified" in data:
+            profile.aadhaar_verified = bool(data["aadhaar_verified"])
+
+
+def _public_joining_profile_out(profile: RecCandidateJoiningProfile | None) -> JoiningProfilePublicOut | None:
+    if profile is None:
+        return None
+    return JoiningProfilePublicOut(
+        personal_id=profile.personal_id,
+        middle_name=profile.middle_name,
+        date_of_birth=profile.date_of_birth,
+        gender=profile.gender,
+        marital_status=profile.marital_status,
+        marriage_date=profile.marriage_date,
+        blood_group=profile.blood_group,
+        physically_handicapped=profile.physically_handicapped,
+        nationality=profile.nationality,
+        mobile_number=profile.mobile_number,
+        personal_email=profile.personal_email,
+        current_address_line_1=profile.current_address_line_1,
+        current_address_line_2=profile.current_address_line_2,
+        current_address_city=profile.current_address_city,
+        current_address_state=profile.current_address_state,
+        current_address_zip=profile.current_address_zip,
+        current_address_country=profile.current_address_country,
+        permanent_address_line_1=profile.permanent_address_line_1,
+        permanent_address_line_2=profile.permanent_address_line_2,
+        permanent_address_city=profile.permanent_address_city,
+        permanent_address_state=profile.permanent_address_state,
+        permanent_address_zip=profile.permanent_address_zip,
+        permanent_address_country=profile.permanent_address_country,
+        father_name=profile.father_name,
+        mother_name=profile.mother_name,
+        spouse_name=profile.spouse_name,
+        children_names=profile.children_names,
+        aadhaar_number=profile.aadhaar_number,
+        pf_number=profile.pf_number,
+        uan_number=profile.uan_number,
+        profile_status=profile.profile_status,
+        submitted_at=profile.submitted_at,
+    )
+
+
+def _refresh_profile_verification_state(profile: RecCandidateJoiningProfile) -> None:
+    if not (profile.personal_id or "").strip():
+        profile.pan_verified = False
+    if not (profile.aadhaar_number or "").strip():
+        profile.aadhaar_verified = False
+    if profile.pan_verified and profile.aadhaar_verified:
+        profile.verified_at = datetime.utcnow()
+    elif not profile.pan_verified or not profile.aadhaar_verified:
+        profile.verified_at = None
 
 
 async def _update_joining_docs_status(session: AsyncSession, *, candidate: RecCandidate) -> str:
@@ -230,6 +364,42 @@ async def upload_joining_docs_internal(
     return JoiningDocOut.model_validate(record)
 
 
+@router.get("/{candidate_id}/joining-profile", response_model=JoiningProfileOut | None)
+async def get_joining_profile_internal(
+    candidate_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
+):
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    profile = await _get_joining_profile(session, candidate_id=candidate_id)
+    if profile is None:
+        return None
+    return JoiningProfileOut.model_validate(profile)
+
+
+@router.patch("/{candidate_id}/joining-profile", response_model=JoiningProfileOut)
+async def update_joining_profile_internal(
+    candidate_id: int,
+    payload: JoiningProfileInternalUpsertIn = Body(...),
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    profile = await _get_or_create_joining_profile(session, candidate_id=candidate_id)
+    _apply_joining_profile_payload(profile, payload)
+    profile.updated_at = datetime.utcnow()
+    if profile.profile_status != "submitted" and any(getattr(profile, field_name) for field_name in JOINING_PROFILE_FIELDS):
+        profile.profile_status = "draft"
+    _refresh_profile_verification_state(profile)
+    await session.commit()
+    await session.refresh(profile)
+    return JoiningProfileOut.model_validate(profile)
+
+
 @public_router.get("/{token}", response_model=JoiningDocsPublicContext)
 async def get_public_joining_docs(
     token: str,
@@ -271,14 +441,60 @@ async def get_public_joining_docs(
         else:
             raise
 
+    profile = await _get_joining_profile(session, candidate_id=candidate.candidate_id)
+
     return JoiningDocsPublicContext(
         candidate_id=candidate.candidate_id,
         candidate_name=candidate.full_name or candidate.first_name or candidate.email,
         opening_title=opening_title,
         joining_docs_status=candidate.joining_docs_status,
         required_doc_types=sorted(REQUIRED_JOINING_DOC_TYPES),
+        profile=_public_joining_profile_out(profile),
         docs=[JoiningDocPublicOut.model_validate(doc) for doc in docs],
     )
+
+
+@public_router.post("/{token}/profile", response_model=JoiningProfilePublicOut)
+async def save_joining_profile_public(
+    token: str,
+    payload: JoiningProfilePublicIn,
+    request: Request,
+    session: AsyncSession = Depends(deps.get_db_session),
+):
+    _validate_public_joining_signature(request, token)
+    offer = (
+        await session.execute(
+            select(RecCandidateOffer).where(RecCandidateOffer.public_token == token)
+        )
+    ).scalars().first()
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    if offer.offer_status != "accepted":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Offer not accepted yet")
+
+    candidate = await session.get(RecCandidate, offer.candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+
+    profile = await _get_or_create_joining_profile(session, candidate_id=candidate.candidate_id)
+    _apply_joining_profile_payload(profile, payload)
+    profile.profile_status = "submitted"
+    profile.submitted_at = datetime.utcnow()
+    profile.updated_at = datetime.utcnow()
+    _refresh_profile_verification_state(profile)
+    await session.commit()
+    await session.refresh(profile)
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type="joining_profile_submitted",
+        performed_by_person_id_platform=None,
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={"profile_status": profile.profile_status},
+    )
+    await session.commit()
+    return _public_joining_profile_out(profile) or JoiningProfilePublicOut()
 
 
 @public_router.post("/{token}/upload", response_model=JoiningDocPublicOut)

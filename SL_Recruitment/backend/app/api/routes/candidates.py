@@ -32,6 +32,7 @@ from app.models.candidate_ingest_idempotency import RecCandidateIngestIdempotenc
 from app.models.candidate_offer import RecCandidateOffer
 from app.models.candidate_sprint import RecCandidateSprint
 from app.models.event import RecCandidateEvent
+from app.models.joining_profile import RecCandidateJoiningProfile
 from app.models.opening import RecOpening
 from app.models.screening import RecCandidateScreening
 from app.models.stage import RecCandidateStage
@@ -1408,6 +1409,23 @@ def _is_public_link_value(raw: str) -> bool:
     return any(segment in lowered for segment in COMMUNICATION_LINK_SEGMENTS)
 
 
+def _normalize_public_candidate_link(raw_path: str) -> str | None:
+    cleaned = _strip_optional(raw_path)
+    if not cleaned:
+        return None
+    if not cleaned.startswith("/"):
+        cleaned = f"/{cleaned}"
+    if not _is_public_link_value(cleaned):
+        return None
+    base_path = (settings.public_app_base_path or "").strip()
+    if base_path and not base_path.startswith("/"):
+        base_path = f"/{base_path}"
+    base_path = base_path.rstrip("/")
+    if base_path and (cleaned == base_path or cleaned.startswith(f"{base_path}/")):
+        return cleaned
+    return build_public_path(cleaned)
+
+
 def _link_label_from_key(key: str) -> str:
     normalized = key.replace("_", " ").replace("-", " ").strip()
     if not normalized:
@@ -1430,9 +1448,10 @@ def _extract_communication_links(
         if not cleaned:
             return
         if cleaned.startswith("/"):
-            if not _is_public_link_value(cleaned):
+            normalized_path = _normalize_public_candidate_link(cleaned)
+            if not normalized_path:
                 return
-            cleaned = build_public_path(cleaned)
+            cleaned = normalized_path
         elif cleaned.startswith("http://") or cleaned.startswith("https://"):
             if not _is_public_link_value(cleaned):
                 return
@@ -4147,8 +4166,22 @@ async def get_candidate_full(
         assessment = None
     except SQLAlchemyError:
         assessment = None
+    joining_profile = None
+    try:
+        joining_profile = await session.get(RecCandidateJoiningProfile, candidate_id)
+    except OperationalError:
+        joining_profile = None
+    except SQLAlchemyError:
+        joining_profile = None
 
-    return CandidateFullOut(candidate=candidate, stages=stages, events=events, screening=screening, assessment=assessment)
+    return CandidateFullOut(
+        candidate=candidate,
+        stages=stages,
+        events=events,
+        screening=screening,
+        assessment=assessment,
+        joining_profile=joining_profile,
+    )
 
 
 @router.get("/{candidate_id}/screening", response_model=ScreeningOut)
@@ -4663,6 +4696,7 @@ async def convert_candidate(
         offer=offer,
         user=user,
         employee_profile=payload.employee_profile.model_dump(),
+        joining_profile_review=(payload.joining_profile_review.model_dump(exclude_none=True) if payload.joining_profile_review else None),
     )
     await session.commit()
     return {"candidate_id": candidate_id, "status": candidate.status, "final_decision": candidate.final_decision}

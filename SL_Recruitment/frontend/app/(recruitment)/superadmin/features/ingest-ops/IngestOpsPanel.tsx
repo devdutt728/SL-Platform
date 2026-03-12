@@ -197,8 +197,8 @@ export function IngestOpsPanel({ openings }: Props) {
   }, [batchId, openingId, sheetId]);
 
   return (
-    <section className="content-pad mt-4 space-y-3">
-      <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+    <section className="content-pad mt-3 space-y-2.5">
+      <div className="rounded-2xl border border-slate-200/80 bg-white/85 p-4 shadow-[0_18px_34px_-30px_rgba(15,23,42,0.6)]">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Ingest Dashboard</p>
@@ -275,7 +275,7 @@ export function IngestOpsPanel({ openings }: Props) {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white/80 p-3">
+      <div className="rounded-2xl border border-slate-200/80 bg-white/85 p-3">
         <div className="flex flex-wrap items-center gap-2">
           <select value={status} onChange={(e) => setStatus(e.target.value as StateFilter)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700">
             {STATE_FILTER_OPTIONS.map((option) => (
@@ -381,7 +381,7 @@ export function IngestOpsPanel({ openings }: Props) {
         </div>
 
         <div className="space-y-3">
-          <div className="rounded-2xl border border-slate-200 bg-white/80 p-3">
+          <div className="rounded-2xl border border-slate-200/80 bg-white/85 p-3">
             <p className="text-[11px] uppercase tracking-wide text-slate-500">Row Timeline</p>
             {!selected ? <p className="mt-2 text-xs text-slate-600">Select a row to see timeline and duplicate reason.</p> : null}
             {selected ? (
@@ -430,7 +430,7 @@ export function IngestOpsPanel({ openings }: Props) {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white/80 p-3">
+          <div className="rounded-2xl border border-slate-200/80 bg-white/85 p-3">
             <p className="text-[11px] uppercase tracking-wide text-slate-500">Preflight (Validate only)</p>
             <textarea
               value={preflightJson}

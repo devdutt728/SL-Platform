@@ -9,7 +9,9 @@ export default async function SuperAdminIngestOpsPage() {
   return (
     <>
       <SuperAdminToolsHeader active="ingest-ops" />
-      <IngestOpsPanel openings={openings.map((item) => ({ opening_id: item.opening_id, title: item.title, opening_code: item.opening_code }))} />
+      <div className="superadmin-shell">
+        <IngestOpsPanel openings={openings.map((item) => ({ opening_id: item.opening_id, title: item.title, opening_code: item.opening_code }))} />
+      </div>
     </>
   );
 }
