@@ -30,6 +30,8 @@ class DimPerson(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     source_system: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_candidate_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_candidate_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 

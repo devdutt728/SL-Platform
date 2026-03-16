@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import deps
 from app.core.auth import require_roles, require_superadmin
 from app.core.config import settings
+from app.core.datetime_utils import now_ist_naive
 from app.core.roles import Role
 from app.models.candidate import RecCandidate
 from app.models.interview import RecCandidateInterview
@@ -165,14 +166,14 @@ async def save_l2_assessment(
             data_json=json.dumps(payload.data),
             created_by_person_id_platform=_clean_platform_person_id(user.person_id_platform),
             updated_by_person_id_platform=_clean_platform_person_id(user.person_id_platform),
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=now_ist_naive(),
+            updated_at=now_ist_naive(),
         )
         session.add(assessment)
     else:
         assessment.data_json = json.dumps(payload.data)
         assessment.updated_by_person_id_platform = _clean_platform_person_id(user.person_id_platform)
-        assessment.updated_at = datetime.utcnow()
+        assessment.updated_at = now_ist_naive()
 
     await session.commit()
     locked = bool(assessment.status == "submitted" and not _is_superadmin(user))
@@ -203,7 +204,7 @@ async def submit_l2_assessment(
     if assessment and assessment.status == "submitted" and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Assessment already submitted")
 
-    now = datetime.utcnow()
+    now = now_ist_naive()
     if not assessment:
         assessment = RecCandidateInterviewAssessment(
             candidate_interview_id=candidate_interview_id,
@@ -359,14 +360,14 @@ async def save_l1_assessment(
             data_json=json.dumps(payload.data),
             created_by_person_id_platform=_clean_platform_person_id(user.person_id_platform),
             updated_by_person_id_platform=_clean_platform_person_id(user.person_id_platform),
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=now_ist_naive(),
+            updated_at=now_ist_naive(),
         )
         session.add(assessment)
     else:
         assessment.data_json = json.dumps(payload.data)
         assessment.updated_by_person_id_platform = _clean_platform_person_id(user.person_id_platform)
-        assessment.updated_at = datetime.utcnow()
+        assessment.updated_at = now_ist_naive()
 
     await session.commit()
     locked = bool(assessment.status == "submitted" and not _is_superadmin(user))
@@ -397,7 +398,7 @@ async def submit_l1_assessment(
     if assessment and assessment.status == "submitted" and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Assessment already submitted")
 
-    now = datetime.utcnow()
+    now = now_ist_naive()
     if not assessment:
         assessment = RecCandidateInterviewAssessment(
             candidate_interview_id=candidate_interview_id,

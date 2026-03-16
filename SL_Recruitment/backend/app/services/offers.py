@@ -9,7 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.platform_session import PlatformSessionLocal
@@ -44,9 +44,7 @@ REQUIRED_JOINING_DOC_TYPES = {
     "aadhaar",
     "marksheets",
     "experience_letters",
-    "salary_slips",
 }
-
 
 def _normalize_joining_doc_type(raw: str | None) -> str | None:
     value = (raw or "").strip().lower().replace(" ", "_")
@@ -902,6 +900,163 @@ def _is_intern_role(*values: str | None) -> bool:
     return False
 
 
+async def _db_scalar(
+    platform_session: AsyncSession,
+    sql: str,
+    params: dict[str, Any],
+) -> Any:
+    return (await platform_session.execute(text(sql), params)).scalar_one_or_none()
+
+
+async def _normalize_employment_type_value(
+    *,
+    platform_session: AsyncSession,
+    value: str | None,
+    designation_title: str | None = None,
+    email: str | None = None,
+) -> str:
+    normalized = await _db_scalar(
+        platform_session,
+        """
+        SELECT fn_dim_person_normalize_employment_type(
+          :employment_type,
+          :job_title,
+          :email
+        ) AS normalized_employment_type
+        """,
+        {
+            "employment_type": (value or "").strip() or None,
+            "job_title": (designation_title or "").strip() or None,
+            "email": (email or "").strip().lower() or None,
+        },
+    )
+    return str(normalized or "Permanent").strip() or "Permanent"
+
+
+async def _db_person_code_type(
+    *,
+    platform_session: AsyncSession,
+    employment_type: str,
+    principal_flag: bool = False,
+) -> str:
+    code_type = await _db_scalar(
+        platform_session,
+        "SELECT fn_dim_person_code_type(:principal_flag, :employment_type) AS code_type",
+        {
+            "principal_flag": 1 if principal_flag else 0,
+            "employment_type": employment_type,
+        },
+    )
+    if not code_type:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not resolve person code series.")
+    return str(code_type).strip().upper()
+
+
+async def _db_person_code_is_valid(
+    *,
+    platform_session: AsyncSession,
+    code_type: str,
+    person_code: str | None,
+) -> bool:
+    if not (person_code or "").strip():
+        return False
+    valid = await _db_scalar(
+        platform_session,
+        "SELECT fn_dim_person_code_is_valid(:code_type, :person_code) AS is_valid",
+        {
+            "code_type": code_type,
+            "person_code": (person_code or "").strip().upper(),
+        },
+    )
+    return bool(int(valid or 0))
+
+
+async def _preview_person_code_from_db(
+    *,
+    platform_session: AsyncSession,
+    person_id: str,
+    employment_type: str | None,
+    designation_title: str | None = None,
+    email: str | None = None,
+) -> tuple[str, str, str]:
+    normalized_employment_type = await _normalize_employment_type_value(
+        platform_session=platform_session,
+        value=employment_type,
+        designation_title=designation_title,
+        email=email,
+    )
+    code_type = await _db_person_code_type(
+        platform_session=platform_session,
+        employment_type=normalized_employment_type,
+    )
+
+    existing = await platform_session.get(DimPerson, person_id)
+    existing_code = (existing.person_code or "").strip().upper() if existing else ""
+    if await _db_person_code_is_valid(
+        platform_session=platform_session,
+        code_type=code_type,
+        person_code=existing_code,
+    ):
+        return existing_code, code_type, normalized_employment_type
+
+    next_seq = await _db_scalar(
+        platform_session,
+        """
+        SELECT `next_seq`
+        FROM `dim_person_code_counter`
+        WHERE `code_type` = :code_type
+        """,
+        {"code_type": code_type},
+    )
+    if next_seq is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Person code counter is not configured.")
+
+    seq = int(next_seq)
+    for _ in range(50000):
+        candidate_code = await _db_scalar(
+            platform_session,
+            "SELECT fn_dim_person_format_code(:code_type, :seq) AS candidate_code",
+            {"code_type": code_type, "seq": seq},
+        )
+        if not candidate_code:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not format preview person code.")
+
+        exists = await _db_scalar(
+            platform_session,
+            "SELECT 1 FROM `dim_person` WHERE `person_code` = :person_code LIMIT 1",
+            {"person_code": str(candidate_code).strip().upper()},
+        )
+        if not exists:
+            return str(candidate_code).strip().upper(), code_type, normalized_employment_type
+        seq += 1
+
+    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not preview the next employee code.")
+
+
+async def preview_candidate_person_code(
+    *,
+    candidate_id: int,
+    employment_type: str | None,
+    designation_title: str | None = None,
+    email: str | None = None,
+) -> dict[str, Any]:
+    person_id = f"REC_{candidate_id}"
+    async with PlatformSessionLocal() as platform_session:
+        person_code, series, normalized_employment_type = await _preview_person_code_from_db(
+            platform_session=platform_session,
+            person_id=person_id,
+            employment_type=employment_type,
+            designation_title=designation_title,
+            email=email,
+        )
+    return {
+        "person_code": person_code,
+        "series": series,
+        "normalized_employment_type": normalized_employment_type,
+        "provisional": True,
+    }
+
+
 _JOINING_PROFILE_REQUIRED_FIELDS = (
     "personal_id",
     "aadhaar_number",
@@ -993,7 +1148,7 @@ async def convert_candidate_to_employee(
     user: UserContext,
     employee_profile: dict[str, Any],
     joining_profile_review: dict[str, Any] | None = None,
-) -> RecCandidate:
+) -> dict[str, Any]:
     if offer.offer_status != "accepted":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer must be accepted before conversion.")
     docs_complete = await _candidate_has_required_joining_docs(session, candidate_id=candidate.candidate_id)
@@ -1044,28 +1199,18 @@ async def convert_candidate_to_employee(
         )
 
     profile = employee_profile or {}
-    person_code = _clean_optional_text(profile.get("person_code"))
     first_name = _clean_optional_text(profile.get("first_name")) or candidate.first_name
-    employment_type = _clean_optional_text(profile.get("employment_type"))
+    requested_employment_type = _clean_optional_text(profile.get("employment_type"))
     email = (_clean_optional_text(profile.get("email")) or "").lower()
 
-    if not person_code:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee ID is required.")
     if not first_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="First name is required.")
-    if not employment_type:
+    if not requested_employment_type:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employment type is required.")
     if not email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required.")
 
     email_domain = email.split("@")[-1] if "@" in email else ""
-    is_intern = _is_intern_role(employment_type, offer.designation_title)
-    is_permanent = "permanent" in employment_type.lower()
-    if is_permanent and not is_intern and email_domain != "studiolotus.in":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Permanent employees must use a @studiolotus.in email.",
-        )
 
     last_name = _clean_optional_text(profile.get("last_name")) or candidate.last_name
     personal_id = _clean_optional_text(profile.get("personal_id")) or _clean_optional_text(joining_profile.personal_id)
@@ -1087,6 +1232,8 @@ async def convert_candidate_to_employee(
     exit_date = profile.get("exit_date")
     person_status = _clean_optional_text(profile.get("status")) or "working"
     source_system = _clean_optional_text(profile.get("source_system")) or "recruitment"
+    source_candidate_id = candidate.candidate_id
+    source_candidate_code = _clean_optional_text(candidate.candidate_code)
 
     full_name = _clean_optional_text(profile.get("full_name"))
     if not full_name:
@@ -1096,20 +1243,23 @@ async def convert_candidate_to_employee(
     person_id = f"REC_{candidate.candidate_id}"
     now = datetime.utcnow()
     async with PlatformSessionLocal() as platform_session:
-        person_code_conflict = (
-            await platform_session.execute(
-                select(DimPerson.person_id).where(
-                    DimPerson.person_code == person_code,
-                    DimPerson.person_id != person_id,
-                    active_status_filter(),
-                )
-            )
-        ).scalars().first()
-        if person_code_conflict:
+        employment_type = await _normalize_employment_type_value(
+            platform_session=platform_session,
+            value=requested_employment_type,
+            designation_title=offer.designation_title,
+            email=email,
+        )
+        is_intern = _is_intern_role(employment_type, offer.designation_title)
+        is_permanent = "permanent" in employment_type.lower()
+        if is_permanent and not is_intern and email_domain != "studiolotus.in":
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Employee ID is already assigned to another active employee.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Permanent employees must use a @studiolotus.in email.",
             )
+        code_type = await _db_person_code_type(
+            platform_session=platform_session,
+            employment_type=employment_type,
+        )
 
         email_conflict = (
             await platform_session.execute(
@@ -1127,8 +1277,14 @@ async def convert_candidate_to_employee(
             )
 
         existing = await platform_session.get(DimPerson, person_id)
+        existing_person_code = (existing.person_code or "").strip().upper() if existing else ""
+        resolved_person_code = existing_person_code if await _db_person_code_is_valid(
+            platform_session=platform_session,
+            code_type=code_type,
+            person_code=existing_person_code,
+        ) else None
         if existing:
-            existing.person_code = person_code
+            existing.person_code = resolved_person_code
             existing.personal_id = personal_id
             existing.email = email
             existing.first_name = first_name
@@ -1139,10 +1295,13 @@ async def convert_candidate_to_employee(
             existing.department_id = department_id
             existing.manager_id = manager_id
             existing.employment_type = employment_type
+            existing.job_title = offer.designation_title
             existing.join_date = join_date
             existing.exit_date = exit_date
             existing.status = person_status
             existing.source_system = source_system
+            existing.source_candidate_id = source_candidate_id
+            existing.source_candidate_code = source_candidate_code
             existing.full_name = full_name
             existing.display_name = display_name
             existing.is_deleted = 0
@@ -1153,10 +1312,11 @@ async def convert_candidate_to_employee(
                 assessment=assessment,
                 mobile_number=mobile_number,
             )
+            person_record = existing
         else:
             person = DimPerson(
                 person_id=person_id,
-                person_code=person_code,
+                person_code=None,
                 personal_id=personal_id,
                 email=email,
                 first_name=first_name,
@@ -1167,6 +1327,7 @@ async def convert_candidate_to_employee(
                 department_id=department_id,
                 manager_id=manager_id,
                 employment_type=employment_type,
+                job_title=offer.designation_title,
                 join_date=join_date,
                 exit_date=exit_date,
                 status=person_status,
@@ -1174,6 +1335,8 @@ async def convert_candidate_to_employee(
                 created_at=now,
                 updated_at=now,
                 source_system=source_system,
+                source_candidate_id=source_candidate_id,
+                source_candidate_code=source_candidate_code,
                 full_name=full_name,
                 display_name=display_name,
             )
@@ -1184,7 +1347,13 @@ async def convert_candidate_to_employee(
                 mobile_number=mobile_number,
             )
             platform_session.add(person)
+            person_record = person
+        await platform_session.flush()
+        await platform_session.refresh(person_record)
         await platform_session.commit()
+
+    person_code = (person_record.person_code or "").strip().upper()
+    employment_type = (person_record.employment_type or employment_type or "").strip()
 
     joining_profile.updated_at = now
 
@@ -1247,6 +1416,24 @@ async def convert_candidate_to_employee(
         performed_by_person_id_platform=_platform_person_id(user),
         related_entity_type="candidate",
         related_entity_id=candidate.candidate_id,
-        meta_json=_event_meta(user, {"person_id_platform": person_id, "person_code": person_code, "email": email}),
+        meta_json=_event_meta(
+            user,
+            {
+                "person_id_platform": person_id,
+                "person_code": person_code,
+                "legacy_candidate_code": source_candidate_code,
+                "source_candidate_id": source_candidate_id,
+                "employment_type": employment_type,
+                "email": email,
+            },
+        ),
     )
-    return candidate
+    return {
+        "candidate": candidate,
+        "person_id": person_id,
+        "person_code": person_code,
+        "source_candidate_id": source_candidate_id,
+        "source_candidate_code": source_candidate_code,
+        "employment_type": employment_type,
+        "email": email,
+    }

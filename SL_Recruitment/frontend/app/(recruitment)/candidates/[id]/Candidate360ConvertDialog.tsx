@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import type { JoiningProfile } from "@/lib/types";
 
 export type CandidateConvertFormState = {
-  person_code: string;
   personal_id: string;
   aadhaar_number: string;
   pan_verified: boolean;
@@ -30,6 +29,10 @@ export type CandidateConvertFormState = {
 type Props = {
   open: boolean;
   busy: boolean;
+  personCodePreview: string;
+  personCodePreviewBusy: boolean;
+  normalizedEmploymentType: string;
+  legacyCandidateCode: string;
   error: string | null;
   requiresStudioLotusDomain: boolean;
   form: CandidateConvertFormState;
@@ -77,9 +80,51 @@ function TextInput({
   );
 }
 
+function SelectInput({
+  label,
+  value,
+  onChange,
+  options,
+  required = false,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+  required?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="space-y-1 text-xs text-slate-600">
+      <span>
+        {label}
+        {required ? " *" : ""}
+      </span>
+      <select
+        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 disabled:cursor-not-allowed disabled:bg-slate-100"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+      >
+        <option value="">Select</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function Candidate360ConvertDialog({
   open,
   busy,
+  personCodePreview,
+  personCodePreviewBusy,
+  normalizedEmploymentType,
+  legacyCandidateCode,
   error,
   requiresStudioLotusDomain,
   form,
@@ -102,13 +147,18 @@ export function Candidate360ConvertDialog({
         <div className="max-h-[92vh] w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_24px_60px_-24px_rgba(15,23,42,0.55)]">
         <p className="text-lg font-semibold text-slate-900">Mark Candidate As Joined</p>
         <p className="mt-1 text-sm text-slate-600">
-          HR can review and edit all employee details before pushing to `dim_person`.
+          HR can review and edit all employee details before pushing to `dim_person`. Employee code is previewed from DB rules and finally assigned by the database on save.
         </p>
         <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           {requiresStudioLotusDomain
             ? "Permanent role detected: email must end with @studiolotus.in."
             : "Intern/non-permanent role detected: any valid email is allowed."}
         </p>
+        {normalizedEmploymentType && normalizedEmploymentType !== form.employment_type ? (
+          <p className="mt-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+            DB normalization applied: this record will be treated as <span className="font-semibold">{normalizedEmploymentType}</span> based on role data.
+          </p>
+        ) : null}
 
         <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
           <p className="font-semibold text-slate-800">Candidate joining profile</p>
@@ -125,12 +175,20 @@ export function Candidate360ConvertDialog({
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <TextInput
-            label="Employee ID"
-            required
-            value={form.person_code}
-            onChange={(value) => onChange({ person_code: value })}
-            placeholder="EMP-00123"
-            disabled={busy}
+            label="Employee Code"
+            value={personCodePreviewBusy ? "Generating..." : personCodePreview}
+            onChange={() => undefined}
+            placeholder="Previewed from DB rules"
+            disabled
+            readOnly
+          />
+          <TextInput
+            label="Recruitment Code"
+            value={legacyCandidateCode}
+            onChange={() => undefined}
+            placeholder="SLR-0000"
+            disabled
+            readOnly
           />
           <TextInput
             label="Personal ID"
@@ -178,12 +236,16 @@ export function Candidate360ConvertDialog({
             placeholder="+91..."
             disabled={busy}
           />
-          <TextInput
+          <SelectInput
             label="Employment Type"
             required
             value={form.employment_type}
             onChange={(value) => onChange({ employment_type: value })}
-            placeholder="permanent / intern"
+            options={[
+              { value: "Permanent", label: "Permanent" },
+              { value: "Intern", label: "Intern" },
+              { value: "Contract", label: "Contract" },
+            ]}
             disabled={busy}
           />
           <TextInput
@@ -291,7 +353,7 @@ export function Candidate360ConvertDialog({
             type="button"
             className="rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
             onClick={onSubmit}
-            disabled={busy}
+            disabled={busy || personCodePreviewBusy || !personCodePreview}
           >
             {busy ? "Marking..." : "Confirm mark as joined"}
           </button>

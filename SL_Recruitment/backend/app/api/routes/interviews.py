@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from app.api import deps
 from app.core.auth import require_roles, require_superadmin
 from app.core.config import settings
+from app.core.datetime_utils import now_ist_naive, to_ist_naive
 from app.core.roles import Role
 from app.core.paths import resolve_repo_path
 from app.db.platform_session import PlatformSessionLocal
@@ -141,14 +142,36 @@ def _is_superadmin(user: UserContext) -> bool:
     return False
 
 
-def _normalize_to_utc(dt: datetime) -> datetime:
+def _normalize_to_ist(dt: datetime) -> datetime:
+    return to_ist_naive(dt)
+
+
+def _to_utc_naive(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
     if dt.tzinfo is None:
         return dt.replace(tzinfo=IST).astimezone(timezone.utc).replace(tzinfo=None)
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def _format_slot_label(dt_utc: datetime, tz: ZoneInfo) -> str:
-    local = dt_utc.replace(tzinfo=timezone.utc).astimezone(tz)
+def _as_ist_aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=IST)
+    return dt.astimezone(IST)
+
+
+def _ist_iso(dt: datetime | None) -> str | None:
+    value = _as_ist_aware(dt)
+    return value.isoformat() if value else None
+
+
+def _format_slot_label(dt_value: datetime, tz: ZoneInfo) -> str:
+    if dt_value.tzinfo is None:
+        local = dt_value.replace(tzinfo=tz)
+    else:
+        local = dt_value.astimezone(tz)
     return local.strftime("%d %b %Y, %I:%M %p %Z")
 
 
@@ -304,7 +327,7 @@ async def _render_slot_conflict(
     slot: RecCandidateInterviewSlot,
     tz: ZoneInfo,
 ) -> HTMLResponse:
-    now = datetime.utcnow()
+    now = now_ist_naive()
     latest_expiry = (
         await session.execute(
             select(func.max(RecCandidateInterviewSlot.expires_at)).where(
@@ -428,8 +451,8 @@ def _build_interview_out(
         interviewer_person_id_platform=interview.interviewer_person_id_platform,
         interviewer_name=(interviewer_meta or {}).get("name"),
         interviewer_email=(interviewer_meta or {}).get("email"),
-        scheduled_start_at=interview.scheduled_start_at,
-        scheduled_end_at=interview.scheduled_end_at,
+        scheduled_start_at=_as_ist_aware(interview.scheduled_start_at),
+        scheduled_end_at=_as_ist_aware(interview.scheduled_end_at),
         location=interview.location,
         meeting_link=interview.meeting_link,
         calendar_event_id=interview.calendar_event_id,
@@ -442,8 +465,8 @@ def _build_interview_out(
         notes_internal=interview.notes_internal,
         notes_for_candidate=interview.notes_for_candidate,
         created_by_person_id_platform=interview.created_by_person_id_platform,
-        created_at=interview.created_at,
-        updated_at=interview.updated_at,
+        created_at=_as_ist_aware(interview.created_at),
+        updated_at=_as_ist_aware(interview.updated_at),
         candidate_name=candidate.full_name if candidate else None,
         candidate_code=candidate.candidate_code if candidate else None,
         opening_id=candidate.opening_id if candidate else None,
@@ -537,8 +560,8 @@ async def create_interview(
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
-    start_at = _normalize_to_utc(payload.scheduled_start_at)
-    end_at = _normalize_to_utc(payload.scheduled_end_at)
+    start_at = _normalize_to_ist(payload.scheduled_start_at)
+    end_at = _normalize_to_ist(payload.scheduled_end_at)
     if end_at <= start_at:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scheduled_end_at must be after scheduled_start_at")
 
@@ -567,8 +590,8 @@ async def create_interview(
         meeting_link=payload.meeting_link,
         feedback_submitted=False,
         created_by_person_id_platform=_clean_platform_person_id(user.person_id_platform),
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=now_ist_naive(),
+        updated_at=now_ist_naive(),
     )
     session.add(interview)
     await session.flush()
@@ -586,8 +609,8 @@ async def create_interview(
         cal_resp = create_calendar_event(
             summary=f"Interview - {candidate.full_name} - {(opening.title if opening else '')}".strip(),
             description="Candidate interview",
-            start_at=start_at,
-            end_at=end_at,
+            start_at=_to_utc_naive(start_at),
+            end_at=_to_utc_naive(end_at),
             attendees=[email for email in [interviewer_email, candidate.email] if email],
             calendar_id=interviewer_email or settings.calendar_id or "primary",
             subject_email=interviewer_email,
@@ -622,8 +645,8 @@ async def create_interview(
                 "interview_id": interview.candidate_interview_id,
                 "summary": f"Interview - {candidate.full_name} - {(opening.title if opening else '')}".strip(),
                 "description": "Candidate interview",
-                "start_at": start_at.isoformat(),
-                "end_at": end_at.isoformat(),
+                "start_at": _to_utc_naive(start_at).replace(tzinfo=timezone.utc).isoformat(),
+                "end_at": _to_utc_naive(end_at).replace(tzinfo=timezone.utc).isoformat(),
                 "attendees": [email for email in [interviewer_email, candidate.email] if email],
                 "calendar_id": interviewer_email or settings.calendar_id or "primary",
                 "subject_email": interviewer_email,
@@ -651,8 +674,7 @@ async def create_interview(
         },
     )
 
-    start_local = start_at.replace(tzinfo=timezone.utc).astimezone(IST)
-    start_str = start_local.strftime("%d %b %Y, %I:%M %p %Z")
+    start_str = _format_slot_label(start_at, IST)
     meeting_link = interview.meeting_link or payload.meeting_link or ""
     candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
     interviewer_name = (interviewer_meta or {}).get("name") or (interviewer_email.split("@")[0] if interviewer_email else "there")
@@ -741,7 +763,7 @@ async def propose_interview_slots(
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview already scheduled.")
 
-    now_utc = datetime.utcnow()
+    now_utc = now_ist_naive()
     active_slots_query = select(func.max(RecCandidateInterviewSlot.expires_at)).where(
         RecCandidateInterviewSlot.candidate_id == candidate_id,
         RecCandidateInterviewSlot.round_type == payload.round_type,
@@ -751,7 +773,7 @@ async def propose_interview_slots(
     active_slots_expiry = (await session.execute(active_slots_query)).scalar_one_or_none()
     if active_slots_expiry and not _is_superadmin(user):
         tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
-        expiry_local = active_slots_expiry.replace(tzinfo=timezone.utc).astimezone(tz).strftime("%d %b %Y, %I:%M %p %Z")
+        expiry_local = active_slots_expiry.replace(tzinfo=tz).strftime("%d %b %Y, %I:%M %p %Z")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Slot invite already sent. It expires on {expiry_local}.",
@@ -768,14 +790,14 @@ async def propose_interview_slots(
         opening = (await session.execute(select(RecOpening).where(RecOpening.opening_id == candidate.opening_id))).scalars().first()
 
     batch_id = build_selection_token()
-    last_slot_end = (free_slots[-1].end_at.astimezone(timezone.utc)).replace(tzinfo=None)
-    ttl_floor = datetime.utcnow() + timedelta(hours=settings.public_link_ttl_hours)
+    last_slot_end = free_slots[-1].end_at.astimezone(tz).replace(tzinfo=None)
+    ttl_floor = now_ist_naive() + timedelta(hours=settings.public_link_ttl_hours)
     expires_at = max(last_slot_end, ttl_floor)
     created_by = _clean_platform_person_id(user.person_id_platform)
     slots: list[RecCandidateInterviewSlot] = []
     for slot in free_slots:
-        slot_start = slot.start_at.astimezone(timezone.utc).replace(tzinfo=None)
-        slot_end = slot.end_at.astimezone(timezone.utc).replace(tzinfo=None)
+        slot_start = slot.start_at.astimezone(tz).replace(tzinfo=None)
+        slot_end = slot.end_at.astimezone(tz).replace(tzinfo=None)
         slots.append(
             RecCandidateInterviewSlot(
                 candidate_id=candidate_id,
@@ -842,8 +864,8 @@ async def propose_interview_slots(
     return [
         InterviewSlotOut(
             candidate_interview_slot_id=slot.candidate_interview_slot_id,
-            slot_start_at=slot.slot_start_at,
-            slot_end_at=slot.slot_end_at,
+            slot_start_at=_as_ist_aware(slot.slot_start_at),
+            slot_end_at=_as_ist_aware(slot.slot_end_at),
             selection_token=build_signed_selection_token(slot.selection_token),
             status=slot.status,
         )
@@ -868,7 +890,7 @@ async def cancel_interview_slots(
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
 
-    now_utc = datetime.utcnow()
+    now_utc = now_ist_naive()
     result = await session.execute(
         RecCandidateInterviewSlot.__table__.update()
         .where(
@@ -902,7 +924,7 @@ async def get_active_interview_slot_invites(
     session: AsyncSession = Depends(deps.get_db_session),
     _user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
 ):
-    now_utc = datetime.utcnow()
+    now_utc = now_ist_naive()
     rows = await session.execute(
         select(
             RecCandidateInterviewSlot.round_type,
@@ -919,7 +941,7 @@ async def get_active_interview_slot_invites(
     active = [
         {
             "round_type": row.round_type,
-            "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+            "expires_at": _ist_iso(row.expires_at),
             "count": int(row.count or 0),
         }
         for row in rows.all()
@@ -957,9 +979,9 @@ async def preview_interview_slots(
     free_slots = filter_free_slots(interviewer_email=email, start_day=start_day, tz=tz)
     return [
         InterviewSlotPreviewOut(
-            slot_start_at=slot.start_at.astimezone(timezone.utc).replace(tzinfo=None),
-            slot_end_at=slot.end_at.astimezone(timezone.utc).replace(tzinfo=None),
-            label=_format_slot_label(slot.start_at.astimezone(timezone.utc).replace(tzinfo=None), tz),
+            slot_start_at=slot.start_at.astimezone(tz),
+            slot_end_at=slot.end_at.astimezone(tz),
+            label=_format_slot_label(slot.start_at, tz),
         )
         for slot in free_slots
     ]
@@ -985,7 +1007,7 @@ async def preview_interview_email(
         parsed = datetime.fromisoformat(scheduled_start_at)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid scheduled_start_at format")
-    start_at = _normalize_to_utc(parsed)
+    start_at = _normalize_to_ist(parsed)
     tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
     start_str = _format_slot_label(start_at, tz)
     html = render_template(
@@ -1028,10 +1050,7 @@ async def preview_interview_slot_email(
     start_day = parsed_start or datetime.now(tz).date()
     free_slots = filter_free_slots(interviewer_email=interviewer_email, start_day=start_day, tz=tz)
 
-    slot_links = [
-        {"label": _format_slot_label(slot.start_at.astimezone(timezone.utc).replace(tzinfo=None), tz), "link": "#"}
-        for slot in free_slots
-    ]
+    slot_links = [{"label": _format_slot_label(slot.start_at, tz), "link": "#"} for slot in free_slots]
     if slot_links:
         slot_rows = "\n".join(
             "<tr>"
@@ -1195,7 +1214,7 @@ async def select_interview_slot(
                 status_code=404,
             )
 
-        await _release_stale_reservations(session, batch_id=slot.batch_id, now=datetime.utcnow())
+        await _release_stale_reservations(session, batch_id=slot.batch_id, now=now_ist_naive())
 
         if slot.status != "proposed":
             if slot.status in {"reserved", "conflict", "expired"}:
@@ -1208,7 +1227,7 @@ async def select_interview_slot(
             )
             return _render_page(title, message, status_code=200)
 
-        if slot.expires_at and slot.expires_at < datetime.utcnow():
+        if slot.expires_at and slot.expires_at < now_ist_naive():
             slot.status = "expired"
             return _render_page(
                 "Slot invitation expired",
@@ -1217,7 +1236,7 @@ async def select_interview_slot(
             )
 
         slot.status = "reserved"
-        slot.updated_at = datetime.utcnow()
+        slot.updated_at = now_ist_naive()
 
     candidate = await session.get(RecCandidate, slot.candidate_id)
     if not candidate:
@@ -1240,8 +1259,6 @@ async def select_interview_slot(
         )
 
     tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
-    slot_start_utc = slot.slot_start_at.replace(tzinfo=timezone.utc)
-    slot_end_utc = slot.slot_end_at.replace(tzinfo=timezone.utc)
     # Allow selection for pre-proposed slots even if the calendar changed after the invite was sent.
 
     existing = (
@@ -1259,7 +1276,7 @@ async def select_interview_slot(
     )
     if existing:
         slot.status = "conflict"
-        slot.updated_at = datetime.utcnow()
+        slot.updated_at = now_ist_naive()
         await session.commit()
         return _render_page(
             "Slot already selected",
@@ -1276,8 +1293,8 @@ async def select_interview_slot(
         scheduled_end_at=slot.slot_end_at,
         feedback_submitted=False,
         created_by_person_id_platform=None,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=now_ist_naive(),
+        updated_at=now_ist_naive(),
     )
     session.add(interview)
     await session.flush()
@@ -1290,8 +1307,8 @@ async def select_interview_slot(
         cal_resp = create_calendar_event(
             summary=f"Interview - {candidate.full_name} - {(opening.title if opening else '')}".strip(),
             description="Candidate interview",
-            start_at=slot.slot_start_at,
-            end_at=slot.slot_end_at,
+            start_at=_to_utc_naive(slot.slot_start_at),
+            end_at=_to_utc_naive(slot.slot_end_at),
             attendees=[email for email in [interviewer_email, candidate.email] if email],
             calendar_id=interviewer_email or settings.calendar_id or "primary",
             subject_email=interviewer_email,
@@ -1326,8 +1343,8 @@ async def select_interview_slot(
                 "interview_id": interview.candidate_interview_id,
                 "summary": f"Interview - {candidate.full_name} - {(opening.title if opening else '')}".strip(),
                 "description": "Candidate interview",
-                "start_at": slot.slot_start_at.isoformat(),
-                "end_at": slot.slot_end_at.isoformat(),
+                "start_at": _to_utc_naive(slot.slot_start_at).replace(tzinfo=timezone.utc).isoformat(),
+                "end_at": _to_utc_naive(slot.slot_end_at).replace(tzinfo=timezone.utc).isoformat(),
                 "attendees": [email for email in [interviewer_email, candidate.email] if email],
                 "calendar_id": interviewer_email or settings.calendar_id or "primary",
                 "subject_email": interviewer_email,
@@ -1340,7 +1357,7 @@ async def select_interview_slot(
 
     slot.status = "confirmed"
     slot.booked_interview_id = interview.candidate_interview_id
-    slot.updated_at = datetime.utcnow()
+    slot.updated_at = now_ist_naive()
 
     await session.execute(
         RecCandidateInterviewSlot.__table__.update()
@@ -1350,7 +1367,7 @@ async def select_interview_slot(
             RecCandidateInterviewSlot.candidate_interview_slot_id != slot.candidate_interview_slot_id,
             RecCandidateInterviewSlot.status.in_(["proposed", "reserved"]),
         )
-        .values(status="expired", updated_at=datetime.utcnow())
+        .values(status="expired", updated_at=now_ist_naive())
     )
 
     await log_event(
@@ -1565,8 +1582,8 @@ async def reschedule_interview(
     if interview.feedback_submitted:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interview feedback already submitted; cannot reschedule.")
 
-    start_at = _normalize_to_utc(payload.scheduled_start_at)
-    end_at = _normalize_to_utc(payload.scheduled_end_at)
+    start_at = _normalize_to_ist(payload.scheduled_start_at)
+    end_at = _normalize_to_ist(payload.scheduled_end_at)
     if end_at <= start_at:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scheduled_end_at must be after scheduled_start_at")
 
@@ -1577,8 +1594,8 @@ async def reschedule_interview(
     if interviewer_email:
         busy = query_freebusy(
             calendar_ids=[interviewer_email],
-            start_at=start_at.replace(tzinfo=timezone.utc),
-            end_at=end_at.replace(tzinfo=timezone.utc),
+            start_at=start_at.replace(tzinfo=IST),
+            end_at=end_at.replace(tzinfo=IST),
             subject_email=interviewer_email,
         ).get(interviewer_email, [])
         if busy:
@@ -1602,8 +1619,8 @@ async def reschedule_interview(
                 event_id=interview.calendar_event_id,
                 summary=summary,
                 description=description,
-                start_at=start_at,
-                end_at=end_at,
+                start_at=_to_utc_naive(start_at),
+                end_at=_to_utc_naive(end_at),
                 attendees=attendees,
                 calendar_id=calendar_id,
                 subject_email=interviewer_email,
@@ -1632,8 +1649,8 @@ async def reschedule_interview(
                     "event_id": interview.calendar_event_id,
                     "summary": summary,
                     "description": description,
-                    "start_at": start_at.isoformat(),
-                    "end_at": end_at.isoformat(),
+                    "start_at": _to_utc_naive(start_at).replace(tzinfo=timezone.utc).isoformat(),
+                    "end_at": _to_utc_naive(end_at).replace(tzinfo=timezone.utc).isoformat(),
                     "attendees": attendees,
                     "calendar_id": calendar_id,
                     "subject_email": interviewer_email,
@@ -1648,8 +1665,8 @@ async def reschedule_interview(
             cal_resp = create_calendar_event(
                 summary=summary,
                 description=description,
-                start_at=start_at,
-                end_at=end_at,
+                start_at=_to_utc_naive(start_at),
+                end_at=_to_utc_naive(end_at),
                 attendees=attendees,
                 calendar_id=calendar_id,
                 subject_email=interviewer_email,
@@ -1678,8 +1695,8 @@ async def reschedule_interview(
                     "interview_id": interview.candidate_interview_id,
                     "summary": summary,
                     "description": description,
-                    "start_at": start_at.isoformat(),
-                    "end_at": end_at.isoformat(),
+                    "start_at": _to_utc_naive(start_at).replace(tzinfo=timezone.utc).isoformat(),
+                    "end_at": _to_utc_naive(end_at).replace(tzinfo=timezone.utc).isoformat(),
                     "attendees": attendees,
                     "calendar_id": calendar_id,
                     "subject_email": interviewer_email,
@@ -1692,7 +1709,7 @@ async def reschedule_interview(
 
     interview.scheduled_start_at = start_at
     interview.scheduled_end_at = end_at
-    interview.updated_at = datetime.utcnow()
+    interview.updated_at = now_ist_naive()
     await session.flush()
 
     tz = ZoneInfo(settings.calendar_timezone or "Asia/Kolkata")
@@ -1822,7 +1839,7 @@ async def list_interviews(
     if candidate_id is not None:
         query = query.where(RecCandidateInterview.candidate_id == candidate_id)
 
-    now = datetime.utcnow()
+    now = now_ist_naive()
     if upcoming is True:
         query = query.where(RecCandidateInterview.scheduled_start_at >= now)
     if upcoming is False:
@@ -1984,7 +2001,7 @@ async def update_interview(
 
     for key, value in updates.items():
         setattr(interview, key, value)
-    interview.updated_at = datetime.utcnow()
+    interview.updated_at = now_ist_naive()
     feedback_submitted = payload.feedback_submitted is True
 
     await log_event(

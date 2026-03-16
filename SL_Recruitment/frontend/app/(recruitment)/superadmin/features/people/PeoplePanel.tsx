@@ -118,6 +118,8 @@ export function PeoplePanel() {
       created_at: fromInputDateTime(form.created_at),
       updated_at: fromInputDateTime(form.updated_at),
       source_system: form.source_system.trim() || null,
+      source_candidate_id: form.source_candidate_id.trim() ? Number(form.source_candidate_id.trim()) : null,
+      source_candidate_code: form.source_candidate_code.trim() || null,
       full_name: form.full_name.trim() || null,
       display_name: form.display_name.trim() || null,
     };
@@ -418,7 +420,7 @@ export function PeoplePanel() {
               {bulkReplaceAll ? (bulkDryRun ? "Preview Full Reload" : "Replace All & Upload") : (bulkDryRun ? "Preview Merge" : "Upload & Merge")}
             </button>
             <p className="text-xs text-slate-500">
-              Matching priority: employee code ({`person_code`}) then email. Existing person_id is preserved by mapping; new IDs are stable per person_code.
+              Matching priority: employee code ({`person_code`}) then email. Recruitment lineage can be stored in `source_candidate_id` and `source_candidate_code` for SLR-to-SL traceability.
             </p>
             {bulkError ? <p className="text-xs text-rose-600">{bulkError}</p> : null}
             {bulkResult ? (
@@ -536,6 +538,8 @@ export function PeoplePanel() {
             <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
               <Field label="Is Deleted (0/1)" value={form.is_deleted} onChange={(val) => updateField("is_deleted", val)} type="number" />
               <Field label="Source System" value={form.source_system} onChange={(val) => updateField("source_system", val)} />
+              <Field label="Source Candidate ID" value={form.source_candidate_id} onChange={(val) => updateField("source_candidate_id", val)} type="number" />
+              <Field label="Source Candidate Code" value={form.source_candidate_code} onChange={(val) => updateField("source_candidate_code", val)} />
               <Field label="Created At" value={form.created_at} onChange={(val) => updateField("created_at", val)} type="datetime-local" />
               <Field label="Updated At" value={form.updated_at} onChange={(val) => updateField("updated_at", val)} type="datetime-local" />
             </div>

@@ -53,6 +53,8 @@ _PERSON_CORE_FIELDS = {
     "created_at",
     "updated_at",
     "source_system",
+    "source_candidate_id",
+    "source_candidate_code",
     "full_name",
     "display_name",
     "middle_name",
@@ -1407,6 +1409,8 @@ def _person_out(person: DimPerson, role_code: str | None, role_name: str | None)
         created_at=person.created_at,
         updated_at=person.updated_at,
         source_system=person.source_system,
+        source_candidate_id=person.source_candidate_id,
+        source_candidate_code=person.source_candidate_code,
         full_name=person.full_name,
         display_name=person.display_name,
         role_code=role_code,
@@ -1503,7 +1507,7 @@ def _coerce_payload(payload: dict) -> dict:
                 value = None
             else:
                 value = trimmed
-        if key in {"role_id", "grade_id", "department_id"}:
+        if key in {"role_id", "grade_id", "department_id", "source_candidate_id"}:
             out[key] = _parse_int(value, key)
         elif key in {"is_deleted"}:
             out[key] = _parse_bool_int(value)

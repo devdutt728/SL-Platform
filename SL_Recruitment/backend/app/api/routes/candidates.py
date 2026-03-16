@@ -60,7 +60,7 @@ from app.services.drive import (
 )
 from app.services.email import send_email
 from app.services.events import log_event
-from app.services.offers import convert_candidate_to_employee, create_offer, offer_pdf_signed_url
+from app.services.offers import convert_candidate_to_employee, create_offer, offer_pdf_signed_url, preview_candidate_person_code
 from app.services.public_links import build_public_link, build_public_path
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
@@ -527,6 +527,8 @@ def _is_interviewer_scope(user: UserContext) -> bool:
     is_superadmin = 2 in role_ids
     if is_hr or is_superadmin:
         return False
+    if 5 in role_ids or 6 in role_ids:
+        return True
     # Keep strict assignment scope only for pure viewer-only access.
     is_viewer_only = Role.VIEWER in roles and not (
         Role.INTERVIEWER in roles or Role.GROUP_LEAD in roles or Role.HIRING_MANAGER in roles
@@ -4690,7 +4692,7 @@ async def convert_candidate(
     ).scalars().first()
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No accepted offer found")
-    await convert_candidate_to_employee(
+    conversion = await convert_candidate_to_employee(
         session,
         candidate=candidate,
         offer=offer,
@@ -4699,4 +4701,47 @@ async def convert_candidate(
         joining_profile_review=(payload.joining_profile_review.model_dump(exclude_none=True) if payload.joining_profile_review else None),
     )
     await session.commit()
-    return {"candidate_id": candidate_id, "status": candidate.status, "final_decision": candidate.final_decision}
+    return {
+        "candidate_id": candidate_id,
+        "status": candidate.status,
+        "final_decision": candidate.final_decision,
+        "person_id_platform": conversion["person_id"],
+        "person_code": conversion["person_code"],
+        "source_candidate_id": conversion["source_candidate_id"],
+        "source_candidate_code": conversion["source_candidate_code"],
+        "employment_type": conversion["employment_type"],
+    }
+
+
+@router.get("/{candidate_id}/convert-preview", status_code=status.HTTP_200_OK)
+async def get_candidate_convert_preview(
+    candidate_id: int,
+    employment_type: str | None = Query(default=None),
+    email: str | None = Query(default=None),
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+
+    offer = (
+        await session.execute(
+            select(RecCandidateOffer)
+            .where(RecCandidateOffer.candidate_id == candidate_id)
+            .order_by(
+                RecCandidateOffer.accepted_at.desc(),
+                case((RecCandidateOffer.offer_status == "accepted", 0), else_=1),
+                RecCandidateOffer.candidate_offer_id.desc(),
+            )
+            .limit(1)
+        )
+    ).scalars().first()
+
+    preview = await preview_candidate_person_code(
+        candidate_id=candidate_id,
+        employment_type=employment_type,
+        designation_title=offer.designation_title if offer else candidate.opening_title,
+        email=email or candidate.email,
+    )
+    return preview

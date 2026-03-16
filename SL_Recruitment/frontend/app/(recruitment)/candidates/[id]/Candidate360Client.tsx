@@ -128,7 +128,6 @@ function looksLikeIntern(value: string | null | undefined): boolean {
 
 function emptyConvertForm(): CandidateConvertFormState {
   return {
-    person_code: "",
     personal_id: "",
     aadhaar_number: "",
     pan_verified: false,
@@ -191,6 +190,9 @@ export function Candidate360Client({
   const [convertDialogBusy, setConvertDialogBusy] = useState(false);
   const [convertDialogError, setConvertDialogError] = useState<string | null>(null);
   const [convertForm, setConvertForm] = useState<CandidateConvertFormState>(emptyConvertForm);
+  const [convertPersonCodePreview, setConvertPersonCodePreview] = useState("");
+  const [convertPersonCodePreviewBusy, setConvertPersonCodePreviewBusy] = useState(false);
+  const [convertNormalizedEmploymentType, setConvertNormalizedEmploymentType] = useState("");
   const [sprintDeleteBusy, setSprintDeleteBusy] = useState(false);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const screeningRef = useRef<HTMLDivElement | null>(null);
@@ -362,7 +364,6 @@ export function Candidate360Client({
     const offerJoinDate = latestOffer?.joining_date ? latestOffer.joining_date.slice(0, 10) : "";
 
     setConvertForm({
-      person_code: (candidate.candidate_code || "").trim(),
       personal_id: (joiningProfile?.personal_id || "").trim(),
       aadhaar_number: (joiningProfile?.aadhaar_number || "").trim(),
       pan_verified: Boolean(joiningProfile?.pan_verified),
@@ -375,7 +376,7 @@ export function Candidate360Client({
       grade_id: offerGradeId,
       department_id: "",
       manager_id: "",
-      employment_type: internByRole ? "intern" : "permanent",
+      employment_type: internByRole ? "Intern" : "Permanent",
       join_date: offerJoinDate,
       exit_date: "",
       status: "working",
@@ -383,10 +384,12 @@ export function Candidate360Client({
       full_name: fullName,
       display_name: fullName,
     });
+    setConvertPersonCodePreview("");
+    setConvertPersonCodePreviewBusy(false);
+    setConvertNormalizedEmploymentType("");
     setConvertDialogError(null);
     setConvertDialogOpen(true);
   }, [
-    candidate.candidate_code,
     candidate.email,
     candidate.first_name,
     candidate.last_name,
@@ -404,29 +407,70 @@ export function Candidate360Client({
     assessment?.contact_number,
   ]);
 
+  useEffect(() => {
+    if (!convertDialogOpen) {
+      setConvertPersonCodePreview("");
+      setConvertPersonCodePreviewBusy(false);
+      setConvertNormalizedEmploymentType("");
+      return;
+    }
+
+    const employmentType = (convertForm.employment_type || "").trim();
+    const email = (convertForm.email || "").trim().toLowerCase();
+    if (!employmentType) {
+      setConvertPersonCodePreview("");
+      setConvertPersonCodePreviewBusy(false);
+      setConvertNormalizedEmploymentType("");
+      return;
+    }
+
+    let cancelled = false;
+    setConvertPersonCodePreviewBusy(true);
+    candidate360Api
+      .fetchConvertPreview(candidateId, employmentType, email)
+      .then((preview) => {
+        if (cancelled) return;
+        setConvertPersonCodePreview((preview.person_code || "").trim());
+        setConvertNormalizedEmploymentType((preview.normalized_employment_type || "").trim());
+      })
+      .catch((e: any) => {
+        if (cancelled) return;
+        setConvertPersonCodePreview("");
+        setConvertNormalizedEmploymentType("");
+        setConvertDialogError((prev) => prev || e?.message || "Could not generate employee code preview.");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setConvertPersonCodePreviewBusy(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [candidateId, convertDialogOpen, convertForm.email, convertForm.employment_type]);
+
   const convertInternRoleDetected = useMemo(() => {
     return looksLikeIntern(convertForm.employment_type) || looksLikeIntern(latestOffer?.designation_title);
   }, [convertForm.employment_type, latestOffer?.designation_title]);
 
   const convertRequiresStudioLotusDomain = useMemo(() => {
-    const employmentType = (convertForm.employment_type || "").toLowerCase();
+    const employmentType = (convertNormalizedEmploymentType || convertForm.employment_type || "").toLowerCase();
     const permanent = employmentType.includes("permanent");
     return permanent && !convertInternRoleDetected;
-  }, [convertForm.employment_type, convertInternRoleDetected]);
+  }, [convertForm.employment_type, convertInternRoleDetected, convertNormalizedEmploymentType]);
 
   const handleSubmitConvertDialog = useCallback(async () => {
     setConvertDialogBusy(true);
     setConvertDialogError(null);
     try {
-      const personCode = (convertForm.person_code || "").trim();
       const firstName = (convertForm.first_name || "").trim();
       const employmentType = (convertForm.employment_type || "").trim();
       const email = (convertForm.email || "").trim().toLowerCase();
       const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-      if (!personCode) throw new Error("Employee ID is required.");
       if (!firstName) throw new Error("First name is required.");
       if (!employmentType) throw new Error("Employment type is required.");
+      if (!convertPersonCodePreview.trim()) throw new Error("Employee code preview is not ready yet.");
       if (!email || !emailValid) throw new Error("Enter a valid email address.");
       if (convertRequiresStudioLotusDomain && !email.endsWith(`@${STUDIOLOTUS_EMAIL_DOMAIN}`)) {
         throw new Error("Permanent employees must use a @studiolotus.in email.");
@@ -443,7 +487,6 @@ export function Candidate360Client({
 
       const payload: CandidateConvertPayload = {
         employee_profile: {
-          person_code: personCode,
           personal_id: normalizeOptionalText(convertForm.personal_id),
           first_name: firstName,
           last_name: lastName,
@@ -467,15 +510,21 @@ export function Candidate360Client({
         },
       };
 
-      await handleConvertCandidate(payload);
+      const result = await handleConvertCandidate(payload);
       setConvertDialogOpen(false);
-      pushToast({ tone: "success", title: "Candidate marked as joined" });
+      const sourceCode = (result?.source_candidate_code || candidate.candidate_code || "").trim();
+      const personCode = (result?.person_code || "").trim();
+      pushToast({
+        tone: "success",
+        title: "Candidate marked as joined",
+        description: sourceCode && personCode ? `${sourceCode} mapped to ${personCode}` : undefined,
+      });
     } catch (e: any) {
       setConvertDialogError(e?.message || "Conversion failed.");
     } finally {
       setConvertDialogBusy(false);
     }
-  }, [convertForm, convertRequiresStudioLotusDomain, handleConvertCandidate, pushToast]);
+  }, [candidate.candidate_code, convertForm, convertPersonCodePreview, convertRequiresStudioLotusDomain, handleConvertCandidate, pushToast]);
 
   const {
     candidateSprints,
@@ -1300,6 +1349,10 @@ export function Candidate360Client({
       <Candidate360ConvertDialog
         open={convertDialogOpen}
         busy={convertDialogBusy || offersBusy}
+        personCodePreview={convertPersonCodePreview}
+        personCodePreviewBusy={convertPersonCodePreviewBusy}
+        normalizedEmploymentType={convertNormalizedEmploymentType}
+        legacyCandidateCode={(candidate.candidate_code || "").trim()}
         error={convertDialogError}
         requiresStudioLotusDomain={convertRequiresStudioLotusDomain}
         form={convertForm}

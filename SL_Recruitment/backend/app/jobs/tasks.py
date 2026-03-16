@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import func, select, exists, and_, or_
 
 from app.core.config import settings
+from app.core.datetime_utils import now_ist_naive
 from app.db.platform_session import PlatformSessionLocal
 from app.db.session import SessionLocal
 from app.models.candidate import RecCandidate
@@ -157,7 +158,7 @@ async def run_caf_reminders() -> None:
 
 
 async def run_interview_feedback_reminders() -> None:
-    now = datetime.utcnow()
+    now = now_ist_naive()
     primary_cutoff = now - timedelta(hours=settings.feedback_reminder_hours)
     escalation_cutoff = now - timedelta(hours=settings.feedback_escalation_hours)
 
@@ -216,7 +217,7 @@ async def run_interview_feedback_reminders() -> None:
 
 
 async def run_interview_status_reminders() -> None:
-    now = datetime.utcnow()
+    now = now_ist_naive()
     cutoff = now - timedelta(minutes=settings.interview_status_reminder_minutes)
 
     async with SessionLocal() as session:
@@ -278,7 +279,7 @@ async def run_interview_status_reminders() -> None:
 
 
 async def run_sprint_reminders() -> None:
-    now = datetime.utcnow()
+    now = now_ist_naive()
     due_soon = now + timedelta(hours=settings.sprint_reminder_hours)
     overdue_cutoff = now - timedelta(days=settings.sprint_overdue_days)
 

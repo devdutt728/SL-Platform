@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
 import { BriefcaseBusiness, CalendarCheck2, ClipboardCheck, ExternalLink, FileDown, Loader2, UserRound } from "lucide-react";
 import type { CandidateDetail, CandidateSprint, Interview, L2Assessment, OpeningListItem, Screening } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
 import { OpeningRequestsWorkspace } from "./OpeningRequestsWorkspace";
+import { reconcileSelectedInterview } from "../shared/interview-selection";
 
 type Props = {
   initialInterviews: Interview[];
@@ -435,11 +436,6 @@ function yesNo(value?: boolean | null) {
   return "";
 }
 
-function dateValue(value?: string | null) {
-  if (!value) return "";
-  return value;
-}
-
 function applyCafPrefill(base: L2Data, candidate: CandidateDetail | null, interview: Interview | null, screening: Screening | null) {
   const next = typeof structuredClone === "function" ? structuredClone(base) : JSON.parse(JSON.stringify(base));
   if (!next.pre_interview || typeof next.pre_interview !== "object") {
@@ -617,7 +613,7 @@ export function GLPortalClient({
   const queueEndIndex = Math.min(queueFilteredInterviews.length, queuePage * queuePageSize);
   const currentStage = candidate?.current_stage ? candidate.current_stage.replace(/_/g, " ") : "";
 
-  async function refreshList() {
+  const refreshList = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
@@ -628,18 +624,18 @@ export function GLPortalClient({
     } finally {
       setBusy(false);
     }
-  }
+  }, [useMeFilter]);
 
-  async function refreshOpeningsList() {
+  const refreshOpeningsList = useCallback(async () => {
     try {
       const next = await fetchOpenings();
       setOpenings(next);
     } catch {
       // Ignore opening refresh errors in assessment workflow.
     }
-  }
+  }, []);
 
-  async function refreshSprints() {
+  const refreshSprints = useCallback(async () => {
     setSprintsBusy(true);
     setSprintsError(null);
     try {
@@ -650,16 +646,16 @@ export function GLPortalClient({
     } finally {
       setSprintsBusy(false);
     }
-  }
+  }, [useMeFilter]);
 
-  function markInterviewNotificationRead(interview: Interview) {
+  const markInterviewNotificationRead = useCallback((interview: Interview) => {
     if (!hasPendingFeedback(interview)) return;
     const key = interviewNotificationKey(interview);
     setReadInterviewNotifications((prev) => {
       if (prev[key]) return prev;
       return { ...prev, [key]: true };
     });
-  }
+  }, []);
 
   function markVisibleNotificationsRead() {
     setReadInterviewNotifications((prev) => {
@@ -682,7 +678,7 @@ export function GLPortalClient({
     });
   }
 
-  async function selectInterview(interview: Interview) {
+  const selectInterview = useCallback(async (interview: Interview) => {
     setActive(interview);
     markInterviewNotificationRead(interview);
     setPreviewOpen(false);
@@ -710,7 +706,7 @@ export function GLPortalClient({
     } catch (e: any) {
       setError(e?.message || "Could not load assessment.");
     }
-  }
+  }, [markInterviewNotificationRead]);
 
   async function handleSave() {
     if (!active) return;
@@ -788,7 +784,7 @@ export function GLPortalClient({
       setActiveTab(match.round_type.toLowerCase().includes("l1") ? "l1" : "l2");
       void selectInterview(match);
     }
-  }, [interviews, searchParams, active]);
+  }, [interviews, searchParams, active, selectInterview]);
 
   useEffect(() => {
     setQueuePage(1);
@@ -811,17 +807,22 @@ export function GLPortalClient({
 
   useEffect(() => {
     if (!active) return;
-    const stillAssigned = interviews.some((item) => item.candidate_interview_id === active.candidate_interview_id);
-    if (stillAssigned) return;
-    setActive(null);
-    setCandidate(null);
-    setAssessment(null);
-    setPreviewOpen(false);
+    const nextActive = reconcileSelectedInterview(interviews, active);
+    if (!nextActive) {
+      setActive(null);
+      setCandidate(null);
+      setAssessment(null);
+      setPreviewOpen(false);
+      return;
+    }
+    if (nextActive !== active) {
+      setActive(nextActive);
+    }
   }, [interviews, active]);
 
   useEffect(() => {
     void refreshSprints();
-  }, [useMeFilter]);
+  }, [refreshSprints]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -906,7 +907,7 @@ export function GLPortalClient({
       cancelled = true;
       source.close();
     };
-  }, [useMeFilter]);
+  }, [refreshList, refreshSprints]);
 
   const locked = assessment?.locked ?? false;
   const isSubmitted = assessment?.status === "submitted";

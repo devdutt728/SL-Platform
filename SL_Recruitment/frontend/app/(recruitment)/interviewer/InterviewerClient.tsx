@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import { CalendarCheck2, ExternalLink, Loader2, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CandidateListItem, CandidateSprint, Interview, L2Assessment, PlatformPersonSuggestion } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
+import { reconcileSelectedInterview } from "../shared/interview-selection";
 
 type Props = {
   initialUpcoming: Interview[];
@@ -337,7 +338,7 @@ export function InterviewerClient({ initialUpcoming, initialPast, assignedCandid
     }
   }
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
@@ -352,7 +353,7 @@ export function InterviewerClient({ initialUpcoming, initialPast, assignedCandid
     } finally {
       setBusy(false);
     }
-  }
+  }, [useMeFilter]);
 
   const upcomingView = useMemo(() => upcoming.filter((item) => !isCancelled(item)), [upcoming]);
   const pastView = useMemo(() => {
@@ -419,7 +420,7 @@ export function InterviewerClient({ initialUpcoming, initialPast, assignedCandid
     [visiblePast]
   );
 
-  async function refreshSprints() {
+  const refreshSprints = useCallback(async () => {
     setSprintsBusy(true);
     setSprintsError(null);
     try {
@@ -430,7 +431,7 @@ export function InterviewerClient({ initialUpcoming, initialPast, assignedCandid
     } finally {
       setSprintsBusy(false);
     }
-  }
+  }, [useMeFilter]);
 
   function openSprintReview(sprint: CandidateSprint) {
     setActiveSprint(sprint);
@@ -482,7 +483,7 @@ export function InterviewerClient({ initialUpcoming, initialPast, assignedCandid
 
   useEffect(() => {
     void refreshSprints();
-  }, []);
+  }, [refreshSprints]);
 
   useEffect(() => {
     let cancelled = false;
@@ -516,7 +517,21 @@ export function InterviewerClient({ initialUpcoming, initialPast, assignedCandid
       cancelled = true;
       source.close();
     };
-  }, []);
+  }, [refresh, refreshSprints]);
+
+  useEffect(() => {
+    if (!active) return;
+    const nextActive = reconcileSelectedInterview([...upcoming, ...past], active);
+    if (!nextActive) {
+      setActive(null);
+      setAssessment(null);
+      setAssessmentError(null);
+      return;
+    }
+    if (nextActive !== active) {
+      setActive(nextActive);
+    }
+  }, [active, upcoming, past]);
 
   useEffect(() => {
     if (!assignSprint) return;

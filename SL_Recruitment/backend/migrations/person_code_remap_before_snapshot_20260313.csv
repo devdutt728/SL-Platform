@@ -1,0 +1,525 @@
+person_id,full_name,email,principal_flag,employment_type,job_title,join_date,person_code,resolved_type
+AA_170,Ambrish Arora,ambrish@studiolotus.in,1,Permanent,Principal,2002-02-12,SL001,Permanent
+AC_172,Ankur Choksi,ankur@lotuslink.in,1,Permanent,Principal,2002-06-12,SL002,Permanent
+ST_171,Sidhartha Talwar,sid@lotuslink.in,1,Permanent,Principal,2002-06-12,SL003,Permanent
+PG_173,Pankhuri Goel,pankhuri@studiolotus.in,1,Permanent,Principal,2009-03-05,SL004,Permanent
+AS_174,Asha Sairam,asha@lotuslink.in,1,Permanent,Principal,2010-06-21,SL005,Permanent
+HV_196,Harsh,harsh@studiolotus.in,1,Permanent,Principal,2017-09-01,SL006,Permanent
+UM_028,Umesh Mandal,umeshmandal1403@gmail.com,0,Permanent,Cook,2006-11-01,SL360,Permanent
+RM_175,Rajendra Kumar Mohanty,rajendra@studiolotus.in,0,Permanent,Head Finance and Accounts,2010-03-10,SL361,Permanent
+RS_107,Ram (Ravi) Prasad Sharma,ravi.sharma.lotus@gmail.com,0,Permanent,Office Support,2010-06-05,SL362,Permanent
+KC_176,Kavita Chatola,kavita@studiolotus.in,0,Permanent,Manager Administration,2011-05-29,SL363,Permanent
+VS_169,Vikram Singh,vikram056085@gmail.com,0,Permanent,Office Support,2012-02-18,SL364,Permanent
+NB_177,Nirmal Singh Bhakuni,nirmal@studiolotus.in,0,Permanent,Assistant Manager -Accounts,2015-03-02,SL365,Permanent
+AL_148,Ajay Kanhaiya Lal,lalk75219@gmail.com,0,Permanent,Office Support,2015-04-01,SL366,Permanent
+RK_178,Randhir Kumar,randhir@lotuslink.in,0,Permanent,Sr. Project Lead,2015-04-10,SL367,Permanent
+TB_179,Tanuj Biyani,tanuj@lotuslink.in,0,Permanent,Sr.Project Lead,2015-11-05,SL368,Permanent
+PC_183,Parija Chandra,parija@studiolotus.in,0,Permanent,Team Lead,2016-01-18,SL014,Permanent
+SK_182,Shalini Satish Kumar,shalini@studiolotus.in,0,Permanent,Senior Team Lead,2016-02-22,SL013,Permanent
+SP_159,Sunil Kumar Paswan,sunil3pswn@gmail.com,0,Permanent,Office Support,2016-03-15,SL369,Permanent
+AP_181,Anusha Pulapaka,anusha@studiolotus.in,0,Permanent,Senior Team Lead,2016-04-04,SL012,Permanent
+AH_180,Ayesha Mahiira Hussain,ayesha@lotuslink.in,0,Permanent,Sr.Project Lead,2016-04-11,SL011,Permanent
+AC_186,Ansel Colaco,ansel@studiolotus.in,0,Permanent,Team Lead,2016-05-16,SL017,Permanent
+ND_185,Neelam Das,neelam@studiolotus.in,0,Permanent,Associate Principal,2016-05-16,SL016,Permanent
+PK_184,Preetinder Kaur,preeti@lotuslink.in,0,Permanent,Project Lead,2016-07-25,SL015,Permanent
+SA_187,Swati Agarwal,swati@studiolotus.in,0,Permanent,Sr. Project Lead,2016-08-03,SL018,Permanent
+PM_188,Palak Mittal,palak@lotuslink.in,0,Permanent,Project Lead,2016-08-24,SL019,Permanent
+AN_189,Akshaya Narayanan,akshaya@lotuslink.in,0,Permanent,Project Lead,2016-09-19,SL020,Permanent
+NS_190,Nitika Srivastava,nitikasrivastava@lotuslink.in,0,Permanent,Project Lead,2016-11-09,SL021,Permanent
+SD_191,Sachin Dabas,sachin@lotuslink.in,0,Permanent,Architect,2017-02-06,SL022,Permanent
+SR_193,Subrata Ray,subrata@studiolotus.in,0,Permanent,Associate Principal,2017-06-01,SL024,Permanent
+VK_192,Vaseem Khan,wasim@studiolotus.in,0,Permanent,Designer,2017-06-29,SL023,Permanent
+AM_194,Adhiraj Miglani,adhiraj@studiolotus.in,0,Permanent,Project Lead,2017-07-13,SL025,Permanent
+AH_195,Adil Hussain,adil@studiolotus.in,0,Permanent,Project Lead,2017-07-24,SL026,Permanent
+AB_197,Aastha Batra,aastha@lotuslink.in,0,Permanent,Project Lead,2017-09-04,SL028,Permanent
+DH_198,Deepesh Harbola,deepesh@studiolotus.in,0,Permanent,Project Lead,2017-09-15,SL029,Permanent
+SM_199,Sushant Maini,sushant@studiolotus.in,0,Permanent,Project Lead,2017-09-27,SL030,Permanent
+RS_200,Rana Shil,rana@studiolotus.in,0,Permanent,Project Lead,2017-12-11,SL031,Permanent
+PJ_201,Pranati Jain,pranati@studiolotus.in,0,Permanent,Project Lead,2018-02-12,SL032,Permanent
+DS_202,Deepanshu Soni,deepanshu@studiolotus.in,0,Permanent,Sr. Project Lead,2018-02-26,SL033,Permanent
+SA_203,Sonam Agarwal,sonam@studiolotus.in,0,Permanent,Project Lead,2018-05-22,SL034,Permanent
+MG_204,Malika Grover,malika@studiolotus.in,0,Permanent,Designer,2018-06-04,SL035,Permanent
+DG_205,Deepali Gupta,deepali.gupta@studiolotus.in,0,Permanent,Designer,2018-06-13,SL036,Permanent
+GK_206,Gauri Ashok Kothavle,gauri@studiolotus.in,0,Permanent,Project Lead,2018-07-16,SL037,Permanent
+TA_207,Tejasv Ahluwalia,tejasv@lotuslink.in,0,Permanent,Architect,2018-07-16,SL038,Permanent
+SC_208,Shamik Sambit Chatterjee,shamik@studiolotus.in,0,Permanent,Sr. Project Lead,2018-07-18,SL039,Permanent
+IB_209,Ishan Batra,ishan@studiolotus.in,0,Permanent,Designer,2018-08-22,SL040,Permanent
+SA_168,Suraj Ambawata,ambawatasuraj@gmail.com,0,Permanent,Office Support,2018-08-26,SL370,Permanent
+MK_210,Monu Kumar,monu@studiolotus.in,0,Permanent,Designer,2018-09-03,SL041,Permanent
+SK_211,Shoaib Mohammad Kamili,shoaib@studiolotus.in,0,Permanent,Sr. Project Lead,2018-09-03,SL042,Permanent
+KN_212,Kirti Kaur Nagpal,kirti@studiolotus.in,0,Permanent,Architect,2018-09-06,SL043,Permanent
+LJ_213,Leenu Jindal,leenu@studiolotus.in,0,Permanent,Project Lead,2018-10-01,SL044,Permanent
+DK_214,Deepali Khunteta,deepali.khunteta@lotuslink.in,0,Permanent,Designer,2018-10-15,SL045,Permanent
+PA_215,Priyanka Aggarwal,priyanka@studiolotus.in,0,Permanent,Sr. Project Lead,2018-10-23,SL046,Permanent
+SS_217,Shivani Prafulla Shastri,shivani@studiolotus.in,0,Permanent,Project Lead,2018-11-12,SL048,Permanent
+NS_216,Neha Sehgal,neha.sehgal@studiolotus.in,0,Permanent,Architect,2018-11-13,SL047,Permanent
+RC_218,Reebanta Paul Chowdhury,reebanta@studiolotus.in,0,Permanent,Designer,2018-12-20,SL049,Permanent
+PJ_219,Pranvi Jain,pranvi@studiolotus.in,0,Permanent,Designer,2019-01-02,SL050,Permanent
+DM_221,Deepak Mahour,deepak.mahour@lotuslink.in,0,Permanent,Project Lead,2019-01-21,SL052,Permanent
+NA_220,Nikita Agarwal,nikita@studiolotus.in,0,Permanent,Project Lead,2019-01-21,SL051,Permanent
+MS_222,Mohd Anas Siraj,anas@lotuslink.in,0,Permanent,Designer,2019-01-28,SL053,Permanent
+RR_223,Rishikesh Rajan,rishikesh@studiolotus.in,0,Permanent,Project Lead,2019-02-04,SL054,Permanent
+PP_226,Pritesh Patel,pritesh@studiolotus.in,0,Permanent,Designer,2019-02-05,SL058,Permanent
+JP_224,Jagriti Periwal,jagriti@studiolotus.in,0,Permanent,Designer,2019-02-06,SL055,Permanent
+RK_225,Ravindra Kumar,ravindra@lotuslink.in,0,Permanent,Team Lead,2019-02-11,SL056,Permanent
+VS_227,Varun Sachdev,varun@studiolotus.in,0,Permanent,Project Lead,2019-03-06,SL059,Permanent
+CS_228,Charu Sharma,charu@studiolotus.in,0,Permanent,Human Resources  Head,2019-03-13,SL060,Permanent
+JP_229,Jyotirmay Patra,jyotirmay@studiolotus.in,0,Permanent,Project Lead,2019-03-19,SL061,Permanent
+TJ_231,Tanvi Jain,tanvi@studiolotus.in,0,Permanent,Senior Manager- Business Development,2019-04-01,SL063,Permanent
+VS_232,Vineet Sakkarwal,vineet@lotuslink.in,0,Permanent,Senior Visualizer(3D),2019-04-01,SL064,Permanent
+RC_233,Ruhani Chopra,ruhani@lotuslink.in,0,Permanent,Designer,2019-04-11,SL065,Permanent
+SU_234,Sharvani Upadhye,sharvani@lotuslink.in,0,Permanent,Architect,2019-04-25,SL066,Permanent
+DS_236,Dinesh Chander Sharma,dinesh@lotuslink.in,0,Permanent,Information Technology Manager,2019-05-01,SL068,Permanent
+PN_237,Parminder Singh Nagi,parminder@lotuslink.in,0,Contract,Team Lead Technical,2019-05-01,SLC001,Contract
+SM_235,Smriti Mishra,smriti@lotuslink.in,0,Permanent,Architect,2019-05-01,SL067,Permanent
+AJ_238,Ayush Jagnani,ayush@lotuslink.in,0,Permanent,Designer,2019-05-21,SL070,Permanent
+PP_239,Pooja Pundeer,pooja@lotuslink.in,0,Permanent,Project Lead,2019-06-03,SL071,Permanent
+MK_240,Meher Kaur Kochhar,mehar@studiolotus.in,0,Permanent,Designer,2019-06-17,SL072,Permanent
+MG_241,Mohit Goel,mohit@studiolotus.in,0,Permanent,Sr.Project Lead,2019-07-01,SL073,Permanent
+AJ_242,Abhishek Kumar Jha,abhishek@lotuslink.in,0,Permanent,Assistant Manager -Infrastruture,2019-07-03,SL074,Permanent
+IP_243,Insiya Pithawala,insiya@studiolotus.in,0,Permanent,Team Lead,2019-07-08,SL075,Permanent
+MB_244,Mannat Bains,mannat@studiolotus.in,0,Permanent,Designer,2019-07-08,SL076,Permanent
+AX_245,Adeeba,adeeba@studiolotus.in,0,Permanent,Graphic Designer,2019-07-22,SL077,Permanent
+RK_246,Ravi Kumar,ravi@lotuslink.in,0,Permanent,3D Visualizer,2019-07-22,SL078,Permanent
+PR_247,Parveen Singh Rawat,praveen@studiolotus.in,0,Permanent,Designer,2019-08-01,SL079,Permanent
+AB_248,Anusha Bajpai,anusha.bajpai@studiolotus.in,0,Permanent,Team Lead,2019-08-05,SL080,Permanent
+PR_249,Pooja Rathi,pooja.rathi@studiolotus.in,0,Permanent,Designer,2019-08-05,SL081,Permanent
+AT_250,Agastya Tripathi,agastya@studiolotus.in,0,Permanent,Sr. Project Lead,2019-08-12,SL083,Permanent
+UA_251,Utsav Agrawal,utsav@lotuslink.in,0,Permanent,Designer,2019-08-19,SL084,Permanent
+CG_252,Christopher Gerhardt,christopher@studiolotus.in,0,Permanent,Project Lead,2019-09-02,SL085,Permanent
+BS_253,Bhavika Singla,bhavika@studiolotus.in,0,Permanent,Project Lead,2019-09-23,SL086,Permanent
+SM_254,Swati Mongia,swatimongia@lotuslink.in,0,Permanent,Project Lead,2019-09-23,SL087,Permanent
+UC_255,Utkarsh Chaudhary,utkarsh@lotuslink.in,0,Permanent,Trainee,2019-10-01,SL088,Permanent
+ND_257,Nitayee Das,itsupport@studiolotus.in,0,Permanent,Manager (Information Technology),2019-12-23,SL090,Permanent
+SS_258,Shaleen Sahay,shaleen@lotuslink.in,0,Permanent,Project Lead,2020-02-20,SL091,Permanent
+AS_256,Agrima Sharma,agrima@studiolotus.in,0,Permanent,Designer,2020-07-13,SL089,Permanent
+JK_002,Jatin Khandelwal,arjatinkhandelwal@gmail.com,0,Intern,Intern,2020-07-14,SLI001,Intern
+MC_003,Mohit Chopra,mister.mohitchopra@gmail.com,0,Intern,Intern,2020-07-22,SLI002,Intern
+VT_004,Vaibhav,vaibhavtomar97@gmail.com,0,Intern,Intern,2020-07-22,SLI003,Intern
+RM_006,Rushali Malhotra,rushali98@gmail.com,0,Intern,Intern,2020-08-06,SLI004,Intern
+AL_005,Akshita Ladhani,akshiiladhani@gmail.com,0,Intern,Intern,2020-08-10,SLI005,Intern
+MS_260,Meghna Sharma,meghna@studiolotus.in,0,Permanent,Designer,2020-08-24,SL093,Permanent
+TK_259,Tanya Kaushik,tanya@studiolotus.in,0,Permanent,Project Lead,2020-08-24,SL092,Permanent
+AS_262,Aniruddh Sharan,aniruddh@studiolotus.in,0,Permanent,Architect,2020-09-01,SL095,Permanent
+AW_261,Amrita Walia,amrita@studiolotus.in,0,Permanent,Architect,2020-09-01,SL094,Permanent
+AB_263,Aditya Bhandari,adityabhandari@studiolotus.in,0,Permanent,Architect,2020-09-07,SL096,Permanent
+PG_007,Pranav Gupta,pranavgupta0518@gmail.com,0,Intern,Intern,2020-09-07,SLI006,Intern
+DE_012,Dummy Employee,join@studiolotus.in,0,Permanent,Trainee,2020-10-01,SL371,Permanent
+VP_264,Vanshaj Paruthi,vanshaj@lotuslink.in,0,Permanent,Trainee,2020-10-05,SL097,Permanent
+SS_008,Siladitya Samir,siladityasamir5@gmail.com,0,Intern,Intern,2020-10-19,SLI007,Intern
+SA_268,Syed Massod Ahsan,hasan@studiolotus.in,0,Permanent,Head-Project Management,2020-11-02,SL101,Permanent
+DS_266,Dhairya Srivastava,dhairya@studiolotus.in,0,Permanent,Trainee,2020-11-09,SL099,Permanent
+AC_267,Ashna Chhatwal,ashna@studiolotus.in,0,Permanent,Designer,2020-11-11,SL100,Permanent
+PA_265,Prajwal Amin,prajwal@studiolotus.in,0,Permanent,Project Lead,2020-11-18,SL098,Permanent
+HC_270,Hari,hari@studiolotus.in,0,Permanent,Architect,2020-12-07,SL103,Permanent
+KR_269,Kapil Rawat,kapil@studiolotus.in,0,Permanent,Quantity Surveyor,2020-12-07,SL102,Permanent
+NM_009,Naman Mehta,namanmehta2211@gmail.com,0,Intern,Intern,2020-12-14,SLI008,Intern
+NT_271,Nikhil Tahiliani,nikhil@studiolotus.in,0,Permanent,Architect,2020-12-14,SL104,Permanent
+SX_272,Sonal,sonal@studiolotus.in,0,Permanent,Trainee,2020-12-14,SL105,Permanent
+MR_275,Mohd Rayyan,rayyan.mohd@studiolotus.in,0,Permanent,Project Supervisor,2020-12-21,SL108,Permanent
+SK_273,Sanjana Khatri,sanjana.khatri@lotuslink.in,0,Permanent,Trainee,2020-12-21,SL106,Permanent
+ZZ_274,Zainab Zaidi,zainab.zaidi@studiolotus.in,0,Permanent,Project Lead,2020-12-21,SL107,Permanent
+AS_011,Aditya Pratap Soni,adityapratapsoni247@gmail.com,0,Intern,Intern,2021-01-04,SLI009,Intern
+FG_010,Falguni Garg,falgunigarg99@gmail.com,0,Intern,Intern,2021-01-04,SLI010,Intern
+SB_277,Siddharth Bansal,siddharth.bansal@studiolotus.in,0,Permanent,Project Lead,2021-01-04,SL110,Permanent
+SD_278,Sanjana Dawani,sanjana.dawani@studiolotus.in,0,Permanent,Designer,2021-01-04,SL111,Permanent
+SM_276,Saundarya Mehtaanii,saundarya.mehtaanii@studiolotus.in,0,Permanent,Project Lead,2021-01-04,SL109,Permanent
+SW_279,Sreenidhi Wupadrasta,sreenidhi.wupadrasta@studiolotus.in,0,Permanent,Architect,2021-01-04,SL112,Permanent
+MK_013,Mehak Kapoor,mehakkapoor1007@gmail.com,0,Intern,Intern,2021-01-11,SLI011,Intern
+SC_014,Saket Chauhan,saket3084arch17@spa.ac.in,0,Intern,Intern,2021-01-13,SLI012,Intern
+AA_015,Arya Arun,arya98arun@gmail.com,0,Intern,Intern,2021-01-18,SLI013,Intern
+RB_016,Rohil Baruah,baruahrohil@gmail.com,0,Intern,Intern,2021-01-18,SLI014,Intern
+RG_280,Renuka Gupta,renuka.gupta@studiolotus.in,0,Permanent,Project Lead,2021-01-18,SL113,Permanent
+JG_017,Jatin Goyal,goyaljatin030@gmail.com,0,Intern,Intern,2021-01-21,SLI015,Intern
+MM_018,Mubashir Meraj,mubashirm202@gmail.com,0,Intern,Intern,2021-01-25,SLI016,Intern
+TB_281,Tanmoy Ballav,tanmoyb.arch@gmail.com,0,Permanent,Architect,2021-02-01,SL114,Permanent
+NG_282,Natasha Kaur Grewal,natasha.grewal@studiolotus.in,0,Permanent,Designer,2021-02-03,SL115,Permanent
+SU_284,Sharad Upadhyay,sharad.upadhyay@studiolotus.in,0,Permanent,Assistant Manager -Projects,2021-02-06,SL117,Permanent
+KK_283,Kshitij Kaul,kshitij.kaul@studiolotus.in,0,Permanent,Sr. Project Lead,2021-02-08,SL116,Permanent
+AG_019,Ashutosh Garg,ashutosh.garg87@gmail.com,0,Intern,Intern,2021-02-18,SLI017,Intern
+DJ_020,Deepanshu Jain,deepanshujainofficial@gmail.com,0,Intern,Intern,2021-02-22,SLI018,Intern
+PG_285,Pranav Gupta,pranav.gupta@studiolotus.in,0,Permanent,Project Lead,2021-03-15,SL118,Permanent
+JK_287,Jatin Khandelwal,jatin.khandelwal@studiolotus.in,0,Permanent,Architect,2021-04-01,SL120,Permanent
+MC_288,Mohit Chopra,mohit.chopra@studiolotus.in,0,Permanent,Architect,2021-04-01,SL121,Permanent
+VT_289,Vaibhav Tomar,vaibhav.tomar@studiolotus.in,0,Permanent,Architect,2021-04-01,SL122,Permanent
+EK_286,Eshani Khandpur,eshani.khandpur@studiolotus.in,0,Permanent,Project Lead,2021-04-05,SL119,Permanent
+NS_021,Nishant Singh,nishant.singh@studiolotu.in,0,Intern,Intern,2021-04-12,SLI019,Intern
+NS_323,Nishant Singh,nishant.singh@studiolotus.in,0,Permanent,Administrator Human Resources,2021-04-12,SL157,Permanent
+ST_290,Sukriti Thukral,sukriti.thukral@studiolotus.in,0,Permanent,Architect,2021-04-12,SL123,Permanent
+KS_291,Karan Singh,karan.singh@studiolotus.in,0,Permanent,Architect,2021-04-21,SL124,Permanent
+NK_292,Nitika Kundu,nitika.kundu@studiolotus.in,0,Permanent,Team Lead,2021-05-03,SL126,Permanent
+RM_293,Rushali Malhotra,rushali.malhotra@studiolotus.in,0,Permanent,Project Lead,2021-05-03,SL127,Permanent
+HS_029,Het Shah,hetshah2121@googlemail.com,0,Intern,Intern,2021-05-10,SLI020,Intern
+RR_039,Raunak Raj,ronraunak@gmail.com,0,Intern,Intern,2021-05-17,SLI021,Intern
+MA_294,Mansi Almadi,mansi.almadi@studiolotus.in,0,Permanent,Designer,2021-05-24,SL128,Permanent
+AM_050,Anoushka Mann,anoushka.mann18@iiad.edu.in,0,Intern,Intern,2021-05-25,SLI022,Intern
+AR_061,Apeksha Rao,apekshaarao19@gmail.com,0,Intern,Intern,2021-06-01,SLI023,Intern
+DJ_295,Deepanshu Jain,deepanshu.jain@studiolotus.in,0,Permanent,Architect,2021-06-01,SL129,Permanent
+TG_296,Tanya Gulati,tanya.gulati@studiolotus.in,0,Permanent,Designer,2021-06-07,SL130,Permanent
+KG_094,Kripa Gulati,kripagulati.barch17@sushantuniversity.edu.in,0,Intern,Intern,2021-06-14,SLI024,Intern
+SM_083,Shaunak Mujumdar,mujumdar.shaunak.pvpcoa1722@gmail.com,0,Intern,Intern,2021-06-14,SLI025,Intern
+RA_104,Ram Arora,ram3158arch18@spa.ac.in,0,Intern,Intern,2021-06-15,SLI026,Intern
+SG_297,Suhani Gupta,suhani.gupta@studiolotus.in,0,Permanent,Designer,2021-06-16,SL131,Permanent
+CS_298,Chanthana Subair,chanthana.subair@studiolotus.in,0,Permanent,Designer,2021-06-17,SL132,Permanent
+KC_106,Kuleen Choubey,kuleen.choubey12@gmail.com,0,Intern,Intern,2021-06-21,SLI027,Intern
+RG_105,Rushil Gupta,rushilguptaa@gmail.com,0,Intern,Intern,2021-06-21,SLI028,Intern
+AA_305,Ashad Alam,ashad.alam@studiolotus.in,0,Permanent,Assistant Manager -Projects,2021-06-28,SL139,Permanent
+SP_299,Subham Pani,subham.pani@studiolotus.in,0,Permanent,Project Lead,2021-06-28,SL133,Permanent
+DM_301,Devika Mankotia,devika.mankotia@studiolotus.in,0,Permanent,Project Lead,2021-07-01,SL135,Permanent
+SJ_300,Shreyansh Jain,shreyansh.jain@studiolotus.in,0,Permanent,Architect,2021-07-01,SL134,Permanent
+AP_304,Avantika Pidiha,avantika.pidiha@studiolotus.in,0,Permanent,Trainee,2021-07-05,SL138,Permanent
+DW_108,Devenpreet Singh Wahi,devenwahi21@gmail.com,0,Intern,Intern,2021-07-05,SLI029,Intern
+NA_302,Nitika Agarwal,nitika.agarwal@studiolotus.in,0,Permanent,Team Lead,2021-07-05,SL136,Permanent
+SA_303,Supriya Agarwal,supriya.agarwal@studiolotus.in,0,Permanent,Project Lead,2021-07-05,SL137,Permanent
+AK_109,Abdullah Khalid,abdullahkhalidd3@gmail.com,0,Intern,Intern,2021-07-13,SLI030,Intern
+SS_110,Saransh Shri Shrimal,aksaranshshrimal@gmail.com,0,Intern,Intern,2021-07-14,SLI031,Intern
+UA_117,Umair Arshad,umair687@gmail.com,0,Intern,Intern,2021-07-15,SLI032,Intern
+AB_307,Aditya Bhattacharya,aditya.bhattacharya@studiolotus.in,0,Permanent,Designer,2021-07-19,SL141,Permanent
+AG_306,Aastha Gupta,aastha.gupta@studiolotus.in,0,Permanent,Trainee,2021-07-19,SL140,Permanent
+BS_308,Bhawna Singh,bhawna.singh@studiolotus.in,0,Permanent,Communications Designer,2021-07-19,SL142,Permanent
+PJ_111,Piyush Jain,piyush.pj99@gmail.com,0,Intern,Intern,2021-07-26,SLI033,Intern
+ZK_309,Zainab Khan,zainab.khan@studiolotus.in,0,Permanent,Trainee,2021-07-26,SL143,Permanent
+PM_310,Palak Mehra,palak.mehra@studiolotus.in,0,Permanent,Trainee,2021-07-28,SL144,Permanent
+MM_311,Mubashir Meraj,mubashir.meraj@studiolotus.in,0,Permanent,Designer,2021-08-02,SL145,Permanent
+AM_312,Abhranil Munsi,abhranil.munsi@studiolotus.in,0,Permanent,Architect,2021-08-09,SL146,Permanent
+AK_313,Atri Karmakar,atri.karmakar@studiolotus.in,0,Permanent,Architect,2021-08-18,SL147,Permanent
+SS_314,Snehlaxmi Shekhawat,snehlaxmi@studiolotus.in,0,Permanent,Designer,2021-08-23,SL148,Permanent
+AB_315,Anjali,anjali@studiolotus.in,0,Permanent,Architect,2021-08-25,SL149,Permanent
+NS_128,Nishant Sabbarwal,sabbarwal.99nishant@gmail.com,0,Intern,Intern,2021-09-01,SLI034,Intern
+YT_316,Yatin Tokas,yatin.tokas@studiolotus.in,0,Permanent,Project Lead,2021-09-01,SL150,Permanent
+VJ_317,Varun Jangid,varun.jangid@studiolotus.in,0,Permanent,Designer,2021-09-13,SL151,Permanent
+VN_134,Vaishnavy  B Nair,vaishnavy.b.nair@gmail.com,0,Intern,Intern,2021-09-29,SLI035,Intern
+AJ_319,Aayushi Jain,aayushi.jain@studiolotus.in,0,Permanent,Project Lead,2021-10-04,SL153,Permanent
+AN_318,Arsalaan Noor,arsalaan.noor@studiolotus.in,0,Permanent,Architect,2021-10-04,SL152,Permanent
+SA_320,Shradha Arya,shradha.arya@studiolotus.in,0,Permanent,Designer,2021-10-04,SL154,Permanent
+VS_321,Vartika Sood,vartika.sood@studiolotus.in,0,Permanent,Project Lead,2021-10-11,SL155,Permanent
+SA_135,Siddharth Vishal Agrawal,siddharth.vagrawal@gmail.com,0,Intern,Intern,2021-11-15,SLI036,Intern
+SK_322,Sanjeev Kumar,sanjeev.kumar@studiolotus.in,0,Permanent,Designer,2021-11-15,SL156,Permanent
+AS_136,Amal Shafi,adhamamalshafi@gmail.com,0,Intern,Intern,2021-11-22,SLI037,Intern
+PS_324,Pushpendra Pratap Singh,pushpendra.singh@studiolotus.in,0,Permanent,Project Lead,2021-11-24,SL158,Permanent
+MP_325,Meenu Poddar,meenu.poddar@studiolotus.in,0,Permanent,Designer,2021-12-01,SL159,Permanent
+AP_230,Aqib Perwaiz,aqib.perwaiz@studiolotus.in,0,Permanent,Project Supervisor,2021-12-19,SL062,Permanent
+MJ_327,Mahak Jain,mahak.jain@studiolotus.in,0,Permanent,Sr. Project Lead,2021-12-20,SL161,Permanent
+SR_326,Shreya Rami,shreya.rami@studiolotus.in,0,Permanent,Project Lead,2021-12-20,SL160,Permanent
+AP_143,Albert Simon Philip,albertsphilip1@gmail.com,0,Intern,Intern,2022-01-03,SLI038,Intern
+AT_142,Akansha Thakre,akankshathakre478@gmail.com,0,Intern,Intern,2022-01-03,SLI039,Intern
+PV_141,Pulkit Verma,vpulkit62@gmail.com,0,Intern,Intern,2022-01-03,SLI040,Intern
+RK_137,Ravi Kumar,r4ravikumar121@gmail.com,0,Intern,Intern,2022-01-03,SLI041,Intern
+RP_140,Rishi Raj Pandey,rishirajpandey255@gmail.com,0,Intern,Intern,2022-01-03,SLI042,Intern
+SK_138,Sujata Kumari,sujatak.arch@gmail.com,0,Intern,Intern,2022-01-03,SLI043,Intern
+SR_139,Satwik Singh Rathour,satwiksinghrathour@gmail.com,0,Intern,Intern,2022-01-03,SLI044,Intern
+SC_328,Sagar Chhabra,sagar.chhabra@studiolotus.in,0,Permanent,Designer,2022-01-04,SL163,Permanent
+TP_144,Tanushree Pillai,t.pillai@strate.design,0,Intern,Intern,2022-01-04,SLI045,Intern
+PS_329,Parth Sharma,parth.sharma@studiolotus.in,0,Permanent,Architect,2022-01-05,SL164,Permanent
+AB_146,Asmita Bharati,bharatiasmita26@gmail.com,0,Intern,Intern,2022-01-10,SLI046,Intern
+AS_147,Ashna Shrestha,ashnashrestha0002@gmail.com,0,Intern,Intern,2022-01-10,SLI047,Intern
+MK_331,Manish Kumar,manish.kumar@studiolotus.in,0,Permanent,Project Lead,2022-01-10,SL166,Permanent
+MS_333,Mayuranki Singhal,mayuranki.singhal@studiolotus.in,0,Permanent,Designer,2022-01-10,SL168,Permanent
+PY_330,Paritosh Yadav,paritosh.yadav@studiolotus.in,0,Permanent,Team Lead,2022-01-10,SL165,Permanent
+UG_145,Uttara Gupta,uttaragupta2404@gmail.com,0,Intern,Intern,2022-01-10,SLI048,Intern
+VJ_332,Vishal Jaswal,vishal.jaswal@studiolotus.in,0,Permanent,Project Lead,2022-01-10,SL167,Permanent
+FS_149,Fathima Shanna,fathimashanna4@gmail.com,0,Intern,Intern,2022-01-17,SLI049,Intern
+PP_150,Priyanka Pattnaik,pattnaik.priyanka10@gmail.com,0,Intern,Intern,2022-01-17,SLI050,Intern
+SS_151,Surbhi Sharma,surbhisharma0524@gmail.com,0,Intern,Intern,2022-01-17,SLI051,Intern
+YB_072,Yashika Bagga,yashikabagga21@gmail.com,0,Intern,Intern,2022-01-31,SLI052,Intern
+YB_334,Yashika Bagga,yashika.bagga@studiolotus.in,0,Permanent,Project Lead,2022-02-01,SL170,Permanent
+SS_152,Shreya Singh,shreyasingh20039@gmail.com,0,Intern,Intern,2022-02-23,SLI053,Intern
+KC_336,Kuleen Choubey,kuleen@studiolotus.in,0,Permanent,Architect,2022-03-01,SL172,Permanent
+KS_335,Komal Kaur Sidhu,komal.kaur@studiolotus.in,0,Permanent,Product Designer,2022-03-01,SL171,Permanent
+RG_337,Rushil Gupta,rushil@studiolotus.in,0,Permanent,Designer,2022-03-01,SL173,Permanent
+SM_153,Saubhagini Mahajan,saubhaginim22@gmail.com,0,Intern,Intern,2022-03-09,SLI054,Intern
+HA_154,Hiba Abdulazees,hibaabdulazees@gmail.com,0,Intern,Intern,2022-03-16,SLI055,Intern
+DW_340,Devenpreet Singh Wahi,devenpreet@studiolotus.in,0,Permanent,Architect,2022-04-01,SL176,Permanent
+DG_338,Devesh Gautam,devesh@studiolotus.in,0,Permanent,Architect,2022-04-04,SL174,Permanent
+HV_339,Himanshu Verma,himanshu@studiolotus.in,0,Permanent,Sr.Project Lead,2022-04-04,SL175,Permanent
+RP_155,Rajeshwar Kumar Pal,rajeshwarpal5366@gmail.com,0,Intern,Intern,2022-04-04,SLI056,Intern
+BS_342,Bhanu Pratap Singh,bhanu@studiolotus.in,0,Permanent,Architect,2022-04-25,SL178,Permanent
+VN_341,Vaishnavy B Nair,vaishnavy@studiolotus.in,0,Permanent,Architect,2022-04-25,SL177,Permanent
+MY_343,Mohit Yadav,mohit.yadav@studiolotus.in,0,Permanent,Project Lead,2022-05-02,SL179,Permanent
+DS_344,Deepthi Sivadas,deepthi@studiolotus.in,0,Permanent,Designer,2022-05-09,SL180,Permanent
+SS_345,Shreyashi Singh,shreyashi@studiolotus.in,0,Permanent,Architect,2022-05-09,SL181,Permanent
+NA_346,Nisha Agarwal,nisha@studiolotus.in,0,Permanent,Project Lead,2022-05-30,SL182,Permanent
+PP_347,Priyanka Pattnaik,priyanka.pattnaik@studiolotus.in,0,Permanent,Architect,2022-06-01,SL183,Permanent
+MC_157,Muskan Chowdhary,muskaanchowdhary7@gmail.com,0,Intern,Intern,2022-06-06,SLI057,Intern
+YG_156,Yukti Gupta,gupta.yukti21@gmail.com,0,Intern,Intern,2022-06-06,SLI058,Intern
+GL_348,L Gyan Praharsh .,praharsh@studiolotus.in,0,Permanent,Designer,2022-06-08,SL184,Permanent
+UP_349,Utkarsh Prasad,utkarsh.p@studiolotus.in,0,Permanent,Architect,2022-06-08,SL185,Permanent
+AP_158,Aditi Panwar,aditiii.archi@gmail.com,0,Intern,Intern,2022-06-09,SLI059,Intern
+JS_161,Jai Aditya Sharma,adijai63@gmail.com,0,Intern,Intern,2022-06-13,SLI060,Intern
+BM_160,Barkha Mangla,barkhamangla.2308@gmail.com,0,Intern,Intern,2022-06-14,SLI061,Intern
+RB_162,Rimil B. M,rimil0501@gmail.com,0,Intern,Intern,2022-06-14,SLI062,Intern
+MY_350,Megha Yadava,megha.yadava@studiolotus.in,0,Permanent,Designer,2022-06-20,SL186,Permanent
+RP_163,Ritika Prasad,ritikaprasad.a@gmail.com,0,Intern,Intern,2022-06-20,SLI063,Intern
+SP_351,Sanchit Singh Pahwa,sanchit@studiolotus.in,0,Permanent,Architect,2022-06-20,SL187,Permanent
+FH_164,Fida Hamid,fidahamidahk@gmail.com,0,Intern,Intern,2022-06-21,SLI064,Intern
+RK_352,Rohan Milind Kini,rohan.kini@studiolotus.in,0,Permanent,Architect,2022-07-04,SL188,Permanent
+TP_353,Tanushree Pillai,tanushree@studiolotus.in,0,Permanent,Designer,2022-07-11,SL189,Permanent
+IC_355,Ipshita Chatterjee,ipshita@studiolotus.in,0,Permanent,Architect,2022-08-01,SL191,Permanent
+PC_165,Paras Chhabra,chhabrap457@gmail.com,0,Intern,Intern,2022-08-01,SLI065,Intern
+RR_356,Raunak Raj,raunak@studiolotus.in,0,Permanent,Architect,2022-08-08,SL192,Permanent
+AK_357,Ayushi Khandelwal,ayushi.k@studiolotus.in,0,Permanent,Designer,2022-08-16,SL193,Permanent
+MX_358,Mantavya,mantavya@studiolotus.in,0,Permanent,Project Lead,2022-08-22,SL194,Permanent
+HA_359,Huda Ateeque,huda@studiolotus.in,0,Permanent,Project Lead,2022-09-05,SL195,Permanent
+RK_361,Rishabh Kamboj,rishabh@studiolotus.in,0,Permanent,Architect,2022-09-05,SL197,Permanent
+SB_360,Somik Beura,somik@studiolotus.in,0,Permanent,Architect,2022-09-05,SL196,Permanent
+KR_362,Kanika Raina,kanika@studiolotus.in,0,Permanent,Designer,2022-09-06,SL198,Permanent
+KC_364,Kaustubh Chaudhary,kaustubh@studiolotus.in,0,Permanent,Designer,2022-09-19,SL200,Permanent
+SK_363,Sakshi Kashelani,sakshi@studiolotus.in,0,Permanent,Designer,2022-09-19,SL199,Permanent
+PR_166,Prantik Saha Roy,prantik.saharoy00@gmail.com,0,Intern,Intern,2022-10-08,SLI066,Intern
+CJ_365,Cheshta Jain,cheshta@studiolotus.in,0,Permanent,Designer,2022-11-01,SL201,Permanent
+HS_167,HR Studio Lotus,hr@studiolotus.in,0,Permanent,Human Resources  Head,2022-11-01,SL372,Permanent
+SY_366,Siddharth Yadav,siddharth.yadav@studiolotus.in,0,Permanent,Architect,2022-11-07,SL202,Permanent
+MT_367,Maitrayee Takale,maitrayee@studiolotus.in,0,Permanent,Project Lead,2022-11-14,SL203,Permanent
+AS_371,Aman Singh,aman.singh@studiolotus.in,0,Permanent,Project Lead,2022-11-21,SL207,Permanent
+KM_370,Keerthy Menon,keerthy@studiolotus.in,0,Permanent,Project Lead,2022-11-21,SL206,Permanent
+RB_369,Reshmi Babu,reshmi@studiolotus.in,0,Permanent,Designer,2022-11-21,SL205,Permanent
+VN_368,Vivin Neelankavil,vivin@studiolotus.in,0,Permanent,Architect,2022-11-21,SL204,Permanent
+WR_022,Muhammad Wasik,muhammadwasik07@gmail.com,0,Intern,Intern,2022-12-19,SLI067,Intern
+ST_373,Saumya Tandan,saumya@studiolotus.in,0,Permanent,Senior Manager- Human Resources,2023-01-02,SL209,Permanent
+RN_372,Rutuja Nathe,rutuja@studiolotus.in,0,Contract,Project Lead,2023-01-03,SLC002,Contract
+SK_023,Soumya Kalhan,soumyakalhan@yahoo.com,0,Intern,Intern,2023-01-03,SLI068,Intern
+DS_374,Dhruv Shah,dhruv@studiolotus.in,0,Permanent,Project Lead,2023-01-09,SL210,Permanent
+RV_024,Riya Verma,itsriyaverma18@gmail.com,0,Intern,Intern,2023-01-16,SLI069,Intern
+EC_375,Eshita Chopra,eshita@studiolotus.in,0,Permanent,Project Lead,2023-01-30,SL211,Permanent
+HK_376,Harsimran Kaur,harsimran@studiolotus.in,0,Permanent,Designer,2023-01-30,SL212,Permanent
+SG_027,Shivsanjan G,shivsanjang@gmail.com,0,Intern,Intern,2023-02-01,SLI070,Intern
+RS_377,Rhythm Samanta,rhythm@studiolotus.in,0,Permanent,Designer,2023-03-28,SL213,Permanent
+HC_030,Harison Clement,harisonclement16@gmail.com,0,Intern,Intern,2023-04-05,SLI071,Intern
+GH_378,Gauri Hardatt,gauri.hardatt@studiolotus.in,0,Permanent,Architect,2023-04-17,SL214,Permanent
+SA_379,Suryansh Agarwal,suryansh@studiolotus.in,0,Permanent,Designer,2023-05-01,SL215,Permanent
+AB_031,Aditya Bhojwani,adityabhojwani52@gmail.com,0,Intern,Intern,2023-05-08,SLI072,Intern
+SS_380,Swati Seshadri,swati.seshadri@studiolotus.in,0,Permanent,Team Lead,2023-05-08,SL216,Permanent
+BG_382,Bhawna Gupta,bhawna.gupta@studiolotus.in,0,Permanent,Project Lead,2023-05-15,SL218,Permanent
+SK_381,Sai Syam Kalapatav,saisyam@studiolotus.in,0,Permanent,Project Lead,2023-05-15,SL217,Permanent
+AS_032,Ayush Sharma,ayush08.sharma12@gmail.com,0,Intern,Intern,2023-05-22,SLI073,Intern
+MS_033,Mansi Singh,mansi.23006@gmail.com,0,Intern,Intern,2023-05-24,SLI074,Intern
+BA_034,Brahmansh Atrey,brahmansh56@gmail.com,0,Intern,Intern,2023-06-01,SLI075,Intern
+AG_388,Amita Goel,amita@studiolotus.in,0,Permanent,Associate Principal,2023-06-05,SL224,Permanent
+HG_385,Hriday Gandhi,hriday@studiolotus.in,0,Permanent,Architect,2023-06-05,SL221,Permanent
+RA_386,Razi Ahmad,razi@studiolotus.in,0,Permanent,Architect,2023-06-05,SL222,Permanent
+RL_035,Rashika Lungani,rashikalungani@gmail.com,0,Intern,Intern,2023-06-05,SLI118,Intern
+SR_384,Satwik Singh Rathour,satwik@studiolotus.in,0,Permanent,Architect,2023-06-05,SL220,Permanent
+UG_383,Uttara Gupta,uttara@studiolotus.in,0,Permanent,Designer,2023-06-05,SL219,Permanent
+MK_387,Mitali Milind Kumakale,mitali@studiolotus.in,0,Permanent,Designer,2023-06-07,SL223,Permanent
+VD_036,Vaibhavi Dhiman,vaibhavidhimanwork62@gmail.com,0,Intern,Intern,2023-06-08,SLI119,Intern
+SB_037,Shruti Bansal,shruti412@hotmail.com,0,Intern,Intern,2023-06-12,SLI120,Intern
+IR_389,Ishita Randhawa,ishita@studiolotus.in,0,Permanent,Trainee,2023-06-15,SL225,Permanent
+IR_390,Insha Rizvi,insha@studiolotus.in,0,Permanent,Designer,2023-06-15,SL226,Permanent
+KB_392,K.S Sri Bharathi,bharathi@studiolotus.in,0,Permanent,Trainee,2023-06-15,SL228,Permanent
+SA_391,Sanchita Agarwal,sanchita@studiolotus.in,0,Permanent,Architect,2023-06-15,SL227,Permanent
+KM_393,Kalpita M,kalpita@studiolotus.in,0,Permanent,Architect,2023-06-19,SL229,Permanent
+SV_394,Shreya Vashisth,shreya.vashisth@studiolotus.in,0,Permanent,Manager Business Development,2023-06-19,SL230,Permanent
+AC_396,Ankeeta Champatiray,ankeeta@studiolotus.in,0,Permanent,Architect,2023-06-26,SL232,Permanent
+PS_395,Pramod Kumar Sahu,pramod@studiolotus.in,0,Permanent,Project Manager,2023-06-26,SL231,Permanent
+SX_038,Samiksha,samikshas110@gmail.com,0,Intern,Intern,2023-06-27,SLI121,Intern
+MC_397,Muskan Chowdhary,muskan@studiolotus.in,0,Contract,Architect,2023-07-03,SLC003,Contract
+KG_040,Khushi Goyal,khushigoel202@gmail.com,0,Intern,Intern,2023-07-04,SLI122,Intern
+SN_398,Shreyas N,shreyas@studiolotus.in,0,Permanent,Architect (Environmental Design),2023-07-05,SL234,Permanent
+CA_041,Chirag Agarwal,chiragagarwal201002@gmail.com,0,Intern,Intern,2023-07-10,SLI076,Intern
+HG_042,Haresh G,ar.hareshg@gmail.com,0,Intern,Intern,2023-07-10,SLI077,Intern
+IM_026,Ishani Maurya,ishani3276arch19@spa.ac.in,0,Intern,Intern,2023-07-10,SLI078,Intern
+JK_399,Jatin Kumar,jatin.kumar@studiolotus.in,0,Permanent,Architect,2023-07-10,SL235,Permanent
+PB_025,Pooja Bansal,pooja3312arch19@spa.ac.in,0,Intern,Intern,2023-07-10,SLI079,Intern
+BA_400,Bharati Asmita,asmita.bharati@studiolotus.in,0,Permanent,Communications Executive,2023-07-12,SL236,Permanent
+AR_403,Anasuya Ray,anasuya.ray@studiolotus.in,0,Permanent,Architect,2023-07-17,SL239,Permanent
+HS_404,Het Satyamkumar Shah,hetshah@studiolotus.in,0,Permanent,Architect,2023-07-17,SL240,Permanent
+SD_401,Samiya Din,samiya.din@studiolotus.in,0,Permanent,Architect,2023-07-17,SL237,Permanent
+VL_402,Vaishnavi Lamba,vaishnavi.lamba@studiolotus.in,0,Permanent,Architect,2023-07-17,SL238,Permanent
+VK_405,Vaibhav Ananda Kadam,vaibhav.kadam@studiolotus.in,0,Permanent,Architect,2023-07-18,SL241,Permanent
+MA_043,Madhav P Ashok,madhav123ashok@gmail.com,0,Intern,Intern,2023-07-24,SLI080,Intern
+AN_408,Anandita Kaur Narula,anandita.narula@studiolotus.in,0,Permanent,Architect,2023-08-01,SL244,Permanent
+AS_409,Aditi Kaur Sachdeva,aditi.kaur@studiolotus.in,0,Permanent,Trainee,2023-08-01,SL245,Permanent
+RR_407,Roshan Roy,roshan.roy@studiolotus.in,0,Permanent,Architect,2023-08-01,SL243,Permanent
+VD_406,Vedanth Dhal,vedanth.dhal@studiolotus.in,0,Permanent,Architect,2023-08-01,SL242,Permanent
+AS_045,Abhishek Sudhir,abhisheksudhirpankan@gmail.com,0,Intern,Intern,2023-08-07,SLI123,Intern
+SB_044,Shivam Bhatia,work.bhatiashivam@gmail.com,0,Intern,Intern,2023-08-07,SLI124,Intern
+AD_046,Ashuditi Devbala,ashuditi01@gmail.com,0,Intern,Intern,2023-08-16,SLI081,Intern
+RR_411,Ritika Rathore,ritika.rathore@studiolotus.in,0,Permanent,Communications Designer,2023-08-16,SL247,Permanent
+SP_410,Saumya Paliwal,saumya.paliwal@studiolotus.in,0,Permanent,Project Lead,2023-08-16,SL246,Permanent
+AR_047,Anubhav Rana,anubhav.rana27@gmail.com,0,Intern,Intern,2023-08-28,SLI125,Intern
+AS_413,Atharv Subharwal,atharv@studiolotus.in,0,Permanent,3D Artist,2023-08-28,SL249,Permanent
+KS_412,Kishan Sirohi,kishan@studiolotus.in,0,Permanent,Architect,2023-08-28,SL248,Permanent
+AP_414,Aditi Panwar,aditi.panwar@studiolotus.in,0,Permanent,Architect,2023-09-06,SL250,Permanent
+PJ_415,Priyanka Jawa,priyanka.jawa@studiolotus.in,0,Permanent,Sr. Architect,2023-09-11,SL251,Permanent
+PG_416,Palak Gupta,palak.gupta@studiolotus.in,0,Permanent,Communications Designer,2023-09-12,SL252,Permanent
+KZ_417,Kashish Zaidi,kashish.zaidi@studiolotus.in,0,Permanent,Designer,2023-09-21,SL253,Permanent
+HS_418,Hemdeep Singh,hemdeep@studiolotus.in,0,Permanent,Architect,2023-10-03,SL254,Permanent
+HM_419,Harigovind MK,harigovind@studiolotus.in,0,Permanent,Architect,2023-10-09,SL255,Permanent
+AA_048,Archita Anand,archianand17@gmail.com,0,Intern,Intern,2023-10-13,SLI126,Intern
+SK_420,Sujata Kumari,sujata.kumari@studiolotus.in,0,Permanent,Architect,2023-10-13,SL256,Permanent
+TS_049,Tannu Sharma,ar.tannusharma@gmail.com,0,Intern,Intern,2023-10-16,SLI127,Intern
+DT_421,Dev Tyagi,dev@studiolotus.in,0,Permanent,Team Lead,2023-11-06,SL257,Permanent
+PV_422,Pradyumna Vikharankar,pradyumna@studiolotus.in,0,Contract,Architect,2023-11-20,SLC004,Contract
+VL_423,Vijay Laxmi,vijay.laxmi@studiolotus.in,0,Permanent,Sr. Project Lead,2023-11-20,SL259,Permanent
+AH_424,Abhinandan HC,abhinandan@studiolotus.in,0,Permanent,Architect,2023-12-11,SL260,Permanent
+MM_051,Michelle Mariam Manoj,michellemariam.20@avani.edu.in,0,Intern,Intern,2023-12-15,SLI128,Intern
+KS_052,Kasturi Solanki,kasturi5333@gmail.com,0,Intern,Intern,2023-12-18,SLI129,Intern
+KJ_425,Kirti Jangra,kirti.jangra@studiolotus.in,0,Permanent,Designer,2023-12-20,SL261,Permanent
+RS_426,Richa Singhal,richa.singhal@studiolotus.in,0,Permanent,Project Lead,2023-12-21,SL262,Permanent
+RD_427,Rida Drabu,rida@studiolotus.in,0,Permanent,Architect,2023-12-26,SL263,Permanent
+SB_053,Samprikta Biswas,sampriktabiswas10@gmail.com,0,Intern,Intern,2023-12-26,SLI130,Intern
+AB_428,Aviraj Bansal,aviraj@studiolotus.in,0,Permanent,Designer,2024-01-02,SL264,Permanent
+AG_054,Ananya Gupta,arch.ananyagupta@gmail.com,0,Intern,Intern,2024-01-02,SLI131,Intern
+AR_063,Adarsh Remesh,adarshramesh10@gmail.com,0,Intern,Intern,2024-01-02,SLI082,Intern
+DM_058,Devika Basu Malik,devikka.mallik@gmail.com,0,Intern,Intern,2024-01-02,SLI132,Intern
+KG_059,Khushi Gupta,2020uar1002@mnit.ac.in,0,Intern,Intern,2024-01-02,SLI133,Intern
+KS_055,Kashish Singh,2019_kashish.s@wcfa.ac.in,0,Intern,Intern,2024-01-02,SLI134,Intern
+KT_060,Kabir Tyagi,tyagikabir9@gmail.com,0,Intern,Intern,2024-01-02,SLI135,Intern
+MM_062,Muskan Mehra,muskanmehra015@gmail.com,0,Intern,Intern,2024-01-02,SLI136,Intern
+NG_065,Naman Gupta,guptanaman0048@gmail.com,0,Intern,Intern,2024-01-02,SLI137,Intern
+RJ_057,Rushil Jain,2019_rushil.j@wcfa.ac.in,0,Intern,Intern,2024-01-02,SLI138,Intern
+SC_056,Saara Chauhan,saara.c471@gmail.com,0,Intern,Intern,2024-01-02,SLI139,Intern
+SZ_064,Samiya Zainab,szainab0929@gmail.com,0,Intern,Intern,2024-01-02,SLI083,Intern
+KR_066,Kareena .,kareena040barch20@igdtuw.ac.in,0,Intern,Intern,2024-01-03,SLI140,Intern
+DM_067,Dhriti Menon,dhriti.uar20040@cept.ac.in,0,Intern,Intern,2024-01-08,SLI141,Intern
+AK_069,Aditi Kaushal,aditi.kaushal32arch20@spa.ac.in,0,Intern,Intern,2024-01-10,SLI084,Intern
+JS_068,Jasny Sherin,jasny.99.sherin@gmail.com,0,Intern,Intern,2024-01-10,SLI085,Intern
+AB_070,Ankit Biswal,ankitbiswal.cca@gmail.com,0,Intern,Intern,2024-01-15,SLI142,Intern
+AG_429,Ananya Gheek,ananya.gheek@studiolotus.in,0,Permanent,Architect,2024-01-15,SL265,Permanent
+AS_430,Atul Kumar Singh,atul@studiolotus.in,0,Permanent,Office Manager,2024-01-22,SL266,Permanent
+NK_431,Nitin Kale,nitin@studiolotus.in,0,Permanent,Architect,2024-01-22,SL267,Permanent
+OS_071,Onam Shandil,onamshandil13@gmail.com,0,Intern,Intern,2024-01-22,SLI143,Intern
+SA_073,Shivansh Agrawal,shivansh.agrawal14arch20@spa.ac.in,0,Intern,Intern,2024-02-01,SLI144,Intern
+SS_074,Swetha Sivaprakasam,swetha.prakash2685@gmail.com,0,Intern,Intern,2024-02-05,SLI145,Intern
+MA_432,Mansoor Ali,mansoor.ali@studiolotus.in,0,Permanent,Architect,2024-02-12,SL268,Permanent
+SS_433,Shilpa K Santhosh,shilpa@studiolotus.in,0,Permanent,Architect,2024-02-12,SL269,Permanent
+AC_434,Arjun Chopra,arjun@studiolotus.in,0,Permanent,Architect,2024-02-19,SL270,Permanent
+AK_435,Abdul Kalam,abdul@studiolotus.in,0,Permanent,Project Lead,2024-03-04,SL271,Permanent
+AM_436,Anshika Maheshwari,anshika@studiolotus.in,0,Permanent,Architect,2024-03-04,SL272,Permanent
+IM_437,Ifrath Kadeeja Mariyam,ifrath@studiolotus.in,0,Permanent,Architect,2024-03-04,SL273,Permanent
+KR_438,Karishma Rathor,karishma.rathor@studiolotus.in,0,Permanent,Project Lead,2024-03-15,SL274,Permanent
+SB_075,Suruchi Bhatnagar,suruchi18j2@gmail.com,0,Intern,Intern,2024-03-22,SLI146,Intern
+JJ_439,Jaya Jadoun,jaya@studiolotus.in,0,Permanent,Architect,2024-04-01,SL275,Permanent
+DD_440,Devansh Das,devansh@studiolotus.in,0,Permanent,Sr.Project Lead,2024-04-15,SL276,Permanent
+NK_076,Nandini Kansal,nandinikansal73@gmail.com,0,Intern,Intern,2024-04-17,SLI086,Intern
+KA_441,Kanishthaa Agarwal,kanishthaa@studiolotus.in,0,Permanent,Designer,2024-04-29,SL277,Permanent
+PB_442,Prashant Bharadwaj,prashant.bharadwaj@studiolotus.in,0,Permanent,Associate Principal,2024-05-01,SL278,Permanent
+HV_443,Harsh Vatsyayen,harsh.vatsyayen@studiolotus.in,0,Permanent,Architect,2024-05-06,SL279,Permanent
+JP_444,Jesuvi Packiam,jesuvi@studiolotus.in,0,Permanent,Sr. Project Lead,2024-05-15,SL280,Permanent
+SR_445,Siddharth Ramkumar,siddharth.ramkumar@studiolotus.in,0,Permanent,Architect,2024-06-03,SL281,Permanent
+UB_446,Uday Berry,uday.berry@studiolotus.in,0,Permanent,Team Lead,2024-06-03,SL282,Permanent
+AM_077,Aparna Mathur,aparnamathur1605@gmail.com,0,Intern,Intern,2024-06-10,SLI147,Intern
+AM_447,Abhishek Mummithi,abhishek.mummithi@studiolotus.in,0,Permanent,Architect,2024-06-10,SL283,Permanent
+TA_078,Tanishqa Agarwal,tanishqaagarwal2003@gmail.com,0,Intern,Intern,2024-06-12,SLI148,Intern
+AG_080,Ananya Gehlot,arananyagehlot@gmail.com,0,Intern,Intern,2024-06-18,SLI149,Intern
+RK_079,Roshani Kumari,roshanik.ug20.ar@nitp.ac.in,0,Intern,Intern,2024-06-18,SLI087,Intern
+RL_448,Rashika Lungani,rashika.lungani@studiolotus.in,0,Permanent,Trainee,2024-06-18,SL284,Permanent
+SS_449,Siya Suri,siya.suri@studiolotus.in,0,Permanent,Trainee,2024-06-18,SL285,Permanent
+HS_081,Hriju Kirti Singhal,work.hriju@gmail.com,0,Intern,Intern,2024-06-24,SLI088,Intern
+TD_082,Tushar Das,tushardas.arch@gmail.com,0,Intern,Intern,2024-06-24,SLI089,Intern
+AB_084,Akshita Basu,mailakshitabasu@gmail.com,0,Intern,Intern,2024-07-01,SLI090,Intern
+JJ_451,Jahnavi Joshi,jahnavi.joshi@studiolotus.in,0,Permanent,Architect,2024-07-01,SL287,Permanent
+KS_452,Kashish Singh,kashish.singh@studiolotus.in,0,Permanent,Architect,2024-07-01,SL288,Permanent
+RJ_453,Rushil Jain,rushil.jain@studiolotus.in,0,Permanent,Architect,2024-07-01,SL289,Permanent
+TT_450,Tejasvi Taneja,tejasvi.taneja@studiolotus.in,0,Permanent,Architect,2024-07-01,SL286,Permanent
+GC_085,Gaurav Chauhan,gauravc.ug20.ar@nitp.ac.in,0,Intern,Intern,2024-07-04,SLI091,Intern
+AS_086,Annanya Singh,annanyasingh440@gmail.com,0,Intern,Intern,2024-07-08,SLI092,Intern
+PS_087,Parul Saroya,parulsaroya@gmail.com,0,Intern,Intern,2024-07-10,SLI093,Intern
+KM_454,Karishma Meena,karishma.meena@studiolotus.in,0,Permanent,Architect,2024-07-17,SL290,Permanent
+KJ_455,Kashvi Jain,kashvi.jain@studiolotus.in,0,Permanent,Trainee,2024-07-22,SL291,Permanent
+RM_457,Rajkumar Mehta,rajkumar@studiolotus.in,0,Permanent,Designer,2024-07-29,SL293,Permanent
+TV_456,Tanmay Vaid,tanmay.vaid@studiolotus.in,0,Permanent,Architect,2024-07-29,SL292,Permanent
+AP_458,Amrapali Patra,amrapali@studiolotus.in,0,Permanent,Architect,2024-08-05,SL294,Permanent
+BK_088,B S Kasinadh,bskasinadh@gmail.com,0,Intern,Intern,2024-08-07,SLI150,Intern
+RS_459,Radhika Saran,radhika.saran@studiolotus.in,0,Permanent,Project Lead,2024-08-07,SL295,Permanent
+SS_089,Sniya Suresh,sniyasnichi@gmail.com,0,Intern,Intern,2024-08-12,SLI094,Intern
+PD_460,Parth Dogra,parth.dogra@studiolotus.in,0,Permanent,Designer,2024-08-20,SL296,Permanent
+DG_461,Disha Garg,disha.garg@studiolotus.in,0,Permanent,Architect,2024-08-21,SL297,Permanent
+HJ_462,Harshit Jain,harshit.jain@studiolotus.in,0,Permanent,Architect,2024-08-26,SL298,Permanent
+HS_463,Harsha Singh,harsha.singh@studiolotus.in,0,Permanent,Architect,2024-08-28,SL299,Permanent
+PM_465,Pratik Mour,pratik.mour@studiolotus.in,0,Permanent,Trainee,2024-09-02,SL301,Permanent
+SC_464,Samiksha Chandaliya,samiksha.chandaliya@studiolotus.in,0,Permanent,Business Executive,2024-09-02,SL300,Permanent
+SS_466,Sarthak Sharma,sarthak.sharma@studiolotus.in,0,Permanent,Architect,2024-09-04,SL302,Permanent
+KD_091,Karimala Dinesh,archdt3@gmail.com,0,Intern,Intern,2024-09-05,SLI151,Intern
+JS_467,Jagdish Samal,jagdish.samal@studiolotus.in,0,Permanent,Architect,2024-09-09,SL303,Permanent
+NC_468,Nabajyoti Dutta Choudhury,nabajyoti.dutta@studiolotus.in,0,Permanent,Project Lead,2024-09-16,SL304,Permanent
+SG_090,Sanyam Gupta,sanyam152@gmail.com,0,Intern,Intern,2024-09-16,SLI152,Intern
+AC_470,Akshit Chauhan,akshit.chauhan@studiolotus.in,0,Permanent,Trainee,2024-09-23,SL306,Permanent
+DS_472,Divyank Sirohi,divyank.sirohi@studiolotus.in,0,Permanent,Sr. Designer,2024-09-23,SL308,Permanent
+PB_471,Puru Bhatia,puru.bhatia@studiolotus.in,0,Permanent,Trainee,2024-09-23,SL307,Permanent
+AJ_469,Aman Jha,accountsexecutive@studiolotus.in,0,Permanent,Accounts Executive,2024-10-01,SL305,Permanent
+BK_473,Bharat Kandpal,bharat.kandpal@studiolotus.in,0,Permanent,Architect,2024-10-01,SL309,Permanent
+IA_475,Ishita Arora,ishita.arora@studiolotus.in,0,Permanent,Trainee,2024-10-07,SL311,Permanent
+SS_474,Shreya Sharma,shreya.sharma@studiolotus.in,0,Permanent,Designer,2024-10-07,SL310,Permanent
+VK_476,Vishal Kumar,vishal.kumar@studiolotus.in,0,Permanent,Project Designer,2024-10-09,SL312,Permanent
+AS_092,Anoushka Sharma,anoushkash26@gmail.com,0,Intern,Intern,2024-11-06,SLI095,Intern
+KB_477,Keshav Bhatt,keshav.bhatt@studiolotus.in,0,Permanent,Designer,2024-11-11,SL313,Permanent
+HP_093,Het Patel,hetjitendrapatel@gmail.com,0,Intern,Intern,2024-12-16,SLI096,Intern
+MM_354,Manish Mandal,manish.mandal@studiolotus.in,0,Permanent,Sr. Architect,2024-12-16,SL190,Permanent
+AB_095,Aniruddh Bajpai,aniruddhsagarbajpai@gmail.com,0,Intern,Intern,2024-12-18,SLI153,Intern
+AC_097,Ananya Chawat,ananyachawat10@gmail.com,0,Intern,Intern,2024-12-23,SLI097,Intern
+DP_096,Dorothy Phukan,21bar035@nith.ac.in,0,Intern,Intern,2024-12-23,SLI098,Intern
+KS_100,Krishnav Singh,krishnav112arch21@spa.ac.in,0,Intern,Intern,2025-01-02,SLI154,Intern
+PR_099,Priyanshu Kumar Raj,priyanshukraj03@gmail.com,0,Intern,Intern,2025-01-02,SLI155,Intern
+SS_098,Shrini Shrivastava,shrinis.14@gmail.com,0,Intern,Intern,2025-01-02,SLI099,Intern
+SS_101,Shrishti Sharma,shrishtisharma.1311@gmail.com,0,Intern,Intern,2025-01-02,SLI100,Intern
+VS_478,Varun Srivastava,varun.srivastava@studiolotus.in,0,Permanent,Group Leader,2025-01-02,SL314,Permanent
+MG_102,Manvi Garg,manvigarg473@gmail.com,0,Intern,Intern,2025-01-06,SLI101,Intern
+US_103,Umar Shaikh,umarshaikh2302@gmail.com,0,Intern,Intern,2025-01-07,SLI102,Intern
+AK_479,Anisha Khandelwal,anisha.khandelwal@studiolotus.in,0,Permanent,Sr. Architect,2025-01-20,SL315,Permanent
+NC_480,Naina Cleetus,naina.cleetus@studiolotus.in,0,Permanent,Project Designer,2025-01-20,SL316,Permanent
+IA_481,Isha Agrawal,isha.agrawal@studiolotus.in,0,Permanent,Sr. Designer,2025-02-03,SL317,Permanent
+KM_112,Krishna Mandviwala,krishna9mandviwala@gmail.com,0,Intern,Intern,2025-02-03,SLI103,Intern
+NB_482,Nikita Bhatia,nikita.bhatia@studiolotus.in,0,Permanent,Project Architect,2025-02-04,SL318,Permanent
+DB_483,Dheeraj Singh Bangari,dheeraj.singh@studiolotus.in,0,Permanent,Sr. Designer,2025-02-17,SL319,Permanent
+VS_484,Vijeet Shah,vijeet.shah@studiolotus.in,0,Permanent,Architect,2025-03-03,SL320,Permanent
+SS_486,Shailen Sharma,shailen.sharma@studiolotus.in,0,Permanent,Designer,2025-03-10,SL322,Permanent
+ST_485,Sachin Tyagi,sachin.tyagi@studiolotus.in,0,Permanent,Senior Manager - IT,2025-03-10,SL321,Permanent
+VG_487,Vrinda Gupta,vrinda.gupta@studiolotus.in,0,Permanent,Sr. Designer,2025-04-01,SL323,Permanent
+GS_113,Garima Sehrawat,sehgarima5@gmail.com,0,Intern,Intern,2025-05-01,SLI104,Intern
+BP_114,Bellona Puri,bellona.puri3@gmail.com,0,Intern,Intern,2025-05-19,SLI105,Intern
+RA_115,Rimjhim Aeran,uid.220180203006.rimjhim@gdgu.org,0,Intern,Intern,2025-06-02,SLI156,Intern
+RS_489,Reetika Singh,reetika.singh@studiolotus.in,0,Permanent,Designer,2025-06-02,SL325,Permanent
+SB_488,Shivani Bapna,shivani.bapna@studiolotus.in,0,Permanent,Sr. Designer,2025-06-02,SL324,Permanent
+AB_118,Arisha Balyan,arisha10balyan30@gmail.com,0,Intern,Intern,2025-07-01,SLI106,Intern
+DS_116,Drishti Soni,sonidrishti1010@gmail.com,0,Intern,Intern,2025-07-01,SLI107,Intern
+ES_121,Ekansh Sood,ekanshs.works@gmail.com,0,Intern,Intern,2025-07-01,SLI108,Intern
+KK_491,Kanwaljeet Kaur,kanwaljeet.kaur@studiolotus.in,0,Permanent,Project Architect,2025-07-01,SL327,Permanent
+MR_490,Mihir Jagdishbhai Ramani,mihir.ramani@studiolotus.in,0,Permanent,Architect,2025-07-01,SL326,Permanent
+NY_120,Nishi Yadav,nishiy2012@gmail.com,0,Intern,Intern,2025-07-01,SLI109,Intern
+YM_119,Yashika Madan,yashikamadan04@gmail.com,0,Intern,Intern,2025-07-01,SLI110,Intern
+AP_492,Aditya Pandoh,aditya.pandoh@studiolotus.in,0,Permanent,Designer,2025-07-07,SL328,Permanent
+SJ_493,Sanya Jain,sanya.jain@studiolotus.in,0,Permanent,Architect,2025-07-10,SL329,Permanent
+RM_495,Rosemary Murry,rosemary@studiolotus.in,0,Permanent,Head - Human Resources,2025-07-21,SL331,Permanent
+SK_494,Suhani Khandelwal,suhani.khandelwal@studiolotus.in,0,Permanent,Architect,2025-07-21,SL330,Permanent
+AK_496,Anishaa Kashyap,anishaa.kashyap@studiolotus.in,0,Permanent,Designer,2025-08-04,SL332,Permanent
+AS_497,Adhiraj Sirkeck,adhiraj.sirkeck@studiolotus.in,0,Permanent,Sr. Architect,2025-08-04,SL333,Permanent
+NK_498,Neha Keshri,neha.keshri@studiolotus.in,0,Permanent,Designer,2025-08-07,SL334,Permanent
+KM_499,Krishna Mandviwala,krishna.mandviwala@studiolotus.in,0,Permanent,Designer,2025-08-18,SL335,Permanent
+AJ_501,Abhinav Jain,abhinav.jain@studiolotus.in,0,Permanent,Project Architect,2025-09-01,SL337,Permanent
+AS_500,Ananya Sadhu,ananya.sadhu@studiolotus.in,0,Permanent,Designer,2025-09-01,SL336,Permanent
+AA_502,Aditi Agashe,aditi.agashe@studiolotus.in,0,Permanent,Project Architect,2025-09-09,SL338,Permanent
+RB_503,Raunak Bhagat,raunak.bhagat@studiolotus.in,0,Permanent,Architect,2025-09-22,SL339,Permanent
+DC_504,Deepak Chakicherla,deepak.chakicherla@studiolotus.in,0,Permanent,Architect,2025-10-13,SL340,Permanent
+SV_505,Sheetal .,sheetal@studiolotus.in,0,Permanent,Sr. Designer,2025-10-13,SL341,Permanent
+AJ_506,Arham Jain,arham.jain@studiolotus.in,0,Permanent,Architect,2025-11-03,SL342,Permanent
+DK_507,Devdutt Kumar,devdutt.kumar@studiolotus.in,0,Permanent,"Senior Software Engineer, Data Platform",2025-11-03,SL343,Permanent
+SJ_122,Saurabh Jangid,saurabh.jangid@krvia.ac.in,0,Intern,Intern,2025-11-12,SLI111,Intern
+PB_508,Pallavi Bansal,pallavi.bansal@studiolotus.in,0,Permanent,Project Designer,2025-11-19,SL344,Permanent
+SK_123,Sagarika Kumar,sagarika.kumar@krvia.ac.in,0,Intern,Intern,2025-12-01,SLI157,Intern
+AP_509,Alpika Pandey,alpika.pandey@studiolotus.in,0,Permanent,Architect,2025-12-02,SL345,Permanent
+AK_510,Akshita Kalia,akshita.kalia@studiolotus.in,0,Permanent,Designer,2025-12-10,SL346,Permanent
+AS_124,Aparjita Singh,aparajita1933@gmail.com,0,Intern,Intern,2025-12-10,SLI158,Intern
+KK_125,Kimaya Kamat,kimkamat24@gmail.com,0,Intern,Intern,2025-12-22,SLI112,Intern
+AS_512,Abhist Sharma,abhist.sharma@studiolotus.in,0,Permanent,Architect,2026-01-05,SL348,Permanent
+KP_511,Karishma Patidar,karishma.patidar@studiolotus.in,0,Permanent,Architect,2026-01-05,SL347,Permanent
+VS_126,Vipul Sharma,vipulsh1402@gmail.com,0,Intern,Intern,2026-01-05,SLI159,Intern
+AJ_129,Anushka Jindal,anushkajindal2004@gmail.com,0,Intern,Intern,2026-01-13,SLI113,Intern
+AK_127,Aditi Sudheer Kari,aditi3641arch22@spa.ac.in,0,Intern,Intern,2026-01-13,SLI114,Intern
+KS_513,Kunal Sagar,kunal.sagar@studiolotus.in,0,Permanent,Project Architect,2026-01-13,SL349,Permanent
+LS_514,Lavanya Sirmaur,lavanya.sirmaur@studiolotus.in,0,Permanent,Designer,2026-01-15,SL350,Permanent
+AP_516,Ayushi Patwari,ayushi.patwari@studiolotus.in,0,Permanent,Architect,2026-01-19,SL352,Permanent
+US_130,Upangna Singh,singhupangna@gmail.com,0,Intern,Intern,2026-01-19,SLI115,Intern
+VD_515,Vishal Dubey,vishal.dubey@studiolotus.in,0,Permanent,Project Architect,2026-01-19,SL351,Permanent
+AD_131,Awani Devgan,awanidevgan1921@gmail.com,0,Intern,Intern,2026-01-27,SLI160,Intern
+RK_517,Randhir Kumar,randhir.kumar@studiolotus.in,0,Permanent,Project Designer,2026-01-28,SL353,Permanent
+AA_132,Ambar Agarwal,ambaragarwal7459@gmail.com,0,Intern,Intern,2026-02-02,SLI116,Intern
+AN_133,Angelica Negri,negriangelica@icloud.com,0,Intern,Intern,2026-02-02,SLI117,Intern
+KK_518,Kadambari Kumar,kadambari@studiolotus.in,0,Permanent,Project Designer,2026-02-02,SL354,Permanent
+RK_519,Rudvi Senthil Kumar,rudvi@studiolotus.in,0,Permanent,Designer,2026-02-02,SL355,Permanent
+IS_520,Isha Singh,isha.singh@studiolotus.in,0,Permanent,Senior Manager- Human Resources,2026-02-16,SL356,Permanent
+KP_522,Khushboo Pandey,khushboo.pandey@studiolotus.in,0,Permanent,Project Architect,2026-03-05,SL357,Permanent
+AE_523,Abiyah Grace Ebby,abiyah.grace@studiolotus.in,0,Permanent,Architect,2026-03-09,SL358,Permanent
+SS_524,Sharan S,sharan.s@studiolotus.in,0,Permanent,Sr. Architect,2026-03-09,SL359,Permanent
+CS_001,Charu Sharma,contact@studiolotus.com,0,Permanent,,,SL416,Permanent
+DH_521,Data,datahub@studiolotus.in,0,Permanent,,,SL417,Permanent

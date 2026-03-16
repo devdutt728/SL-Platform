@@ -231,11 +231,19 @@ export function useCandidate360Interviews({
       setInterviewsError("Select a slot from the planner.");
       return;
     }
-    const startIso = `${selectedSlot.slot_start_at}Z`;
-    const endIso = `${selectedSlot.slot_end_at}Z`;
-    const start = new Date(startIso);
-    const end = new Date(endIso);
-    if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end <= start) {
+    const start = parseDateUtc(selectedSlot.slot_start_at);
+    const end = parseDateUtc(selectedSlot.slot_end_at);
+    const startIso = start?.toISOString() || "";
+    const endIso = end?.toISOString() || "";
+    if (!startIso || !endIso) {
+      setInterviewsError("Selected slot has an invalid time.");
+      return;
+    }
+    if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      setInterviewsError("Selected slot has an invalid time.");
+      return;
+    }
+    if (end <= start) {
       setInterviewsError("End time must be after start time.");
       return;
     }

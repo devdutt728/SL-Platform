@@ -8,6 +8,7 @@ import anyio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datetime_utils import IST, now_ist_naive
 from app.models.interview import RecCandidateInterview
 from app.models.operation_retry import RecOperationRetry
 from app.services.calendar import create_calendar_event, delete_calendar_event, update_calendar_event
@@ -65,6 +66,14 @@ def _parse_datetime_utc(raw: str | None) -> datetime:
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
     return parsed
+
+
+def _interview_dt_to_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=IST).astimezone(timezone.utc).replace(tzinfo=None)
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _parse_int(raw: Any) -> int | None:
@@ -181,15 +190,15 @@ async def _apply_calendar_result_to_interview(
         interview.calendar_event_id = event_id
     if meeting_link:
         interview.meeting_link = meeting_link
-    interview.updated_at = datetime.utcnow()
+    interview.updated_at = now_ist_naive()
 
 
 async def _execute_calendar_create_event(session: AsyncSession, payload: dict[str, Any]) -> None:
     interview_id = _parse_int(payload.get("interview_id"))
     interview = await session.get(RecCandidateInterview, interview_id) if interview_id is not None else None
 
-    start_at = interview.scheduled_start_at if interview and interview.scheduled_start_at else _parse_datetime_utc(payload.get("start_at"))
-    end_at = interview.scheduled_end_at if interview and interview.scheduled_end_at else _parse_datetime_utc(payload.get("end_at"))
+    start_at = _interview_dt_to_utc(interview.scheduled_start_at) if interview and interview.scheduled_start_at else _parse_datetime_utc(payload.get("start_at"))
+    end_at = _interview_dt_to_utc(interview.scheduled_end_at) if interview and interview.scheduled_end_at else _parse_datetime_utc(payload.get("end_at"))
     summary = str(payload.get("summary") or "").strip()
     description = str(payload.get("description") or "").strip()
     attendees = payload.get("attendees") or []
@@ -249,8 +258,8 @@ async def _execute_calendar_update_event(session: AsyncSession, payload: dict[st
     if not event_id:
         raise ValueError("calendar_update_event: missing event_id")
 
-    start_at = interview.scheduled_start_at if interview and interview.scheduled_start_at else _parse_datetime_utc(payload.get("start_at"))
-    end_at = interview.scheduled_end_at if interview and interview.scheduled_end_at else _parse_datetime_utc(payload.get("end_at"))
+    start_at = _interview_dt_to_utc(interview.scheduled_start_at) if interview and interview.scheduled_start_at else _parse_datetime_utc(payload.get("start_at"))
+    end_at = _interview_dt_to_utc(interview.scheduled_end_at) if interview and interview.scheduled_end_at else _parse_datetime_utc(payload.get("end_at"))
     summary = str(payload.get("summary") or "").strip()
     description = str(payload.get("description") or "").strip()
     attendees = payload.get("attendees") or []

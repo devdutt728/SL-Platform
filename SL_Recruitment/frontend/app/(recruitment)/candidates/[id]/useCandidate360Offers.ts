@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CandidateConvertPayload, CandidateFull, CandidateOffer } from "@/lib/types";
+import { CandidateConvertPayload, CandidateConvertResult, CandidateFull, CandidateOffer } from "@/lib/types";
 import * as candidate360Api from "./candidate360.api";
 import { cleanLetterOverrides, normalizeOfferStatus, suggestOfferTemplate } from "./candidate360.client-utils";
 import { principalApproverOptions } from "./candidate360.constants";
@@ -461,12 +461,13 @@ export function useCandidate360Offers({
     [closeDialog, currentStageKey, openDialog, pushToast, refreshAll, refreshOffers, reviseOfferEligibility, setDialogError]
   );
 
-  const handleConvertCandidate = useCallback(async (payload: CandidateConvertPayload) => {
+  const handleConvertCandidate = useCallback(async (payload: CandidateConvertPayload): Promise<CandidateConvertResult> => {
     setOffersBusy(true);
     setOffersError(null);
     try {
-      await candidate360Api.convertCandidate(candidateId, payload);
+      const result = await candidate360Api.convertCandidate(candidateId, payload);
       await refreshAll();
+      return result;
     } catch (e: any) {
       const message = e?.message || "Conversion failed.";
       setOffersError(message);

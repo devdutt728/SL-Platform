@@ -18,6 +18,8 @@ export type PersonForm = {
   created_at: string;
   updated_at: string;
   source_system: string;
+  source_candidate_id: string;
+  source_candidate_code: string;
   full_name: string;
   display_name: string;
 };
@@ -56,6 +58,8 @@ export const emptyPersonForm: PersonForm = {
   created_at: "",
   updated_at: "",
   source_system: "",
+  source_candidate_id: "",
+  source_candidate_code: "",
   full_name: "",
   display_name: "",
 };

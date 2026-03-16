@@ -460,6 +460,8 @@ export type PlatformPerson = {
   created_at?: string | null;
   updated_at?: string | null;
   source_system?: string | null;
+  source_candidate_id?: number | null;
+  source_candidate_code?: string | null;
   full_name?: string | null;
   display_name?: string | null;
   role_name?: string | null;
@@ -737,7 +739,7 @@ export type CandidateOffer = {
 };
 
 export type CandidateEmployeeProfileInput = {
-  person_code: string;
+  person_code?: string | null;
   personal_id?: string | null;
   first_name: string;
   last_name?: string | null;
@@ -764,6 +766,24 @@ export type CandidateJoiningProfileReviewInput = {
 export type CandidateConvertPayload = {
   employee_profile: CandidateEmployeeProfileInput;
   joining_profile_review?: CandidateJoiningProfileReviewInput | null;
+};
+
+export type CandidateConvertPreview = {
+  person_code: string;
+  series: string;
+  normalized_employment_type: string;
+  provisional: boolean;
+};
+
+export type CandidateConvertResult = {
+  candidate_id: number;
+  status: string;
+  final_decision?: string | null;
+  person_id_platform: string;
+  person_code: string;
+  source_candidate_id: number;
+  source_candidate_code?: string | null;
+  employment_type: string;
 };
 
 export type OfferPublic = {

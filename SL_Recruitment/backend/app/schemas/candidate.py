@@ -137,7 +137,7 @@ class CandidateDetailOut(BaseModel):
 
 
 class CandidateEmployeeProfileIn(BaseModel):
-    person_code: str
+    person_code: Optional[str] = None
     personal_id: Optional[str] = None
     first_name: str
     last_name: Optional[str] = None
@@ -178,7 +178,7 @@ class CandidateEmployeeProfileIn(BaseModel):
             return cleaned or None
         return value
 
-    @field_validator("person_code", "first_name", "employment_type")
+    @field_validator("first_name", "employment_type")
     @classmethod
     def _required_text(cls, value: str | None):
         if not value:

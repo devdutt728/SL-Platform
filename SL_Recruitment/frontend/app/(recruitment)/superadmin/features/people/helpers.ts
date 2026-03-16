@@ -45,6 +45,8 @@ export function toPersonForm(person: PlatformPerson): PersonForm {
     created_at: toInputDateTime(person.created_at),
     updated_at: toInputDateTime(person.updated_at),
     source_system: person.source_system || "",
+    source_candidate_id: person.source_candidate_id != null ? String(person.source_candidate_id) : "",
+    source_candidate_code: person.source_candidate_code || "",
     full_name: person.full_name || "",
     display_name: person.display_name || "",
   };

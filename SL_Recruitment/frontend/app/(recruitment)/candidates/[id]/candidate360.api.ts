@@ -1,5 +1,7 @@
 import {
   CandidateConvertPayload,
+  CandidateConvertPreview,
+  CandidateConvertResult,
   CandidateDetail,
   CandidateFull,
   CandidateOffer,
@@ -205,7 +207,20 @@ export async function convertCandidate(candidateId: string, payload: CandidateCo
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return await res.json();
+  return (await res.json()) as CandidateConvertResult;
+}
+
+export async function fetchConvertPreview(candidateId: string, employmentType?: string | null, email?: string | null) {
+  const url = new URL(`/api/rec/candidates/${encodeURIComponent(candidateId)}/convert-preview`, window.location.origin);
+  if ((employmentType || "").trim()) {
+    url.searchParams.set("employment_type", (employmentType || "").trim());
+  }
+  if ((email || "").trim()) {
+    url.searchParams.set("email", (email || "").trim());
+  }
+  const res = await fetch(url.toString(), { cache: "no-store" });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as CandidateConvertPreview;
 }
 
 export async function assignSprint(candidateId: string, payload: Record<string, unknown>) {

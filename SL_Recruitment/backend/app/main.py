@@ -5,6 +5,8 @@ from fastapi import FastAPI
 from app.api.router import api_router
 from app.api.routes import reports
 from app.core.config import settings
+from app.db.platform_session import platform_engine
+from app.db.session import engine
 from app.jobs.scheduler import start_scheduler
 from app.middleware.internal_guard import InternalGuardMiddleware
 from app.middleware.logging import RequestLoggingMiddleware
@@ -62,3 +64,5 @@ async def _shutdown_jobs() -> None:
     scheduler = getattr(app.state, "scheduler", None)
     if scheduler:
         scheduler.shutdown()
+    await engine.dispose()
+    await platform_engine.dispose()

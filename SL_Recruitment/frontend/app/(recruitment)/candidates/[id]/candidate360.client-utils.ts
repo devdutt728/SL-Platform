@@ -29,7 +29,7 @@ export const joiningDocOptions = [
   { value: "other", label: "Other documents" },
 ];
 
-export const requiredJoiningDocTypes = ["pan", "aadhaar", "marksheets", "experience_letters", "salary_slips"] as const;
+export const requiredJoiningDocTypes = ["pan", "aadhaar", "marksheets", "experience_letters"] as const;
 
 export function normalizeStage(raw?: string | null) {
   return normalizeRecruitmentStage(raw);

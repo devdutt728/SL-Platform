@@ -47,7 +47,6 @@ REQUIRED_JOINING_DOC_TYPES = {
     "aadhaar",
     "marksheets",
     "experience_letters",
-    "salary_slips",
 }
 
 JOINING_PROFILE_FIELDS = (
@@ -115,6 +114,11 @@ def _normalize_doc_type(raw: str | None) -> str:
     return value
 
 
+def _is_missing_joining_profile_table_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "doesn't exist" in message or "unknown table" in message
+
+
 async def _get_joining_profile(
     session: AsyncSession,
     *,
@@ -123,7 +127,7 @@ async def _get_joining_profile(
     try:
         return await session.get(RecCandidateJoiningProfile, candidate_id)
     except SQLAlchemyError as exc:
-        if "doesn't exist" in str(exc).lower():
+        if _is_missing_joining_profile_table_error(exc):
             return None
         raise
 
@@ -138,7 +142,15 @@ async def _get_or_create_joining_profile(
         return existing
     profile = RecCandidateJoiningProfile(candidate_id=candidate_id, created_at=datetime.utcnow(), updated_at=datetime.utcnow())
     session.add(profile)
-    await session.flush()
+    try:
+        await session.flush()
+    except SQLAlchemyError as exc:
+        if _is_missing_joining_profile_table_error(exc):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Joining profile table is missing. Apply migration `backend/migrations/0041_rec_candidate_joining_profile.sql`.",
+            ) from exc
+        raise
     return profile
 
 

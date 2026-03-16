@@ -38,6 +38,8 @@ class PlatformPersonBase(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     source_system: Optional[str] = None
+    source_candidate_id: Optional[int] = None
+    source_candidate_code: Optional[str] = None
     full_name: Optional[str] = None
     display_name: Optional[str] = None
 
@@ -65,6 +67,8 @@ class PlatformPersonUpdate(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     source_system: Optional[str] = None
+    source_candidate_id: Optional[int] = None
+    source_candidate_code: Optional[str] = None
     full_name: Optional[str] = None
     display_name: Optional[str] = None
 
