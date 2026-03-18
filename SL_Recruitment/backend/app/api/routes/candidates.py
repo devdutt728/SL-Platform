@@ -578,6 +578,14 @@ def _can_view_candidate_basic_details(user: UserContext) -> bool:
     return bool(roles & {Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD})
 
 
+def _can_view_candidate_joining_workspace(user: UserContext) -> bool:
+    roles = set(user.roles or [])
+    if Role.HR_ADMIN in roles or Role.HR_EXEC in roles:
+        return True
+    role_ids = _actor_role_ids(user)
+    return 2 in role_ids
+
+
 def _extract_drive_file_id(raw_url: str | None) -> str | None:
     if not raw_url:
         return None
@@ -4169,12 +4177,13 @@ async def get_candidate_full(
     except SQLAlchemyError:
         assessment = None
     joining_profile = None
-    try:
-        joining_profile = await session.get(RecCandidateJoiningProfile, candidate_id)
-    except OperationalError:
-        joining_profile = None
-    except SQLAlchemyError:
-        joining_profile = None
+    if _can_view_candidate_joining_workspace(user):
+        try:
+            joining_profile = await session.get(RecCandidateJoiningProfile, candidate_id)
+        except OperationalError:
+            joining_profile = None
+        except SQLAlchemyError:
+            joining_profile = None
 
     return CandidateFullOut(
         candidate=candidate,

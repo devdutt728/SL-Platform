@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ExternalLink, FileText } from "lucide-react";
-import { CandidateFull, JoiningDoc } from "@/lib/types";
+import { CandidateFull, JoiningDoc, JoiningProfile } from "@/lib/types";
 import { Chip } from "./Candidate360Primitives";
 
 type Props = {
@@ -11,7 +11,9 @@ type Props = {
   onToggle: () => void;
   candidateId: string;
   candidate: CandidateFull["candidate"];
+  joiningProfile?: JoiningProfile | null;
   canOpenDriveFolder: boolean;
+  canViewJoiningWorkspace: boolean;
   canUploadJoiningDocs: boolean;
   joiningDocsNotice: string | null;
   joiningDocsError: string | null;
@@ -35,7 +37,9 @@ export function Candidate360DocumentsSection({
   onToggle,
   candidateId,
   candidate,
+  joiningProfile,
   canOpenDriveFolder,
+  canViewJoiningWorkspace,
   canUploadJoiningDocs,
   joiningDocsNotice,
   joiningDocsError,
@@ -52,6 +56,66 @@ export function Candidate360DocumentsSection({
   joiningDocLabel,
   formatDateTime,
 }: Props) {
+  const profileSummarySections = [
+    {
+      title: "Identity",
+      items: [
+        ["PAN", joiningProfile?.personal_id],
+        ["Aadhaar", joiningProfile?.aadhaar_number],
+        ["Date of birth", joiningProfile?.date_of_birth],
+        ["Gender", joiningProfile?.gender],
+        ["Marital status", joiningProfile?.marital_status],
+        ["Blood group", joiningProfile?.blood_group],
+        ["Nationality", joiningProfile?.nationality],
+      ],
+    },
+    {
+      title: "Contact",
+      items: [
+        ["Mobile", joiningProfile?.mobile_number],
+        ["Personal email", joiningProfile?.personal_email],
+        ["PF number", joiningProfile?.pf_number],
+        ["UAN number", joiningProfile?.uan_number],
+      ],
+    },
+    {
+      title: "Current address",
+      items: [
+        ["Address line 1", joiningProfile?.current_address_line_1],
+        ["Address line 2", joiningProfile?.current_address_line_2],
+        ["City", joiningProfile?.current_address_city],
+        ["State", joiningProfile?.current_address_state],
+        ["PIN code", joiningProfile?.current_address_zip],
+        ["Country", joiningProfile?.current_address_country],
+      ],
+    },
+    {
+      title: "Permanent address",
+      items: [
+        ["Address line 1", joiningProfile?.permanent_address_line_1],
+        ["Address line 2", joiningProfile?.permanent_address_line_2],
+        ["City", joiningProfile?.permanent_address_city],
+        ["State", joiningProfile?.permanent_address_state],
+        ["PIN code", joiningProfile?.permanent_address_zip],
+        ["Country", joiningProfile?.permanent_address_country],
+      ],
+    },
+    {
+      title: "Family",
+      items: [
+        ["Father", joiningProfile?.father_name],
+        ["Mother", joiningProfile?.mother_name],
+        ["Spouse", joiningProfile?.spouse_name],
+        ["Children", joiningProfile?.children_names],
+      ],
+    },
+  ]
+    .map((section) => ({
+      ...section,
+      items: section.items.filter(([, value]) => Boolean(String(value || "").trim())),
+    }))
+    .filter((section) => section.items.length > 0);
+
   return (
     <div ref={sectionRef} className="section-card">
       <div className="flex items-center justify-between">
@@ -133,69 +197,139 @@ export function Candidate360DocumentsSection({
                 </span>
               ) : null}
             </div>
-            {joiningDocsError ? (
-              <div className="mt-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-700">
-                {joiningDocsError}
+            {!canViewJoiningWorkspace ? (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                Joining workspace visibility is restricted to HR.
               </div>
-            ) : null}
-            {joiningDocsBusy && !joiningDocs ? (
-              <div className="mt-3 text-sm text-slate-600">Loading joining documents...</div>
-            ) : null}
-            {joiningDocs && joiningDocs.length ? (
-              <ul className="mt-3 space-y-2 text-sm text-slate-700">
-                {joiningDocs.map((doc) => (
-                  <li key={doc.joining_doc_id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/70 bg-white/60 px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold">{joiningDocLabel(doc.doc_type)}</p>
-                      <p className="truncate text-xs text-slate-500">{doc.file_name}</p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-slate-500">{formatDateTime(doc.created_at)}</span>
-                      <span className="rounded-full bg-white/80 px-2 py-1 text-xs text-slate-600">
-                        {doc.uploaded_by === "candidate" ? "Candidate" : "HR"}
-                      </span>
-                      <Link
-                        href={doc.file_url}
-                        target="_blank"
-                        className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white hover:bg-slate-800"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        Open
-                      </Link>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            ) : joiningDocs && !joiningDocs.length ? (
-              <p className="mt-3 text-sm text-slate-600">No joining documents uploaded yet.</p>
-            ) : null}
+            ) : (
+              <>
+                {joiningDocsError ? (
+                  <div className="mt-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-700">
+                    {joiningDocsError}
+                  </div>
+                ) : null}
+                {joiningDocsBusy && !joiningDocs ? (
+                  <div className="mt-3 text-sm text-slate-600">Loading joining documents...</div>
+                ) : null}
+                {joiningDocs && joiningDocs.length ? (
+                  <ul className="mt-3 space-y-2 text-sm text-slate-700">
+                    {joiningDocs.map((doc) => (
+                      <li key={doc.joining_doc_id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/70 bg-white/60 px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold">{joiningDocLabel(doc.doc_type)}</p>
+                          <p className="truncate text-xs text-slate-500">{doc.file_name}</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs text-slate-500">{formatDateTime(doc.created_at)}</span>
+                          <span className="rounded-full bg-white/80 px-2 py-1 text-xs text-slate-600">
+                            {doc.uploaded_by === "candidate" ? "Candidate" : "HR"}
+                          </span>
+                          <Link
+                            href={doc.file_url}
+                            target="_blank"
+                            className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white hover:bg-slate-800"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            Open
+                          </Link>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : joiningDocs && !joiningDocs.length ? (
+                  <p className="mt-3 text-sm text-slate-600">No joining documents uploaded yet.</p>
+                ) : null}
 
-            {canUploadJoiningDocs ? (
-              <div className="mt-4 grid gap-3 md:grid-cols-[1.1fr_1.7fr_auto]">
-                <select
-                  className="w-full rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-800"
-                  value={joiningDocType}
-                  onChange={(event) => setJoiningDocType(event.target.value)}
-                >
-                  {joiningDocOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-                <input
-                  className="w-full rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-700"
-                  type="file"
-                  onChange={(event) => setJoiningDocFile(event.target.files?.[0] || null)}
-                />
-                <button
-                  type="button"
-                  className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                  onClick={() => void handleUploadJoiningDoc()}
-                  disabled={!joiningDocFile || joiningDocsBusy}
-                >
-                  {joiningDocsBusy ? "Uploading..." : "Upload"}
-                </button>
-              </div>
-            ) : null}
+                {canUploadJoiningDocs ? (
+                  <div className="mt-4 grid gap-3 md:grid-cols-[1.1fr_1.7fr_auto]">
+                    <select
+                      className="w-full rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-800"
+                      value={joiningDocType}
+                      onChange={(event) => setJoiningDocType(event.target.value)}
+                    >
+                      {joiningDocOptions.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                    <input
+                      className="w-full rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-700"
+                      type="file"
+                      onChange={(event) => setJoiningDocFile(event.target.files?.[0] || null)}
+                    />
+                    <button
+                      type="button"
+                      className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                      onClick={() => void handleUploadJoiningDoc()}
+                      disabled={!joiningDocFile || joiningDocsBusy}
+                    >
+                      {joiningDocsBusy ? "Uploading..." : "Upload"}
+                    </button>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 border-t border-white/60 pt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold">Joining profile visibility</p>
+                    {joiningProfile ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-white/80 px-2 py-1 text-xs text-slate-600">
+                          Status: {joiningProfile.profile_status}
+                        </span>
+                        <span className="rounded-full bg-white/80 px-2 py-1 text-xs text-slate-600">
+                          Updated: {formatDateTime(joiningProfile.updated_at)}
+                        </span>
+                        {joiningProfile.submitted_at ? (
+                          <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
+                            Submitted: {formatDateTime(joiningProfile.submitted_at)}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {joiningProfile ? (
+                    <>
+                      <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                        <div className="rounded-xl border border-white/70 bg-white/70 px-3 py-3">
+                          <p className="text-xs uppercase tracking-tight text-slate-500">Profile state</p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">{joiningProfile.profile_status === "submitted" ? "Submitted by candidate" : "Draft in progress"}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/70 bg-white/70 px-3 py-3">
+                          <p className="text-xs uppercase tracking-tight text-slate-500">PAN verification</p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">{joiningProfile.pan_verified ? "Verified" : "Pending"}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/70 bg-white/70 px-3 py-3">
+                          <p className="text-xs uppercase tracking-tight text-slate-500">Aadhaar verification</p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">{joiningProfile.aadhaar_verified ? "Verified" : "Pending"}</p>
+                        </div>
+                      </div>
+
+                      {profileSummarySections.length ? (
+                        <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                          {profileSummarySections.map((section) => (
+                            <div key={section.title} className="rounded-xl border border-white/70 bg-white/70 p-3">
+                              <p className="text-sm font-semibold text-slate-900">{section.title}</p>
+                              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                {section.items.map(([label, value]) => (
+                                  <div key={`${section.title}-${label}`} className="rounded-lg bg-slate-50 px-3 py-2">
+                                    <p className="text-[11px] uppercase tracking-tight text-slate-500">{label}</p>
+                                    <p className="mt-1 text-sm text-slate-900">{value}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-sm text-slate-600">Candidate has not saved any joining profile fields yet.</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-600">Candidate has not started the joining profile yet.</p>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

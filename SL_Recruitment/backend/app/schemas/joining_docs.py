@@ -143,6 +143,7 @@ class JoiningProfileOut(JoiningProfileBase):
 class JoiningProfilePublicOut(JoiningProfileBase):
     profile_status: str = "draft"
     submitted_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 JoiningDocsPublicContext.model_rebuild()

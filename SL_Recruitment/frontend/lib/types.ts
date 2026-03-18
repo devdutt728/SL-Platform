@@ -738,6 +738,15 @@ export type CandidateOffer = {
   opening_title?: string | null;
 };
 
+export type OfferJoiningLinkResendResult = {
+  candidate_offer_id: number;
+  candidate_id: number;
+  public_token: string;
+  joining_link: string;
+  email_status: string;
+  email_error?: string | null;
+};
+
 export type CandidateEmployeeProfileInput = {
   person_code?: string | null;
   personal_id?: string | null;
@@ -890,6 +899,7 @@ export type JoiningProfile = JoiningProfileBase & {
 export type JoiningProfilePublic = JoiningProfileBase & {
   profile_status: string;
   submitted_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type JoiningDocsPublicContext = {

@@ -76,6 +76,7 @@ type Props = {
   canUploadJoiningDocs: boolean;
   canAccessOffers: boolean;
   canOpenDriveFolder: boolean;
+  canViewJoiningWorkspace: boolean;
 };
 
 type DialogState = {
@@ -161,6 +162,7 @@ export function Candidate360Client({
   canUploadJoiningDocs,
   canAccessOffers,
   canOpenDriveFolder,
+  canViewJoiningWorkspace,
 }: Props) {
   const searchParams = useSearchParams();
   const { pushToast } = useToast();
@@ -336,6 +338,7 @@ export function Candidate360Client({
     handleApproveOffer,
     handleRejectOffer,
     handleSendOffer,
+    handleResendJoiningLink,
     handleAdminDecision,
     handleSaveDraftOverrides,
     handleDeleteOffer,
@@ -729,6 +732,11 @@ export function Candidate360Client({
   }, [data.events, interviews]);
 
   const refreshJoiningDocs = useCallback(async () => {
+    if (!canViewJoiningWorkspace) {
+      setJoiningDocs(null);
+      setJoiningDocsError(null);
+      return;
+    }
     setJoiningDocsBusy(true);
     setJoiningDocsError(null);
     try {
@@ -739,7 +747,7 @@ export function Candidate360Client({
     } finally {
       setJoiningDocsBusy(false);
     }
-  }, [candidateId]);
+  }, [canViewJoiningWorkspace, candidateId]);
 
   async function handleUploadJoiningDoc() {
     if (!joiningDocFile) {
@@ -810,10 +818,11 @@ export function Candidate360Client({
   }
 
   useEffect(() => {
+    if (!canViewJoiningWorkspace) return;
     if (joiningDocs === null) {
       void refreshJoiningDocs();
     }
-  }, [joiningDocs, refreshJoiningDocs]);
+  }, [canViewJoiningWorkspace, joiningDocs, refreshJoiningDocs]);
 
   const joiningDocsComplete = useMemo(() => {
     if ((candidate.joining_docs_status || "").toLowerCase() === "complete") return true;
@@ -1116,7 +1125,9 @@ export function Candidate360Client({
             onToggle={() => toggleSection("documents")}
             candidateId={candidateId}
             candidate={candidate}
+            joiningProfile={joiningProfile}
             canOpenDriveFolder={canOpenDriveFolder}
+            canViewJoiningWorkspace={canViewJoiningWorkspace}
             canUploadJoiningDocs={canUploadJoiningDocs}
             joiningDocsNotice={joiningDocsNotice}
             joiningDocsError={joiningDocsError}
@@ -1322,6 +1333,7 @@ export function Candidate360Client({
               handleApproveOffer,
               handleRejectOffer,
               handleSendOffer,
+              handleResendJoiningLink,
               handleAdminDecision,
               handleReviseOffer,
               handleConvertCandidate: openConvertDialog,

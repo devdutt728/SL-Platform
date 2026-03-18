@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import anyio
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -9,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import deps
 from app.core.auth import require_roles
 from app.core.config import settings
+from app.core.datetime_utils import now_ist_naive
 from app.core.roles import Role
 from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, validate_upload
 from app.models.candidate import RecCandidate
 from app.models.candidate_offer import RecCandidateOffer
+from app.models.event import RecCandidateEvent
 from app.models.joining_doc import RecCandidateJoiningDoc
 from app.models.joining_profile import RecCandidateJoiningProfile
 from app.models.opening import RecOpening
@@ -119,6 +121,23 @@ def _is_missing_joining_profile_table_error(exc: Exception) -> bool:
     return "doesn't exist" in message or "unknown table" in message
 
 
+def _can_view_joining_workspace(user: UserContext) -> bool:
+    roles = set(user.roles or [])
+    if Role.HR_ADMIN in roles or Role.HR_EXEC in roles:
+        return True
+    role_ids: set[int] = set()
+    values = [user.platform_role_id, *(user.platform_role_ids or [])]
+    for value in values:
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        try:
+            role_ids.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return 2 in role_ids
+
+
 async def _get_joining_profile(
     session: AsyncSession,
     *,
@@ -205,6 +224,7 @@ def _public_joining_profile_out(profile: RecCandidateJoiningProfile | None) -> J
         uan_number=profile.uan_number,
         profile_status=profile.profile_status,
         submitted_at=profile.submitted_at,
+        updated_at=profile.updated_at,
     )
 
 
@@ -217,6 +237,41 @@ def _refresh_profile_verification_state(profile: RecCandidateJoiningProfile) -> 
         profile.verified_at = datetime.utcnow()
     elif not profile.pan_verified or not profile.aadhaar_verified:
         profile.verified_at = None
+
+
+def _has_joining_profile_content(profile: RecCandidateJoiningProfile) -> bool:
+    return any(getattr(profile, field_name) for field_name in JOINING_PROFILE_FIELDS)
+
+
+def _resolve_public_joining_candidate(
+    offer: RecCandidateOffer | None,
+    candidate: RecCandidate | None,
+) -> tuple[RecCandidateOffer, RecCandidate]:
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    if offer.offer_status != "accepted":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Offer not accepted yet")
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    return offer, candidate
+
+
+async def _should_log_joining_profile_draft_event(
+    session: AsyncSession,
+    *,
+    candidate_id: int,
+) -> bool:
+    cutoff = now_ist_naive() - timedelta(seconds=30)
+    recent_event = (
+        await session.execute(
+            select(RecCandidateEvent.candidate_event_id).where(
+                RecCandidateEvent.candidate_id == candidate_id,
+                RecCandidateEvent.action_type == "joining_profile_draft_saved",
+                RecCandidateEvent.created_at >= cutoff,
+            )
+        )
+    ).first()
+    return recent_event is None
 
 
 async def _update_joining_docs_status(session: AsyncSession, *, candidate: RecCandidate) -> str:
@@ -322,6 +377,8 @@ async def list_joining_docs(
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
 ):
+    if not _can_view_joining_workspace(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Joining workspace visibility is restricted to HR.")
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
@@ -382,6 +439,8 @@ async def get_joining_profile_internal(
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.VIEWER])),
 ):
+    if not _can_view_joining_workspace(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Joining workspace visibility is restricted to HR.")
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
@@ -404,7 +463,7 @@ async def update_joining_profile_internal(
     profile = await _get_or_create_joining_profile(session, candidate_id=candidate_id)
     _apply_joining_profile_payload(profile, payload)
     profile.updated_at = datetime.utcnow()
-    if profile.profile_status != "submitted" and any(getattr(profile, field_name) for field_name in JOINING_PROFILE_FIELDS):
+    if profile.profile_status != "submitted" and _has_joining_profile_content(profile):
         profile.profile_status = "draft"
     _refresh_profile_verification_state(profile)
     await session.commit()
@@ -424,14 +483,8 @@ async def get_public_joining_docs(
             select(RecCandidateOffer).where(RecCandidateOffer.public_token == token)
         )
     ).scalars().first()
-    if not offer:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
-    if offer.offer_status != "accepted":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Offer not accepted yet")
-
-    candidate = await session.get(RecCandidate, offer.candidate_id)
-    if not candidate:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    candidate = await session.get(RecCandidate, offer.candidate_id) if offer else None
+    _, candidate = _resolve_public_joining_candidate(offer, candidate)
 
     opening_title = None
     if offer.opening_id:
@@ -479,14 +532,8 @@ async def save_joining_profile_public(
             select(RecCandidateOffer).where(RecCandidateOffer.public_token == token)
         )
     ).scalars().first()
-    if not offer:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
-    if offer.offer_status != "accepted":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Offer not accepted yet")
-
-    candidate = await session.get(RecCandidate, offer.candidate_id)
-    if not candidate:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    candidate = await session.get(RecCandidate, offer.candidate_id) if offer else None
+    _, candidate = _resolve_public_joining_candidate(offer, candidate)
 
     profile = await _get_or_create_joining_profile(session, candidate_id=candidate.candidate_id)
     _apply_joining_profile_payload(profile, payload)
@@ -506,6 +553,47 @@ async def save_joining_profile_public(
         meta_json={"profile_status": profile.profile_status},
     )
     await session.commit()
+    return _public_joining_profile_out(profile) or JoiningProfilePublicOut()
+
+
+@public_router.patch("/{token}/profile-draft", response_model=JoiningProfilePublicOut)
+async def save_joining_profile_public_draft(
+    token: str,
+    payload: JoiningProfilePublicIn,
+    request: Request,
+    session: AsyncSession = Depends(deps.get_db_session),
+):
+    _validate_public_joining_signature(request, token)
+    offer = (
+        await session.execute(
+            select(RecCandidateOffer).where(RecCandidateOffer.public_token == token)
+        )
+    ).scalars().first()
+    candidate = await session.get(RecCandidate, offer.candidate_id) if offer else None
+    _, candidate = _resolve_public_joining_candidate(offer, candidate)
+
+    profile = await _get_or_create_joining_profile(session, candidate_id=candidate.candidate_id)
+    previous_values = {field_name: getattr(profile, field_name) for field_name in JOINING_PROFILE_FIELDS}
+    _apply_joining_profile_payload(profile, payload)
+    profile.updated_at = datetime.utcnow()
+    if profile.profile_status != "submitted":
+        profile.profile_status = "draft"
+        profile.submitted_at = None
+    _refresh_profile_verification_state(profile)
+    changed = any(getattr(profile, field_name) != previous_values[field_name] for field_name in JOINING_PROFILE_FIELDS)
+    if changed and _has_joining_profile_content(profile):
+        if await _should_log_joining_profile_draft_event(session, candidate_id=candidate.candidate_id):
+            await log_event(
+                session,
+                candidate_id=candidate.candidate_id,
+                action_type="joining_profile_draft_saved",
+                performed_by_person_id_platform=None,
+                related_entity_type="candidate",
+                related_entity_id=candidate.candidate_id,
+                meta_json={"profile_status": profile.profile_status},
+            )
+    await session.commit()
+    await session.refresh(profile)
     return _public_joining_profile_out(profile) or JoiningProfilePublicOut()
 
 

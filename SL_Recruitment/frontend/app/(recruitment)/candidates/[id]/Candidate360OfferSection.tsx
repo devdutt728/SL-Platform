@@ -40,6 +40,7 @@ type OfferSectionActions = {
   handleApproveOffer: (offerId: number) => Promise<void>;
   handleRejectOffer: (offerId: number) => Promise<void>;
   handleSendOffer: (offer: CandidateOffer) => Promise<void>;
+  handleResendJoiningLink: (offer: CandidateOffer) => Promise<void>;
   handleAdminDecision: (offerId: number, decision: "accept" | "decline") => Promise<void>;
   handleReviseOffer: (offerId: number) => Promise<void>;
   handleConvertCandidate: () => void | Promise<void>;
@@ -310,14 +311,26 @@ export function Candidate360OfferSection({
                   </>
                 ) : null}
                 {isAccepted ? (
-                  <button
-                    type="button"
-                    className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
-                    onClick={() => void actions.handleConvertCandidate()}
-                    disabled={offersBusy}
-                  >
-                    Mark as joined
-                  </button>
+                  <>
+                    {canSkip ? (
+                      <button
+                        type="button"
+                        className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
+                        onClick={() => void actions.handleResendJoiningLink(latestOffer)}
+                        disabled={offersBusy}
+                      >
+                        Resend fresh joining link
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
+                      onClick={() => void actions.handleConvertCandidate()}
+                      disabled={offersBusy}
+                    >
+                      Mark as joined
+                    </button>
+                  </>
                 ) : null}
               </div>
               {isDraft ? (

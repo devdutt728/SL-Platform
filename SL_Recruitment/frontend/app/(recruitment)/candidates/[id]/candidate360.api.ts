@@ -5,6 +5,7 @@ import {
   CandidateDetail,
   CandidateFull,
   CandidateOffer,
+  OfferJoiningLinkResendResult,
   CandidateSprint,
   Interview,
   JoiningDoc,
@@ -173,6 +174,12 @@ export async function sendOffer(offerId: number) {
   const res = await fetch(`/api/rec/offers/${offerId}/send`, { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as CandidateOffer;
+}
+
+export async function resendJoiningLink(offerId: number) {
+  const res = await fetch(`/api/rec/offers/${offerId}/resend-joining-link`, { method: "POST" });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as OfferJoiningLinkResendResult;
 }
 
 export async function adminDecideOffer(offerId: number, decision: "accept" | "decline") {

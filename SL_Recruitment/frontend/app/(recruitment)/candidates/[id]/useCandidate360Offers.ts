@@ -303,6 +303,46 @@ export function useCandidate360Offers({
     [syncOfferAndCandidate]
   );
 
+  const handleResendJoiningLink = useCallback(
+    async (offer: CandidateOffer) => {
+      openDialog({
+        title: "Resend fresh joining link",
+        description: "This will rotate the current joining token, invalidate the old link, and send the candidate a fresh joining access link.",
+        confirmLabel: "Resend fresh link",
+        tone: "success",
+        onConfirm: async () => {
+          setOffersBusy(true);
+          setOffersError(null);
+          try {
+            const result = await candidate360Api.resendJoiningLink(offer.candidate_offer_id);
+            try {
+              await navigator.clipboard.writeText(result.joining_link);
+            } catch {
+              // Ignore clipboard failures.
+            }
+            await syncOfferAndCandidate();
+            pushToast({
+              tone: "success",
+              title: "Fresh joining link sent",
+              description:
+                result.email_status === "sent"
+                  ? "The old joining link is invalid now. The fresh link was emailed and copied to clipboard."
+                  : `Fresh link generated. Email status: ${result.email_status}.`,
+            });
+            closeDialog();
+          } catch (e: any) {
+            const message = e?.message || "Could not resend the joining link.";
+            setOffersError(message);
+            setDialogError(message);
+          } finally {
+            setOffersBusy(false);
+          }
+        },
+      });
+    },
+    [closeDialog, openDialog, pushToast, setDialogError, syncOfferAndCandidate]
+  );
+
   const handleAdminDecision = useCallback(
     async (offerId: number, decision: "accept" | "decline") => {
       openDialog({
@@ -526,6 +566,7 @@ export function useCandidate360Offers({
     handleApproveOffer,
     handleRejectOffer,
     handleSendOffer,
+    handleResendJoiningLink,
     handleAdminDecision,
     handleSaveDraftOverrides,
     handleDeleteOffer,

@@ -121,6 +121,15 @@ class OfferRevisionIn(BaseModel):
     reason: str | None = None
 
 
+class OfferJoiningLinkResendOut(BaseModel):
+    candidate_offer_id: int
+    candidate_id: int
+    public_token: str
+    joining_link: str
+    email_status: str
+    email_error: str | None = None
+
+
 def _request_ip(request: Request) -> str | None:
     forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
     if forwarded:
@@ -203,18 +212,21 @@ async def _send_joining_documents_request_email(
     offer: RecCandidateOffer,
     candidate: RecCandidate | None,
     opening: RecOpening | None,
-) -> None:
+    force_resend: bool = False,
+) -> dict[str, object]:
     if not candidate or not candidate.email:
-        return
-    if await _joining_docs_email_already_sent(session, offer=offer):
-        return
+        return {"status": "skipped", "reason": "missing_recipient"}
+    if not force_resend and await _joining_docs_email_already_sent(session, offer=offer):
+        return {"status": "skipped", "reason": "already_sent"}
 
     joining_link = _joining_public_link(offer.public_token)
-    await send_email(
+    subject = "Updated joining documents link" if force_resend else "Joining documents required"
+    email_type = "joining_documents_request_resend" if force_resend else "joining_documents_request"
+    email_meta = await send_email(
         session,
         candidate_id=candidate.candidate_id,
         to_emails=[candidate.email],
-        subject="Joining documents required",
+        subject=subject,
         template_name="joining_documents_request",
         context={
             "candidate_name": candidate.full_name or candidate.first_name or "",
@@ -225,14 +237,20 @@ async def _send_joining_documents_request_email(
             "joining_link": joining_link,
             "sender_name": "Studio Lotus Recruitment Team",
         },
-        email_type="joining_documents_request",
+        email_type=email_type,
         related_entity_type="offer",
         related_entity_id=offer.candidate_offer_id,
         meta_extra={
             "offer_id": offer.candidate_offer_id,
             "joining_link": joining_link,
+            "force_resend": force_resend,
         },
     )
+    return {
+        "status": email_meta.get("status") or "unknown",
+        "error": email_meta.get("error"),
+        "joining_link": joining_link,
+    }
 
 
 async def _send_offer_decline_revision_email_to_hr(
@@ -699,6 +717,67 @@ async def send_offer_route(
     return OfferOut(
         **_offer_base_payload(offer),
         letter_overrides=_decode_letter_overrides(offer.offer_letter_overrides),
+    )
+
+
+@router.post("/{offer_id}/resend-joining-link", response_model=OfferJoiningLinkResendOut)
+async def resend_joining_link_route(
+    offer_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    offer = await session.get(RecCandidateOffer, offer_id)
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found")
+    if offer.offer_status != "accepted":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Joining link can only be resent for accepted offers.")
+
+    candidate = await session.get(RecCandidate, offer.candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    opening = await session.get(RecOpening, offer.opening_id) if offer.opening_id else None
+
+    previous_token = offer.public_token
+    offer.public_token = uuid4().hex
+    offer.updated_at = datetime.utcnow()
+    await session.flush()
+
+    email_meta = await _send_joining_documents_request_email(
+        session,
+        offer=offer,
+        candidate=candidate,
+        opening=opening,
+        force_resend=True,
+    )
+    joining_link = str(email_meta.get("joining_link") or _joining_public_link(offer.public_token))
+    email_status = str(email_meta.get("status") or "unknown")
+    email_error = str(email_meta.get("error") or "").strip() or None
+
+    await log_event(
+        session,
+        candidate_id=offer.candidate_id,
+        action_type="joining_link_resent",
+        performed_by_person_id_platform=_safe_person_id(user.person_id_platform),
+        related_entity_type="offer",
+        related_entity_id=offer.candidate_offer_id,
+        meta_json={
+            "offer_id": offer.candidate_offer_id,
+            "old_public_token": previous_token,
+            "public_token": offer.public_token,
+            "joining_link": joining_link,
+            "email_status": email_status,
+            "email_error": email_error,
+        },
+    )
+    await session.commit()
+    await session.refresh(offer)
+    return OfferJoiningLinkResendOut(
+        candidate_offer_id=offer.candidate_offer_id,
+        candidate_id=offer.candidate_id,
+        public_token=offer.public_token,
+        joining_link=joining_link,
+        email_status=email_status,
+        email_error=email_error,
     )
 
 

@@ -83,6 +83,7 @@ export default async function CandidateDetailPage({ params }: { params: Promise<
   const canUploadJoiningDocs = canManageCandidate360 && (isHrLikeRole || isSuperadmin);
   const canAccessOffers = canManageCandidate360 && (isHrLikeRole || isSuperadmin);
   const canOpenDriveFolder = isHrLikeRole || isSuperadmin;
+  const canViewJoiningWorkspace = isHrLikeRole || isSuperadmin;
 
   return (
     <Candidate360Client
@@ -96,6 +97,7 @@ export default async function CandidateDetailPage({ params }: { params: Promise<
       canUploadJoiningDocs={canUploadJoiningDocs}
       canAccessOffers={canAccessOffers}
       canOpenDriveFolder={canOpenDriveFolder}
+      canViewJoiningWorkspace={canViewJoiningWorkspace}
     />
   );
 }

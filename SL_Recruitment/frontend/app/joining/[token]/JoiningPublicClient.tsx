@@ -43,6 +43,8 @@ type UploadProgress = {
   currentLabel: string;
 };
 
+type DraftSyncState = "idle" | "saving" | "saved" | "error";
+
 type WorkspaceView = "documents" | "profile";
 
 type FieldProps = {
@@ -154,6 +156,7 @@ const EMPTY_PROFILE: JoiningProfilePublic = {
   uan_number: "",
   profile_status: "draft",
   submitted_at: null,
+  updated_at: null,
 };
 
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-IN", {
@@ -179,11 +182,13 @@ function normalizeProfile(profile?: JoiningProfilePublic | null): JoiningProfile
 
 function mergeProfileDraft(serverProfile: JoiningProfilePublic, draftProfile: JoiningProfilePublic | null) {
   if (!draftProfile) return serverProfile;
+  if (hasProfileContent(serverProfile)) return serverProfile;
   return {
     ...serverProfile,
     ...draftProfile,
     profile_status: serverProfile.profile_status || draftProfile.profile_status || "draft",
     submitted_at: serverProfile.submitted_at ?? draftProfile.submitted_at ?? null,
+    updated_at: serverProfile.updated_at ?? draftProfile.updated_at ?? null,
   };
 }
 
@@ -222,7 +227,7 @@ function readDraftProfile(draftStorageKey: string) {
 
 function hasProfileContent(profile: JoiningProfilePublic) {
   return Object.entries(profile).some(([key, value]) => {
-    if (key === "profile_status" || key === "submitted_at") return false;
+    if (key === "profile_status" || key === "submitted_at" || key === "updated_at") return false;
     return typeof value === "string" ? value.trim().length > 0 : Boolean(value);
   });
 }
@@ -333,6 +338,7 @@ export function JoiningPublicClient({ token }: Props) {
   const [queuedUploads, setQueuedUploads] = useState<Record<string, QueuedUpload[]>>({});
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
+  const [draftSyncState, setDraftSyncState] = useState<DraftSyncState>("idle");
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("documents");
   const profileHydratedRef = useRef(false);
   const suppressDraftSyncRef = useRef(false);
@@ -362,10 +368,24 @@ export function JoiningPublicClient({ token }: Props) {
     [queuedUploads],
   );
   const totalUploadedFiles = context?.docs.length || 0;
+  const serverHasProfile = hasProfileContent(normalizeProfile(context?.profile)) || Boolean(context?.profile?.updated_at);
+  const draftSyncLabel =
+    profile.profile_status === "submitted"
+      ? "Submitted"
+      : draftSyncState === "saving"
+        ? "Syncing"
+        : draftSyncState === "saved"
+          ? "Synced"
+          : draftSyncState === "error"
+            ? "Local only"
+            : draftSaved
+              ? "Buffered"
+              : "Live";
 
   useEffect(() => {
     profileHydratedRef.current = false;
     setDraftSaved(false);
+    setDraftSyncState("idle");
 
     async function loadContext() {
       setLoading(true);
@@ -381,7 +401,8 @@ export function JoiningPublicClient({ token }: Props) {
         const serverProfile = normalizeProfile(data.profile);
         const draftProfile = readDraftProfile(draftStorageKey);
         setProfile(mergeProfileDraft(serverProfile, draftProfile));
-        setDraftSaved(Boolean(draftProfile));
+        setDraftSaved(Boolean(draftProfile) || hasProfileContent(serverProfile));
+        setDraftSyncState(hasProfileContent(serverProfile) ? "saved" : "idle");
         profileHydratedRef.current = true;
       } catch (loadError) {
         setError(getErrorMessage(loadError));
@@ -410,6 +431,50 @@ export function JoiningPublicClient({ token }: Props) {
     window.localStorage.setItem(draftStorageKey, JSON.stringify(profile));
     setDraftSaved(true);
   }, [draftStorageKey, profile]);
+
+  useEffect(() => {
+    if (!profileHydratedRef.current) return;
+    if (suppressDraftSyncRef.current) {
+      suppressDraftSyncRef.current = false;
+      return;
+    }
+    if (profile.profile_status === "submitted") {
+      setDraftSyncState("saved");
+      return;
+    }
+    if (!hasProfileContent(profile) && !serverHasProfile) {
+      setDraftSyncState("idle");
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        setDraftSyncState("saving");
+        const res = await fetch(`${basePath}/api/joining/${encodeURIComponent(token)}/profile-draft${signedQuery}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ...profile,
+            date_of_birth: profile.date_of_birth || null,
+            marriage_date: profile.marriage_date || null,
+          }),
+        });
+        if (!res.ok) throw new Error(await readErrorResponse(res));
+        const savedProfile = normalizeProfile((await res.json()) as JoiningProfilePublic);
+        suppressDraftSyncRef.current = true;
+        setProfile(savedProfile);
+        setContext((previous) => (previous ? { ...previous, profile: savedProfile } : previous));
+        setDraftSaved(true);
+        setDraftSyncState("saved");
+      } catch {
+        setDraftSyncState("error");
+      }
+    }, 900);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [basePath, context?.profile, profile, serverHasProfile, signedQuery, token]);
 
   function updateContextDocs(uploadedDocsBatch: JoiningDocPublic[]) {
     setContext((previous) => {
@@ -548,9 +613,10 @@ export function JoiningPublicClient({ token }: Props) {
         window.localStorage.removeItem(draftStorageKey);
       }
       setDraftSaved(false);
+      setDraftSyncState("saved");
       setProfile(savedProfile);
       setContext((previous) => (previous ? { ...previous, profile: savedProfile } : previous));
-      setNotice("Profile saved successfully. HR can now review these details without asking you to refill them.");
+      setNotice("Profile submitted successfully. HR can now review the final profile and uploaded documents together.");
     } catch (saveError) {
       setError(getErrorMessage(saveError));
     } finally {
@@ -577,8 +643,8 @@ export function JoiningPublicClient({ token }: Props) {
             <p className="mt-1.5 text-xl font-semibold text-slate-950">{totalUploadedFiles}</p>
           </div>
           <div className="rounded-[1rem] border border-slate-200/80 bg-white p-3">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Local draft</p>
-            <p className="mt-1.5 text-xl font-semibold text-slate-950">{draftSaved ? "On" : "Off"}</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Profile sync</p>
+            <p className="mt-1.5 text-xl font-semibold text-slate-950">{draftSyncLabel}</p>
           </div>
         </div>
       </div>
@@ -682,7 +748,7 @@ export function JoiningPublicClient({ token }: Props) {
                 </div>
                 <div className="rounded-2xl border border-slate-200/80 bg-white/88 px-4 py-2.5">
                   <div className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Profile draft</div>
-                  <div className="mt-1 text-lg font-semibold text-slate-950">{draftSaved ? "Protected" : "Live"}</div>
+                  <div className="mt-1 text-lg font-semibold text-slate-950">{draftSyncLabel}</div>
                 </div>
               </div>
             </div>
@@ -916,23 +982,23 @@ export function JoiningPublicClient({ token }: Props) {
                         </div>
                         <h2 className="text-xl font-semibold text-slate-950">Profile focus mode</h2>
                         <p className="max-w-3xl text-sm text-slate-500">
-                          Complete the form section-wise in a compact layout. Your local draft stays protected while you work, and you can switch back to documents anytime.
+                          Complete the form section-wise in a compact layout. Draft changes sync to the joining workspace for HR review while you work, and you can switch back to documents anytime.
                         </p>
                       </div>
                       <div className="flex flex-col items-stretch gap-2 rounded-[1.2rem] border border-slate-200/80 bg-white/90 p-3 shadow-[0_10px_24px_rgba(15,23,42,0.05)]">
                         <div className="flex items-center justify-between text-xs font-medium uppercase tracking-[0.22em] text-slate-500">
                           <span>Draft safety</span>
-                          <span>{draftSaved ? "Saved locally" : "Tracking changes"}</span>
+                          <span>{draftSyncLabel}</span>
                         </div>
                         <button
                           className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(15,23,42,0.16)] transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-55"
                           onClick={() => void saveProfile()}
                           disabled={savingProfile}
                         >
-                          {savingProfile ? "Saving profile..." : "Save profile"}
+                          {savingProfile ? "Submitting profile..." : "Submit profile"}
                         </button>
                         <p className="text-xs text-slate-500">
-                          Complete the sections below, then save once for HR review.
+                          Draft updates sync automatically. Submit once when you are ready for HR review.
                         </p>
                       </div>
                     </div>
