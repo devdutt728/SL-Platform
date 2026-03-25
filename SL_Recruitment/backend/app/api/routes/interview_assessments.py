@@ -18,6 +18,11 @@ from app.models.interview_assessment import RecCandidateInterviewAssessment
 from app.schemas.interview_assessment import L2AssessmentOut, L2AssessmentPayload
 from app.schemas.user import UserContext
 from app.services.events import log_event
+from app.services.workflow_policy import (
+    INTERN_L2_ONLY_WORKFLOW,
+    extract_intern_hiring_recommendation,
+    get_interview_workflow_policy,
+)
 
 router = APIRouter(prefix="/rec", tags=["interview-assessments"])
 
@@ -146,6 +151,14 @@ async def save_l2_assessment(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to edit assessments")
     if not _round_matches(interview, "l2") and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L2 assessments are only for L2 interviews")
+    workflow_policy = await get_interview_workflow_policy(session, interview)
+    if workflow_policy.workflow_variant == INTERN_L2_ONLY_WORKFLOW:
+        recommendation = extract_intern_hiring_recommendation(payload.data)
+        if recommendation is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Intern L2 feedback requires a suitable-for-hiring recommendation.",
+            )
     assessment = (
         await session.execute(
             select(RecCandidateInterviewAssessment).where(
@@ -193,6 +206,15 @@ async def submit_l2_assessment(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to submit assessments")
     if not _round_matches(interview, "l2") and not _is_superadmin(user):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="L2 assessments are only for L2 interviews")
+    workflow_policy = await get_interview_workflow_policy(session, interview)
+    recommendation = None
+    if workflow_policy.workflow_variant == INTERN_L2_ONLY_WORKFLOW:
+        recommendation = extract_intern_hiring_recommendation(payload.data)
+        if recommendation is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Intern L2 feedback requires a suitable-for-hiring recommendation.",
+            )
     assessment = (
         await session.execute(
             select(RecCandidateInterviewAssessment).where(
@@ -227,6 +249,10 @@ async def submit_l2_assessment(
         assessment.updated_at = now
 
     interview.feedback_submitted = True
+    if recommendation == "YES":
+        interview.decision = "advance"
+    elif recommendation == "NO":
+        interview.decision = "reject"
     interview.updated_at = now
 
     performed_by = None
@@ -243,7 +269,11 @@ async def submit_l2_assessment(
         performed_by_person_id_platform=performed_by,
         related_entity_type="interview",
         related_entity_id=interview.candidate_interview_id,
-        meta_json={"candidate_interview_id": candidate_interview_id},
+        meta_json={
+            "candidate_interview_id": candidate_interview_id,
+            "workflow_variant": workflow_policy.workflow_variant,
+            "recommendation": recommendation,
+        },
     )
 
     await session.commit()

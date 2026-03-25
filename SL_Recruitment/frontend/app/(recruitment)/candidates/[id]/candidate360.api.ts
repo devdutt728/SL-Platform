@@ -5,6 +5,7 @@ import {
   CandidateDetail,
   CandidateFull,
   CandidateOffer,
+  L2Assessment,
   OfferJoiningLinkResendResult,
   CandidateSprint,
   Interview,
@@ -64,6 +65,14 @@ export async function fetchInterviews(candidateId: string) {
   const res = await fetch(`/api/rec/interviews?candidate_id=${encodeURIComponent(candidateId)}`, { cache: "no-store" });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as Interview[];
+}
+
+export async function fetchInterviewL2Assessment(interviewId: number) {
+  const res = await fetch(`/api/rec/interviews/${encodeURIComponent(String(interviewId))}/l2-assessment`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as L2Assessment;
 }
 
 export async function cancelInterview(interviewId: number, reason?: string) {
@@ -283,4 +292,12 @@ export async function transition(candidateId: string, payload: { to_stage: strin
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function sendInternSelectionEmail(candidateId: string) {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/intern-selection-email`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as { candidate_id: number; email_status: string; email_error?: string | null; workflow_variant: string };
 }

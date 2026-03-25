@@ -12,6 +12,7 @@ type Props = {
   panelRef: React.RefObject<HTMLDivElement>;
   open: boolean;
   rescheduleInterviewId: number | null;
+  allowedRounds: string[];
   scheduleRound: string;
   setScheduleRound: (value: string) => void;
   personQuery: string;
@@ -51,6 +52,7 @@ export function Candidate360SchedulePanel({
   panelRef,
   open,
   rescheduleInterviewId,
+  allowedRounds,
   scheduleRound,
   setScheduleRound,
   personQuery,
@@ -114,9 +116,11 @@ export function Candidate360SchedulePanel({
               disabled={!!rescheduleInterviewId}
               onChange={(e) => setScheduleRound(e.target.value)}
             >
-            <option value="L2">L2</option>
-            <option value="L1">L1</option>
-            <option value="HR">HR</option>
+            {allowedRounds.map((round) => (
+              <option key={round} value={round}>
+                {round}
+              </option>
+            ))}
           </select>
         </label>
 

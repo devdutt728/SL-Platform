@@ -47,6 +47,7 @@ from app.services.public_links import build_public_link
 from app.services.events import log_event
 from app.services.stage_transitions import apply_stage_transition
 from app.services.sprint_brief import render_sprint_brief_html
+from app.services.workflow_policy import INTERN_L2_ONLY_WORKFLOW, get_candidate_workflow_policy
 
 router = APIRouter(prefix="/rec", tags=["sprints"])
 public_router = APIRouter(prefix="/sprint", tags=["sprints-public"])
@@ -584,6 +585,12 @@ async def assign_sprint(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if workflow_policy.workflow_variant == INTERN_L2_ONLY_WORKFLOW:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sprint assignment is disabled for this intern workflow.",
+        )
 
     template = await session.get(RecSprintTemplate, payload.sprint_template_id)
     if not template or not template.is_active:

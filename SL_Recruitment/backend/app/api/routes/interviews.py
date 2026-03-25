@@ -48,6 +48,12 @@ from app.services.operation_queue import (
     enqueue_operation,
 )
 from app.services.stage_transitions import apply_stage_transition
+from app.services.workflow_policy import (
+    INTERN_L2_ONLY_WORKFLOW,
+    get_candidate_workflow_policy,
+    is_l1_round,
+    workflow_variant_for_opening_code,
+)
 from app.services.interview_slots import (
     build_selection_token,
     build_signed_selection_token,
@@ -470,7 +476,9 @@ def _build_interview_out(
         candidate_name=candidate.full_name if candidate else None,
         candidate_code=candidate.candidate_code if candidate else None,
         opening_id=candidate.opening_id if candidate else None,
+        opening_code=opening.opening_code if opening else None,
         opening_title=opening.title if opening else None,
+        workflow_variant=workflow_variant_for_opening_code(opening.opening_code if opening else None),
     )
 
 
@@ -568,6 +576,12 @@ async def create_interview(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if workflow_policy.workflow_variant == INTERN_L2_ONLY_WORKFLOW and is_l1_round(payload.round_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="L1 interviews are disabled for this intern workflow.",
+        )
     candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
 
     existing_query = select(RecCandidateInterview).where(
@@ -742,6 +756,12 @@ async def propose_interview_slots(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     if not candidate.email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Candidate email is required")
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if workflow_policy.workflow_variant == INTERN_L2_ONLY_WORKFLOW and is_l1_round(payload.round_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="L1 interview slot invites are disabled for this intern workflow.",
+        )
 
     interviewer_email = (payload.interviewer_email or "").strip() or None
     interviewer_pid = _clean_platform_person_id(payload.interviewer_person_id_platform)

@@ -102,16 +102,16 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
       }
     }
 
-    if (cv && cv.size > 2 * 1024 * 1024) {
-      setError("CV file is too large. Max 2MB.");
+    if (cv && cv.size > 50 * 1024 * 1024) {
+      setError("CV file is too large. Max 50MB.");
       return;
     }
-    if (resume && resume.size > 2 * 1024 * 1024) {
-      setError("Resume file is too large. Max 2MB.");
+    if (resume && resume.size > 50 * 1024 * 1024) {
+      setError("Resume file is too large. Max 50MB.");
       return;
     }
-    if (portfolio && portfolio.size > 10 * 1024 * 1024) {
-      setError("Portfolio file is too large. Max 10MB.");
+    if (portfolio && portfolio.size > 50 * 1024 * 1024) {
+      setError("Portfolio file is too large. Max 50MB.");
       return;
     }
 
@@ -245,9 +245,9 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className={pillClass}>CV 2MB</span>
-            <span className={pillClass}>Resume 2MB</span>
-            <span className={pillClass}>Portfolio 10MB</span>
+            <span className={pillClass}>CV 50MB</span>
+            <span className={pillClass}>Resume 50MB</span>
+            <span className={pillClass}>Portfolio 50MB</span>
           </div>
         </div>
         <div className="mt-3">

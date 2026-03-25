@@ -23,6 +23,7 @@ type Props = {
   canDelete: boolean;
   canManageCandidate360: boolean;
   busy: boolean;
+  showCafSection: boolean;
   cafState: { label: string; tone: string };
   cafAssessmentSubmittedAt: string | null;
   cafAssessmentSentAt: string | null;
@@ -76,7 +77,9 @@ type Props = {
   onJumpScreening: () => void;
   onJumpDocuments: () => void;
   onJumpInterviews: () => void;
+  showSprintSection: boolean;
   onJumpSprint: () => void;
+  showOfferSection: boolean;
   onJumpOffer: () => void;
 };
 
@@ -87,6 +90,7 @@ export function Candidate360OverviewSection({
   canDelete,
   canManageCandidate360,
   busy,
+  showCafSection,
   cafState,
   cafAssessmentSubmittedAt,
   cafAssessmentSentAt,
@@ -140,7 +144,9 @@ export function Candidate360OverviewSection({
   onJumpScreening,
   onJumpDocuments,
   onJumpInterviews,
+  showSprintSection,
   onJumpSprint,
+  showOfferSection,
   onJumpOffer,
 }: Props) {
   const [selectedStageKey, setSelectedStageKey] = useState<string | null>(currentStageKey);
@@ -208,6 +214,7 @@ export function Candidate360OverviewSection({
           </div>
         </div>
 
+        {showCafSection ? (
         <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
           <p className="text-xs uppercase tracking-tight text-slate-500">CAF</p>
 
@@ -280,6 +287,7 @@ export function Candidate360OverviewSection({
             </Link>
           </div>
         </div>
+        ) : null}
 
         {canDelete ? (
           <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-3">
@@ -320,7 +328,7 @@ export function Candidate360OverviewSection({
 
           {collapsed ? null : (
             <div className="mt-4 space-y-4">
-              {cafLocked ? (
+              {showCafSection && cafLocked ? (
                 <div className="rounded-2xl border border-amber-200/70 bg-gradient-to-r from-amber-50 via-white to-cyan-50 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
@@ -428,8 +436,8 @@ export function Candidate360OverviewSection({
                     { label: "Screening", action: onJumpScreening },
                     { label: "Documents", action: onJumpDocuments },
                     { label: "Interviews", action: onJumpInterviews },
-                    { label: "Sprint", action: onJumpSprint },
-                    { label: "Offer", action: onJumpOffer },
+                    ...(showSprintSection ? [{ label: "Sprint", action: onJumpSprint }] : []),
+                    ...(showOfferSection ? [{ label: "Offer", action: onJumpOffer }] : []),
                   ].map((item) => (
                     <button
                       key={item.label}

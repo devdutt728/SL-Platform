@@ -101,7 +101,14 @@ function chipTone(kind: "neutral" | "green" | "amber" | "red" | "blue") {
   return "bg-slate-500/10 text-slate-800 ring-1 ring-slate-500/15";
 }
 
+const INTERN_OPENING_CODES = new Set(["INTR-8299B8", "CMIN-8299B0"]);
+
+function isInternCandidate(candidate: CandidateListItem) {
+  return INTERN_OPENING_CODES.has(String(candidate.opening_code || "").toUpperCase());
+}
+
 function cafChip(candidate: CandidateListItem) {
+  if (isInternCandidate(candidate)) return { label: "CAF not required", tone: chipTone("blue") };
   if (candidate.caf_submitted_at) return { label: "CAF submitted", tone: chipTone("green") };
   if (candidate.caf_sent_at) return { label: "CAF pending", tone: chipTone("amber") };
   return { label: "CAF not sent", tone: chipTone("neutral") };
@@ -126,6 +133,7 @@ function isAttentionCandidate(candidate: CandidateListItem) {
   const isMedium = screening === "amber" || screening === "medium";
   const isLow = screening === "green" || screening === "low";
   const cafPendingTooLong =
+    !isInternCandidate(candidate) &&
     normalizeStage(candidate.current_stage) === "hr_screening" &&
     !candidate.caf_submitted_at &&
     (candidate.ageing_days || 0) >= 3;
@@ -216,7 +224,7 @@ function canTransitionCandidate(candidate: CandidateListItem, toStage: Recruitme
   const current = normalizeStage(candidate.current_stage);
   if (!current) return { ok: true as const };
   if (current === toStage) return { ok: false as const, reason: "Candidate is already in this stage." };
-  const cafLocked = !!candidate.caf_sent_at && !candidate.caf_submitted_at;
+  const cafLocked = !isInternCandidate(candidate) && !!candidate.caf_sent_at && !candidate.caf_submitted_at;
   if (cafLocked && toStage !== "rejected" && toStage !== "declined" && toStage !== "hired") {
     return { ok: false as const, reason: "CAF is pending. Only terminal transitions are allowed." };
   }
@@ -229,7 +237,9 @@ function canTransitionCandidate(candidate: CandidateListItem, toStage: Recruitme
 function nextBestAction(candidate: CandidateListItem) {
   const stage = normalizeStage(candidate.current_stage);
   if (!candidate.l2_owner_email && stage === "enquiry") return "Assign GL/L2 owner to unlock HR screening.";
-  if (!!candidate.caf_sent_at && !candidate.caf_submitted_at) return "Follow up for CAF submission before progressing.";
+  if (!isInternCandidate(candidate) && !!candidate.caf_sent_at && !candidate.caf_submitted_at) {
+    return "Follow up for CAF submission before progressing.";
+  }
   if (stage === "l2_feedback") return "Capture decision quickly and move to Sprint/Reject.";
   if (stage === "l1_feedback") return "Create and send offer draft immediately.";
   if (stage === "offer") return "Follow up on offer decision and timeline.";

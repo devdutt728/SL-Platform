@@ -28,14 +28,10 @@ from app.db.platform_session import PlatformSessionLocal
 from app.models.platform_person import DimPerson
 from app.models.platform_role import DimRole
 from app.models.candidate import RecCandidate
-from app.models.event import RecCandidateEvent
-from app.models.screening import RecCandidateScreening
-from app.models.stage import RecCandidateStage
 from app.models.opening_event import RecOpeningEvent
 from uuid import uuid4
 from app.models.opening_request import RecOpeningRequest
-from app.services.drive import delete_drive_item
-from app.services.operation_queue import OP_DRIVE_DELETE_ITEM, enqueue_operation
+from app.services.candidate_purge import purge_candidate_with_dependents
 from app.services.platform_identity import active_status_filter
 
 router = APIRouter(prefix="/rec/openings", tags=["openings"])
@@ -1268,41 +1264,11 @@ async def delete_opening(
     if not opening:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opening not found")
     try:
-        # Fetch candidates linked to this opening and delete dependents
         candidates = (
             await session.execute(select(RecCandidate).where(RecCandidate.opening_id == opening_id))
         ).scalars().all()
         for candidate in candidates:
-            cid = candidate.candidate_id
-            await session.execute(delete(RecCandidateEvent).where(RecCandidateEvent.candidate_id == cid))
-            await session.execute(delete(RecCandidateStage).where(RecCandidateStage.candidate_id == cid))
-            await session.execute(delete(RecCandidateScreening).where(RecCandidateScreening.candidate_id == cid))
-            for table in [
-                "rec_candidate_interview",
-                "rec_candidate_offer",
-                "rec_candidate_reference_check",
-                "rec_candidate_sprint",
-            ]:
-                try:
-                    await session.execute(text(f"DELETE FROM {table} WHERE candidate_id = :cid"), {"cid": cid})
-                except Exception:
-                    continue
-            if candidate.drive_folder_id:
-                try:
-                    deleted = await anyio.to_thread.run_sync(delete_drive_item, candidate.drive_folder_id)
-                    if not deleted:
-                        raise RuntimeError("delete_drive_item returned false")
-                except Exception:
-                    await enqueue_operation(
-                        session,
-                        operation_type=OP_DRIVE_DELETE_ITEM,
-                        payload={"item_id": candidate.drive_folder_id},
-                        candidate_id=None,
-                        related_entity_type="opening",
-                        related_entity_id=opening_id,
-                        idempotency_key=f"drive_delete_candidate_folder:{cid}:{candidate.drive_folder_id}",
-                    )
-            await session.delete(candidate)
+            await purge_candidate_with_dependents(session, candidate)
 
         await session.execute(delete(RecOpeningEvent).where(RecOpeningEvent.opening_id == opening_id))
         await session.execute(delete(RecOpeningRequest).where(RecOpeningRequest.opening_id == opening_id))
@@ -1317,3 +1283,8 @@ async def delete_opening(
     except SQLAlchemyError as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Opening could not be deleted: {exc}")
+    except Exception as exc:
+        await session.rollback()
+        logger.exception("Opening delete failed: opening_id=%s error=%s", opening_id, exc)
+        detail = "Opening could not be deleted."
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)

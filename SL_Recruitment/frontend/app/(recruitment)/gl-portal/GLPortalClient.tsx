@@ -115,6 +115,13 @@ const DEFAULT_L2_DATA: L2Data = {
   },
 };
 
+const DEFAULT_INTERN_L2_DATA: L2Data = {
+  intern_recommendation: {
+    suitable_for_hiring: "",
+    notes: "",
+  },
+};
+
 type FieldConfig = {
   label: string;
   path: string[];
@@ -218,6 +225,16 @@ const L2_SECTION_FIELDS: { title: string; fields: FieldConfig[] }[] = [
   },
 ];
 
+const INTERN_L2_SECTION_FIELDS: { title: string; fields: FieldConfig[] }[] = [
+  {
+    title: "Intern L2 Hiring Recommendation",
+    fields: [
+      { label: "Is the candidate suitable for hiring?", path: ["intern_recommendation", "suitable_for_hiring"], type: "yesno" },
+      { label: "Internal notes", path: ["intern_recommendation", "notes"], type: "textarea" },
+    ],
+  },
+];
+
 const DEFAULT_L1_DATA: L1Data = {
   section1: {
     role_clarity: "",
@@ -312,8 +329,13 @@ const HIGH_POTENTIAL_REFERENCE = [
   "They appreciate a detailed interaction to check the fitment. As they see, the hiring organisation is trying to understand them as a person.",
 ];
 
-function cloneDefault(mode: AssessmentMode) {
-  const base = mode === "l1" ? DEFAULT_L1_DATA : DEFAULT_L2_DATA;
+function cloneDefault(mode: AssessmentMode, workflowVariant?: string | null) {
+  const base =
+    mode === "l1"
+      ? DEFAULT_L1_DATA
+      : workflowVariant === "intern_l2_only"
+        ? DEFAULT_INTERN_L2_DATA
+        : DEFAULT_L2_DATA;
   return typeof structuredClone === "function" ? structuredClone(base) : JSON.parse(JSON.stringify(base));
 }
 
@@ -685,9 +707,9 @@ export function GLPortalClient({
     setError(null);
     setCandidate(null);
     setAssessment(null);
-    const mode = assessmentModeForInterview(interview);
-    setData(cloneDefault(mode));
-    try {
+      const mode = assessmentModeForInterview(interview);
+      setData(cloneDefault(mode, interview.workflow_variant));
+      try {
       const [candidateDetail, assessmentResp] = await Promise.all([
         fetchCandidate(interview.candidate_id),
         fetchAssessment(interview.candidate_interview_id, mode),
@@ -699,8 +721,11 @@ export function GLPortalClient({
         screening = null;
       }
       setCandidate(candidateDetail);
-      const merged = { ...cloneDefault(mode), ...(assessmentResp.data || {}) } as Record<string, any>;
-      const hydrated = mode === "l2" ? applyCafPrefill(merged as L2Data, candidateDetail, interview, screening) : merged;
+      const merged = { ...cloneDefault(mode, candidateDetail.workflow_variant), ...(assessmentResp.data || {}) } as Record<string, any>;
+      const hydrated =
+        mode === "l2" && candidateDetail.workflow_variant !== "intern_l2_only"
+          ? applyCafPrefill(merged as L2Data, candidateDetail, interview, screening)
+          : merged;
       setAssessment(assessmentResp);
       setData(hydrated);
     } catch (e: any) {
@@ -912,8 +937,10 @@ export function GLPortalClient({
   const locked = assessment?.locked ?? false;
   const isSubmitted = assessment?.status === "submitted";
   const activeMode = active ? assessmentModeForInterview(active) : activeTab;
+  const isInternL2Assessment =
+    activeMode === "l2" && ((candidate?.workflow_variant || active?.workflow_variant || "").trim().toLowerCase() === "intern_l2_only");
   const pdfSlug = activeMode === "l1" ? "l1-assessment" : "l2-assessment";
-  const sections = activeMode === "l1" ? L1_SECTION_FIELDS : L2_SECTION_FIELDS;
+  const sections = activeMode === "l1" ? L1_SECTION_FIELDS : isInternL2Assessment ? INTERN_L2_SECTION_FIELDS : L2_SECTION_FIELDS;
   const activeInterviewStatus = (active?.interview_status || "").toLowerCase();
   const isInterviewNotTaken = activeInterviewStatus === "not_taken";
   const isInterviewTaken = activeInterviewStatus === "taken";

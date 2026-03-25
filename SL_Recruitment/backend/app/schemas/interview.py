@@ -67,7 +67,9 @@ class InterviewOut(BaseModel):
     candidate_name: Optional[str] = None
     candidate_code: Optional[str] = None
     opening_id: Optional[int] = None
+    opening_code: Optional[str] = None
     opening_title: Optional[str] = None
+    workflow_variant: Optional[str] = None
 
 
 class InterviewNotificationCountsOut(BaseModel):

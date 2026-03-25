@@ -42,13 +42,14 @@ const INGEST_CONFIG = {
   retryCountColumn: "retry_count",
   lastAttemptAtColumn: "last_attempt_at",
   nextRetryAtColumn: "next_retry_at",
-  batchSize: 50,
+  processingStaleMinutes: 15,
+  batchSize: 1,
   requestTimeoutMs: 120000,
   maxRetries: 5,
   retryBaseDelaySeconds: 300,
   retryMaxDelaySeconds: 14400,
   retryJitterSeconds: 90,
-  transientBatchStatusCodes: [408, 425, 429, 500, 502, 503, 504],
+  transientBatchStatusCodes: [408, 425, 429, 500, 502, 503, 504, 524],
   permanentRowErrorPatterns: [
     "missing required columns",
     "terms must be accepted",
@@ -58,7 +59,9 @@ const INGEST_CONFIG = {
     "is inactive",
     "invalid row payload",
     "must be a valid public url",
-    "payload too large"
+    "payload too large",
+    "exceeds max allowed size",
+    "max allowed is"
   ],
   skipStatuses: ["created", "duplicate", "processing", "failed_permanent"],
   duplicateCooldownHours: 24,
@@ -162,9 +165,68 @@ function handleIngestSheetChange(e) {
 function runScheduledIngest() {
   try {
     syncExternalUpdatedToIngestQueue(); // pulls correct columns
-    pushCandidatesToRecruitment();      // your existing ingest flow
   } catch (err) {
-    Logger.log(`runScheduledIngest failed: ${err}`);
+    Logger.log(`runScheduledIngest sync failed: ${err}`);
+  }
+
+  try {
+    pushCandidatesToRecruitment(); // your existing ingest flow
+  } catch (err) {
+    Logger.log(`runScheduledIngest ingest failed: ${err}`);
+  }
+}
+
+/**
+ * One-time repair helper for rows that already exist in backend but are stale in the sheet.
+ * Edit the row numbers if you need a different set, then run this manually.
+ */
+function repairKnownCreatedRows() {
+  _resetIngestOpsForRows([5, 6, 7], { rerunIngest: true });
+}
+
+function _resetIngestOpsForRows(rowNumbers, options) {
+  const opts = options || {};
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = _resolveTargetSheet(ss);
+  if (!sheet) {
+    throw new Error("Target ingest sheet not found (check SHEET_TAB_NAME).");
+  }
+
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+  if (!values.length) {
+    throw new Error("Target sheet has no headers.");
+  }
+
+  const headers = values[0].map((h) => String(h || "").trim());
+  const headerIndex = _buildHeaderIndex(headers);
+  _ensureOpsColumns(sheet, headers, headerIndex);
+
+  const columnsToClear = [
+    INGEST_CONFIG.statusColumn,
+    INGEST_CONFIG.codeColumn,
+    INGEST_CONFIG.messageColumn,
+    INGEST_CONFIG.emailStatusColumn,
+    INGEST_CONFIG.emailErrorColumn,
+    INGEST_CONFIG.ingestedAtColumn,
+    INGEST_CONFIG.retryCountColumn,
+    INGEST_CONFIG.lastAttemptAtColumn,
+    INGEST_CONFIG.nextRetryAtColumn
+  ];
+
+  (rowNumbers || []).forEach((rowNumberRaw) => {
+    const rowNumber = Math.floor(Number(rowNumberRaw || 0));
+    if (!Number.isFinite(rowNumber) || rowNumber < 2) return;
+    columnsToClear.forEach((columnName) => {
+      const idx = headerIndex[columnName];
+      if (idx == null || idx < 0) return;
+      sheet.getRange(rowNumber, idx + 1).clearContent();
+    });
+  });
+
+  Logger.log(`Cleared ingest ops columns for rows: ${(rowNumbers || []).join(", ")}`);
+  if (opts.rerunIngest !== false) {
+    pushCandidatesToRecruitment();
   }
 }
 
@@ -241,9 +303,10 @@ function pushCandidatesToRecruitment() {
     Logger.log(`Pending rows: ${pending.length}`);
     for (let i = 0; i < pending.length; i += INGEST_CONFIG.batchSize) {
       const batch = pending.slice(i, i + INGEST_CONFIG.batchSize);
+      const actionableBatch = batch.filter((item) => !item.localError);
       const batchId = _newBatchId(i / INGEST_CONFIG.batchSize + 1);
 
-      const payloadRows = batch.map((item) => item.payload);
+      const payloadRows = actionableBatch.map((item) => item.payload);
       const payload = {
         batch_id: batchId,
         sheet_id: ss.getId(),
@@ -257,6 +320,15 @@ function pushCandidatesToRecruitment() {
           batchId: batchId
         }
       });
+
+      if (!actionableBatch.length) {
+        _pushAuditEntry(auditEntries, auditContext, "INFO", "batch_local_validation_only", {
+          batchId: batchId,
+          details: { row_count: batch.length }
+        });
+        continue;
+      }
+
       _pushAuditEntry(auditEntries, auditContext, "INFO", "batch_dispatched", {
         batchId: batchId,
         details: { row_count: payloadRows.length }
@@ -286,7 +358,7 @@ function pushCandidatesToRecruitment() {
         _pushAuditEntry(auditEntries, auditContext, "WARN", "batch_transport_failure", {
           batchId: batchId,
           message: message,
-          details: { row_count: batch.length }
+          details: { row_count: actionableBatch.length }
         });
         Logger.log(`${message} [transient]`);
         continue;
@@ -311,7 +383,7 @@ function pushCandidatesToRecruitment() {
           batchId: batchId,
           httpStatus: statusCode,
           message: message,
-          details: { transient: transient, row_count: batch.length }
+          details: { transient: transient, row_count: actionableBatch.length }
         });
         Logger.log(transient ? `${message} [transient]` : message);
         continue;
@@ -336,7 +408,7 @@ function pushCandidatesToRecruitment() {
           batchId: batchId,
           httpStatus: statusCode,
           message: message,
-          details: { row_count: batch.length }
+          details: { row_count: actionableBatch.length }
         });
         Logger.log(`${message} [transient]`);
         continue;
@@ -345,7 +417,7 @@ function pushCandidatesToRecruitment() {
         batchId: batchId,
         httpStatus: statusCode,
         details: {
-          requested_rows: batch.length,
+          requested_rows: payloadRows.length,
           created_count: Number(parsed.created_count || 0),
           duplicate_count: Number(parsed.duplicate_count || 0),
           failed_count: Number(parsed.failed_count || 0)
@@ -359,7 +431,7 @@ function pushCandidatesToRecruitment() {
       });
 
       const nowIso = new Date().toISOString();
-      batch.forEach((item) => {
+      actionableBatch.forEach((item) => {
         const result = resultByRowKey[item.rowKey];
         const rowNumber = item.rowNumber;
         if (!result) {
@@ -369,11 +441,13 @@ function pushCandidatesToRecruitment() {
             headerIndex,
             "error",
             "",
-            "No result returned for row.",
+            "No result returned for row; backend response was incomplete.",
             nowIso,
             "",
             "",
             {
+              countRetry: false,
+              allowPermanentFailure: false,
               audit: {
                 entries: auditEntries,
                 context: auditContext,
@@ -604,6 +678,7 @@ function _deriveExternalSourceRef(payload, context) {
 function _shouldSkipRowForStatus(status, row, headerIndex) {
   const normalized = String(status || "").trim().toLowerCase();
   if (!normalized) return false;
+  if (normalized === "processing" && _isStaleProcessingRow(row, headerIndex)) return false;
   const retryWindowStatus =
     normalized === "error" || normalized === "failed_permanent" || normalized === "processing";
   if (retryWindowStatus && _isRowDeferredForRetry(row, headerIndex)) return true;
@@ -622,7 +697,24 @@ function _shouldSkipRowForStatus(status, row, headerIndex) {
   if (normalized !== "duplicate") {
     return INGEST_CONFIG.skipStatuses.includes(normalized);
   }
-  return true;
+  const candidateCode = _readCell(row, headerIndex, INGEST_CONFIG.codeColumn);
+  return Boolean(String(candidateCode || "").trim());
+}
+
+function _isStaleProcessingRow(row, headerIndex) {
+  const lastAttemptRaw =
+    _readCell(row, headerIndex, INGEST_CONFIG.lastAttemptAtColumn) ||
+    _readCell(row, headerIndex, INGEST_CONFIG.ingestedAtColumn);
+  if (!lastAttemptRaw) return true;
+
+  const parsed = Date.parse(String(lastAttemptRaw));
+  if (!Number.isFinite(parsed)) return true;
+
+  const staleMinutes = Math.max(
+    1,
+    Math.floor(Number(INGEST_CONFIG.processingStaleMinutes || 15))
+  );
+  return Date.now() - parsed >= staleMinutes * 60 * 1000;
 }
 
 function _readFileField(row, richRow, headerIndex, headerName) {
@@ -668,13 +760,16 @@ function _markBatchProcessing(sheet, batch, headerIndex, options) {
         sheet,
         item.rowNumber,
         headerIndex,
-        "error",
+        "failed_permanent",
         "",
-        item.localError,
+        _prefixMessage(item.localError, "Local validation error"),
         nowIso,
         "",
         "",
-        rowOptions
+        Object.assign({}, rowOptions, {
+          countRetry: false,
+          allowPermanentFailure: false
+        })
       );
       return;
     }
@@ -836,6 +931,7 @@ function _archiveSuccessfulRows(ss, sourceSheet, sourceHeaders) {
     const row = data[i];
     const status = String(row[statusIdx] || "").trim().toLowerCase();
     if (!INGEST_CONFIG.archiveStatuses.includes(status)) continue;
+    if (status === "duplicate" && !_readCell(row, headerIndex, INGEST_CONFIG.codeColumn)) continue;
     if (!_shouldArchiveRowByAge(row, status, headerIndex)) continue;
     sourceRowsToArchive.push({ rowNumber: i + 1, row, status });
   }

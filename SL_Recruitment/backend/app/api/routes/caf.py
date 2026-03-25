@@ -14,8 +14,18 @@ from app.core.config import settings
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
 from app.services.stage_transitions import apply_stage_transition
+from app.services.workflow_policy import get_candidate_workflow_policy
 
 router = APIRouter(prefix="/caf", tags=["caf"])
+
+
+async def _assert_caf_available(session: AsyncSession, candidate: RecCandidate) -> None:
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if not workflow_policy.requires_caf:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="CAF is not required for this opening.",
+        )
 
 
 def _caf_expiry_window() -> timedelta | None:
@@ -48,6 +58,7 @@ async def get_caf_prefill(
     ).scalars().first()
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid CAF token")
+    await _assert_caf_available(session, candidate)
     if _caf_expired(candidate):
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="CAF link expired")
 
@@ -92,6 +103,7 @@ async def get_caf_screening(
     ).scalars().first()
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid CAF token")
+    await _assert_caf_available(session, candidate)
 
     screening = (
         await session.execute(
@@ -114,6 +126,7 @@ async def submit_caf(
     ).scalars().first()
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid CAF token")
+    await _assert_caf_available(session, candidate)
     if _caf_expired(candidate):
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="CAF link expired")
     if candidate.caf_submitted_at is not None:

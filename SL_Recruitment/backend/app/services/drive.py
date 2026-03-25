@@ -296,6 +296,8 @@ def _delete_drive_item_with_service(service, item_id: str) -> bool:
         service.files().delete(fileId=item_id, supportsAllDrives=True).execute()
         return True
     except Exception as exc:
+        if isinstance(exc, HttpError) and getattr(exc.resp, "status", None) == 404:
+            return True
         logger.exception("Drive delete failed: item_id=%s error=%s", item_id, _format_drive_error(exc))
         return False
 

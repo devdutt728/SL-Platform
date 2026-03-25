@@ -28,6 +28,7 @@ type Args = {
   candidateId: string;
   canSchedule: boolean;
   canSkip: boolean;
+  allowL1Scheduling: boolean;
   currentStageKey: string | null;
   refreshAll: () => Promise<void>;
   candidateL2OwnerEmail?: string | null;
@@ -47,6 +48,7 @@ export function useCandidate360Interviews({
   candidateId,
   canSchedule,
   canSkip,
+  allowL1Scheduling,
   currentStageKey,
   refreshAll,
   candidateL2OwnerEmail,
@@ -146,6 +148,11 @@ export function useCandidate360Interviews({
 
   const openSchedule = useCallback(
     (roundType: string, rescheduleId: number | null = null) => {
+      const normalizedRound = roundType.toUpperCase();
+      if (!allowL1Scheduling && normalizedRound === "L1") {
+        setInterviewsNotice("L1 interviews are disabled for this opening.");
+        return;
+      }
       const existing = rescheduleId ? interviews?.find((item) => item.candidate_interview_id === rescheduleId) : null;
       setScheduleRound(existing?.round_type || roundType);
       setScheduleStartAt("");
@@ -180,7 +187,7 @@ export function useCandidate360Interviews({
       }
       void prefillL2Owner(roundType);
     },
-    [interviews, prefillL2Owner]
+    [allowL1Scheduling, interviews, prefillL2Owner]
   );
 
   useEffect(() => {

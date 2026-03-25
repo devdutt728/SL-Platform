@@ -1,11 +1,7 @@
 from datetime import datetime, timedelta
 import hashlib
 import json
-import mimetypes
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.parse import unquote, urlparse
-from urllib.request import Request, urlopen
 from uuid import uuid4
 
 import anyio
@@ -22,13 +18,16 @@ from app.models.candidate import RecCandidate
 from app.models.candidate_ingest_attempt import RecCandidateIngestAttempt
 from app.models.opening import RecOpening
 from app.models.screening import RecCandidateScreening
+from app.services.candidate_codes import assign_candidate_code, ensure_candidate_code_registered
 from app.services.drive import create_candidate_folder, upload_application_doc
 from app.services.email import send_email
+from app.services.external_documents import download_external_document
 from app.services.events import log_event
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
 from app.services.public_links import build_public_link, build_public_path
 from app.services.stage_transitions import apply_stage_transition
+from app.services.workflow_policy import workflow_policy_for_opening
 from app.schemas.screening import ScreeningUpsertIn
 from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, SPRINT_EXTENSIONS, SPRINT_MIME_TYPES, sanitize_filename, validate_upload
 
@@ -37,8 +36,7 @@ router = APIRouter(prefix="/apply", tags=["apply"])
 IDEMPOTENCY_TTL = timedelta(hours=24)
 RATE_LIMIT_WINDOW = timedelta(minutes=1)
 RATE_LIMIT_MAX = 5
-EXTERNAL_DOC_MAX_BYTES_DOC = 2 * 1024 * 1024
-EXTERNAL_DOC_MAX_BYTES_PORTFOLIO = 10 * 1024 * 1024
+APPLICATION_DOC_MAX_BYTES = 50 * 1024 * 1024
 PUBLIC_APPLY_DUPLICATE_WINDOW = timedelta(hours=24)
 
 
@@ -55,8 +53,8 @@ class PublicApplyIn(BaseModel):
 class PublicApplyOut(BaseModel):
     candidate_id: int
     candidate_code: str | None = None
-    caf_token: str
-    caf_url: str
+    caf_token: str | None = None
+    caf_url: str | None = None
     screening_result: str | None = None
     already_applied: bool = False
     reapplied: bool = False
@@ -254,46 +252,12 @@ def _parse_years_of_experience(raw: str | None) -> float | None:
 
 
 def _download_external_file(url: str, *, max_bytes: int) -> tuple[bytes, str, str]:
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported URL scheme for '{url}'.")
-
-    request = Request(url, headers={"User-Agent": "SL-Recruitment-Apply/1.0"})
-    try:
-        with urlopen(request, timeout=25) as response:
-            content_type = (response.headers.get_content_type() or "application/octet-stream").strip().lower()
-            data = response.read(max_bytes + 1)
-            if len(data) > max_bytes:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"File from '{url}' exceeds max allowed size.",
-                )
-    except HTTPException:
-        raise
-    except HTTPError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Could not download file '{url}' (HTTP {exc.code}).",
-        )
-    except URLError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Could not download file '{url}' ({exc.reason}).",
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Could not download file '{url}' ({exc}).",
-        )
-
-    raw_name = unquote(Path(parsed.path or "").name or "document")
-    filename = sanitize_filename(raw_name, default="document")
-    if "." not in filename:
-        guessed_ext = mimetypes.guess_extension(content_type or "") or ""
-        if guessed_ext:
-            filename = f"{filename}{guessed_ext}"
-
-    return data, filename, content_type or "application/octet-stream"
+    downloaded = download_external_document(
+        url,
+        max_bytes=max_bytes,
+        user_agent="SL-Recruitment-Apply/1.0",
+    )
+    return downloaded.data, downloaded.filename, downloaded.content_type
 
 
 def _validate_external_document(kind: str, filename: str, content_type: str) -> str:
@@ -346,6 +310,7 @@ async def get_opening_apply_prefill(
     ).scalars().first()
     if not opening or not bool(opening.is_active):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not available")
+    workflow_policy = workflow_policy_for_opening(opening)
     return OpeningApplyPrefillOut(
         opening_id=opening.opening_id,
         opening_code=opening_code,
@@ -553,8 +518,8 @@ async def apply_for_opening(
     ).scalars().first()
     if existing_candidate and _is_recent_public_apply_duplicate(existing_candidate, now=now):
         duplicate_message = "Candidate already exists for this opening/email within last 24 hours."
-        caf_token_existing = existing_candidate.caf_token or uuid4().hex
-        if existing_candidate.caf_token != caf_token_existing:
+        caf_token_existing = existing_candidate.caf_token or uuid4().hex if workflow_policy.requires_caf else None
+        if workflow_policy.requires_caf and existing_candidate.caf_token != caf_token_existing:
             existing_candidate.caf_token = caf_token_existing
             existing_candidate.caf_sent_at = now
             existing_candidate.updated_at = now
@@ -590,7 +555,7 @@ async def apply_for_opening(
             candidate_id=existing_candidate.candidate_id,
             candidate_code=existing_candidate.candidate_code,
             caf_token=caf_token_existing,
-            caf_url=build_public_path(f"/caf/{caf_token_existing}"),
+            caf_url=build_public_path(f"/caf/{caf_token_existing}") if caf_token_existing else None,
             screening_result=None,
             already_applied=True,
             reapplied=False,
@@ -603,10 +568,10 @@ async def apply_for_opening(
 
     is_reapplied = bool(existing_candidate)
     candidate: RecCandidate
-    caf_token: str
+    caf_token: str | None
     if existing_candidate:
         candidate = existing_candidate
-        caf_token = candidate.caf_token or uuid4().hex
+        caf_token = candidate.caf_token or uuid4().hex if workflow_policy.requires_caf else None
         candidate.first_name = first_name_clean
         candidate.last_name = last_name_clean
         candidate.full_name = _compose_full_name(first_name_clean, last_name_clean)
@@ -627,7 +592,7 @@ async def apply_for_opening(
         candidate.resume_url = resume_source_url or candidate.resume_url
         candidate.questions_from_candidate = questions_value
         candidate.caf_token = caf_token
-        candidate.caf_sent_at = now
+        candidate.caf_sent_at = now if workflow_policy.requires_caf else None
         candidate.updated_at = now
         candidate.application_docs_status = _application_docs_status(
             cv_url=cv_source_url if has_cv_file or cv_source_url else candidate.cv_url,
@@ -636,6 +601,7 @@ async def apply_for_opening(
         )
         if not candidate.candidate_code:
             candidate.candidate_code = _candidate_code(candidate.candidate_id)
+        await ensure_candidate_code_registered(session, candidate)
 
         await log_event(
             session,
@@ -651,27 +617,27 @@ async def apply_for_opening(
                 "external_source_ref": external_source_ref,
             },
         )
-        await log_event(
-            session,
-            candidate_id=candidate.candidate_id,
-            action_type="caf_link_generated",
-            performed_by_person_id_platform=None,
-            related_entity_type="candidate",
-            related_entity_id=candidate.candidate_id,
-            meta_json={"caf_token": caf_token, "reason": "public_apply_reapply"},
-        )
+        if workflow_policy.requires_caf and caf_token:
+            await log_event(
+                session,
+                candidate_id=candidate.candidate_id,
+                action_type="caf_link_generated",
+                performed_by_person_id_platform=None,
+                related_entity_type="candidate",
+                related_entity_id=candidate.candidate_id,
+                meta_json={"caf_token": caf_token, "reason": "public_apply_reapply"},
+            )
     else:
-        caf_token = uuid4().hex
+        caf_token = uuid4().hex if workflow_policy.requires_caf else None
         full_name = _compose_full_name(first_name_clean, last_name_clean)
         application_docs_status = _application_docs_status(
             cv_url=cv_source_url if has_cv_file or cv_source_url else None,
             portfolio_url=portfolio_source_url if has_portfolio_file or portfolio_source_url else None,
             resume_url=resume_source_url if has_resume_file or resume_source_url else None,
         )
-        temp_candidate_code = uuid4().hex[:8].upper()
-
         candidate = RecCandidate(
-            candidate_code=temp_candidate_code,
+            # Leave unset until the allocator assigns the real SLR code.
+            candidate_code="",
             first_name=first_name_clean,
             last_name=last_name_clean,
             full_name=full_name,
@@ -692,15 +658,14 @@ async def apply_for_opening(
             portfolio_url=portfolio_source_url,
             resume_url=resume_source_url,
             caf_token=caf_token,
-            caf_sent_at=now,
+            caf_sent_at=now if workflow_policy.requires_caf else None,
             application_docs_status=application_docs_status,
             joining_docs_status="none",
             created_at=now,
             updated_at=now,
         )
-        session.add(candidate)
         try:
-            await session.flush()
+            await assign_candidate_code(session, candidate, legacy_code_factory=_candidate_code)
         except IntegrityError:
             await session.rollback()
             existing_candidate = (
@@ -715,8 +680,8 @@ async def apply_for_opening(
                 )
             ).scalars().first()
             if existing_candidate:
-                caf_token_existing = existing_candidate.caf_token or uuid4().hex
-                if existing_candidate.caf_token != caf_token_existing:
+                caf_token_existing = existing_candidate.caf_token or uuid4().hex if workflow_policy.requires_caf else None
+                if workflow_policy.requires_caf and existing_candidate.caf_token != caf_token_existing:
                     existing_candidate.caf_token = caf_token_existing
                     existing_candidate.caf_sent_at = now
                     existing_candidate.updated_at = now
@@ -724,7 +689,7 @@ async def apply_for_opening(
                     candidate_id=existing_candidate.candidate_id,
                     candidate_code=existing_candidate.candidate_code,
                     caf_token=caf_token_existing,
-                    caf_url=build_public_path(f"/caf/{caf_token_existing}"),
+                    caf_url=build_public_path(f"/caf/{caf_token_existing}") if caf_token_existing else None,
                     screening_result=None,
                     already_applied=True,
                     reapplied=False,
@@ -765,9 +730,6 @@ async def apply_for_opening(
                 detail="An application with this email already exists for this opening.",
             )
 
-        candidate.candidate_code = _candidate_code(candidate.candidate_id)
-        await session.flush()
-
     if not is_reapplied:
         await apply_stage_transition(
             session,
@@ -796,17 +758,16 @@ async def apply_for_opening(
                 "terms_consent": True,
             },
         )
-        await log_event(
-            session,
-            candidate_id=candidate.candidate_id,
-            action_type="caf_link_generated",
-            performed_by_person_id_platform=None,
-            related_entity_type="candidate",
-            related_entity_id=candidate.candidate_id,
-            meta_json={"caf_token": caf_token},
-        )
-
-    caf_link = build_public_link(f"/caf/{caf_token}")
+        if workflow_policy.requires_caf and caf_token:
+            await log_event(
+                session,
+                candidate_id=candidate.candidate_id,
+                action_type="caf_link_generated",
+                performed_by_person_id_platform=None,
+                related_entity_type="candidate",
+                related_entity_id=candidate.candidate_id,
+                meta_json={"caf_token": caf_token},
+            )
 
     # Re-use existing folder for reapply; create only if missing.
     drive_folder_id = _strip_optional(candidate.drive_folder_id)
@@ -922,7 +883,7 @@ async def apply_for_opening(
         )
 
     async def _upload_remote(kind: str, source_url: str) -> str:
-        max_bytes = EXTERNAL_DOC_MAX_BYTES_PORTFOLIO if kind == "portfolio" else EXTERNAL_DOC_MAX_BYTES_DOC
+        max_bytes = APPLICATION_DOC_MAX_BYTES
         data, filename, content_type = await anyio.to_thread.run_sync(
             lambda: _download_external_file(source_url, max_bytes=max_bytes)
         )
@@ -941,7 +902,7 @@ async def apply_for_opening(
         cv_url = await _upload_file(
             "cv",
             cv_file,
-            max_bytes=2 * 1024 * 1024,
+            max_bytes=APPLICATION_DOC_MAX_BYTES,
             allowed_extensions=DOC_EXTENSIONS,
             allowed_mime_types=DOC_MIME_TYPES,
         )
@@ -952,7 +913,7 @@ async def apply_for_opening(
         portfolio_url = await _upload_file(
             "portfolio",
             portfolio_file,
-            max_bytes=10 * 1024 * 1024,
+            max_bytes=APPLICATION_DOC_MAX_BYTES,
             allowed_extensions=SPRINT_EXTENSIONS,
             allowed_mime_types=SPRINT_MIME_TYPES,
         )
@@ -963,7 +924,7 @@ async def apply_for_opening(
         resume_url_uploaded = await _upload_file(
             "resume",
             resume_file,
-            max_bytes=2 * 1024 * 1024,
+            max_bytes=APPLICATION_DOC_MAX_BYTES,
             allowed_extensions=DOC_EXTENSIONS,
             allowed_mime_types=DOC_MIME_TYPES,
         )
@@ -1027,7 +988,7 @@ async def apply_for_opening(
         candidate_id=candidate.candidate_id,
         candidate_code=candidate.candidate_code,
         caf_token=caf_token,
-        caf_url=build_public_path(f"/caf/{caf_token}"),
+        caf_url=build_public_path(f"/caf/{caf_token}") if caf_token else None,
         screening_result=decision,
         already_applied=False,
         reapplied=is_reapplied,
@@ -1037,12 +998,12 @@ async def apply_for_opening(
         session,
         candidate_id=candidate.candidate_id,
         to_emails=[candidate.email],
-        subject="Your Studio Lotus application links",
-        template_name="application_links",
+        subject="Your Studio Lotus application links" if workflow_policy.requires_caf else "Your Studio Lotus application is received",
+        template_name="application_links" if workflow_policy.requires_caf else "application_received",
         context={
             "candidate_name": candidate.full_name,
             "candidate_code": candidate.candidate_code,
-            "caf_link": caf_link,
+            "caf_link": build_public_link(f"/caf/{caf_token}") if caf_token else "",
             "candidate_email": candidate.email,
             "candidate_phone": candidate.phone or "—",
             "willing_to_relocate": _label_yes_no(screening_data.get("willing_to_relocate")),
@@ -1051,7 +1012,9 @@ async def apply_for_opening(
         meta_extra={
             "caf_token": caf_token,
             "reason": "public_apply_reapply" if is_reapplied else "public_apply",
-        },
+        }
+        if caf_token
+        else {"reason": "public_apply_reapply" if is_reapplied else "public_apply"},
     )
 
     email_status = _strip_optional(str((email_meta or {}).get("status") or ""))

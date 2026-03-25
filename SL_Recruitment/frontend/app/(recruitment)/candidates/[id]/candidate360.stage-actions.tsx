@@ -13,6 +13,7 @@ export type Candidate360StageButton = {
 
 type BuildStageButtonsParams = {
   currentStageKey: string | null;
+  isInternWorkflow: boolean;
   canManageCandidate360: boolean;
   canSchedule: boolean;
   canAccessOffers: boolean;
@@ -20,6 +21,7 @@ type BuildStageButtonsParams = {
   cafLocked: boolean;
   hasL2FeedbackSubmitted: boolean;
   hasL1FeedbackSubmitted: boolean;
+  hasInternSelectionEmailSent: boolean;
   candidateL2OwnerEmail?: string | null;
   sprintAssignDisabled: boolean;
   hasApprovedSprint: boolean;
@@ -29,6 +31,7 @@ type BuildStageButtonsParams = {
   latestOfferStatus?: string | null;
   latestOfferId?: number | null;
   handleTransition: (toStage: string, decision: string) => void | Promise<void>;
+  handleSendInternSelectionEmail: () => void | Promise<void>;
   handleConvertCandidate: () => void | Promise<void>;
   handleReviseOffer: (offerId: number) => void | Promise<void>;
   focusSection: (section: "screening" | "documents" | "interviews" | "sprint" | "offer") => void;
@@ -38,6 +41,7 @@ type BuildStageButtonsParams = {
 
 export function buildCandidate360StageButtons({
   currentStageKey,
+  isInternWorkflow,
   canManageCandidate360,
   canSchedule,
   canAccessOffers,
@@ -45,6 +49,7 @@ export function buildCandidate360StageButtons({
   cafLocked,
   hasL2FeedbackSubmitted,
   hasL1FeedbackSubmitted,
+  hasInternSelectionEmailSent,
   candidateL2OwnerEmail,
   sprintAssignDisabled,
   hasApprovedSprint,
@@ -54,6 +59,7 @@ export function buildCandidate360StageButtons({
   latestOfferStatus,
   latestOfferId,
   handleTransition,
+  handleSendInternSelectionEmail,
   handleConvertCandidate,
   handleReviseOffer,
   focusSection,
@@ -177,6 +183,37 @@ export function buildCandidate360StageButtons({
   }
   if (current === "l2_feedback") {
     const feedbackPending = !hasL2FeedbackSubmitted;
+    if (isInternWorkflow) {
+      return [
+        {
+          label: feedbackPending
+            ? "Send selection email (locked)"
+            : hasInternSelectionEmailSent
+              ? "Resend selection email"
+              : "Send selection email",
+          tone: "btn-action-success",
+          icon: <CheckCircle2 className="h-4 w-4" />,
+          intent: "advance",
+          disabled: feedbackPending || !canAccessOffers,
+          action: () => handleSendInternSelectionEmail(),
+        },
+        {
+          label: feedbackPending ? "Reject after L2 feedback (locked)" : "Reject after L2 feedback",
+          tone: "btn-action-danger",
+          icon: <XCircle className="h-4 w-4" />,
+          intent: "reject",
+          disabled: feedbackPending,
+          action: () => handleTransition("rejected", "reject"),
+        },
+        {
+          label: "Go to interviews",
+          tone: "btn-action-neutral",
+          icon: <Layers className="h-4 w-4" />,
+          intent: "review",
+          action: () => focusSection("interviews"),
+        },
+      ];
+    }
     return [
       {
         label: feedbackPending ? "Advance to sprint (locked)" : "Advance to sprint",

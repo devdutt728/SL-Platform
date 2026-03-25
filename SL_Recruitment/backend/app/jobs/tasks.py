@@ -24,6 +24,7 @@ from app.services.events import log_event
 from app.services.operation_queue import process_due_operations
 from app.services.platform_identity import active_status_filter
 from app.services.sprint_brief import render_sprint_brief_html
+from app.services.workflow_policy import get_candidate_workflow_policy
 
 
 def _caf_link(token: str) -> str:
@@ -129,6 +130,9 @@ async def run_caf_reminders() -> None:
             )
         ).scalars().all()
         for candidate in rows:
+            workflow_policy = await get_candidate_workflow_policy(session, candidate)
+            if not workflow_policy.requires_caf:
+                continue
             if not candidate.email or not candidate.caf_token:
                 continue
             if await _email_event_exists(

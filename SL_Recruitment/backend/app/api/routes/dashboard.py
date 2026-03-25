@@ -23,6 +23,7 @@ from app.schemas.dashboard import DashboardMetricsOut, StageCount
 from app.schemas.event import CandidateEventOut
 from app.schemas.user import UserContext
 from app.services.event_bus import event_bus
+from app.services.workflow_policy import INTERN_OPENING_CODES
 
 router = APIRouter(prefix="/rec", tags=["dashboard"])
 
@@ -290,6 +291,7 @@ async def get_dashboard_metrics(
                 select(func.count())
                 .select_from(RecCandidate)
                 .join(RecCandidateStage, RecCandidateStage.candidate_id == RecCandidate.candidate_id)
+                .outerjoin(RecOpening, RecOpening.opening_id == RecCandidate.opening_id)
                 .where(
                     RecCandidateStage.stage_status == "pending",
                     RecCandidateStage.stage_name.in_(["hr_screening", "caf"]),
@@ -297,6 +299,7 @@ async def get_dashboard_metrics(
                     RecCandidate.caf_sent_at.is_not(None),
                     RecCandidate.caf_sent_at
                     <= func.date_sub(now, text(f"INTERVAL {settings.caf_reminder_days} DAY")),
+                    or_(RecOpening.opening_code.is_(None), ~RecOpening.opening_code.in_(tuple(INTERN_OPENING_CODES))),
                 )
             )
         )

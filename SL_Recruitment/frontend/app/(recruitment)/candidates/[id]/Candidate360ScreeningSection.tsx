@@ -9,6 +9,7 @@ type Props = {
   onToggle: () => void;
   screening: Screening | null | undefined;
   assessment: CandidateAssessment | null | undefined;
+  isInternWorkflow: boolean;
   candidateQuestionsFromCandidate?: string | null;
   screeningTone: (result?: string | null) => string;
   screeningLabel: (result?: string | null) => string | null;
@@ -25,6 +26,7 @@ export function Candidate360ScreeningSection({
   onToggle,
   screening,
   assessment,
+  isInternWorkflow,
   candidateQuestionsFromCandidate,
   screeningTone,
   screeningLabel,
@@ -51,12 +53,16 @@ export function Candidate360ScreeningSection({
           {!screening ? (
             <div className="mt-3 rounded-2xl border border-white/60 bg-white/30 p-6">
               <p className="text-sm font-semibold">No screening yet</p>
-              <p className="mt-1 text-sm text-slate-600">This candidate has not submitted CAF/screening data.</p>
+              <p className="mt-1 text-sm text-slate-600">
+                {isInternWorkflow
+                  ? "This candidate has not submitted screening data."
+                  : "This candidate has not submitted CAF/screening data."}
+              </p>
             </div>
             ) : (
               <div className="mt-3 rounded-2xl border border-white/60 bg-white/30 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold">CAF screening</p>
+                  <p className="text-sm font-semibold">{isInternWorkflow ? "Screening" : "CAF screening"}</p>
                   <Chip className={screeningTone(screening.screening_result)}>
                   {screeningLabel(screening.screening_result) || screening.screening_result || "?"}
                 </Chip>
@@ -80,7 +86,7 @@ export function Candidate360ScreeningSection({
               </div>
             )}
 
-            {!assessment ? (
+            {isInternWorkflow ? null : !assessment ? (
               <div className="mt-4 rounded-2xl border border-white/60 bg-white/30 p-6">
                 <p className="text-sm font-semibold">CAF assessment form</p>
                 <p className="mt-1 text-sm text-slate-600">No CAF assessment data submitted yet.</p>

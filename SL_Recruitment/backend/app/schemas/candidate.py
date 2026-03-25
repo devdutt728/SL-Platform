@@ -60,6 +60,7 @@ class CandidateListItem(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     opening_id: Optional[int] = None
+    opening_code: Optional[str] = None
     opening_title: Optional[str] = None
     l2_owner_email: Optional[EmailStr] = None
     l2_owner_name: Optional[str] = None
@@ -98,7 +99,9 @@ class CandidateDetailOut(BaseModel):
     email: EmailStr
     phone: Optional[str] = None
     opening_id: Optional[int] = None
+    opening_code: Optional[str] = None
     opening_title: Optional[str] = None
+    workflow_variant: Optional[str] = None
     l2_owner_email: Optional[EmailStr] = None
     l2_owner_name: Optional[str] = None
     source_channel: Optional[str] = None

@@ -12,9 +12,19 @@ from app.schemas.candidate_assessment import CandidateAssessmentOut, CandidateAs
 from app.services.email import send_email
 from app.services.events import log_event
 from app.services.stage_transitions import apply_stage_transition
+from app.services.workflow_policy import get_candidate_workflow_policy
 from app.core.config import settings
 
 router = APIRouter(prefix="/assessment", tags=["candidate-assessment"])
+
+
+async def _assert_assessment_available(session: AsyncSession, candidate: RecCandidate) -> None:
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if not workflow_policy.requires_candidate_assessment:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Candidate assessment is not required for this opening.",
+        )
 
 
 def _assessment_expired(assessment: RecCandidateAssessment) -> bool:
@@ -50,6 +60,7 @@ async def get_candidate_assessment_prefill(
     candidate = await session.get(RecCandidate, assessment.candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    await _assert_assessment_available(session, candidate)
 
     opening_title = None
     opening_description = None
@@ -141,6 +152,7 @@ async def submit_candidate_assessment(
     candidate = await session.get(RecCandidate, assessment.candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    await _assert_assessment_available(session, candidate)
 
     now = datetime.utcnow()
     data = payload.model_dump(exclude_none=True)

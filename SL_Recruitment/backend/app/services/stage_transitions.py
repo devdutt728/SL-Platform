@@ -28,6 +28,7 @@ from app.models.interview import RecCandidateInterview
 from app.models.stage import RecCandidateStage
 from app.schemas.user import UserContext
 from app.services.events import log_event
+from app.services.workflow_policy import get_candidate_workflow_policy, is_stage_disabled_for_policy
 
 _CAF_BYPASS_STAGES = {ENQUIRY, HR_SCREENING, L2_SHORTLIST}
 _TERMINAL_STATUS_STAGES = {REJECTED, HIRED, DECLINED}
@@ -151,7 +152,14 @@ async def apply_stage_transition(
     if skip_flag and skip_requires_superadmin and not is_superadmin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Skip is restricted to Superadmin.")
 
-    if enforce_caf_gate and normalized_to_stage not in _CAF_BYPASS_STAGES and not is_superadmin:
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+
+    if (
+        enforce_caf_gate
+        and workflow_policy.requires_candidate_assessment
+        and normalized_to_stage not in _CAF_BYPASS_STAGES
+        and not is_superadmin
+    ):
         assessment_shared, assessment_submitted = await _assessment_gate_state(
             session,
             candidate_id=candidate.candidate_id,
@@ -172,6 +180,11 @@ async def apply_stage_transition(
     current_stage = await _current_stage_row(session, candidate_id=candidate.candidate_id)
     from_stage = current_stage.stage_name if current_stage else None
     normalized_from_stage = normalize_stage_name(from_stage)
+    if is_stage_disabled_for_policy(workflow_policy, normalized_to_stage):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Stage '{normalized_to_stage}' is disabled for this opening workflow.",
+        )
 
     feedback_guard_bypass = skip_flag and is_superadmin
     if (

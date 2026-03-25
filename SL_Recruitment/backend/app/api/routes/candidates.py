@@ -1,14 +1,12 @@
 import csv
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 import hmac
 from hashlib import sha256
 from io import StringIO
 import logging
-import mimetypes
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, unquote, urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import anyio
@@ -37,6 +35,7 @@ from app.models.opening import RecOpening
 from app.models.screening import RecCandidateScreening
 from app.models.stage import RecCandidateStage
 from app.models.interview import RecCandidateInterview
+from app.models.interview_assessment import RecCandidateInterviewAssessment
 from app.schemas.candidate import (
     CandidateConvertIn,
     CandidateCreate,
@@ -54,17 +53,26 @@ from app.schemas.user import UserContext
 from app.services.drive import (
     create_candidate_folder,
     delete_all_candidate_folders,
-    delete_candidate_folder,
     download_drive_file,
     upload_application_doc,
 )
+from app.services.candidate_codes import assign_candidate_code
 from app.services.email import send_email
+from app.services.external_documents import download_external_document
+from app.services.candidate_purge import purge_candidate_with_dependents
 from app.services.events import log_event
 from app.services.offers import convert_candidate_to_employee, create_offer, offer_pdf_signed_url, preview_candidate_person_code
 from app.services.public_links import build_public_link, build_public_path
 from app.services.opening_config import get_opening_config
 from app.services.screening_rules import evaluate_screening
 from app.services.stage_transitions import apply_stage_transition
+from app.services.workflow_policy import (
+    INTERN_L2_ONLY_WORKFLOW,
+    WorkflowPolicy,
+    extract_intern_hiring_recommendation,
+    get_candidate_workflow_policy,
+    workflow_policy_for_opening,
+)
 from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, SPRINT_EXTENSIONS, SPRINT_MIME_TYPES, sanitize_filename
 
 router = APIRouter(prefix="/rec/candidates", tags=["candidates"])
@@ -72,8 +80,7 @@ logger = logging.getLogger("slr.candidates")
 
 SOURCE_ORIGIN_UI = "ui"
 SOURCE_ORIGIN_GOOGLE_SHEET = "google_sheet"
-EXTERNAL_DOC_MAX_BYTES_DOC = 2 * 1024 * 1024
-EXTERNAL_DOC_MAX_BYTES_PORTFOLIO = 10 * 1024 * 1024
+APPLICATION_DOC_MAX_BYTES = 50 * 1024 * 1024
 GOOGLE_SHEET_DUPLICATE_WINDOW = timedelta(hours=24)
 INGEST_STATE_CREATED = "created"
 INGEST_STATE_DUPLICATE = "duplicate"
@@ -124,6 +131,100 @@ def _label_yes_no(value: bool | None) -> str:
     if value is None:
         return "—"
     return "Yes" if value else "No"
+
+
+async def _workflow_policy_for_opening_id(session: AsyncSession, opening_id: int | None) -> WorkflowPolicy:
+    if not opening_id:
+        return WorkflowPolicy()
+    opening = await session.get(RecOpening, opening_id)
+    return workflow_policy_for_opening(opening)
+
+
+async def _send_candidate_application_acknowledgement(
+    session: AsyncSession,
+    *,
+    candidate: RecCandidate,
+    willing_to_relocate: bool | None,
+    meta_extra: dict[str, object] | None = None,
+) -> dict[str, object]:
+    policy = await _workflow_policy_for_opening_id(session, candidate.opening_id)
+    if policy.requires_caf and candidate.caf_token:
+        return await send_email(
+            session,
+            candidate_id=candidate.candidate_id,
+            to_emails=[candidate.email],
+            subject="Your Studio Lotus application links",
+            template_name="application_links",
+            context={
+                "candidate_name": candidate.full_name,
+                "candidate_code": candidate.candidate_code,
+                "caf_link": build_public_link(f"/caf/{candidate.caf_token}"),
+                "candidate_email": candidate.email,
+                "candidate_phone": candidate.phone or "—",
+                "willing_to_relocate": _label_yes_no(willing_to_relocate),
+            },
+            email_type="application_links",
+            meta_extra=meta_extra,
+        )
+
+    return await send_email(
+        session,
+        candidate_id=candidate.candidate_id,
+        to_emails=[candidate.email],
+        subject="Your Studio Lotus application is received",
+        template_name="application_received",
+        context={
+            "candidate_name": candidate.full_name,
+            "candidate_code": candidate.candidate_code,
+            "candidate_email": candidate.email,
+            "candidate_phone": candidate.phone or "—",
+            "willing_to_relocate": _label_yes_no(willing_to_relocate),
+        },
+        email_type="application_links",
+        meta_extra=meta_extra,
+    )
+
+
+async def _latest_submitted_l2_recommendation(
+    session: AsyncSession,
+    *,
+    candidate_id: int,
+) -> tuple[RecCandidateInterview | None, str | None, str | None]:
+    rows = (
+        await session.execute(
+            select(RecCandidateInterview, RecCandidateInterviewAssessment)
+            .join(
+                RecCandidateInterviewAssessment,
+                RecCandidateInterviewAssessment.candidate_interview_id == RecCandidateInterview.candidate_interview_id,
+            )
+            .where(
+                RecCandidateInterview.candidate_id == candidate_id,
+                RecCandidateInterview.feedback_submitted.is_(True),
+                func.lower(func.coalesce(RecCandidateInterview.round_type, "")).like("%l2%"),
+                RecCandidateInterviewAssessment.status == "submitted",
+            )
+            .order_by(
+                RecCandidateInterviewAssessment.submitted_at.desc(),
+                RecCandidateInterview.updated_at.desc(),
+                RecCandidateInterview.candidate_interview_id.desc(),
+            )
+        )
+    ).all()
+    for interview, assessment in rows:
+        recommendation = extract_intern_hiring_recommendation(assessment.data_json)
+        if recommendation:
+            notes = None
+            try:
+                data = json.loads(assessment.data_json or "{}")
+            except Exception:
+                data = {}
+            if isinstance(data, dict):
+                block = data.get("intern_recommendation")
+                if isinstance(block, dict):
+                    raw_notes = str(block.get("notes") or "").strip()
+                    notes = raw_notes or None
+            return interview, recommendation, notes
+    return None, None, None
 
 
 def _parse_optional_datetime(value: str | datetime | None) -> datetime | None:
@@ -190,47 +291,14 @@ def _application_docs_status(*, cv_url: str | None, portfolio_url: str | None, r
     return "partial"
 
 
-def _download_external_file(url: str, *, max_bytes: int) -> tuple[bytes, str, str]:
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported URL scheme for '{url}'.")
-
-    request = Request(url, headers={"User-Agent": "SL-Recruitment-Ingest/1.0"})
-    try:
-        with urlopen(request, timeout=25) as response:
-            content_type = (response.headers.get_content_type() or "application/octet-stream").strip().lower()
-            data = response.read(max_bytes + 1)
-            if len(data) > max_bytes:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"File from '{url}' exceeds max allowed size.",
-                )
-    except HTTPException:
-        raise
-    except HTTPError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Could not download file '{url}' (HTTP {exc.code}).",
-        )
-    except URLError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Could not download file '{url}' ({exc.reason}).",
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Could not download file '{url}' ({exc}).",
-        )
-
-    raw_name = unquote(Path(parsed.path or "").name or "document")
-    filename = sanitize_filename(raw_name, default="document")
-    if "." not in filename:
-        guessed_ext = mimetypes.guess_extension(content_type or "") or ""
-        if guessed_ext:
-            filename = f"{filename}{guessed_ext}"
-
-    return data, filename, content_type or "application/octet-stream"
+@dataclass(slots=True)
+class _PreparedExternalDocument:
+    kind: str
+    source_url: str
+    safe_name: str
+    filename: str
+    content_type: str
+    data: bytes
 
 
 def _validate_external_document(kind: str, filename: str, content_type: str) -> str:
@@ -255,23 +323,28 @@ async def _upload_external_document(
     *,
     candidate: RecCandidate,
     kind: str,
-    source_url: str,
     drive_folder_id: str,
     drive_folder_url: str | None,
     performed_by_person_id_platform: int | None,
+    source_url: str | None = None,
+    prepared_document: _PreparedExternalDocument | None = None,
 ) -> str:
-    max_bytes = EXTERNAL_DOC_MAX_BYTES_PORTFOLIO if kind == "portfolio" else EXTERNAL_DOC_MAX_BYTES_DOC
-    data, filename, content_type = await anyio.to_thread.run_sync(
-        lambda: _download_external_file(source_url, max_bytes=max_bytes)
-    )
-    safe_name = _validate_external_document(kind, filename, content_type)
-    stored_name = f"{candidate.candidate_code}-{kind}-{safe_name}"
+    prepared = prepared_document
+    if prepared is not None and prepared.kind != kind:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Prepared document kind mismatch.")
+
+    if prepared is None:
+        if not source_url:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Missing source URL for {kind}.")
+        prepared = await _prepare_external_document(kind=kind, source_url=source_url)
+
+    stored_name = f"{candidate.candidate_code}-{kind}-{prepared.safe_name}"
     _, file_url = await anyio.to_thread.run_sync(
         lambda: upload_application_doc(
             drive_folder_id,
             filename=stored_name,
-            content_type=content_type or "application/octet-stream",
-            data=data,
+            content_type=prepared.content_type or "application/octet-stream",
+            data=prepared.data,
         )
     )
     await log_event(
@@ -282,13 +355,50 @@ async def _upload_external_document(
         related_entity_type="candidate",
         related_entity_id=candidate.candidate_id,
         meta_json={
-            "source_url": source_url,
+            "source_url": prepared.source_url,
             "file_url": file_url,
             "drive_folder_id": drive_folder_id,
             "drive_folder_url": drive_folder_url,
         },
     )
     return file_url
+
+
+async def _prepare_external_document(*, kind: str, source_url: str) -> _PreparedExternalDocument:
+    downloaded = await anyio.to_thread.run_sync(
+        lambda: download_external_document(
+            source_url,
+            max_bytes=APPLICATION_DOC_MAX_BYTES,
+            user_agent="SL-Recruitment-Ingest/1.0",
+        )
+    )
+    safe_name = _validate_external_document(kind, downloaded.filename, downloaded.content_type)
+    return _PreparedExternalDocument(
+        kind=kind,
+        source_url=source_url,
+        safe_name=safe_name,
+        filename=downloaded.filename,
+        content_type=downloaded.content_type,
+        data=downloaded.data,
+    )
+
+
+async def _prepare_candidate_external_documents(
+    *,
+    cv_url: str | None,
+    portfolio_url: str | None,
+    resume_url: str | None,
+) -> dict[str, _PreparedExternalDocument]:
+    prepared: dict[str, _PreparedExternalDocument] = {}
+    for kind, source_url in (
+        ("cv", cv_url),
+        ("portfolio", portfolio_url),
+        ("resume", resume_url),
+    ):
+        if not source_url:
+            continue
+        prepared[kind] = await _prepare_external_document(kind=kind, source_url=source_url)
+    return prepared
 
 
 class GoogleSheetCandidateRow(BaseModel):
@@ -681,6 +791,18 @@ def _ingest_state_from_attempt_status(attempt_status: str | None, *, fallback: s
     if status in {"error"}:
         return INGEST_STATE_FAILED_TRANSIENT
     return fallback
+
+
+def _idempotency_hit_blocks_retry(hit: RecCandidateIngestIdempotency) -> bool:
+    state = _normalize_ingest_state(
+        hit.ingest_state,
+        fallback=_ingest_state_from_attempt_status(hit.result_status, fallback=INGEST_STATE_FAILED_TRANSIENT),
+    )
+    if state in {INGEST_STATE_FAILED_PERMANENT, INGEST_STATE_FAILED_TRANSIENT, INGEST_STATE_RETRYING}:
+        return False
+    if state == INGEST_STATE_DUPLICATE and hit.candidate_id is None:
+        return False
+    return state in {INGEST_STATE_CREATED, INGEST_STATE_DUPLICATE}
 
 
 def _error_hint_for_code(error_code: str | None, *, transient: bool) -> str:
@@ -1147,8 +1269,10 @@ async def _apply_ui_reapplication(
     candidate.terms_consent_at = attempted_at if terms_consent else candidate.terms_consent_at
     candidate.l2_owner_email = l2_owner_email.lower() if l2_owner_email else None
     candidate.l2_owner_name = l2_owner_name
-    candidate.caf_token = candidate.caf_token or uuid4().hex
-    candidate.caf_sent_at = attempted_at
+    workflow_policy = await _workflow_policy_for_opening_id(session, opening_id)
+    if workflow_policy.requires_caf:
+        candidate.caf_token = candidate.caf_token or uuid4().hex
+        candidate.caf_sent_at = attempted_at
     candidate.updated_at = attempted_at
     candidate.application_docs_status = _application_docs_status(
         cv_url=candidate.cv_url,
@@ -1172,33 +1296,27 @@ async def _apply_ui_reapplication(
         },
     )
 
-    await log_event(
-        session,
-        candidate_id=candidate.candidate_id,
-        action_type="caf_link_generated",
-        performed_by_person_id_platform=performed_by_person_id_platform,
-        related_entity_type="candidate",
-        related_entity_id=candidate.candidate_id,
-        meta_json={"caf_token": candidate.caf_token, "reason": "ui_reapply"},
-    )
+    if workflow_policy.requires_caf and candidate.caf_token:
+        await log_event(
+            session,
+            candidate_id=candidate.candidate_id,
+            action_type="caf_link_generated",
+            performed_by_person_id_platform=performed_by_person_id_platform,
+            related_entity_type="candidate",
+            related_entity_id=candidate.candidate_id,
+            meta_json={"caf_token": candidate.caf_token, "reason": "ui_reapply"},
+        )
 
-    caf_link = build_public_link(f"/caf/{candidate.caf_token}")
-    await send_email(
+    await _send_candidate_application_acknowledgement(
         session,
-        candidate_id=candidate.candidate_id,
-        to_emails=[candidate.email],
-        subject="Your Studio Lotus application links",
-        template_name="application_links",
-        context={
-            "candidate_name": candidate.full_name,
-            "candidate_code": candidate.candidate_code,
-            "caf_link": caf_link,
-            "candidate_email": candidate.email,
-            "candidate_phone": candidate.phone or "—",
-            "willing_to_relocate": _label_yes_no(None),
-        },
-        email_type="application_links",
-        meta_extra={"caf_token": candidate.caf_token, "source": "ui_reapply"},
+        candidate=candidate,
+        willing_to_relocate=None,
+        meta_extra={
+            "caf_token": candidate.caf_token,
+            "source": "ui_reapply",
+        }
+        if candidate.caf_token
+        else {"source": "ui_reapply"},
     )
 
 
@@ -1244,6 +1362,15 @@ async def _send_assessment_link_for_l2_shortlist(
             "attempted": False,
             "status": "skipped",
             "reason": "missing_recipient",
+            "assessment_token": None,
+        }
+
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if not workflow_policy.requires_candidate_assessment:
+        return {
+            "attempted": False,
+            "status": "skipped",
+            "reason": "disabled_for_workflow",
             "assessment_token": None,
         }
 
@@ -1814,11 +1941,20 @@ async def _create_candidate_with_automation(
     link_sent_at = link_sent_at_override or created_at
     if link_sent_at.tzinfo is not None:
         link_sent_at = to_ist_naive(link_sent_at)
+    prepared_documents: dict[str, _PreparedExternalDocument] = {}
+    if ingest_remote_documents:
+        prepared_documents = await _prepare_candidate_external_documents(
+            cv_url=cv_url,
+            portfolio_url=portfolio_url,
+            resume_url=resume_url,
+        )
+    workflow_policy = await _workflow_policy_for_opening_id(session, opening_id)
     full_name = _compose_full_name(first_name, last_name)
     application_docs_status = _application_docs_status(cv_url=cv_url, portfolio_url=portfolio_url, resume_url=resume_url)
 
     candidate = RecCandidate(
-        candidate_code=uuid4().hex[:8].upper(),
+        # Leave unset until the allocator assigns the real SLR code.
+        candidate_code="",
         first_name=first_name,
         last_name=last_name,
         full_name=full_name,
@@ -1840,18 +1976,14 @@ async def _create_candidate_with_automation(
         cv_url=cv_url,
         portfolio_url=portfolio_url,
         resume_url=resume_url,
-        caf_token=uuid4().hex,
-        caf_sent_at=link_sent_at,
+        caf_token=uuid4().hex if workflow_policy.requires_caf else None,
+        caf_sent_at=link_sent_at if workflow_policy.requires_caf else None,
         application_docs_status=application_docs_status,
         joining_docs_status="none",
         created_at=created_at,
         updated_at=created_at,
     )
-    session.add(candidate)
-    await session.flush()
-
-    candidate.candidate_code = _candidate_code(candidate.candidate_id)
-    await session.flush()
+    await assign_candidate_code(session, candidate, legacy_code_factory=_candidate_code)
 
     await log_event(
         session,
@@ -1874,33 +2006,22 @@ async def _create_candidate_with_automation(
         },
     )
 
-    await log_event(
-        session,
-        candidate_id=candidate.candidate_id,
-        action_type="caf_link_generated",
-        performed_by_person_id_platform=performed_by_person_id_platform,
-        related_entity_type="candidate",
-        related_entity_id=candidate.candidate_id,
-        meta_json={"caf_token": candidate.caf_token},
-    )
+    if workflow_policy.requires_caf and candidate.caf_token:
+        await log_event(
+            session,
+            candidate_id=candidate.candidate_id,
+            action_type="caf_link_generated",
+            performed_by_person_id_platform=performed_by_person_id_platform,
+            related_entity_type="candidate",
+            related_entity_id=candidate.candidate_id,
+            meta_json={"caf_token": candidate.caf_token},
+        )
 
-    caf_link = build_public_link(f"/caf/{candidate.caf_token}")
-    await send_email(
+    await _send_candidate_application_acknowledgement(
         session,
-        candidate_id=candidate.candidate_id,
-        to_emails=[candidate.email],
-        subject="Your Studio Lotus application links",
-        template_name="application_links",
-        context={
-            "candidate_name": candidate.full_name,
-            "candidate_code": candidate.candidate_code,
-            "caf_link": caf_link,
-            "candidate_email": candidate.email,
-            "candidate_phone": candidate.phone or "—",
-            "willing_to_relocate": _label_yes_no(willing_to_relocate),
-        },
-        email_type="application_links",
-        meta_extra={"caf_token": candidate.caf_token},
+        candidate=candidate,
+        willing_to_relocate=willing_to_relocate,
+        meta_extra={"caf_token": candidate.caf_token} if candidate.caf_token else None,
     )
 
     folder_id, folder_url = await anyio.to_thread.run_sync(
@@ -1925,20 +2046,20 @@ async def _create_candidate_with_automation(
                 session,
                 candidate=candidate,
                 kind="cv",
-                source_url=cv_url,
                 drive_folder_id=folder_id,
                 drive_folder_url=folder_url,
                 performed_by_person_id_platform=performed_by_person_id_platform,
+                prepared_document=prepared_documents.get("cv"),
             )
         if portfolio_url:
             candidate.portfolio_url = await _upload_external_document(
                 session,
                 candidate=candidate,
                 kind="portfolio",
-                source_url=portfolio_url,
                 drive_folder_id=folder_id,
                 drive_folder_url=folder_url,
                 performed_by_person_id_platform=performed_by_person_id_platform,
+                prepared_document=prepared_documents.get("portfolio"),
             )
             candidate.portfolio_not_uploaded_reason = None
         if resume_url:
@@ -1946,10 +2067,10 @@ async def _create_candidate_with_automation(
                 session,
                 candidate=candidate,
                 kind="resume",
-                source_url=resume_url,
                 drive_folder_id=folder_id,
                 drive_folder_url=folder_url,
                 performed_by_person_id_platform=performed_by_person_id_platform,
+                prepared_document=prepared_documents.get("resume"),
             )
         candidate.application_docs_status = _application_docs_status(
             cv_url=candidate.cv_url,
@@ -2057,46 +2178,7 @@ def _offer_out_payload(offer: RecCandidateOffer) -> dict:
 
 
 async def _delete_candidate_with_dependents(session: AsyncSession, candidate: RecCandidate, *, delete_drive: bool = True):
-    cid = candidate.candidate_id
-    # Delete known dependent tables (best-effort to tolerate missing tables/migrations).
-    for stmt, label in [
-        (delete(RecCandidateEvent).where(RecCandidateEvent.candidate_id == cid), "rec_candidate_event"),
-        (delete(RecCandidateStage).where(RecCandidateStage.candidate_id == cid), "rec_candidate_stage"),
-        (delete(RecCandidateScreening).where(RecCandidateScreening.candidate_id == cid), "rec_candidate_screening"),
-    ]:
-        try:
-            await session.execute(stmt)
-        except SQLAlchemyError as exc:
-            logger.warning("Skip delete on %s due to DB error: %s", label, exc)
-    # Best-effort deletes for other dependent tables
-    for table in [
-        "rec_candidate_interview",
-        "rec_candidate_offer",
-        "rec_candidate_reference_check",
-        "rec_candidate_sprint",
-    ]:
-        try:
-            await session.execute(text(f"DELETE FROM {table} WHERE candidate_id = :cid"), {"cid": cid})
-        except Exception:
-            # Ignore if table missing or FK differs
-            continue
-    if delete_drive:
-        try:
-            # Try all buckets to catch folders that were moved post-creation.
-            deleted = 0
-            for bucket in ["Ongoing", "Appointed", "Not Appointed"]:
-                deleted += await anyio.to_thread.run_sync(
-                    lambda: delete_candidate_folder(
-                        candidate_code=candidate.candidate_code,
-                        folder_id=candidate.drive_folder_id,
-                        bucket=bucket,  # type: ignore[arg-type]
-                    )
-                )
-            if deleted == 0 and candidate.drive_folder_id:
-                logger.warning("Drive delete attempted but nothing removed for candidate_id=%s", cid)
-        except Exception as exc:
-            logger.warning("Drive delete failed for candidate_id=%s: %s", cid, exc)
-    await session.delete(candidate)
+    await purge_candidate_with_dependents(session, candidate, delete_drive=delete_drive)
 
 
 async def _get_current_stage_name(session: AsyncSession, *, candidate_id: int) -> str | None:
@@ -2433,8 +2515,14 @@ async def import_candidates_from_google_sheet(
                 source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
                 external_source_ref=external_source_ref,
             )
-            if idempotent_hit:
-                duplicate_count += 1
+            if idempotent_hit and _idempotency_hit_blocks_retry(idempotent_hit):
+                hit_state = _normalize_ingest_state(
+                    idempotent_hit.ingest_state,
+                    fallback=_ingest_state_from_attempt_status(
+                        idempotent_hit.result_status,
+                        fallback=INGEST_STATE_DUPLICATE,
+                    ),
+                ) or INGEST_STATE_DUPLICATE
                 idempotent_candidate: RecCandidate | None = None
                 if idempotent_hit.candidate_id is not None:
                     idempotent_candidate = await session.get(RecCandidate, idempotent_hit.candidate_id)
@@ -2442,8 +2530,11 @@ async def import_candidates_from_google_sheet(
                     _strip_optional(idempotent_hit.result_message)
                     or "This source application row was already ingested."
                 )
-                duplicate_error_code = "idempotent_duplicate"
-                duplicate_resolution = _error_hint_for_code(duplicate_error_code, transient=False)
+                is_idempotent_created = hit_state == INGEST_STATE_CREATED and idempotent_candidate is not None
+                result_status = "created" if is_idempotent_created else "duplicate"
+                result_attempt_status = "created" if is_idempotent_created else "duplicate_idempotent"
+                result_error_code = None if is_idempotent_created else "idempotent_duplicate"
+                result_resolution = None if is_idempotent_created else _error_hint_for_code("idempotent_duplicate", transient=False)
                 if not validate_only:
                     await _record_ingest_attempt(
                         session,
@@ -2452,44 +2543,66 @@ async def import_candidates_from_google_sheet(
                         row=row,
                         email_normalized=email_normalized,
                         external_source_ref=external_source_ref,
-                        attempt_status="duplicate_idempotent",
+                        attempt_status=result_attempt_status,
                         candidate_id=idempotent_candidate.candidate_id if idempotent_candidate else idempotent_hit.candidate_id,
                         opening_id=idempotent_candidate.opening_id if idempotent_candidate else None,
                         message=idempotent_message,
                         raw_row=raw_row,
                         attempted_at=row_now,
-                        ingest_state=INGEST_STATE_DUPLICATE,
-                        error_code=duplicate_error_code,
-                        resolution_hint=duplicate_resolution,
+                        ingest_state=hit_state,
+                        error_code=result_error_code,
+                        resolution_hint=result_resolution,
                     )
                     await _upsert_ingest_idempotency(
                         session,
                         source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
                         external_source_ref=external_source_ref,
                         candidate_id=idempotent_candidate.candidate_id if idempotent_candidate else idempotent_hit.candidate_id,
-                        result_status="duplicate",
+                        result_status=result_status,
                         result_message=idempotent_message,
-                        ingest_state=INGEST_STATE_DUPLICATE,
-                        error_code=duplicate_error_code,
-                        resolution_hint=duplicate_resolution,
+                        ingest_state=hit_state,
+                        error_code=result_error_code,
+                        resolution_hint=result_resolution,
                         matching_key="external_source_ref",
                     )
                     await session.commit()
-                results.append(
-                    {
-                        "row_key": row_key,
-                        "status": "duplicate",
-                        "ingest_state": INGEST_STATE_DUPLICATE,
-                        "candidate_id": idempotent_candidate.candidate_id if idempotent_candidate else idempotent_hit.candidate_id,
-                        "candidate_code": (
-                            idempotent_candidate.candidate_code if idempotent_candidate else None
-                        ),
-                        "message": idempotent_message,
-                        "error_code": duplicate_error_code,
-                        "resolution_hint": duplicate_resolution,
-                        "matching_key": "external_source_ref",
-                    }
-                )
+                if is_idempotent_created:
+                    created_count += 1
+                else:
+                    duplicate_count += 1
+                result_payload = {
+                    "row_key": row_key,
+                    "status": result_status,
+                    "ingest_state": hit_state,
+                    "candidate_id": idempotent_candidate.candidate_id if idempotent_candidate else idempotent_hit.candidate_id,
+                    "candidate_code": (
+                        idempotent_candidate.candidate_code if idempotent_candidate else None
+                    ),
+                    "message": idempotent_message,
+                    "error_code": result_error_code,
+                    "resolution_hint": result_resolution,
+                    "matching_key": "external_source_ref",
+                }
+                if is_idempotent_created and idempotent_candidate is not None:
+                    email_meta = await _latest_email_meta(
+                        session,
+                        candidate_id=idempotent_candidate.candidate_id,
+                        email_type="application_links",
+                    )
+                    if email_meta:
+                        email_status = _strip_optional(str(email_meta.get("status") or ""))
+                        email_error = _strip_optional(str(email_meta.get("error") or ""))
+                        if email_status:
+                            result_payload["email_status"] = email_status
+                            if email_status == "sent":
+                                result_payload["message"] = "Candidate created and application links email sent."
+                            elif email_status == "failed":
+                                result_payload["message"] = "Candidate created, but application links email failed."
+                            elif email_status == "skipped":
+                                result_payload["message"] = "Candidate created, but application links email was skipped."
+                        if email_error:
+                            result_payload["email_error"] = email_error
+                results.append(result_payload)
                 continue
 
             opening: RecOpening | None = None
@@ -2681,9 +2794,11 @@ async def import_candidates_from_google_sheet(
                     fallback=existing_candidate.source_channel or SOURCE_ORIGIN_GOOGLE_SHEET,
                 )
                 existing_candidate.external_source_ref = external_source_ref
-                if not existing_candidate.caf_token:
-                    existing_candidate.caf_token = uuid4().hex
-                existing_candidate.caf_sent_at = row_now
+                workflow_policy = await _workflow_policy_for_opening_id(session, opening.opening_id)
+                if workflow_policy.requires_caf:
+                    if not existing_candidate.caf_token:
+                        existing_candidate.caf_token = uuid4().hex
+                    existing_candidate.caf_sent_at = row_now
                 existing_candidate.updated_at = row_now
 
                 await log_event(
@@ -2702,25 +2817,16 @@ async def import_candidates_from_google_sheet(
                     },
                 )
 
-                reapply_email_meta = await send_email(
+                reapply_email_meta = await _send_candidate_application_acknowledgement(
                     session,
-                    candidate_id=existing_candidate.candidate_id,
-                    to_emails=[existing_candidate.email],
-                    subject="Your Studio Lotus application links",
-                    template_name="application_links",
-                    context={
-                        "candidate_name": existing_candidate.full_name,
-                        "candidate_code": existing_candidate.candidate_code,
-                        "caf_link": build_public_link(f"/caf/{existing_candidate.caf_token}"),
-                        "candidate_email": existing_candidate.email,
-                        "candidate_phone": existing_candidate.phone or "—",
-                        "willing_to_relocate": _label_yes_no(willing_to_relocate),
-                    },
-                    email_type="application_links",
+                    candidate=existing_candidate,
+                    willing_to_relocate=willing_to_relocate,
                     meta_extra={
                         "caf_token": existing_candidate.caf_token,
                         "reason": "google_sheet_reapply",
-                    },
+                    }
+                    if existing_candidate.caf_token
+                    else {"reason": "google_sheet_reapply"},
                 )
 
                 reapply_status = _strip_optional(str((reapply_email_meta or {}).get("status") or ""))
@@ -3066,9 +3172,10 @@ async def import_candidates_from_google_sheet(
             await session.rollback()
             failed_count += 1
             logger.exception("Google sheet import failed for row %s: %s", row_key, exc)
-            detail = "Candidate import failed."
-            if settings.environment != "production":
-                detail = f"Candidate import failed: {exc}"
+            detail = _truncate_text(
+                f"Candidate import failed: {exc}",
+                max_len=500,
+            ) or "Candidate import failed."
             ingest_state, error_code, resolution_hint = _classify_ingest_error(
                 detail=detail,
                 unexpected_error=True,
@@ -3810,6 +3917,7 @@ async def list_candidates(
             RecCandidate.caf_sent_at.label("caf_sent_at"),
             RecCandidate.caf_submitted_at.label("caf_submitted_at"),
             RecCandidate.needs_hr_review.label("needs_hr_review"),
+            RecOpening.opening_code.label("opening_code"),
             RecOpening.title.label("opening_title"),
             RecCandidateScreening.screening_result.label("screening_result"),
             RecCandidateScreening.willing_to_relocate.label("willing_to_relocate"),
@@ -3874,6 +3982,7 @@ async def list_candidates(
             email=row.email if can_view_basic_details else None,
             phone=row.phone if can_view_basic_details else None,
             opening_id=row.opening_id,
+            opening_code=row.opening_code,
             opening_title=row.opening_title,
             l2_owner_email=row.l2_owner_email,
             l2_owner_name=row.l2_owner_name,
@@ -4042,11 +4151,10 @@ async def get_candidate(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     await _assert_candidate_access(session, candidate_id, user)
 
-    opening_title = None
+    opening = None
     if candidate.opening_id is not None:
-        opening_title = (
-            await session.execute(select(RecOpening.title).where(RecOpening.opening_id == candidate.opening_id))
-        ).scalar_one_or_none()
+        opening = await session.get(RecOpening, candidate.opening_id)
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
 
     current_stage = await _get_current_stage_name(session, candidate_id=candidate_id)
     duplicate_tag, duplicate_application_count, latest_reapplication_at = await _candidate_duplicate_metadata(
@@ -4061,7 +4169,9 @@ async def get_candidate(
         email=candidate.email,
         phone=candidate.phone,
         opening_id=candidate.opening_id,
-        opening_title=opening_title,
+        opening_code=opening.opening_code if opening else None,
+        opening_title=opening.title if opening else None,
+        workflow_variant=workflow_policy.workflow_variant,
         l2_owner_email=candidate.l2_owner_email,
         l2_owner_name=candidate.l2_owner_name,
         source_channel=candidate.source_channel,
@@ -4278,6 +4388,12 @@ async def get_candidate_caf_link(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if not workflow_policy.requires_caf:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CAF is not applicable for this opening workflow.",
+        )
     now = now_ist_naive()
     refreshed = False
     if not candidate.caf_token:
@@ -4310,6 +4426,12 @@ async def get_candidate_assessment_link(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if not workflow_policy.requires_candidate_assessment:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Candidate assessment is not applicable for this opening workflow.",
+        )
 
     assessment = (
         await session.execute(
@@ -4363,6 +4485,12 @@ async def resend_candidate_assessment_link(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if not workflow_policy.requires_candidate_assessment:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Candidate assessment is not applicable for this opening workflow.",
+        )
 
     send_result = await _send_assessment_link_for_l2_shortlist(
         session,
@@ -4587,6 +4715,12 @@ async def create_candidate_offer(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if workflow_policy.workflow_variant == INTERN_L2_ONLY_WORKFLOW:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Offer creation is disabled for this intern workflow.",
+        )
     opening = None
     if candidate.opening_id:
         opening = await session.get(RecOpening, candidate.opening_id)
@@ -4678,6 +4812,89 @@ async def transition_stage(
         "from_stage": result.from_stage,
         "to_stage": result.to_stage,
         "status": candidate.status,
+    }
+
+
+@router.post("/{candidate_id}/intern-selection-email", status_code=status.HTTP_202_ACCEPTED)
+async def send_intern_selection_email(
+    candidate_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if workflow_policy.workflow_variant != INTERN_L2_ONLY_WORKFLOW:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selection email is available only for intern workflow openings.",
+        )
+    if not candidate.email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Candidate email is required.")
+
+    current_stage = await _get_current_stage_name(session, candidate_id=candidate_id)
+    if (current_stage or "").strip().lower() != "l2_feedback":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Selection email can be sent only while the candidate is in L2 feedback stage.",
+        )
+
+    interview, recommendation, recommendation_notes = await _latest_submitted_l2_recommendation(
+        session,
+        candidate_id=candidate_id,
+    )
+    if interview is None or not recommendation:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Submit intern L2 feedback with a hiring recommendation before sending the selection email.",
+        )
+    if recommendation != "YES":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Selection email can be sent only after L2 feedback marks the candidate as suitable for hiring.",
+        )
+
+    opening = await session.get(RecOpening, candidate.opening_id) if candidate.opening_id else None
+    email_meta = await send_email(
+        session,
+        candidate_id=candidate.candidate_id,
+        to_emails=[candidate.email],
+        subject=f"Studio Lotus internship selection update - {opening.title if opening else 'Internship'}",
+        template_name="intern_selection_update",
+        context={
+            "candidate_name": candidate.full_name or candidate.first_name or "Candidate",
+            "opening_title": opening.title if opening else "Internship",
+            "opening_label": (
+                f"{opening.title} ({workflow_policy.opening_code})"
+                if opening and workflow_policy.opening_code
+                else (opening.title if opening else "Internship")
+            ),
+            "interview_round": interview.round_type,
+            "sender_name": user.full_name or "Studio Lotus Recruitment Team",
+            "next_steps_note": (
+                recommendation_notes
+                or "We are happy to share that your interview has been positively reviewed. Our HR team will reach out with the next steps shortly."
+            ),
+            "reply_to_email": user.email or "hr@studiolotus.in",
+        },
+        email_type="intern_selection",
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_extra={
+            "workflow_variant": workflow_policy.workflow_variant,
+            "opening_code": workflow_policy.opening_code,
+            "interview_id": interview.candidate_interview_id,
+            "recommendation": recommendation,
+        },
+    )
+    await session.commit()
+    return {
+        "candidate_id": candidate.candidate_id,
+        "email_status": email_meta.get("status") or "unknown",
+        "email_error": email_meta.get("error"),
+        "workflow_variant": workflow_policy.workflow_variant,
     }
 
 

@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Interview } from "@/lib/types";
+import { useEffect, useMemo, useState } from "react";
+import { Interview, L2Assessment } from "@/lib/types";
 import { Chip } from "./Candidate360Primitives";
+import * as candidate360Api from "./candidate360.api";
 
 type ActiveSlotInvite = { round_type: string; expires_at: string | null; count: number };
 
@@ -11,6 +13,7 @@ type Props = {
   collapsed: boolean;
   onToggle: () => void;
   scheduleAllowed: boolean;
+  allowL1Scheduling: boolean;
   onScheduleL2: () => void;
   onScheduleL1: () => void;
   interviewsError: string | null;
@@ -46,6 +49,7 @@ export function Candidate360InterviewsSection({
   collapsed,
   onToggle,
   scheduleAllowed,
+  allowL1Scheduling,
   onScheduleL2,
   onScheduleL1,
   interviewsError,
@@ -75,6 +79,224 @@ export function Candidate360InterviewsSection({
   expandedInterviewId,
   onToggleExpandedInterview,
 }: Props) {
+  const [l2AssessmentByInterviewId, setL2AssessmentByInterviewId] = useState<Record<number, L2Assessment | null>>({});
+  const [l2AssessmentLoadingId, setL2AssessmentLoadingId] = useState<number | null>(null);
+  const [l2AssessmentErrors, setL2AssessmentErrors] = useState<Record<number, string>>({});
+
+  const expandedInterview = useMemo(
+    () => interviewTaken.find((item) => item.candidate_interview_id === expandedInterviewId) || null,
+    [expandedInterviewId, interviewTaken]
+  );
+
+  useEffect(() => {
+    if (!expandedInterview) return;
+    if (!(expandedInterview.round_type || "").toLowerCase().includes("l2")) return;
+    if (!expandedInterview.feedback_submitted) return;
+    if (Object.prototype.hasOwnProperty.call(l2AssessmentByInterviewId, expandedInterview.candidate_interview_id)) return;
+
+    let cancelled = false;
+    const interviewId = expandedInterview.candidate_interview_id;
+    setL2AssessmentLoadingId(interviewId);
+    setL2AssessmentErrors((prev) => {
+      const next = { ...prev };
+      delete next[interviewId];
+      return next;
+    });
+
+    void candidate360Api
+      .fetchInterviewL2Assessment(interviewId)
+      .then((assessment) => {
+        if (cancelled) return;
+        setL2AssessmentByInterviewId((prev) => ({ ...prev, [interviewId]: assessment }));
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setL2AssessmentErrors((prev) => ({
+          ...prev,
+          [interviewId]: error instanceof Error ? error.message : "Could not load L2 feedback.",
+        }));
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setL2AssessmentLoadingId((current) => (current === interviewId ? null : current));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedInterview, l2AssessmentByInterviewId]);
+
+  const normalizeDisplayValue = (value: unknown): string => {
+    if (value == null) return "-";
+    if (typeof value === "boolean") return value ? "Yes" : "No";
+    const text = String(value).trim();
+    if (!text) return "-";
+    const normalized = text.toLowerCase();
+    if (["yes", "true", "1"].includes(normalized)) return "Yes";
+    if (["no", "false", "0"].includes(normalized)) return "No";
+    return text;
+  };
+
+  const readAssessmentPath = (
+    data: Record<string, unknown> | undefined,
+    path: string[]
+  ): unknown => {
+    let current: unknown = data || {};
+    for (const key of path) {
+      if (!current || typeof current !== "object" || Array.isArray(current)) return null;
+      current = (current as Record<string, unknown>)[key];
+    }
+    return current;
+  };
+
+  const renderL2FeedbackSummary = (item: Interview) => {
+    const interviewId = item.candidate_interview_id;
+    const assessment = l2AssessmentByInterviewId[interviewId];
+    const assessmentError = l2AssessmentErrors[interviewId];
+    const assessmentLoading = l2AssessmentLoadingId === interviewId;
+
+    if (assessmentLoading) {
+      return (
+        <div className="rounded-xl border border-white/60 bg-white/70 p-3">
+          <p className="text-[10px] uppercase tracking-tight text-slate-500">L2 feedback</p>
+          <p className="mt-1 text-xs text-slate-600">Loading submitted feedback...</p>
+        </div>
+      );
+    }
+
+    if (assessmentError) {
+      return (
+        <div className="rounded-xl border border-rose-200 bg-rose-50/80 p-3">
+          <p className="text-[10px] uppercase tracking-tight text-rose-600">L2 feedback</p>
+          <p className="mt-1 text-xs text-rose-700">{assessmentError}</p>
+        </div>
+      );
+    }
+
+    if (!assessment?.data || typeof assessment.data !== "object") {
+      return item.feedback_submitted ? (
+        <div className="rounded-xl border border-white/60 bg-white/70 p-3">
+          <p className="text-[10px] uppercase tracking-tight text-slate-500">L2 feedback</p>
+          <p className="mt-1 text-xs text-slate-600">Submitted, but no readable assessment summary was returned.</p>
+        </div>
+      ) : null;
+    }
+
+    const data = assessment.data;
+    const isInternFeedback =
+      item.workflow_variant === "intern_l2_only" ||
+      Boolean(readAssessmentPath(data, ["intern_recommendation"]));
+
+    if (isInternFeedback) {
+      const suitableForHiring = normalizeDisplayValue(
+        readAssessmentPath(data, ["intern_recommendation", "suitable_for_hiring"])
+      );
+      const notes = normalizeDisplayValue(readAssessmentPath(data, ["intern_recommendation", "notes"]));
+      return (
+        <div className="rounded-xl border border-white/60 bg-white/70 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[10px] uppercase tracking-tight text-slate-500">Intern L2 feedback</p>
+            <Chip
+              className={chipTone(
+                suitableForHiring === "Yes"
+                  ? "green"
+                  : suitableForHiring === "No"
+                    ? "red"
+                    : "amber"
+              )}
+            >
+              {suitableForHiring === "-" ? "Recommendation pending" : `Suitable for hiring: ${suitableForHiring}`}
+            </Chip>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            <div className="rounded-xl border border-white/60 bg-white/80 p-3">
+              <p className="text-[10px] uppercase tracking-tight text-slate-500">Submitted</p>
+              <p className="mt-1 text-xs text-slate-700">
+                {assessment.submitted_at ? formatDateTime(assessment.submitted_at) : "-"}
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/60 bg-white/80 p-3">
+              <p className="text-[10px] uppercase tracking-tight text-slate-500">Status</p>
+              <p className="mt-1 text-xs text-slate-700">{normalizeDisplayValue(assessment.status)}</p>
+            </div>
+          </div>
+          <div className="mt-3 rounded-xl border border-white/60 bg-white/80 p-3">
+            <p className="text-[10px] uppercase tracking-tight text-slate-500">Internal notes</p>
+            <pre className="mt-1 whitespace-pre-wrap text-xs text-slate-700">{notes}</pre>
+          </div>
+        </div>
+      );
+    }
+
+    const teamLead = normalizeDisplayValue(readAssessmentPath(data, ["pre_interview", "team_lead"]));
+    const preferredJoiningDate = normalizeDisplayValue(
+      readAssessmentPath(data, ["pre_interview", "preferred_joining_date"])
+    );
+    const goodToHire = normalizeDisplayValue(readAssessmentPath(data, ["section7", "assess_good_to_hire"]));
+    const openToFeedback = normalizeDisplayValue(readAssessmentPath(data, ["section7", "assess_open_feedback"]));
+    const coachable = normalizeDisplayValue(readAssessmentPath(data, ["section7", "assess_coachable"]));
+    const keyStrengths = normalizeDisplayValue(readAssessmentPath(data, ["section6", "key_strengths"]));
+    const learningNeeds = normalizeDisplayValue(readAssessmentPath(data, ["section6", "key_learning_needs"]));
+    const nextRoundNotes = normalizeDisplayValue(readAssessmentPath(data, ["section7", "l1_focus_notes"]));
+
+    return (
+      <div className="rounded-xl border border-white/60 bg-white/70 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[10px] uppercase tracking-tight text-slate-500">L2 feedback summary</p>
+          <Chip
+            className={chipTone(
+              goodToHire === "Yes" ? "green" : goodToHire === "No" ? "red" : "amber"
+            )}
+          >
+            {goodToHire === "-" ? "Good to hire not set" : `Good to hire: ${goodToHire}`}
+          </Chip>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <div className="rounded-xl border border-white/60 bg-white/80 p-3">
+            <p className="text-[10px] uppercase tracking-tight text-slate-500">Team Lead</p>
+            <p className="mt-1 text-xs text-slate-700">{teamLead}</p>
+          </div>
+          <div className="rounded-xl border border-white/60 bg-white/80 p-3">
+            <p className="text-[10px] uppercase tracking-tight text-slate-500">Preferred DOJ</p>
+            <p className="mt-1 text-xs text-slate-700">{preferredJoiningDate}</p>
+          </div>
+          <div className="rounded-xl border border-white/60 bg-white/80 p-3">
+            <p className="text-[10px] uppercase tracking-tight text-slate-500">Submitted</p>
+            <p className="mt-1 text-xs text-slate-700">
+              {assessment.submitted_at ? formatDateTime(assessment.submitted_at) : "-"}
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/60 bg-white/80 p-3">
+            <p className="text-[10px] uppercase tracking-tight text-slate-500">Open to feedback</p>
+            <p className="mt-1 text-xs text-slate-700">{openToFeedback}</p>
+          </div>
+          <div className="rounded-xl border border-white/60 bg-white/80 p-3">
+            <p className="text-[10px] uppercase tracking-tight text-slate-500">Coachable</p>
+            <p className="mt-1 text-xs text-slate-700">{coachable}</p>
+          </div>
+          <div className="rounded-xl border border-white/60 bg-white/80 p-3">
+            <p className="text-[10px] uppercase tracking-tight text-slate-500">Assessment status</p>
+            <p className="mt-1 text-xs text-slate-700">{normalizeDisplayValue(assessment.status)}</p>
+          </div>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <div className="rounded-xl border border-white/60 bg-white/80 p-3">
+            <p className="text-[10px] uppercase tracking-tight text-slate-500">Key strengths</p>
+            <pre className="mt-1 whitespace-pre-wrap text-xs text-slate-700">{keyStrengths}</pre>
+          </div>
+          <div className="rounded-xl border border-white/60 bg-white/80 p-3">
+            <p className="text-[10px] uppercase tracking-tight text-slate-500">Key learning needs</p>
+            <pre className="mt-1 whitespace-pre-wrap text-xs text-slate-700">{learningNeeds}</pre>
+          </div>
+        </div>
+        <div className="mt-3 rounded-xl border border-white/60 bg-white/80 p-3">
+          <p className="text-[10px] uppercase tracking-tight text-slate-500">Anything specific for next round</p>
+          <pre className="mt-1 whitespace-pre-wrap text-xs text-slate-700">{nextRoundNotes}</pre>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div ref={sectionRef} className="section-card">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -104,13 +326,15 @@ export function Candidate360InterviewsSection({
               >
                 Schedule L2 interview
               </button>
-              <button
-                type="button"
-                className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
-                onClick={onScheduleL1}
-              >
-                Schedule L1 interview
-              </button>
+              {allowL1Scheduling ? (
+                <button
+                  type="button"
+                  className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+                  onClick={onScheduleL1}
+                >
+                  Schedule L1 interview
+                </button>
+              ) : null}
             </div>
           ) : null}
           {interviewsError ? (
@@ -296,13 +520,26 @@ export function Candidate360InterviewsSection({
                                       <p className="mt-1 text-xs text-slate-700">{item.notes_for_candidate}</p>
                                     </div>
                                   ) : null}
+                                  {item.round_type.toLowerCase().includes("l2") ? renderL2FeedbackSummary(item) : null}
                                   {item.round_type.toLowerCase().includes("l1") || item.round_type.toLowerCase().includes("l2") ? (
-                                    <Link
-                                      className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
-                                      href={`/interviews/${encodeURIComponent(String(item.candidate_interview_id))}`}
-                                    >
-                                      {item.round_type.toLowerCase().includes("l1") ? "Open L1 assessment" : "Open L2 assessment"}
-                                    </Link>
+                                    <div className="flex flex-wrap gap-3">
+                                      <Link
+                                        className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
+                                        href={`/interviews/${encodeURIComponent(String(item.candidate_interview_id))}`}
+                                      >
+                                        {item.round_type.toLowerCase().includes("l1") ? "Open L1 assessment" : "Open L2 assessment"}
+                                      </Link>
+                                      {item.round_type.toLowerCase().includes("l2") ? (
+                                        <a
+                                          className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
+                                          href={`/api/rec/interviews/${encodeURIComponent(String(item.candidate_interview_id))}/l2-assessment/pdf`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          Download L2 PDF
+                                        </a>
+                                      ) : null}
+                                    </div>
                                   ) : null}
                                 </div>
                               ) : null}

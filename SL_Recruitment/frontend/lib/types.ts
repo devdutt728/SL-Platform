@@ -7,6 +7,7 @@ export type CandidateListItem = {
   email?: string | null;
   phone?: string | null;
   opening_id?: number | null;
+  opening_code?: string | null;
   opening_title?: string | null;
   l2_owner_email?: string | null;
   l2_owner_name?: string | null;
@@ -195,7 +196,9 @@ export type CandidateDetail = {
   email: string;
   phone?: string | null;
   opening_id?: number | null;
+  opening_code?: string | null;
   opening_title?: string | null;
+  workflow_variant?: string | null;
   l2_owner_email?: string | null;
   l2_owner_name?: string | null;
   source_channel?: string | null;
@@ -299,7 +302,9 @@ export type Interview = {
   candidate_name?: string | null;
   candidate_code?: string | null;
   opening_id?: number | null;
+  opening_code?: string | null;
   opening_title?: string | null;
+  workflow_variant?: string | null;
 };
 
 export type InterviewNotificationCounts = {

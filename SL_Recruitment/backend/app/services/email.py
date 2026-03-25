@@ -8,9 +8,9 @@ from typing import Any
 import google.auth
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-
 from app.core.config import settings
 from app.core.paths import resolve_repo_path
+from app.models.candidate import RecCandidate
 from app.services.events import log_event
 
 
@@ -49,6 +49,25 @@ def render_template(name: str, context: dict[str, Any]) -> str:
     return html
 
 
+async def _resolve_candidate_subject_identifier(
+    session,
+    *,
+    candidate_id: int,
+    context: dict[str, Any],
+) -> str:
+    context_code = str(context.get("candidate_code") or "").strip()
+    if context_code:
+        return context_code
+
+    try:
+        candidate = await session.get(RecCandidate, candidate_id)
+    except Exception:  # noqa: BLE001
+        candidate = None
+
+    resolved = str(getattr(candidate, "candidate_code", "") or "").strip()
+    return resolved or str(candidate_id)
+
+
 async def send_email(
     session,
     *,
@@ -63,7 +82,12 @@ async def send_email(
     related_entity_id: int | None = None,
     meta_extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    candidate_suffix = f" | Candidate ID: {candidate_id}"
+    candidate_identifier = await _resolve_candidate_subject_identifier(
+        session,
+        candidate_id=candidate_id,
+        context=context,
+    )
+    candidate_suffix = f" | Candidate ID: {candidate_identifier}"
     if "Candidate ID:" not in subject:
         subject = f"{subject}{candidate_suffix}"
     meta: dict[str, Any] = {

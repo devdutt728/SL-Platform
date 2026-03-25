@@ -98,8 +98,10 @@ const fetchCandidateSprints = candidate360Api.fetchCandidateSprints;
 const deleteCandidateSprint = candidate360Api.deleteCandidateSprint;
 const fetchJoiningDocs = candidate360Api.fetchJoiningDocs;
 const uploadJoiningDoc = candidate360Api.uploadJoiningDoc;
+const sendInternSelectionEmailRequest = candidate360Api.sendInternSelectionEmail;
 
 const STUDIOLOTUS_EMAIL_DOMAIN = "studiolotus.in";
+const INTERN_OPENING_CODES = new Set(["INTR-8299B8", "CMIN-8299B0"]);
 
 function normalizeOptionalText(value: string): string | null {
   const trimmed = value.trim();
@@ -207,6 +209,8 @@ export function Candidate360Client({
   const candidate = data.candidate;
   const assessment = data.assessment as CandidateAssessment | null | undefined;
   const joiningProfile = data.joining_profile as JoiningProfile | null | undefined;
+  const isInternWorkflow =
+    candidate.workflow_variant === "intern_l2_only" || INTERN_OPENING_CODES.has(String(candidate.opening_code || "").toUpperCase());
   const candidateInitials = useMemo(() => {
     const parts = (candidate.name || "").trim().split(/\s+/).filter(Boolean);
     const first = parts[0]?.[0] || "";
@@ -214,9 +218,17 @@ export function Candidate360Client({
     return (first + second).toUpperCase() || "C";
   }, [candidate.name]);
   const currentStageKey = normalizeStage(candidate.current_stage);
-  const cafAssessmentSentAt = assessment?.assessment_sent_at || null;
-  const cafAssessmentSubmittedAt = assessment?.assessment_submitted_at || candidate.caf_submitted_at || null;
-  const cafGateActive = !!cafAssessmentSentAt;
+  const hasInternSelectionEmailSent = useMemo(() => {
+    if (!isInternWorkflow) return false;
+    return (data.events || []).some((event) => {
+      if ((event.action_type || "").toLowerCase() !== "email_sent") return false;
+      const emailType = String((event.meta_json as { email_type?: unknown })?.email_type || "").trim().toLowerCase();
+      return emailType === "intern_selection";
+    });
+  }, [data.events, isInternWorkflow]);
+  const cafAssessmentSentAt = isInternWorkflow ? null : assessment?.assessment_sent_at || null;
+  const cafAssessmentSubmittedAt = isInternWorkflow ? null : assessment?.assessment_submitted_at || candidate.caf_submitted_at || null;
+  const cafGateActive = !isInternWorkflow && !!cafAssessmentSentAt;
   const cafLocked = cafGateActive && !cafAssessmentSubmittedAt;
   const cafExpiryDays = 3;
   const cafSentAt = cafAssessmentSentAt ? new Date(cafAssessmentSentAt) : null;
@@ -227,12 +239,13 @@ export function Candidate360Client({
       : null;
 
   const cafState = useMemo(() => {
+    if (isInternWorkflow) return { label: "CAF not required", tone: chipTone("blue") };
     const generated = cafGateActive;
     const submitted = !!cafAssessmentSubmittedAt;
     if (submitted) return { label: "CAF submitted", tone: chipTone("green") };
     if (generated) return { label: "CAF pending", tone: chipTone("amber") };
     return { label: "CAF not shared", tone: chipTone("neutral") };
-  }, [cafAssessmentSubmittedAt, cafGateActive]);
+  }, [cafAssessmentSubmittedAt, cafGateActive, isInternWorkflow]);
   const needsReviewChip = useMemo(() => {
     if (!candidate.needs_hr_review) return null;
     return <Chip className={chipTone("amber")}>Needs HR review</Chip>;
@@ -249,13 +262,17 @@ export function Candidate360Client({
   const refreshAll = useCallback(async () => {
     const full = await fetchFull(candidateId);
     setData(full);
+    if (isInternWorkflow) {
+      setCafLink(null);
+      return;
+    }
     try {
       const link = await fetchCafLink(candidateId);
       setCafLink(link);
     } catch {
       // ignore
     }
-  }, [candidateId]);
+  }, [candidateId, isInternWorkflow]);
 
   const {
     skipStage,
@@ -565,6 +582,7 @@ export function Candidate360Client({
   });
 
   async function initCafLinkIfNeeded() {
+    if (isInternWorkflow) return;
     if (cafLink || candidate.caf_sent_at) return;
     try {
       const link = await fetchCafLink(candidateId);
@@ -575,6 +593,7 @@ export function Candidate360Client({
   }
 
   async function handleCopyCafLink() {
+    if (isInternWorkflow) return;
     setError(null);
     try {
       const link = cafLink || (await fetchCafLink(candidateId));
@@ -658,6 +677,7 @@ export function Candidate360Client({
     candidateId,
     canSchedule,
     canSkip,
+    allowL1Scheduling: !isInternWorkflow,
     currentStageKey,
     refreshAll,
     candidateL2OwnerEmail: candidate.l2_owner_email,
@@ -770,6 +790,36 @@ export function Candidate360Client({
     }
   }
 
+  function handleSendInternSelectionEmail() {
+    openDialog({
+      title: hasInternSelectionEmailSent ? "Resend selection email" : "Send selection email",
+      description: hasInternSelectionEmailSent
+        ? "This will resend the internship selection email using the current placeholder template."
+        : "This sends the internship selection email using the current placeholder template.",
+      confirmLabel: hasInternSelectionEmailSent ? "Resend email" : "Send email",
+      tone: "success",
+      onConfirm: async () => {
+        setBusy(true);
+        setError(null);
+        try {
+          await sendInternSelectionEmailRequest(candidateId);
+          await refreshAll();
+          pushToast({
+            tone: "success",
+            title: hasInternSelectionEmailSent ? "Selection email resent" : "Selection email sent",
+          });
+          closeDialog();
+        } catch (e: any) {
+          const message = e?.message || "Could not send selection email.";
+          setError(message);
+          setDialog((prev) => ({ ...prev, error: message }));
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
+  }
+
   useCandidate360RealtimeRefresh({
     candidateId,
     refreshAll,
@@ -837,6 +887,7 @@ export function Candidate360Client({
 
   const stageButtons: Candidate360StageButton[] = buildCandidate360StageButtons({
     currentStageKey,
+    isInternWorkflow,
     canManageCandidate360,
     canSchedule,
     canAccessOffers,
@@ -844,6 +895,7 @@ export function Candidate360Client({
     cafLocked,
     hasL2FeedbackSubmitted,
     hasL1FeedbackSubmitted,
+    hasInternSelectionEmailSent,
     candidateL2OwnerEmail: candidate.l2_owner_email,
     sprintAssignDisabled,
     hasApprovedSprint,
@@ -853,6 +905,7 @@ export function Candidate360Client({
     latestOfferStatus: latestOffer?.offer_status || null,
     latestOfferId: latestOffer?.candidate_offer_id || null,
     handleTransition,
+    handleSendInternSelectionEmail,
     handleConvertCandidate: openConvertDialog,
     handleReviseOffer,
     focusSection: (section) => {
@@ -887,19 +940,21 @@ export function Candidate360Client({
     const isAccepted =
       (latestOffer?.offer_status || "").toLowerCase() === "accepted" || hasStage("joining_documents") || hasStage("hired") || status === "hired";
 
-    let steps = [...pipelineStages];
+    let steps = isInternWorkflow
+      ? ["enquiry", "hr_screening", "l2_shortlist", "l2_interview", "l2_feedback"]
+      : [...pipelineStages];
     if (isRejected) {
       steps = [...steps, ...postRejectStages];
     } else if (isDeclined) {
       steps = [...steps, ...postDeclineStages];
-    } else if (isAccepted) {
+    } else if (!isInternWorkflow && isAccepted) {
       steps = [...steps, ...postAcceptanceStages];
     }
 
     return steps
       .map((key) => stageOrder.find((stage) => stage.key === key))
       .filter(Boolean) as Array<{ key: string; label: string }>;
-  }, [candidate.status, data.stages, latestOffer?.offer_status]);
+  }, [candidate.status, data.stages, isInternWorkflow, latestOffer?.offer_status]);
 
   const nextBestActions = useMemo(() => {
     const actions: string[] = [];
@@ -913,25 +968,33 @@ export function Candidate360Client({
       actions.push("Submit at least one L2 interview feedback to unlock stage transitions.");
     }
     if (currentStageKey === "l2_feedback" && hasL2FeedbackSubmitted) {
-      actions.push("Finalize L2 decision and move to Sprint or Reject.");
+      if (isInternWorkflow) {
+        actions.push(
+          hasInternSelectionEmailSent
+            ? "Selection email already sent. HR can resend it or reject the candidate from this stage."
+            : "Review the L2 hiring recommendation, then send the selection email or reject the candidate."
+        );
+      } else {
+        actions.push("Finalize L2 decision and move to Sprint or Reject.");
+      }
     }
-    if (currentStageKey === "sprint" && !hasApprovedSprint) {
+    if (!isInternWorkflow && currentStageKey === "sprint" && !hasApprovedSprint) {
       actions.push("Get at least one approved sprint before L1 shortlist.");
     }
-    if (currentStageKey === "l1_feedback" && !hasL1FeedbackSubmitted) {
+    if (!isInternWorkflow && currentStageKey === "l1_feedback" && !hasL1FeedbackSubmitted) {
       actions.push("Submit at least one L1 interview feedback to unlock Offer/Reject actions.");
     }
-    if (currentStageKey === "l1_feedback" && hasL1FeedbackSubmitted) {
+    if (!isInternWorkflow && currentStageKey === "l1_feedback" && hasL1FeedbackSubmitted) {
       actions.push("Finalize L1 decision and move to Offer or Reject.");
     }
-    if (currentStageKey === "offer" && canAccessOffers) {
+    if (!isInternWorkflow && currentStageKey === "offer" && canAccessOffers) {
       if ((latestOffer?.offer_status || "").toLowerCase() === "declined") {
         actions.push("Candidate declined latest offer. Negotiate and create revised draft, or close explicitly as Rejected with a reason.");
       } else {
         actions.push("Push offer decision follow-up to close this candidate.");
       }
     }
-    if (currentStageKey === "joining_documents" && !joiningDocsComplete) {
+    if (!isInternWorkflow && currentStageKey === "joining_documents" && !joiningDocsComplete) {
       actions.push("Collect mandatory joining docs to unlock final hire.");
     }
     if (!actions.length) actions.push("Continue progression based on latest interview/sprint feedback.");
@@ -941,9 +1004,11 @@ export function Candidate360Client({
     canAccessOffers,
     cafLocked,
     currentStageKey,
+    hasInternSelectionEmailSent,
     hasApprovedSprint,
     hasL1FeedbackSubmitted,
     hasL2FeedbackSubmitted,
+    isInternWorkflow,
     joiningDocsComplete,
     latestOffer?.offer_status,
   ]);
@@ -1019,6 +1084,7 @@ export function Candidate360Client({
         canDelete={canDelete}
         canManageCandidate360={canManageCandidate360}
         busy={busy}
+        showCafSection={!isInternWorkflow}
         cafState={cafState}
         cafAssessmentSubmittedAt={cafAssessmentSubmittedAt}
         cafAssessmentSentAt={cafAssessmentSentAt}
@@ -1088,7 +1154,9 @@ export function Candidate360Client({
         onJumpScreening={() => focusSection("screening", screeningRef)}
         onJumpDocuments={() => focusSection("documents", documentsRef)}
         onJumpInterviews={() => focusSection("interviews", interviewsRef)}
+        showSprintSection={!isInternWorkflow}
         onJumpSprint={() => focusSection("sprint", sprintRef)}
+        showOfferSection={!isInternWorkflow}
         onJumpOffer={() => focusSection("offer", offerRef)}
       />
 
@@ -1103,17 +1171,18 @@ export function Candidate360Client({
             chipTone={chipTone}
           />
 
-          <Candidate360ScreeningSection
-            sectionRef={screeningRef}
-            collapsed={collapsedSections.screening}
-            onToggle={() => toggleSection("screening")}
-            screening={screening}
-            assessment={assessment}
-            candidateQuestionsFromCandidate={candidate.questions_from_candidate}
-            screeningTone={screeningTone}
-            screeningLabel={screeningLabel}
-            chipTone={chipTone}
-            valueOrDash={valueOrDash}
+        <Candidate360ScreeningSection
+          sectionRef={screeningRef}
+          collapsed={collapsedSections.screening}
+          onToggle={() => toggleSection("screening")}
+          screening={screening}
+          assessment={assessment}
+          isInternWorkflow={isInternWorkflow}
+          candidateQuestionsFromCandidate={candidate.questions_from_candidate}
+          screeningTone={screeningTone}
+          screeningLabel={screeningLabel}
+          chipTone={chipTone}
+          valueOrDash={valueOrDash}
             yesNo={yesNo}
             formatDate={formatDate}
             formatDateTime={formatDateTime}
@@ -1127,8 +1196,8 @@ export function Candidate360Client({
             candidate={candidate}
             joiningProfile={joiningProfile}
             canOpenDriveFolder={canOpenDriveFolder}
-            canViewJoiningWorkspace={canViewJoiningWorkspace}
-            canUploadJoiningDocs={canUploadJoiningDocs}
+            canViewJoiningWorkspace={canViewJoiningWorkspace && !isInternWorkflow}
+            canUploadJoiningDocs={canUploadJoiningDocs && !isInternWorkflow}
             joiningDocsNotice={joiningDocsNotice}
             joiningDocsError={joiningDocsError}
             joiningDocsBusy={joiningDocsBusy}
@@ -1150,6 +1219,7 @@ export function Candidate360Client({
             collapsed={collapsedSections.interviews}
             onToggle={() => toggleSection("interviews")}
             scheduleAllowed={scheduleAllowed}
+            allowL1Scheduling={!isInternWorkflow}
             onScheduleL2={handleScheduleL2FromInterviews}
             onScheduleL1={handleScheduleL1FromInterviews}
             interviewsError={interviewsError}
@@ -1186,6 +1256,7 @@ export function Candidate360Client({
             panelRef={schedulePanelRef}
             open={scheduleOpen}
             rescheduleInterviewId={rescheduleInterviewId}
+            allowedRounds={isInternWorkflow ? ["L2"] : ["L2", "L1", "HR"]}
             scheduleRound={scheduleRound}
             setScheduleRound={setScheduleRound}
             personQuery={personQuery}
@@ -1230,121 +1301,125 @@ export function Candidate360Client({
             }}
           />
 
-          <Candidate360SprintSection
-            sectionRef={sprintRef}
-            collapsed={collapsedSections.sprint}
-            onToggle={() => toggleSection("sprint")}
-            hasApprovedSprint={hasApprovedSprint}
-            sprintApprovalPending={sprintApprovalPending}
-            sprintsError={sprintsError}
-            sprintsBusy={sprintsBusy}
-            candidateSprints={candidateSprints}
-            activeSprints={activeSprints}
-            lastSprintNotice={lastSprintNotice}
-            currentStageKey={currentStageKey}
-            sprintAssignDisabled={sprintAssignDisabled}
-            canSkip={canSkip}
-            sprintDeleteBusy={sprintDeleteBusy}
-            onDeleteSprint={(candidateSprintId) => {
-              void handleDeleteSprint(candidateSprintId);
-            }}
-            onSuperadminSprintDecision={(candidateSprintId, decision, reason) => {
-              void handleSuperadminSprintDecision(candidateSprintId, decision, reason);
-            }}
-            onOpenAssignSprint={() => {
-              void openAssignSprint();
-            }}
-            assignOpen={assignOpen}
-            onCloseAssign={() => setAssignOpen(false)}
-            sprintTemplates={sprintTemplates}
-            selectedTemplateId={selectedTemplateId}
-            onSelectTemplate={(value) => {
-              void handleTemplateSelect(value);
-            }}
-            dueAt={dueAt}
-            setDueAt={setDueAt}
-            templatePreviewBusy={templatePreviewBusy}
-            templatePreview={templatePreview}
-            sprintEmailPreviewHtml={sprintEmailPreviewHtml}
-            templatePreviewError={templatePreviewError}
-            onAssignSprint={() => {
-              void handleAssignSprint();
-            }}
-            chipTone={chipTone}
-            decisionTone={decisionTone}
-            formatDateTime={formatDateTime}
-            formatRelativeDue={formatRelativeDue}
-            stripHtml={stripHtml}
-            formatBytes={formatBytes}
-          />
+          {!isInternWorkflow ? (
+            <Candidate360SprintSection
+              sectionRef={sprintRef}
+              collapsed={collapsedSections.sprint}
+              onToggle={() => toggleSection("sprint")}
+              hasApprovedSprint={hasApprovedSprint}
+              sprintApprovalPending={sprintApprovalPending}
+              sprintsError={sprintsError}
+              sprintsBusy={sprintsBusy}
+              candidateSprints={candidateSprints}
+              activeSprints={activeSprints}
+              lastSprintNotice={lastSprintNotice}
+              currentStageKey={currentStageKey}
+              sprintAssignDisabled={sprintAssignDisabled}
+              canSkip={canSkip}
+              sprintDeleteBusy={sprintDeleteBusy}
+              onDeleteSprint={(candidateSprintId) => {
+                void handleDeleteSprint(candidateSprintId);
+              }}
+              onSuperadminSprintDecision={(candidateSprintId, decision, reason) => {
+                void handleSuperadminSprintDecision(candidateSprintId, decision, reason);
+              }}
+              onOpenAssignSprint={() => {
+                void openAssignSprint();
+              }}
+              assignOpen={assignOpen}
+              onCloseAssign={() => setAssignOpen(false)}
+              sprintTemplates={sprintTemplates}
+              selectedTemplateId={selectedTemplateId}
+              onSelectTemplate={(value) => {
+                void handleTemplateSelect(value);
+              }}
+              dueAt={dueAt}
+              setDueAt={setDueAt}
+              templatePreviewBusy={templatePreviewBusy}
+              templatePreview={templatePreview}
+              sprintEmailPreviewHtml={sprintEmailPreviewHtml}
+              templatePreviewError={templatePreviewError}
+              onAssignSprint={() => {
+                void handleAssignSprint();
+              }}
+              chipTone={chipTone}
+              decisionTone={decisionTone}
+              formatDateTime={formatDateTime}
+              formatRelativeDue={formatRelativeDue}
+              stripHtml={stripHtml}
+              formatBytes={formatBytes}
+            />
+          ) : null}
 
-          <Candidate360OfferSection
-            canAccessOffers={canAccessOffers}
-            offerRef={offerRef}
-            collapsed={collapsedSections.offer}
-            onToggle={() => toggleSection("offer")}
-            offersError={offersError}
-            offerPreviewError={offerPreviewError}
-            offersBusy={offersBusy}
-            candidateOffers={candidateOffers}
-            latestOffer={latestOffer}
-            reviseOfferEligibility={reviseOfferEligibility}
-            canDelete={canDelete}
-            canSkip={canSkip}
-            canSendApprovedOffer={canSendApprovedOffer}
-            candidateOpeningTitle={candidate.opening_title}
-            offerApprovalPrincipal={offerApprovalPrincipal}
-            setOfferApprovalPrincipal={setOfferApprovalPrincipal}
-            draftOverridesOpen={draftOverridesOpen}
-            setDraftOverridesOpen={setDraftOverridesOpen}
-            draftLetterOverrides={draftLetterOverrides}
-            setDraftLetterOverrides={setDraftLetterOverrides}
-            offerPreviewBusy={offerPreviewBusy}
-            form={{
-              offerTemplateCode,
-              offerDesignation,
-              offerGross,
-              offerFixed,
-              offerVariable,
-              offerCurrency,
-              offerJoiningDate,
-              offerProbationMonths,
-              offerGradeId,
-              offerNotes,
-              offerLetterOverrides,
-            }}
-            formSetters={{
-              setOfferTemplateCode,
-              setOfferDesignation,
-              setOfferGross,
-              setOfferFixed,
-              setOfferVariable,
-              setOfferCurrency,
-              setOfferJoiningDate,
-              setOfferProbationMonths,
-              setOfferGradeId,
-              setOfferNotes,
-              setOfferLetterOverrides,
-            }}
-            actions={{
-              handleOfferPreview,
-              handleSubmitOffer,
-              handleDeleteOffer,
-              handleApproveOffer,
-              handleRejectOffer,
-              handleSendOffer,
-              handleResendJoiningLink,
-              handleAdminDecision,
-              handleReviseOffer,
-              handleConvertCandidate: openConvertDialog,
-              handleSaveDraftOverrides,
-              handleCreateOffer,
-            }}
-            chipTone={chipTone}
-            formatMoney={formatMoney}
-            formatDate={formatDate}
-            formatDateTime={formatDateTime}
-          />
+          {!isInternWorkflow ? (
+            <Candidate360OfferSection
+              canAccessOffers={canAccessOffers}
+              offerRef={offerRef}
+              collapsed={collapsedSections.offer}
+              onToggle={() => toggleSection("offer")}
+              offersError={offersError}
+              offerPreviewError={offerPreviewError}
+              offersBusy={offersBusy}
+              candidateOffers={candidateOffers}
+              latestOffer={latestOffer}
+              reviseOfferEligibility={reviseOfferEligibility}
+              canDelete={canDelete}
+              canSkip={canSkip}
+              canSendApprovedOffer={canSendApprovedOffer}
+              candidateOpeningTitle={candidate.opening_title}
+              offerApprovalPrincipal={offerApprovalPrincipal}
+              setOfferApprovalPrincipal={setOfferApprovalPrincipal}
+              draftOverridesOpen={draftOverridesOpen}
+              setDraftOverridesOpen={setDraftOverridesOpen}
+              draftLetterOverrides={draftLetterOverrides}
+              setDraftLetterOverrides={setDraftLetterOverrides}
+              offerPreviewBusy={offerPreviewBusy}
+              form={{
+                offerTemplateCode,
+                offerDesignation,
+                offerGross,
+                offerFixed,
+                offerVariable,
+                offerCurrency,
+                offerJoiningDate,
+                offerProbationMonths,
+                offerGradeId,
+                offerNotes,
+                offerLetterOverrides,
+              }}
+              formSetters={{
+                setOfferTemplateCode,
+                setOfferDesignation,
+                setOfferGross,
+                setOfferFixed,
+                setOfferVariable,
+                setOfferCurrency,
+                setOfferJoiningDate,
+                setOfferProbationMonths,
+                setOfferGradeId,
+                setOfferNotes,
+                setOfferLetterOverrides,
+              }}
+              actions={{
+                handleOfferPreview,
+                handleSubmitOffer,
+                handleDeleteOffer,
+                handleApproveOffer,
+                handleRejectOffer,
+                handleSendOffer,
+                handleResendJoiningLink,
+                handleAdminDecision,
+                handleReviseOffer,
+                handleConvertCandidate: openConvertDialog,
+                handleSaveDraftOverrides,
+                handleCreateOffer,
+              }}
+              chipTone={chipTone}
+              formatMoney={formatMoney}
+              formatDate={formatDate}
+              formatDateTime={formatDateTime}
+            />
+          ) : null}
         </section>
       <Candidate360HtmlPreviewModal
         open={scheduleEmailPreviewOpen}
