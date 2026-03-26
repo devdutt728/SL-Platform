@@ -94,6 +94,8 @@ type DialogState = {
 
 const fetchFull = candidate360Api.fetchFull;
 const fetchCafLink = candidate360Api.fetchCafLink;
+const fetchAssessmentLink = candidate360Api.fetchAssessmentLink;
+const resendAssessmentLink = candidate360Api.resendAssessmentLink;
 const fetchCandidateSprints = candidate360Api.fetchCandidateSprints;
 const deleteCandidateSprint = candidate360Api.deleteCandidateSprint;
 const fetchJoiningDocs = candidate360Api.fetchJoiningDocs;
@@ -184,6 +186,7 @@ export function Candidate360Client({
     onConfirm: () => undefined,
   });
   const [cafLink, setCafLink] = useState<{ caf_token: string; caf_url: string } | null>(null);
+  const [assessmentLink, setAssessmentLink] = useState<{ assessment_token: string; assessment_url: string } | null>(null);
   const [joiningDocs, setJoiningDocs] = useState<JoiningDoc[] | null>(null);
   const [joiningDocsBusy, setJoiningDocsBusy] = useState(false);
   const [joiningDocsError, setJoiningDocsError] = useState<string | null>(null);
@@ -226,26 +229,30 @@ export function Candidate360Client({
       return emailType === "intern_selection";
     });
   }, [data.events, isInternWorkflow]);
-  const cafAssessmentSentAt = isInternWorkflow ? null : assessment?.assessment_sent_at || null;
-  const cafAssessmentSubmittedAt = isInternWorkflow ? null : assessment?.assessment_submitted_at || candidate.caf_submitted_at || null;
-  const cafGateActive = !isInternWorkflow && !!cafAssessmentSentAt;
-  const cafLocked = cafGateActive && !cafAssessmentSubmittedAt;
-  const cafExpiryDays = 3;
-  const cafSentAt = cafAssessmentSentAt ? new Date(cafAssessmentSentAt) : null;
-  const cafExpiresAt = cafSentAt ? new Date(cafSentAt.getTime() + cafExpiryDays * 24 * 60 * 60 * 1000) : null;
-  const cafDaysLeft =
-    cafExpiresAt && cafSentAt
-      ? Math.max(0, Math.ceil((cafExpiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
+  const cafSentAt = isInternWorkflow ? null : candidate.caf_sent_at || null;
+  const cafSubmittedAt = isInternWorkflow ? null : candidate.caf_submitted_at || null;
+  const assessmentSentAt = isInternWorkflow ? null : assessment?.assessment_sent_at || null;
+  const assessmentSubmittedAt = isInternWorkflow ? null : assessment?.assessment_submitted_at || null;
+  const assessmentGateActive = !isInternWorkflow && !!assessmentSentAt;
+  const assessmentLocked = assessmentGateActive && !assessmentSubmittedAt;
+  const assessmentExpiryDays = 3;
+  const assessmentSentDate = assessmentSentAt ? new Date(assessmentSentAt) : null;
+  const assessmentExpiresAt = assessmentSentDate
+    ? new Date(assessmentSentDate.getTime() + assessmentExpiryDays * 24 * 60 * 60 * 1000)
+    : null;
+  const assessmentDaysLeft =
+    assessmentExpiresAt && assessmentSentDate
+      ? Math.max(0, Math.ceil((assessmentExpiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
       : null;
 
   const cafState = useMemo(() => {
     if (isInternWorkflow) return { label: "CAF not required", tone: chipTone("blue") };
-    const generated = cafGateActive;
-    const submitted = !!cafAssessmentSubmittedAt;
+    const generated = !!cafSentAt;
+    const submitted = !!cafSubmittedAt;
     if (submitted) return { label: "CAF submitted", tone: chipTone("green") };
     if (generated) return { label: "CAF pending", tone: chipTone("amber") };
     return { label: "CAF not shared", tone: chipTone("neutral") };
-  }, [cafAssessmentSubmittedAt, cafGateActive, isInternWorkflow]);
+  }, [cafSentAt, cafSubmittedAt, isInternWorkflow]);
   const needsReviewChip = useMemo(() => {
     if (!candidate.needs_hr_review) return null;
     return <Chip className={chipTone("amber")}>Needs HR review</Chip>;
@@ -264,15 +271,23 @@ export function Candidate360Client({
     setData(full);
     if (isInternWorkflow) {
       setCafLink(null);
+      setAssessmentLink(null);
       return;
     }
     try {
-      const link = await fetchCafLink(candidateId);
-      setCafLink(link);
+      const nextAssessment = full.assessment as CandidateAssessment | null | undefined;
+      const [nextCafLink, nextAssessmentLink] = await Promise.all([
+        fetchCafLink(candidateId).catch(() => null),
+        nextAssessment?.assessment_sent_at || assessmentLink
+          ? fetchAssessmentLink(candidateId).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      setCafLink(nextCafLink);
+      setAssessmentLink(nextAssessmentLink);
     } catch {
       // ignore
     }
-  }, [candidateId, isInternWorkflow]);
+  }, [assessmentLink, candidateId, isInternWorkflow]);
 
   const {
     skipStage,
@@ -592,6 +607,17 @@ export function Candidate360Client({
     }
   }
 
+  async function initAssessmentLinkIfNeeded() {
+    if (isInternWorkflow) return;
+    if (assessmentLink || assessment?.assessment_sent_at) return;
+    try {
+      const link = await fetchAssessmentLink(candidateId);
+      setAssessmentLink(link);
+    } catch {
+      // ignore
+    }
+  }
+
   async function handleCopyCafLink() {
     if (isInternWorkflow) return;
     setError(null);
@@ -679,6 +705,7 @@ export function Candidate360Client({
     canSkip,
     allowL1Scheduling: !isInternWorkflow,
     currentStageKey,
+    assessmentSubmittedAt,
     refreshAll,
     candidateL2OwnerEmail: candidate.l2_owner_email,
     candidateL2OwnerName: candidate.l2_owner_name,
@@ -790,6 +817,82 @@ export function Candidate360Client({
     }
   }
 
+  async function handleCopyAssessmentLink() {
+    if (isInternWorkflow) return;
+    setError(null);
+    try {
+      const link = assessmentLink || (await fetchAssessmentLink(candidateId));
+      setAssessmentLink(link);
+      if (!link) {
+        setError("Assessment link is not available for this candidate yet.");
+        return;
+      }
+      const absolute = `${window.location.origin}${link.assessment_url}`;
+      await navigator.clipboard.writeText(absolute);
+      setError("Assessment link copied.");
+      window.setTimeout(() => setError(null), 1200);
+    } catch (e: any) {
+      setError(e?.message || "Could not copy assessment link");
+    }
+  }
+
+  async function handleSendAssessmentLink() {
+    if (isInternWorkflow) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await resendAssessmentLink(candidateId);
+      if (result.assessment_token && result.assessment_url) {
+        setAssessmentLink({
+          assessment_token: result.assessment_token,
+          assessment_url: result.assessment_url,
+        });
+      }
+      await refreshAll();
+
+      if (result.attempted && result.email_status !== "failed") {
+        pushToast({
+          title: "Assessment email sent",
+          description: result.email_status === "resent" ? "The updated assessment link has been re-sent." : "The updated assessment link has been sent.",
+          tone: "success",
+        });
+        return;
+      }
+
+      if (result.email_status === "failed") {
+        throw new Error(result.email_error || "Assessment email could not be sent.");
+      }
+
+      const reason = (result.reason || "").trim();
+      if (reason === "already_submitted") {
+        pushToast({
+          title: "Assessment already submitted",
+          description: "No new email was sent because this candidate has already completed the assessment.",
+          tone: "warning",
+        });
+        return;
+      }
+
+      if (reason === "missing_recipient") {
+        throw new Error("Candidate email is missing.");
+      }
+
+      if (reason === "disabled_for_workflow") {
+        throw new Error("Candidate assessment is not enabled for this opening.");
+      }
+
+      pushToast({
+        title: "Assessment email not sent",
+        description: reason || "No new assessment email was sent.",
+        tone: "warning",
+      });
+    } catch (e: any) {
+      setError(e?.message || "Could not send assessment email");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleSendInternSelectionEmail() {
     openDialog({
       title: hasInternSelectionEmailSent ? "Resend selection email" : "Send selection email",
@@ -892,7 +995,7 @@ export function Candidate360Client({
     canSchedule,
     canAccessOffers,
     canSkip,
-    cafLocked,
+    assessmentLocked,
     hasL2FeedbackSubmitted,
     hasL1FeedbackSubmitted,
     hasInternSelectionEmailSent,
@@ -961,8 +1064,8 @@ export function Candidate360Client({
     if (!candidate.l2_owner_email && currentStageKey === "enquiry") {
       actions.push("Assign GL/L2 owner to unlock HR screening.");
     }
-    if (cafLocked) {
-      actions.push("Collect CAF submission before moving to non-terminal stages.");
+    if (assessmentLocked) {
+      actions.push("Collect assessment submission before moving to the L2 interview and later stages.");
     }
     if (currentStageKey === "l2_feedback" && !hasL2FeedbackSubmitted) {
       actions.push("Submit at least one L2 interview feedback to unlock stage transitions.");
@@ -1002,7 +1105,7 @@ export function Candidate360Client({
   }, [
     candidate.l2_owner_email,
     canAccessOffers,
-    cafLocked,
+    assessmentLocked,
     currentStageKey,
     hasInternSelectionEmailSent,
     hasApprovedSprint,
@@ -1086,8 +1189,10 @@ export function Candidate360Client({
         busy={busy}
         showCafSection={!isInternWorkflow}
         cafState={cafState}
-        cafAssessmentSubmittedAt={cafAssessmentSubmittedAt}
-        cafAssessmentSentAt={cafAssessmentSentAt}
+        cafSubmittedAt={cafSubmittedAt}
+        cafSentAt={cafSentAt}
+        assessmentSubmittedAt={assessmentSubmittedAt}
+        assessmentSentAt={assessmentSentAt}
         l2FeedbackEvent={l2FeedbackEvent}
         l1FeedbackEvent={l1FeedbackEvent}
         onCopyCafLink={() => {
@@ -1095,6 +1200,15 @@ export function Candidate360Client({
         }}
         onInitCafLinkIfNeeded={() => {
           void initCafLinkIfNeeded();
+        }}
+        onCopyAssessmentLink={() => {
+          void handleCopyAssessmentLink();
+        }}
+        onInitAssessmentLinkIfNeeded={() => {
+          void initAssessmentLinkIfNeeded();
+        }}
+        onSendAssessmentLink={() => {
+          void handleSendAssessmentLink();
         }}
         docTone={docTone}
         chipTone={chipTone}
@@ -1104,9 +1218,9 @@ export function Candidate360Client({
         onExpandAll={() => setAllSections(false)}
         onCollapseAll={() => setAllSections(true)}
         collapsed={collapsedSections.overview}
-        cafLocked={cafLocked}
-        cafExpiresAt={cafExpiresAt}
-        cafDaysLeft={cafDaysLeft}
+        assessmentLocked={assessmentLocked}
+        assessmentExpiresAt={assessmentExpiresAt}
+        assessmentDaysLeft={assessmentDaysLeft}
         l2OwnerSelected={l2OwnerSelected}
         l2OwnerQuery={l2OwnerQuery}
         setL2OwnerSelected={setL2OwnerSelected}
@@ -1175,18 +1289,20 @@ export function Candidate360Client({
           sectionRef={screeningRef}
           collapsed={collapsedSections.screening}
           onToggle={() => toggleSection("screening")}
+          candidate={candidate}
           screening={screening}
           assessment={assessment}
+          assessmentCompensationVisible={data.assessment_compensation_visible !== false}
           isInternWorkflow={isInternWorkflow}
           candidateQuestionsFromCandidate={candidate.questions_from_candidate}
           screeningTone={screeningTone}
           screeningLabel={screeningLabel}
           chipTone={chipTone}
           valueOrDash={valueOrDash}
-            yesNo={yesNo}
-            formatDate={formatDate}
-            formatDateTime={formatDateTime}
-          />
+          yesNo={yesNo}
+          formatDate={formatDate}
+          formatDateTime={formatDateTime}
+        />
 
           <Candidate360DocumentsSection
             sectionRef={documentsRef}

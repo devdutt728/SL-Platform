@@ -448,7 +448,15 @@ export function IngestOpsPanel({ openings }: Props) {
             {preflightResult ? (
               <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-700">
                 <p>Rows: {preflightResult.requested_rows}</p>
-                <p>Created: {preflightResult.created_count} · Duplicate: {preflightResult.duplicate_count} · Failed: {preflightResult.failed_count}</p>
+                <p>
+                  Created: {preflightResult.created_count}
+                  {" · "}
+                  Reapplied: {preflightResult.reapplied_count ?? 0}
+                  {" · "}
+                  Duplicate: {preflightResult.duplicate_count}
+                  {" · "}
+                  Failed: {preflightResult.failed_count}
+                </p>
               </div>
             ) : null}
           </div>

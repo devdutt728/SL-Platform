@@ -33,7 +33,9 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
       current_employment_status: stringOrNull(formData.get("current_employment_status")),
       interviewer_name: stringOrNull(formData.get("interviewer_name")),
       notice_period_days: intOrNull(formData.get("notice_period_days")),
+      earliest_joining_date: stringOrNull(formData.get("earliest_joining_date")),
       current_ctc_annual: numberOrNull(formData.get("current_ctc_annual")),
+      current_monthly_take_home: numberOrNull(formData.get("current_monthly_take_home")),
       expected_ctc_annual: numberOrNull(formData.get("expected_ctc_annual")),
       current_location: stringOrNull(formData.get("current_location")),
       reason_for_job_change: stringOrNull(formData.get("reason_for_job_change")),
@@ -239,20 +241,45 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
               placeholder="30"
             />
           </Field>
-          <Field label="Current CTC (annual)">
+          <Field
+            label="If selected for this role, what would be your earliest available date to join?"
+            hint="Please select the earliest date you would be able to join, subject to notice period and release formalities."
+          >
+            <input
+              name="earliest_joining_date"
+              type="date"
+              required
+              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+            />
+          </Field>
+          <Field label="Current Annual CTC (in INR)">
             <input
               name="current_ctc_annual"
               type="number"
               step="0.01"
+              required
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              placeholder="1200000"
             />
           </Field>
-          <Field label="Expected CTC (annual)">
+          <Field label="Current Monthly Take-Home Pay (in INR)">
+            <input
+              name="current_monthly_take_home"
+              type="number"
+              step="0.01"
+              required
+              className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              placeholder="85000"
+            />
+          </Field>
+          <Field label="Expected Annual CTC (in INR)">
             <input
               name="expected_ctc_annual"
               type="number"
               step="0.01"
+              required
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
+              placeholder="1500000"
             />
           </Field>
           <Field label="Current location">
@@ -732,10 +759,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="space-y-1">
       <span className="text-sm text-[var(--dim-grey)]">{label}</span>
+      {hint ? <span className="block text-xs text-[var(--text-secondary)]">{hint}</span> : null}
       {children}
     </label>
   );

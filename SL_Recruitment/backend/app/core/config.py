@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     sheet_ingest_token: str = ""
     # 0 or negative disables per-request row cap for Google Sheet ingest.
     sheet_ingest_max_rows: int = 0
+    assessment_compensation_hidden_emails: str = (
+        "nishant.singh@studiolotus.in,devdutt.kumar@studiolotus.in"
+    )
+    assessment_compensation_hidden_role_ids: str = "5,6"
 
     model_config = SettingsConfigDict(env_prefix="SL_", env_file=_env_files(), extra="ignore")
 

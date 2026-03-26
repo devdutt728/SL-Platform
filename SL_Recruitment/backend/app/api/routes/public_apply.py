@@ -593,6 +593,7 @@ async def apply_for_opening(
         candidate.questions_from_candidate = questions_value
         candidate.caf_token = caf_token
         candidate.caf_sent_at = now if workflow_policy.requires_caf else None
+        candidate.caf_submitted_at = candidate.caf_submitted_at or (now if workflow_policy.requires_caf else None)
         candidate.updated_at = now
         candidate.application_docs_status = _application_docs_status(
             cv_url=cv_source_url if has_cv_file or cv_source_url else candidate.cv_url,
@@ -659,6 +660,7 @@ async def apply_for_opening(
             resume_url=resume_source_url,
             caf_token=caf_token,
             caf_sent_at=now if workflow_policy.requires_caf else None,
+            caf_submitted_at=now if workflow_policy.requires_caf else None,
             application_docs_status=application_docs_status,
             joining_docs_status="none",
             created_at=now,
@@ -681,10 +683,19 @@ async def apply_for_opening(
             ).scalars().first()
             if existing_candidate:
                 caf_token_existing = existing_candidate.caf_token or uuid4().hex if workflow_policy.requires_caf else None
-                if workflow_policy.requires_caf and existing_candidate.caf_token != caf_token_existing:
-                    existing_candidate.caf_token = caf_token_existing
-                    existing_candidate.caf_sent_at = now
-                    existing_candidate.updated_at = now
+                if workflow_policy.requires_caf:
+                    candidate_changed = False
+                    if existing_candidate.caf_token != caf_token_existing:
+                        existing_candidate.caf_token = caf_token_existing
+                        candidate_changed = True
+                    if existing_candidate.caf_sent_at is None:
+                        existing_candidate.caf_sent_at = now
+                        candidate_changed = True
+                    if existing_candidate.caf_submitted_at is None:
+                        existing_candidate.caf_submitted_at = now
+                        candidate_changed = True
+                    if candidate_changed:
+                        existing_candidate.updated_at = now
                 response_payload = PublicApplyOut(
                     candidate_id=existing_candidate.candidate_id,
                     candidate_code=existing_candidate.candidate_code,

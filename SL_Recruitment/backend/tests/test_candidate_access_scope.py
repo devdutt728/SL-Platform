@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.api.routes.candidates import _is_interviewer_scope
+from app.api.routes.candidates import _can_view_assessment_compensation, _is_interviewer_scope
 from app.core.roles import Role
 from app.schemas.user import UserContext
 
@@ -39,6 +39,29 @@ class CandidateAccessScopeTests(unittest.TestCase):
         user = _user(roles=[Role.GROUP_LEAD], platform_role_ids=[2, 5])
 
         self.assertFalse(_is_interviewer_scope(user))
+
+    def test_assessment_compensation_hidden_for_explicit_email(self) -> None:
+        user = UserContext(
+            user_id="nishant.singh@studiolotus.in",
+            email="nishant.singh@studiolotus.in",
+            roles=[Role.HR_EXEC],
+            person_id_platform="123",
+            full_name="Nishant Singh",
+            platform_role_id=3,
+            platform_role_ids=[3],
+        )
+
+        self.assertFalse(_can_view_assessment_compensation(user))
+
+    def test_assessment_compensation_hidden_for_role_5(self) -> None:
+        user = _user(roles=[Role.GROUP_LEAD], platform_role_ids=[5])
+
+        self.assertFalse(_can_view_assessment_compensation(user))
+
+    def test_assessment_compensation_visible_for_regular_hr_user(self) -> None:
+        user = _user(roles=[Role.HR_EXEC], platform_role_ids=[3])
+
+        self.assertTrue(_can_view_assessment_compensation(user))
 
 
 if __name__ == "__main__":

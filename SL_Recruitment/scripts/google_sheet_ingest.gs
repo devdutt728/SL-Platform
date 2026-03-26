@@ -29,7 +29,7 @@ const INGEST_CONFIG = {
   archiveSheetName: "Ingest Archive",
   auditSheetName: "Ingest Audit Log",
   auditMaxRows: 50000,
-  archiveStatuses: ["created", "duplicate"],
+  archiveStatuses: ["created", "reapplied", "duplicate"],
   archiveMinAgeHours: 24,
   defaultSourceChannel: "google_sheet",
   requiredHeaderHints: ["Job ID", "First name", "Last name", "Email", "Terms"],
@@ -63,7 +63,7 @@ const INGEST_CONFIG = {
     "exceeds max allowed size",
     "max allowed is"
   ],
-  skipStatuses: ["created", "duplicate", "processing", "failed_permanent"],
+  skipStatuses: ["created", "reapplied", "duplicate", "processing", "failed_permanent"],
   duplicateCooldownHours: 24,
   changeTriggerHandler: "handleIngestSheetChange",
   scheduledTriggerHandler: "runScheduledIngest",
@@ -170,7 +170,7 @@ function runScheduledIngest() {
   }
 
   try {
-    pushCandidatesToRecruitment(); // your existing ingest flow
+    pushCandidatesToRecruitment({ suppressIdleAudit: true }); // your existing ingest flow
   } catch (err) {
     Logger.log(`runScheduledIngest ingest failed: ${err}`);
   }
@@ -182,6 +182,100 @@ function runScheduledIngest() {
  */
 function repairKnownCreatedRows() {
   _resetIngestOpsForRows([5, 6, 7], { rerunIngest: true });
+}
+
+function countCurrentSheetRows() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const targetSheet = _resolveTargetSheet(ss);
+  const tabNames = [];
+  const seen = {};
+
+  if (targetSheet) {
+    const targetName = String(targetSheet.getName() || "").trim();
+    if (targetName) {
+      tabNames.push(targetName);
+      seen[targetName] = true;
+    }
+  }
+
+  const archiveName = String(INGEST_CONFIG.archiveSheetName || "").trim();
+  if (archiveName && !seen[archiveName]) {
+    tabNames.push(archiveName);
+    seen[archiveName] = true;
+  }
+
+  const summaries = [];
+  let combinedCandidateLikeRows = 0;
+
+  tabNames.forEach((tabName) => {
+    const sheet = ss.getSheetByName(tabName);
+    if (!sheet) {
+      const missingSummary = {
+        sheet_name: tabName,
+        found: false,
+        total_data_rows: 0,
+        candidate_like_rows: 0,
+        status_counts: {}
+      };
+      summaries.push(missingSummary);
+      Logger.log(`${tabName}: not found`);
+      return;
+    }
+
+    const values = sheet.getDataRange().getValues();
+    if (!values.length || values.length === 1) {
+      const emptySummary = {
+        sheet_name: tabName,
+        found: true,
+        total_data_rows: 0,
+        candidate_like_rows: 0,
+        status_counts: {}
+      };
+      summaries.push(emptySummary);
+      Logger.log(`${tabName}: total_data_rows=0, candidate_like_rows=0`);
+      return;
+    }
+
+    const headers = values[0].map((h) => String(h || "").trim());
+    const headerIndex = _buildHeaderIndex(headers);
+    const rows = values.slice(1);
+    const statusCounts = {};
+    let candidateLikeRows = 0;
+
+    rows.forEach((row) => {
+      const email = _readCell(row, headerIndex, "Email");
+      const externalRef =
+        _readCell(row, headerIndex, "External Source Ref") ||
+        _readCell(row, headerIndex, "external_source_ref");
+      if (!email && !externalRef) return;
+
+      candidateLikeRows += 1;
+      const status = _readCell(row, headerIndex, INGEST_CONFIG.statusColumn).toLowerCase() || "(blank)";
+      statusCounts[status] = (statusCounts[status] || 0) + 1;
+    });
+
+    combinedCandidateLikeRows += candidateLikeRows;
+
+    const summary = {
+      sheet_name: tabName,
+      found: true,
+      total_data_rows: rows.length,
+      candidate_like_rows: candidateLikeRows,
+      status_counts: statusCounts
+    };
+    summaries.push(summary);
+    Logger.log(
+      `${tabName}: total_data_rows=${rows.length}, candidate_like_rows=${candidateLikeRows}, status_counts=${JSON.stringify(statusCounts)}`
+    );
+  });
+
+  const output = {
+    sheets: summaries,
+    combined_candidate_like_rows: combinedCandidateLikeRows
+  };
+  Logger.log(`Combined candidate_like_rows=${combinedCandidateLikeRows}`);
+  Logger.log(JSON.stringify(output));
+  return output;
 }
 
 function _resetIngestOpsForRows(rowNumbers, options) {
@@ -230,7 +324,8 @@ function _resetIngestOpsForRows(rowNumbers, options) {
   }
 }
 
-function pushCandidatesToRecruitment() {
+function pushCandidatesToRecruitment(options) {
+  const opts = options || {};
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) {
     Logger.log("Skipping run: could not acquire lock.");
@@ -271,9 +366,13 @@ function pushCandidatesToRecruitment() {
     const values = range.getValues();
     const richValues = range.getRichTextValues();
     if (!values.length || values.length === 1) {
-      _pushAuditEntry(auditEntries, auditContext, "INFO", "run_no_data", {
-        message: "No data rows found."
-      });
+      if (opts.suppressIdleAudit) {
+        auditEntries.length = 0;
+      } else {
+        _pushAuditEntry(auditEntries, auditContext, "INFO", "run_no_data", {
+          message: "No data rows found."
+        });
+      }
       Logger.log("No data rows found.");
       return;
     }
@@ -289,9 +388,13 @@ function pushCandidatesToRecruitment() {
       sheetName: sheet.getName()
     });
     if (!pending.length) {
-      _pushAuditEntry(auditEntries, auditContext, "INFO", "run_no_pending", {
-        details: { total_rows: rows.length }
-      });
+      if (opts.suppressIdleAudit) {
+        auditEntries.length = 0;
+      } else {
+        _pushAuditEntry(auditEntries, auditContext, "INFO", "run_no_pending", {
+          details: { total_rows: rows.length }
+        });
+      }
       Logger.log("No pending rows to ingest.");
       _archiveSuccessfulRows(ss, sheet, headers);
       return;
@@ -519,7 +622,6 @@ function _collectPendingRows(rows, richRows, headerIndex, context) {
     "First name",
     "Last name",
     "Email",
-    "Portfolio",
     "Terms"
   ];
 
@@ -532,6 +634,9 @@ function _collectPendingRows(rows, richRows, headerIndex, context) {
     const portfolioValue = _readFileField(row, richRow, headerIndex, "Portfolio");
     const cvValue = _readFileField(row, richRow, headerIndex, "CV");
     const resumeValue = _readFileField(row, richRow, headerIndex, "Resume");
+    const normalizedPortfolioValue = _normalizeOptionalFileUrl(portfolioValue);
+    const normalizedCvValue = _normalizeOptionalFileUrl(cvValue);
+    const normalizedResumeValue = _normalizeOptionalFileUrl(resumeValue);
 
     const payload = {
       row_key: String(rowNumber),
@@ -547,9 +652,9 @@ function _collectPendingRows(rows, richRows, headerIndex, context) {
       city: _readCell(row, headerIndex, "City"),
       willing_to_relocate: _readCell(row, headerIndex, "Willing to Relocate?"),
       terms: _readCell(row, headerIndex, "Terms"),
-      portfolio: portfolioValue,
-      cv: cvValue,
-      resume: resumeValue,
+      portfolio: normalizedPortfolioValue,
+      cv: normalizedCvValue,
+      resume: normalizedResumeValue,
       source_channel:
         _readCell(row, headerIndex, "Source Channel") ||
         _readCell(row, headerIndex, "source_channel") ||
@@ -585,38 +690,6 @@ function _collectPendingRows(rows, richRows, headerIndex, context) {
         rowKey: String(rowNumber),
         payload,
         localError: "Terms must be accepted (Yes/True/1)."
-      });
-      return;
-    }
-
-    if (!_looksLikeUrl(payload.portfolio)) {
-      out.push({
-        rowNumber,
-        rowKey: String(rowNumber),
-        payload,
-        localError:
-          "Portfolio must be a valid public URL (or a hyperlink in the Portfolio cell)."
-      });
-      return;
-    }
-
-    if (payload.cv && !_looksLikeUrl(payload.cv)) {
-      out.push({
-        rowNumber,
-        rowKey: String(rowNumber),
-        payload,
-        localError: "CV must be a valid public URL (or a hyperlink in the CV cell)."
-      });
-      return;
-    }
-
-    if (payload.resume && !_looksLikeUrl(payload.resume)) {
-      out.push({
-        rowNumber,
-        rowKey: String(rowNumber),
-        payload,
-        localError:
-          "Resume must be a valid public URL (or a hyperlink in the Resume cell)."
       });
       return;
     }
@@ -691,7 +764,9 @@ function _shouldSkipRowForStatus(status, row, headerIndex) {
 
   if (normalized === "failed_permanent") {
     const message = _readCell(row, headerIndex, INGEST_CONFIG.messageColumn);
-    if (_isTransientBatchFailureMessage(message)) return false;
+    if (_isTransientBatchFailureMessage(message) || _shouldReevaluateFailedPermanentRow(message)) {
+      return false;
+    }
   }
 
   if (normalized !== "duplicate") {
@@ -748,7 +823,29 @@ function _extractLinkFromRichText(richText) {
 
 function _looksLikeUrl(value) {
   const text = String(value || "").trim();
-  return /^https?:\/\/.+/i.test(text);
+  if (!text) return false;
+  try {
+    const parsed = new URL(text);
+    return /^https?:$/i.test(parsed.protocol) && !!parsed.hostname;
+  } catch (err) {
+    return false;
+  }
+}
+
+function _normalizeOptionalFileUrl(value) {
+  return _looksLikeUrl(value) ? String(value || "").trim() : "";
+}
+
+function _shouldReevaluateFailedPermanentRow(message) {
+  const text = String(message || "").toLowerCase();
+  if (!text) return false;
+  return (
+    text.indexOf("portfolio must be a valid public url") >= 0 ||
+    text.indexOf("cv must be a valid public url") >= 0 ||
+    text.indexOf("resume must be a valid public url") >= 0 ||
+    text.indexOf("contains multiple urls") >= 0 ||
+    text.indexOf("missing required columns: portfolio") >= 0
+  );
 }
 
 function _markBatchProcessing(sheet, batch, headerIndex, options) {
@@ -860,6 +957,7 @@ function _writeRowStatus(
 
   if (
     finalStatus === "created" ||
+    finalStatus === "reapplied" ||
     finalStatus === "duplicate" ||
     finalStatus === "failed_permanent" ||
     finalStatus === "processing"

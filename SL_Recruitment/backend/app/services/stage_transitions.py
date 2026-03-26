@@ -158,17 +158,15 @@ async def apply_stage_transition(
         enforce_caf_gate
         and workflow_policy.requires_candidate_assessment
         and normalized_to_stage not in _CAF_BYPASS_STAGES
-        and not is_superadmin
     ):
-        assessment_shared, assessment_submitted = await _assessment_gate_state(
+        _assessment_shared, assessment_submitted = await _assessment_gate_state(
             session,
             candidate_id=candidate.candidate_id,
         )
-        caf_submitted = candidate.caf_submitted_at is not None or assessment_submitted
-        if assessment_shared and not caf_submitted:
+        if not assessment_submitted:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="CAF must be submitted before advancing to further rounds.",
+                detail="Assessment must be submitted before advancing to further rounds.",
             )
 
     if require_l2_owner_for_hr_screening and normalized_to_stage == HR_SCREENING and not candidate.l2_owner_email:

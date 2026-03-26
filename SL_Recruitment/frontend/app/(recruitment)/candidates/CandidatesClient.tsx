@@ -107,11 +107,21 @@ function isInternCandidate(candidate: CandidateListItem) {
   return INTERN_OPENING_CODES.has(String(candidate.opening_code || "").toUpperCase());
 }
 
+function isAssessmentLockedStage(toStage: RecruitmentStageKey) {
+  return !["enquiry", "hr_screening", "l2_shortlist", "rejected", "declined", "hired"].includes(toStage);
+}
+
 function cafChip(candidate: CandidateListItem) {
   if (isInternCandidate(candidate)) return { label: "CAF not required", tone: chipTone("blue") };
   if (candidate.caf_submitted_at) return { label: "CAF submitted", tone: chipTone("green") };
   if (candidate.caf_sent_at) return { label: "CAF pending", tone: chipTone("amber") };
   return { label: "CAF not sent", tone: chipTone("neutral") };
+}
+
+function assessmentChip(candidate: CandidateListItem) {
+  if (isInternCandidate(candidate)) return { label: "Assessment not required", tone: chipTone("blue") };
+  if (candidate.assessment_submitted_at) return { label: "Assessment submitted", tone: chipTone("green") };
+  return { label: "Assessment pending", tone: chipTone("amber") };
 }
 
 function priorityChip(candidate: CandidateListItem) {
@@ -220,13 +230,35 @@ async function transitionCandidateStage(params: {
   if (!res.ok) throw new Error(await res.text());
 }
 
+async function markLegacyCafComplete(candidateIds: number[]) {
+  const res = await fetch("/api/rec/candidates/legacy-caf-complete", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      candidate_ids: candidateIds,
+      note: "bulk_legacy_caf_backfill",
+    }),
+  });
+  if (res.status === 401) {
+    redirectToLogin();
+    return null;
+  }
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as {
+    requested_count: number;
+    updated_count: number;
+    skipped_count: number;
+    screening_seeded_count: number;
+  };
+}
+
 function canTransitionCandidate(candidate: CandidateListItem, toStage: RecruitmentStageKey) {
   const current = normalizeStage(candidate.current_stage);
   if (!current) return { ok: true as const };
   if (current === toStage) return { ok: false as const, reason: "Candidate is already in this stage." };
-  const cafLocked = !isInternCandidate(candidate) && !!candidate.caf_sent_at && !candidate.caf_submitted_at;
-  if (cafLocked && toStage !== "rejected" && toStage !== "declined" && toStage !== "hired") {
-    return { ok: false as const, reason: "CAF is pending. Only terminal transitions are allowed." };
+  const assessmentLocked = !isInternCandidate(candidate) && isAssessmentLockedStage(toStage) && !candidate.assessment_submitted_at;
+  if (assessmentLocked) {
+    return { ok: false as const, reason: "Assessment is pending. Moving to L2 interview and later stages is blocked." };
   }
   if (toStage === "hr_screening" && !candidate.l2_owner_email) {
     return { ok: false as const, reason: "GL/L2 owner is required before HR screening." };
@@ -237,8 +269,11 @@ function canTransitionCandidate(candidate: CandidateListItem, toStage: Recruitme
 function nextBestAction(candidate: CandidateListItem) {
   const stage = normalizeStage(candidate.current_stage);
   if (!candidate.l2_owner_email && stage === "enquiry") return "Assign GL/L2 owner to unlock HR screening.";
-  if (!isInternCandidate(candidate) && !!candidate.caf_sent_at && !candidate.caf_submitted_at) {
-    return "Follow up for CAF submission before progressing.";
+  if (!isInternCandidate(candidate) && stage === "hr_screening" && !candidate.caf_submitted_at) {
+    return "CAF/basic details should be marked submitted for this candidate record.";
+  }
+  if (!isInternCandidate(candidate) && stage === "l2_shortlist" && !candidate.assessment_submitted_at) {
+    return "Follow up for assessment submission before scheduling the L2 interview.";
   }
   if (stage === "l2_feedback") return "Capture decision quickly and move to Sprint/Reject.";
   if (stage === "l1_feedback") return "Create and send offer draft immediately.";
@@ -267,6 +302,7 @@ export function CandidatesClient({
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<number>>(new Set());
   const [bulkTargetStage, setBulkTargetStage] = useState<RecruitmentStageKey | "">("");
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkLegacyCafBusy, setBulkLegacyCafBusy] = useState(false);
 
   const tableGrid =
     "grid grid-cols-[minmax(200px,2.4fr)_minmax(140px,1.2fr)_minmax(170px,1.5fr)_minmax(200px,1.9fr)_minmax(80px,0.7fr)_minmax(80px,0.7fr)_minmax(95px,0.8fr)]";
@@ -637,6 +673,43 @@ export function CandidatesClient({
     if (!failed) setSelectedCandidateIds(new Set());
   }
 
+  async function runLegacyCafBackfill() {
+    if (!selectedCandidates.length) {
+      pushToast({ tone: "warning", title: "No candidates selected" });
+      return;
+    }
+    setBulkLegacyCafBusy(true);
+    try {
+      const result = await markLegacyCafComplete(selectedCandidates.map((candidate) => candidate.candidate_id));
+      if (!result) return;
+      await reloadCandidates();
+      pushToast({
+        tone: result.skipped_count ? "warning" : "success",
+        title: "Legacy CAF backfill complete",
+        description: `${result.updated_count} updated, ${result.skipped_count} skipped.`,
+      });
+      trackUxMetric({
+        event_name: "candidate_legacy_caf_backfill_bulk",
+        entity_type: "candidate_bulk",
+        entity_id: String(Date.now()),
+        metadata: {
+          requested: result.requested_count,
+          updated: result.updated_count,
+          skipped: result.skipped_count,
+          screening_seeded: result.screening_seeded_count,
+        },
+      });
+    } catch (e: any) {
+      pushToast({
+        tone: "error",
+        title: "Legacy CAF backfill failed",
+        description: e?.message || "Could not update selected candidates.",
+      });
+    } finally {
+      setBulkLegacyCafBusy(false);
+    }
+  }
+
   async function handleDropToStage(toStage: RecruitmentStageKey) {
     if (!dragCandidateId) return;
     const candidate = filtered.find((item) => item.candidate_id === dragCandidateId);
@@ -831,6 +904,17 @@ export function CandidatesClient({
             {allFilteredSelected ? "Clear selection" : "Select filtered"}
           </button>
           <span className="text-[11px] text-amber-800">{selectedCandidateIds.size} selected</span>
+          <button
+            type="button"
+            onClick={() => {
+              void runLegacyCafBackfill();
+            }}
+            disabled={bulkBusy || bulkLegacyCafBusy || selectedCandidateIds.size === 0}
+            className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-semibold text-amber-900 disabled:opacity-60"
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {bulkLegacyCafBusy ? "Marking CAF..." : "Mark selected CAF done"}
+          </button>
           <select
             value={bulkTargetStage}
             onChange={(e) => setBulkTargetStage((e.target.value || "") as RecruitmentStageKey | "")}
@@ -848,7 +932,7 @@ export function CandidatesClient({
             onClick={() => {
               void runBulkTransition();
             }}
-            disabled={bulkBusy || !bulkTargetStage || selectedCandidateIds.size === 0}
+            disabled={bulkBusy || bulkLegacyCafBusy || !bulkTargetStage || selectedCandidateIds.size === 0}
             className="inline-flex items-center gap-1.5 rounded-full bg-amber-700 px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
           >
             <MoveRight className="h-3.5 w-3.5" />
@@ -879,6 +963,7 @@ export function CandidatesClient({
           <div className="divide-y divide-slate-200">
             {filtered.map((candidate) => {
               const caf = cafChip(candidate);
+              const assessment = assessmentChip(candidate);
               const screening = priorityChip(candidate);
               const stageKey = normalizeStage(candidate.current_stage);
               const stageClass = stageTone[stageKey] || "bg-slate-500/10 text-slate-700 ring-1 ring-slate-500/15";
@@ -926,6 +1011,9 @@ export function CandidatesClient({
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 whitespace-nowrap">
                     <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", caf.tone)}>{caf.label}</span>
+                    <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", assessment.tone)}>
+                      {assessment.label}
+                    </span>
                     {screening ? (
                       <span className={clsx("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold", screening.tone)}>
                         <CheckCircle2 className="h-3 w-3" />
@@ -1016,6 +1104,7 @@ export function CandidatesClient({
                   <div className="mt-2 space-y-2">
                     {items.map((candidate) => {
                       const selected = selectedCandidateIds.has(candidate.candidate_id);
+                      const assessment = assessmentChip(candidate);
                       const canMoveText = (() => {
                         const check = canTransitionCandidate(candidate, column.key);
                         return check.ok ? null : check.reason;
@@ -1054,6 +1143,9 @@ export function CandidatesClient({
                           <div className="mt-2 flex flex-wrap items-center gap-1.5">
                             <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", cafChip(candidate).tone)}>
                               {cafChip(candidate).label}
+                            </span>
+                            <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", assessment.tone)}>
+                              {assessment.label}
                             </span>
                             <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", chipTone((candidate.ageing_days || 0) > (STAGE_SLA_DAYS[column.key] || 3) ? "red" : "green"))}>
                               Age {candidate.ageing_days || 0}d
@@ -1103,6 +1195,14 @@ export function CandidatesClient({
               <>
                 <p className="mt-2 text-sm font-semibold text-slate-900">{selectedCandidate.name}</p>
                 <p className="text-[11px] text-slate-600">{selectedCandidate.candidate_code} · {stageLabel(selectedCandidate.current_stage)}</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", cafChip(selectedCandidate).tone)}>
+                    {cafChip(selectedCandidate).label}
+                  </span>
+                  <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", assessmentChip(selectedCandidate).tone)}>
+                    {assessmentChip(selectedCandidate).label}
+                  </span>
+                </div>
                 <div className="mt-2 rounded-xl border border-slate-200 bg-white p-2.5">
                   <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px]">
                     <p className="text-slate-500">Applying for</p>

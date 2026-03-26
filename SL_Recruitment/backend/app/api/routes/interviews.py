@@ -18,6 +18,7 @@ from app.core.roles import Role
 from app.core.paths import resolve_repo_path
 from app.db.platform_session import PlatformSessionLocal
 from app.models.candidate import RecCandidate
+from app.models.candidate_assessment import RecCandidateAssessment
 from app.models.event import RecCandidateEvent
 from app.models.interview import RecCandidateInterview
 from app.models.interview_assessment import RecCandidateInterviewAssessment
@@ -118,6 +119,33 @@ def _is_role_5_or_6_actor(user: UserContext) -> bool:
 
 def _normalize_round(raw: str | None) -> str:
     return (raw or "").strip().lower()
+
+
+async def _assert_assessment_submitted_for_round(
+    session: AsyncSession,
+    *,
+    candidate: RecCandidate,
+    round_type: str | None,
+) -> None:
+    normalized_round = _normalize_round(round_type)
+    if normalized_round != "l2":
+        return
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if workflow_policy.workflow_variant == INTERN_L2_ONLY_WORKFLOW:
+        return
+    assessment = (
+        await session.execute(
+            select(RecCandidateAssessment)
+            .where(RecCandidateAssessment.candidate_id == candidate.candidate_id)
+            .limit(1)
+        )
+    ).scalars().first()
+    if assessment and assessment.assessment_submitted_at is not None:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Assessment must be submitted before scheduling the L2 interview.",
+    )
 
 
 def _round_to_transition(round_type: str, decision: str) -> str | None:
@@ -582,6 +610,7 @@ async def create_interview(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="L1 interviews are disabled for this intern workflow.",
         )
+    await _assert_assessment_submitted_for_round(session, candidate=candidate, round_type=payload.round_type)
     candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
 
     existing_query = select(RecCandidateInterview).where(
@@ -762,6 +791,7 @@ async def propose_interview_slots(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="L1 interview slot invites are disabled for this intern workflow.",
         )
+    await _assert_assessment_submitted_for_round(session, candidate=candidate, round_type=payload.round_type)
 
     interviewer_email = (payload.interviewer_email or "").strip() or None
     interviewer_pid = _clean_platform_person_id(payload.interviewer_person_id_platform)

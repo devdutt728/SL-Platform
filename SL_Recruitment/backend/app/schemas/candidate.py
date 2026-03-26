@@ -82,6 +82,7 @@ class CandidateListItem(BaseModel):
     created_at: Optional[datetime] = None
     caf_sent_at: Optional[datetime] = None
     caf_submitted_at: Optional[datetime] = None
+    assessment_submitted_at: Optional[datetime] = None
     needs_hr_review: bool = False
     screening_result: Optional[str] = None
     l1_interview_count: int = 0

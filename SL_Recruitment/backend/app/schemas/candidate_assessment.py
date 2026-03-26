@@ -15,7 +15,9 @@ class CandidateAssessmentUpsertIn(BaseModel):
     interviewer_name: Optional[str] = None
     notice_period_or_joining_time: Optional[str] = None
     notice_period_days: Optional[int] = None
+    earliest_joining_date: Optional[date] = None
     current_ctc_annual: Optional[float] = None
+    current_monthly_take_home: Optional[float] = None
     expected_ctc_annual: Optional[float] = None
     current_location: Optional[str] = None
     reason_for_job_change: Optional[str] = None
@@ -128,7 +130,9 @@ class CandidateAssessmentOut(BaseModel):
     interviewer_name: Optional[str] = None
     notice_period_or_joining_time: Optional[str] = None
     notice_period_days: Optional[int] = None
+    earliest_joining_date: Optional[date] = None
     current_ctc_annual: Optional[float] = None
+    current_monthly_take_home: Optional[float] = None
     expected_ctc_annual: Optional[float] = None
     current_location: Optional[str] = None
     reason_for_job_change: Optional[str] = None

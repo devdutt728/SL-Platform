@@ -30,6 +30,7 @@ type Args = {
   canSkip: boolean;
   allowL1Scheduling: boolean;
   currentStageKey: string | null;
+  assessmentSubmittedAt?: string | null;
   refreshAll: () => Promise<void>;
   candidateL2OwnerEmail?: string | null;
   candidateL2OwnerName?: string | null;
@@ -50,6 +51,7 @@ export function useCandidate360Interviews({
   canSkip,
   allowL1Scheduling,
   currentStageKey,
+  assessmentSubmittedAt,
   refreshAll,
   candidateL2OwnerEmail,
   candidateL2OwnerName,
@@ -99,11 +101,13 @@ export function useCandidate360Interviews({
 
   const scheduleAllowed = useMemo(() => {
     if (!canSchedule) return false;
+    const l2SchedulingStage = currentStageKey === "l2_shortlist" || currentStageKey === "l2_interview";
+    if (l2SchedulingStage && !assessmentSubmittedAt) return false;
     if (canSkip) return true;
     if (rescheduleInterviewId) return true;
     if (!interviews) return false;
     return interviews.length === 0;
-  }, [canSchedule, canSkip, interviews, rescheduleInterviewId]);
+  }, [assessmentSubmittedAt, canSchedule, canSkip, currentStageKey, interviews, rescheduleInterviewId]);
 
   const refreshInterviews = useCallback(async () => {
     setInterviewsBusy(true);
@@ -558,6 +562,11 @@ export function useCandidate360Interviews({
   );
 
   const handleScheduleL2FromInterviews = useCallback(() => {
+    if (!assessmentSubmittedAt) {
+      setInterviewsError(null);
+      setInterviewsNotice("Assessment must be submitted before scheduling the L2 interview.");
+      return;
+    }
     if (currentStageKey === "l2_shortlist") {
       void (async () => {
         await handleTransition("l2_interview", "advance");
@@ -566,7 +575,7 @@ export function useCandidate360Interviews({
       return;
     }
     openSchedule("L2");
-  }, [currentStageKey, handleTransition, openSchedule]);
+  }, [assessmentSubmittedAt, currentStageKey, handleTransition, openSchedule]);
 
   const handleScheduleL1FromInterviews = useCallback(() => {
     if (currentStageKey === "l1_shortlist") {

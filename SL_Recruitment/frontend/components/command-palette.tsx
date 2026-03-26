@@ -5,6 +5,7 @@ import { Search, Command } from "lucide-react";
 import type { CandidateListItem, OpeningListItem } from "@/lib/types";
 import { fetchDeduped } from "@/lib/fetch-deduped";
 import { useToast } from "@/components/ui/toast-provider";
+import { canAccessReports, type ReportsAccessActor } from "@/lib/reports-access";
 
 type PaletteItem = {
   id: string;
@@ -19,8 +20,26 @@ export function CommandPalette() {
   const [loading, setLoading] = useState(false);
   const [candidates, setCandidates] = useState<CandidateListItem[]>([]);
   const [openings, setOpenings] = useState<OpeningListItem[]>([]);
+  const [me, setMe] = useState<ReportsAccessActor | null>(null);
   const { pushToast } = useToast();
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as ReportsAccessActor;
+        if (!cancelled) setMe(data);
+      } catch {
+        // Leave feature-only shortcuts hidden when auth context is unavailable.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -74,9 +93,11 @@ export function CommandPalette() {
       { id: "go-candidates", label: "Go to Candidates", href: "/candidates", hint: "Pipeline list" },
       { id: "go-openings", label: "Go to Openings", href: "/openings", hint: "Role inventory" },
       { id: "go-offers", label: "Go to Offers", href: "/offers", hint: "Offer lifecycle" },
-      { id: "go-reports", label: "Go to Reports", href: "/reports", hint: "Analytics and exports" },
+      ...(canAccessReports(me)
+        ? [{ id: "go-reports", label: "Go to Reports", href: "/reports", hint: "Analytics and exports" }]
+        : []),
     ],
-    []
+    [me]
   );
 
   const trimmed = query.trim().toLowerCase();

@@ -504,6 +504,24 @@ class GoogleSheetCandidateRow(BaseModel):
             raise ValueError("years_of_experience cannot be negative.")
         return value
 
+    @field_validator("portfolio_url", "cv_url", "resume_url")
+    @classmethod
+    def _normalize_optional_document_urls(cls, value: str | None) -> str | None:
+        cleaned = _strip_optional(value)
+        if cleaned is None:
+            return None
+        lowered = cleaned.lower()
+        if not (lowered.startswith("http://") or lowered.startswith("https://")):
+            return None
+        if " " in cleaned:
+            return None
+        if lowered.find("http://", 8) >= 0 or lowered.find("https://", 8) >= 0:
+            return None
+        parsed = urlparse(cleaned)
+        if not parsed.scheme or not parsed.netloc:
+            return None
+        return cleaned
+
     @model_validator(mode="after")
     def _validate_required_fields(self):
         if not self.opening_code and not self.applying_for:
@@ -515,8 +533,6 @@ class GoogleSheetCandidateRow(BaseModel):
         terms_consent = _parse_yes_no(self.terms)
         if terms_consent is not True:
             raise ValueError("terms consent must be accepted.")
-        if not self.portfolio_url:
-            raise ValueError("portfolio_url is required.")
         return self
 
 
@@ -585,6 +601,33 @@ class CandidateCommunicationFeedOut(BaseModel):
     items: list[CandidateCommunicationItemOut]
 
 
+class LegacyCafCompleteIn(BaseModel):
+    candidate_ids: list[int] = Field(default_factory=list)
+    note: str | None = None
+
+    @field_validator("candidate_ids")
+    @classmethod
+    def _validate_candidate_ids(cls, value: list[int]) -> list[int]:
+        cleaned: list[int] = []
+        seen: set[int] = set()
+        for raw in value or []:
+            candidate_id = int(raw)
+            if candidate_id <= 0 or candidate_id in seen:
+                continue
+            cleaned.append(candidate_id)
+            seen.add(candidate_id)
+        if not cleaned:
+            raise ValueError("At least one candidate_id is required.")
+        if len(cleaned) > 500:
+            raise ValueError("Select at most 500 candidates per request.")
+        return cleaned
+
+    @field_validator("note")
+    @classmethod
+    def _strip_note(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+
 def _candidate_code(candidate_id: int) -> str:
     return f"SLR-{candidate_id:04d}"
 
@@ -623,6 +666,43 @@ def _actor_role_ids(user: UserContext) -> set[int]:
         except (TypeError, ValueError):
             continue
     return role_ids
+
+
+def _legacy_caf_screening_note(note: str | None = None) -> str:
+    base = "Legacy CAF completion backfill applied by HR."
+    if not note:
+        return base
+    return f"{base} {note}"
+
+
+def _csv_items(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [item.strip() for item in str(raw).split(",") if item and item.strip()]
+
+
+def _assessment_compensation_hidden_emails() -> set[str]:
+    return {item.lower() for item in _csv_items(settings.assessment_compensation_hidden_emails)}
+
+
+def _assessment_compensation_hidden_role_ids() -> set[int]:
+    out: set[int] = set()
+    for item in _csv_items(settings.assessment_compensation_hidden_role_ids):
+        try:
+            out.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _can_view_assessment_compensation(user: UserContext) -> bool:
+    email = str(user.email or "").strip().lower()
+    if email and email in _assessment_compensation_hidden_emails():
+        return False
+    hidden_role_ids = _assessment_compensation_hidden_role_ids()
+    if hidden_role_ids and (_actor_role_ids(user) & hidden_role_ids):
+        return False
+    return True
 
 
 def _is_role_5_or_6_actor(user: UserContext) -> bool:
@@ -1273,6 +1353,7 @@ async def _apply_ui_reapplication(
     if workflow_policy.requires_caf:
         candidate.caf_token = candidate.caf_token or uuid4().hex
         candidate.caf_sent_at = attempted_at
+        candidate.caf_submitted_at = candidate.caf_submitted_at or attempted_at
     candidate.updated_at = attempted_at
     candidate.application_docs_status = _application_docs_status(
         cv_url=candidate.cv_url,
@@ -1576,6 +1657,8 @@ def _extract_communication_links(
     meta: dict,
     offer_public_tokens: dict[int, str],
     sprint_public_tokens: dict[int, str],
+    current_caf_token: str | None = None,
+    current_assessment_token: str | None = None,
 ) -> list[CandidateCommunicationLinkOut]:
     links: list[CandidateCommunicationLinkOut] = []
     seen_urls: set[str] = set()
@@ -1631,6 +1714,11 @@ def _extract_communication_links(
         add_link("CAF form", build_public_path(f"/caf/{caf_token}"))
     if action_type == "assessment_link_generated" and assessment_token:
         add_link("Assessment form", build_public_path(f"/assessment/{assessment_token}"))
+
+    if current_caf_token:
+        add_link("CAF form", build_public_path(f"/caf/{current_caf_token}"))
+    if current_assessment_token:
+        add_link("Assessment form", build_public_path(f"/assessment/{current_assessment_token}"))
 
     for key, value in meta.items():
         if not isinstance(value, str):
@@ -1978,6 +2066,7 @@ async def _create_candidate_with_automation(
         resume_url=resume_url,
         caf_token=uuid4().hex if workflow_policy.requires_caf else None,
         caf_sent_at=link_sent_at if workflow_policy.requires_caf else None,
+        caf_submitted_at=created_at if workflow_policy.requires_caf else None,
         application_docs_status=application_docs_status,
         joining_docs_status="none",
         created_at=created_at,
@@ -2488,6 +2577,7 @@ async def import_candidates_from_google_sheet(
     validate_only = bool(payload.validate_only)
     results: list[dict] = []
     created_count = 0
+    reapplied_count = 0
     duplicate_count = 0
     failed_count = 0
     processed_at = now_ist_naive().isoformat()
@@ -2799,6 +2889,7 @@ async def import_candidates_from_google_sheet(
                     if not existing_candidate.caf_token:
                         existing_candidate.caf_token = uuid4().hex
                     existing_candidate.caf_sent_at = row_now
+                    existing_candidate.caf_submitted_at = existing_candidate.caf_submitted_at or row_now
                 existing_candidate.updated_at = row_now
 
                 await log_event(
@@ -2865,10 +2956,10 @@ async def import_candidates_from_google_sheet(
                 )
                 await session.commit()
 
-                created_count += 1
+                reapplied_count += 1
                 result_payload = {
                     "row_key": row_key,
-                    "status": "created",
+                    "status": "reapplied",
                     "ingest_state": INGEST_STATE_CREATED,
                     "candidate_id": existing_candidate.candidate_id,
                     "candidate_code": existing_candidate.candidate_code,
@@ -3223,6 +3314,7 @@ async def import_candidates_from_google_sheet(
 
     requested_rows = len(payload.rows)
     safe_denom = max(requested_rows, 1)
+    success_count = created_count + reapplied_count
     return {
         "batch_id": payload.batch_id,
         "sheet_id": payload.sheet_id,
@@ -3231,9 +3323,10 @@ async def import_candidates_from_google_sheet(
         "processed_at": processed_at,
         "requested_rows": requested_rows,
         "created_count": created_count,
+        "reapplied_count": reapplied_count,
         "duplicate_count": duplicate_count,
         "failed_count": failed_count,
-        "success_pct": round((created_count / safe_denom) * 100, 2),
+        "success_pct": round((success_count / safe_denom) * 100, 2),
         "duplicate_pct": round((duplicate_count / safe_denom) * 100, 2),
         "failed_pct": round((failed_count / safe_denom) * 100, 2),
         "results": results,
@@ -3916,6 +4009,7 @@ async def list_candidates(
             RecCandidate.created_at.label("created_at"),
             RecCandidate.caf_sent_at.label("caf_sent_at"),
             RecCandidate.caf_submitted_at.label("caf_submitted_at"),
+            RecCandidateAssessment.assessment_submitted_at.label("assessment_submitted_at"),
             RecCandidate.needs_hr_review.label("needs_hr_review"),
             RecOpening.opening_code.label("opening_code"),
             RecOpening.title.label("opening_title"),
@@ -3932,6 +4026,7 @@ async def list_candidates(
         .select_from(RecCandidate)
         .outerjoin(RecOpening, RecOpening.opening_id == RecCandidate.opening_id)
         .outerjoin(RecCandidateScreening, RecCandidateScreening.candidate_id == RecCandidate.candidate_id)
+        .outerjoin(RecCandidateAssessment, RecCandidateAssessment.candidate_id == RecCandidate.candidate_id)
         .outerjoin(current_stage_subq, current_stage_subq.c.candidate_id == RecCandidate.candidate_id)
         .outerjoin(interview_agg_subq, interview_agg_subq.c.candidate_id == RecCandidate.candidate_id)
         .order_by(RecCandidate.created_at.desc(), RecCandidate.candidate_id.desc())
@@ -4006,6 +4101,7 @@ async def list_candidates(
             created_at=row.created_at,
             caf_sent_at=row.caf_sent_at,
             caf_submitted_at=row.caf_submitted_at,
+            assessment_submitted_at=row.assessment_submitted_at,
             needs_hr_review=bool(row.needs_hr_review),
             screening_result=row.screening_result,
             l1_interview_count=int(row.l1_interview_count or 0),
@@ -4015,6 +4111,147 @@ async def list_candidates(
         )
         for row in rows
     ]
+
+
+@router.post("/legacy-caf-complete", status_code=status.HTTP_200_OK)
+async def mark_legacy_caf_complete(
+    payload: LegacyCafCompleteIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    if not _can_manage_candidate_360(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 actions are restricted for this account.")
+
+    candidate_ids = payload.candidate_ids
+    candidates = (
+        await session.execute(
+            select(RecCandidate)
+            .where(RecCandidate.candidate_id.in_(candidate_ids))
+            .order_by(RecCandidate.candidate_id.asc())
+        )
+    ).scalars().all()
+    candidate_map = {candidate.candidate_id: candidate for candidate in candidates}
+
+    screening_rows = (
+        await session.execute(
+            select(RecCandidateScreening).where(RecCandidateScreening.candidate_id.in_(candidate_ids))
+        )
+    ).scalars().all()
+    screening_map = {row.candidate_id: row for row in screening_rows}
+
+    updated_count = 0
+    skipped_count = 0
+    screening_seeded_count = 0
+    items: list[dict[str, object]] = []
+    note_text = payload.note
+    screening_note = _legacy_caf_screening_note(note_text)
+    performed_by_person_id_platform = _platform_person_id(user)
+
+    for candidate_id in candidate_ids:
+        candidate = candidate_map.get(candidate_id)
+        if candidate is None:
+            skipped_count += 1
+            items.append({"candidate_id": candidate_id, "status": "skipped", "reason": "not_found"})
+            continue
+
+        workflow_policy = await get_candidate_workflow_policy(session, candidate)
+        if not workflow_policy.requires_caf:
+            skipped_count += 1
+            items.append(
+                {
+                    "candidate_id": candidate_id,
+                    "candidate_code": candidate.candidate_code or _candidate_code(candidate_id),
+                    "status": "skipped",
+                    "reason": "caf_not_required",
+                }
+            )
+            continue
+
+        legacy_timestamp = candidate.caf_sent_at or candidate.caf_submitted_at or now_ist_naive()
+        screening_seeded = False
+        changed = False
+
+        if candidate.caf_sent_at is None:
+            candidate.caf_sent_at = legacy_timestamp
+            changed = True
+        if candidate.caf_submitted_at is None:
+            candidate.caf_submitted_at = legacy_timestamp
+            changed = True
+        if not candidate.caf_token:
+            candidate.caf_token = uuid4().hex
+            changed = True
+
+        screening = screening_map.get(candidate_id)
+        if screening is None:
+            screening = RecCandidateScreening(
+                candidate_id=candidate_id,
+                screening_result="amber",
+                screening_notes=screening_note,
+                created_at=legacy_timestamp,
+                updated_at=legacy_timestamp,
+            )
+            session.add(screening)
+            screening_map[candidate_id] = screening
+            screening_seeded = True
+            screening_seeded_count += 1
+            changed = True
+        else:
+            screening_changed = False
+            if not _strip_optional(screening.screening_result):
+                screening.screening_result = "amber"
+                screening_changed = True
+            if not _strip_optional(screening.screening_notes):
+                screening.screening_notes = screening_note
+                screening_changed = True
+            if screening_changed:
+                screening.updated_at = legacy_timestamp
+                changed = True
+
+        if not changed:
+            skipped_count += 1
+            items.append(
+                {
+                    "candidate_id": candidate_id,
+                    "candidate_code": candidate.candidate_code or _candidate_code(candidate_id),
+                    "status": "skipped",
+                    "reason": "already_marked",
+                }
+            )
+            continue
+
+        await log_event(
+            session,
+            candidate_id=candidate_id,
+            action_type="caf_legacy_marked_complete",
+            performed_by_person_id_platform=performed_by_person_id_platform,
+            related_entity_type="candidate",
+            related_entity_id=candidate_id,
+            meta_json={
+                "legacy_timestamp": legacy_timestamp.isoformat(),
+                "screening_seeded": screening_seeded,
+                "note": note_text,
+            },
+        )
+        updated_count += 1
+        items.append(
+            {
+                "candidate_id": candidate_id,
+                "candidate_code": candidate.candidate_code or _candidate_code(candidate_id),
+                "status": "updated",
+                "caf_sent_at": candidate.caf_sent_at.isoformat() if candidate.caf_sent_at else None,
+                "caf_submitted_at": candidate.caf_submitted_at.isoformat() if candidate.caf_submitted_at else None,
+                "screening_seeded": screening_seeded,
+            }
+        )
+
+    await session.commit()
+    return {
+        "requested_count": len(candidate_ids),
+        "updated_count": updated_count,
+        "skipped_count": skipped_count,
+        "screening_seeded_count": screening_seeded_count,
+        "items": items,
+    }
 
 
 @router.get("/communications", response_model=CandidateCommunicationFeedOut)
@@ -4091,9 +4328,11 @@ async def list_candidate_communications(
     parsed_meta: dict[int, dict] = {}
     offer_ids: set[int] = set()
     sprint_ids: set[int] = set()
+    candidate_ids: set[int] = set()
     for event, _name, _code, _email, _opening_title in rows:
         meta = _event_meta_to_dict(event.meta_json)
         parsed_meta[event.candidate_event_id] = meta
+        candidate_ids.add(int(event.candidate_id))
         offer_raw = _strip_optional(str(meta.get("offer_id") or ""))
         if offer_raw:
             try:
@@ -4109,6 +4348,32 @@ async def list_candidate_communications(
 
     offer_public_tokens = await _load_offer_public_tokens(session, offer_ids)
     sprint_public_tokens = await _load_sprint_public_tokens(session, sprint_ids)
+    current_caf_tokens: dict[int, str] = {}
+    current_assessment_tokens: dict[int, str] = {}
+    if candidate_ids:
+        candidate_token_rows = (
+            await session.execute(
+                select(RecCandidate.candidate_id, RecCandidate.caf_token).where(
+                    RecCandidate.candidate_id.in_(list(candidate_ids))
+                )
+            )
+        ).all()
+        for candidate_id_value, caf_token in candidate_token_rows:
+            cleaned = _strip_optional(caf_token)
+            if cleaned:
+                current_caf_tokens[int(candidate_id_value)] = cleaned
+
+        assessment_token_rows = (
+            await session.execute(
+                select(RecCandidateAssessment.candidate_id, RecCandidateAssessment.assessment_token).where(
+                    RecCandidateAssessment.candidate_id.in_(list(candidate_ids))
+                )
+            )
+        ).all()
+        for candidate_id_value, assessment_token in assessment_token_rows:
+            cleaned = _strip_optional(assessment_token)
+            if cleaned:
+                current_assessment_tokens[int(candidate_id_value)] = cleaned
 
     items: list[CandidateCommunicationItemOut] = []
     for event, full_name, candidate_code, candidate_email, opening_title in rows:
@@ -4132,6 +4397,8 @@ async def list_candidate_communications(
                     meta=meta,
                     offer_public_tokens=offer_public_tokens,
                     sprint_public_tokens=sprint_public_tokens,
+                    current_caf_token=current_caf_tokens.get(int(event.candidate_id)),
+                    current_assessment_token=current_assessment_tokens.get(int(event.candidate_id)),
                 ),
                 created_at=event.created_at,
             )
@@ -4255,6 +4522,7 @@ async def get_candidate_full(
 ):
     if not _can_view_candidate_360(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Candidate 360 is not available for this account.")
+    assessment_compensation_visible = _can_view_assessment_compensation(user)
 
     candidate = await get_candidate(candidate_id, session, user)  # type: ignore[arg-type]
 
@@ -4282,6 +4550,13 @@ async def get_candidate_full(
         ).scalars().first()
         if assessment_row:
             assessment = CandidateAssessmentOut.model_validate(assessment_row)
+            if not assessment_compensation_visible:
+                assessment = assessment.model_copy(
+                    update={
+                        "current_ctc_annual": None,
+                        "expected_ctc_annual": None,
+                    }
+                )
     except OperationalError:
         assessment = None
     except SQLAlchemyError:
@@ -4301,6 +4576,7 @@ async def get_candidate_full(
         events=events,
         screening=screening,
         assessment=assessment,
+        assessment_compensation_visible=assessment_compensation_visible,
         joining_profile=joining_profile,
     )
 

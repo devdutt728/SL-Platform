@@ -161,8 +161,7 @@ async def submit_candidate_assessment(
     assessment.assessment_submitted_at = now
     assessment.updated_at = now
 
-    if candidate.caf_submitted_at is None:
-        candidate.caf_submitted_at = now
+    if candidate.status != "in_process":
         candidate.status = "in_process"
         if candidate.l2_owner_email:
             try:
@@ -171,7 +170,7 @@ async def submit_candidate_assessment(
                     candidate=candidate,
                     to_stage="hr_screening",
                     decision="advance",
-                    note="caf_assessment",
+                    note="assessment_submit",
                     source="assessment_submit",
                     allow_noop=True,
                 )

@@ -13,8 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
 from app.api import deps
-from app.core.auth import require_roles
-from app.core.roles import Role
+from app.core.feature_access import require_reports_access
 from app.models.candidate import RecCandidate
 from app.models.candidate_assessment import RecCandidateAssessment
 from app.models.candidate_offer import RecCandidateOffer
@@ -663,7 +662,7 @@ def _get_report(report_id: str):
 
 @router.get("", response_model=dict)
 async def list_reports(
-    _user=Depends(require_roles([Role.HR_ADMIN])),
+    _user=Depends(require_reports_access()),
 ):
     output = []
     for report_id, cfg in REPORTS.items():
@@ -768,7 +767,7 @@ async def preview_report(
     limit: int = Query(default=50, ge=1, le=MAX_PREVIEW_LIMIT),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(deps.get_db_session),
-    _user=Depends(require_roles([Role.HR_ADMIN])),
+    _user=Depends(require_reports_access()),
 ):
     cfg = _get_report(report_id)
     column_list = _parse_columns(cfg, columns)
@@ -818,7 +817,7 @@ async def download_report(
     limit: int = Query(default=5000, ge=1, le=MAX_DOWNLOAD_LIMIT),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(deps.get_db_session),
-    _user=Depends(require_roles([Role.HR_ADMIN])),
+    _user=Depends(require_reports_access()),
 ):
     cfg = _get_report(report_id)
     column_list = _parse_columns(cfg, columns)

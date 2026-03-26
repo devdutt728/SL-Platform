@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
 import { Home, Users, Briefcase, LayoutDashboard, CalendarClock, FileSignature, BarChart3, Shield } from "lucide-react";
 import type { InterviewNotificationCounts } from "@/lib/types";
+import { canAccessReports } from "@/lib/reports-access";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, guard: "all" },
@@ -93,9 +94,9 @@ export function Sidebar({ initialMe }: { initialMe: SidebarMe | null }) {
       hr: isHr || isRoleFiveOrSix,
       interviewer: isInterviewer || isGl || isRoleFiveOrSix || isHr,
       offers: isHr || isSuperadmin,
-      reports: isSuperadmin || normalizedRoles.includes("hr_admin"),
+      reports: canAccessReports(initialMe),
     };
-  }, [isGl, isHr, isInterviewer, isRoleFiveOrSix, isSuperadmin, normalizedRoles]);
+  }, [initialMe, isGl, isHr, isInterviewer, isRoleFiveOrSix, isSuperadmin]);
 
   useEffect(() => {
     if (!guards.interviewer) return;

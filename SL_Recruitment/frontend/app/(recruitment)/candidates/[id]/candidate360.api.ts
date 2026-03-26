@@ -51,6 +51,29 @@ export async function fetchCafLink(candidateId: string) {
   return (await res.json()) as { caf_token: string; caf_url: string };
 }
 
+export async function fetchAssessmentLink(candidateId: string) {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/assessment-link`, { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as { assessment_token: string; assessment_url: string };
+}
+
+export async function resendAssessmentLink(candidateId: string) {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/assessment-link/resend`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as {
+    candidate_id: number;
+    attempted: boolean;
+    email_status: string;
+    assessment_token?: string;
+    assessment_url?: string;
+    reason?: string;
+    email_error?: string;
+  };
+}
+
 export async function updateCandidate(candidateId: string, payload: Record<string, unknown>) {
   const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}`, {
     method: "PATCH",

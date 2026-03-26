@@ -29,6 +29,7 @@ export type CandidateListItem = {
   created_at?: string | null;
   caf_sent_at?: string | null;
   caf_submitted_at?: string | null;
+  assessment_submitted_at?: string | null;
   needs_hr_review?: boolean;
   screening_result?: string | null;
   l1_interview_count?: number;
@@ -39,7 +40,7 @@ export type CandidateListItem = {
 
 export type GoogleSheetIngestRowResult = {
   row_key: string;
-  status: "created" | "duplicate" | "error";
+  status: "created" | "reapplied" | "duplicate" | "error";
   ingest_state?: "created" | "duplicate" | "retrying" | "failed_permanent" | "failed_transient";
   candidate_id?: number | null;
   candidate_code?: string | null;
@@ -59,6 +60,7 @@ export type GoogleSheetIngestResult = {
   processed_at?: string;
   requested_rows: number;
   created_count: number;
+  reapplied_count?: number;
   duplicate_count: number;
   failed_count: number;
   success_pct?: number;
@@ -507,6 +509,7 @@ export type CandidateFull = {
   events: CandidateEvent[];
   screening?: Screening | null;
   assessment?: CandidateAssessment | null;
+  assessment_compensation_visible?: boolean;
   joining_profile?: JoiningProfile | null;
 };
 
@@ -525,7 +528,9 @@ export type CandidateAssessment = {
   interviewer_name?: string | null;
   notice_period_or_joining_time?: string | null;
   notice_period_days?: number | null;
+  earliest_joining_date?: string | null;
   current_ctc_annual?: number | null;
+  current_monthly_take_home?: number | null;
   expected_ctc_annual?: number | null;
   current_location?: string | null;
   reason_for_job_change?: string | null;

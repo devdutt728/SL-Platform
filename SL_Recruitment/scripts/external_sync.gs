@@ -83,20 +83,28 @@ function syncExternalUpdatedToIngestQueue() {
     const srcValues = srcRange.getValues();
     const srcRich = srcRange.getRichTextValues();
 
-    // Build existing keys from target (+ archive optionally)
-    const existingKeys = new Set();
-    _sync_addKeysFromSheet(existingKeys, tgtSheet);
+    // Build existing row lookup from target and dedupe keys from archive.
+    const targetRowLookup = _sync_buildRowLookup(tgtSheet);
+    const archivedKeys = new Set();
 
     if (EXTERNAL_SYNC.CHECK_ARCHIVE_TOO) {
       const archive = tgtSS.getSheetByName(INGEST_CONFIG.archiveSheetName);
-      if (archive) _sync_addKeysFromSheet(existingKeys, archive);
+      if (archive) _sync_addKeysFromSheet(archivedKeys, archive);
     }
 
     const toAppendValues = [];
     const richWriteQueue = [];
+    let refreshedCount = 0;
+
+    const jobIdCol1Based = (targetHeaderIndex["Job ID"] != null ? targetHeaderIndex["Job ID"] : 1) + 1;
 
     srcValues.forEach((row, i) => {
       const mapped = _sync_mapSourceRow(row);
+      const richRow = srcRich[i] || [];
+
+      const normalizedCv = _sync_pickDocumentValue(mapped.cv, richRow[9]);
+      const normalizedResume = _sync_pickDocumentValue(mapped.resume, richRow[10]);
+      const normalizedPortfolio = _sync_pickDocumentValue(mapped.portfolio, richRow[11]);
 
       // External sheet has no native Job ID column for ingest purposes.
       // Use email + applyingFor + date presence as the row-validity gate.
@@ -109,9 +117,8 @@ function syncExternalUpdatedToIngestQueue() {
       });
 
       const derivedJobId = _sync_computeJobIdFromApplyingFor(mapped.applyingFor);
-      const key = externalRef || _sync_legacyKey(derivedJobId, mapped.email, mapped.date);
-
-      if (existingKeys.has(key)) return;
+      const legacyKey = _sync_legacyKey(derivedJobId, mapped.email, mapped.date);
+      const dedupeKey = externalRef || legacyKey;
 
       const targetRow = new Array(targetColumnCount).fill("");
 
@@ -131,9 +138,9 @@ function syncExternalUpdatedToIngestQueue() {
       _sync_set(targetRow, targetHeaderIndex, "City", mapped.city);
       _sync_set(targetRow, targetHeaderIndex, "Willing to Relocate?", mapped.willingToRelocate);
       _sync_set(targetRow, targetHeaderIndex, "Terms", mapped.terms);
-      _sync_set(targetRow, targetHeaderIndex, "Portfolio", mapped.portfolio);
-      _sync_set(targetRow, targetHeaderIndex, "CV", mapped.cv);
-      _sync_set(targetRow, targetHeaderIndex, "Resume", mapped.resume);
+      _sync_set(targetRow, targetHeaderIndex, "Portfolio", normalizedPortfolio);
+      _sync_set(targetRow, targetHeaderIndex, "CV", normalizedCv);
+      _sync_set(targetRow, targetHeaderIndex, "Resume", normalizedResume);
       _sync_set(
         targetRow,
         targetHeaderIndex,
@@ -142,9 +149,28 @@ function syncExternalUpdatedToIngestQueue() {
       );
       _sync_set(targetRow, targetHeaderIndex, "External Source Ref", externalRef);
 
-      toAppendValues.push(targetRow);
+      const existingTarget = _sync_findRowLookupEntry(targetRowLookup, externalRef, legacyKey);
+      if (existingTarget) {
+        const refreshed = _sync_refreshExistingTargetRow(
+          tgtSheet,
+          existingTarget,
+          targetHeaderIndex,
+          targetRow,
+          targetColumnCount,
+          jobIdCol1Based,
+          {
+            cv: richRow[9],
+            resume: richRow[10],
+            portfolio: richRow[11]
+          }
+        );
+        if (refreshed) refreshedCount += 1;
+        return;
+      }
 
-      const richRow = srcRich[i] || [];
+      if (archivedKeys.has(dedupeKey)) return;
+
+      toAppendValues.push(targetRow);
 
       // Correct rich text mapping from source:
       // J -> CV, K -> Resume, L -> Portfolio
@@ -152,27 +178,26 @@ function syncExternalUpdatedToIngestQueue() {
       _sync_queueRichText(richWriteQueue, toAppendValues.length - 1, targetHeaderIndex, "Resume", richRow[10]);
       _sync_queueRichText(richWriteQueue, toAppendValues.length - 1, targetHeaderIndex, "Portfolio", richRow[11]);
 
-      existingKeys.add(key);
     });
 
-    if (!toAppendValues.length) {
-      Logger.log("No new rows to sync.");
+    if (!toAppendValues.length && !refreshedCount) {
+      Logger.log("No new or updated rows to sync.");
       _sync_applyJobIdArrayFormula(tgtSheet, targetHeaderIndex);
       return;
     }
 
-    const startRow = tgtSheet.getLastRow() + 1;
-
-    // Write everything EXCEPT Job ID column, otherwise ARRAYFORMULA in Job ID will break.
-    const jobIdCol1Based = (targetHeaderIndex["Job ID"] != null ? targetHeaderIndex["Job ID"] : 1) + 1;
-    _sync_writeRowsSkippingColumns(tgtSheet, startRow, toAppendValues, targetColumnCount, [jobIdCol1Based]);
-
-    _sync_applyQueuedRichText(tgtSheet, startRow, richWriteQueue);
+    if (toAppendValues.length) {
+      const startRow = tgtSheet.getLastRow() + 1;
+      _sync_writeRowsSkippingColumns(tgtSheet, startRow, toAppendValues, targetColumnCount, [jobIdCol1Based]);
+      _sync_applyQueuedRichText(tgtSheet, startRow, richWriteQueue);
+    }
 
     // Re-apply formula so old wrong/manual Job IDs also get corrected.
     _sync_applyJobIdArrayFormula(tgtSheet, targetHeaderIndex);
 
-    Logger.log(`Synced ${toAppendValues.length} new row(s) into "${tgtSheet.getName()}".`);
+    Logger.log(
+      `Synced ${toAppendValues.length} new row(s) and refreshed ${refreshedCount} existing row(s) in "${tgtSheet.getName()}".`
+    );
   } finally {
     lock.releaseLock();
   }
@@ -216,6 +241,66 @@ function _sync_addKeysFromSheet(keySet, sheet) {
     if (!jobId || !email) continue;
     keySet.add(_sync_legacyKey(jobId, email, date));
   }
+}
+
+function _sync_buildRowLookup(sheet) {
+  const lookup = {
+    byExternalRef: {},
+    byLegacyKey: {}
+  };
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return lookup;
+
+  const width = Math.max(1, sheet.getLastColumn());
+  const data = sheet.getRange(1, 1, lastRow, width).getValues();
+  if (!data || data.length < 2) return lookup;
+
+  const headers = data[0].map((h) => String(h || "").trim());
+  const idx = _sync_buildHeaderIndex(headers);
+
+  const externalRefIdx =
+    idx["External Source Ref"] != null ? idx["External Source Ref"] : idx["external_source_ref"];
+  const jobIdx = idx["Job ID"] != null ? idx["Job ID"] : idx["job_id"];
+  const applyingForIdx = idx["Applying for"] != null ? idx["Applying for"] : idx["applying_for"];
+  const emailIdx = idx["Email"] != null ? idx["Email"] : idx["email"];
+  const dateIdx = idx["Date"] != null ? idx["Date"] : idx["date"];
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const entry = { rowNumber: i + 1, row };
+
+    const ext = _sync_normalizeRef(externalRefIdx == null ? "" : row[externalRefIdx]);
+    if (ext && lookup.byExternalRef[ext] == null) {
+      lookup.byExternalRef[ext] = entry;
+    }
+
+    const applyingFor = applyingForIdx == null ? "" : String(row[applyingForIdx] || "").trim();
+    const computedJobId = _sync_computeJobIdFromApplyingFor(applyingFor);
+    const existingJobId = jobIdx == null ? "" : String(row[jobIdx] || "").trim();
+    const jobId = computedJobId || existingJobId;
+    const email = emailIdx == null ? "" : String(row[emailIdx] || "").trim().toLowerCase();
+    const date = dateIdx == null ? "" : _sync_normalizeDateForKey(row[dateIdx]);
+
+    if (!jobId || !email) continue;
+    const legacyKey = _sync_legacyKey(jobId, email, date);
+    if (legacyKey && lookup.byLegacyKey[legacyKey] == null) {
+      lookup.byLegacyKey[legacyKey] = entry;
+    }
+  }
+
+  return lookup;
+}
+
+function _sync_findRowLookupEntry(lookup, externalRef, legacyKey) {
+  if (!lookup) return null;
+  const normalizedRef = _sync_normalizeRef(externalRef);
+  if (normalizedRef && lookup.byExternalRef[normalizedRef]) {
+    return lookup.byExternalRef[normalizedRef];
+  }
+  if (legacyKey && lookup.byLegacyKey[legacyKey]) {
+    return lookup.byLegacyKey[legacyKey];
+  }
+  return null;
 }
 
 function _sync_ensureTargetHeaders(sheet) {
@@ -429,6 +514,42 @@ function _sync_writeRowsSkippingColumns(sheet, startRow, rows, totalCols, skipCo
   }
 }
 
+function _sync_refreshExistingTargetRow(
+  sheet,
+  entry,
+  headerIndex,
+  targetRow,
+  totalCols,
+  jobIdCol1Based,
+  richFields
+) {
+  if (!entry || !entry.rowNumber || !targetRow) return false;
+  const rowNumber = entry.rowNumber;
+  const skipCols = [jobIdCol1Based];
+  const needsValueRefresh = _sync_rowNeedsRefresh(entry.row, targetRow, skipCols);
+  const needsRichRefresh = _sync_richRefreshRequested(richFields);
+
+  if (!needsValueRefresh && !needsRichRefresh) {
+    return false;
+  }
+
+  if (needsValueRefresh) {
+    _sync_writeRowsSkippingColumns(sheet, rowNumber, [targetRow], totalCols, skipCols);
+    entry.row = targetRow.slice();
+  }
+
+  _sync_applyRichFieldIfPresent(sheet, rowNumber, headerIndex, "CV", richFields && richFields.cv);
+  _sync_applyRichFieldIfPresent(sheet, rowNumber, headerIndex, "Resume", richFields && richFields.resume);
+  _sync_applyRichFieldIfPresent(
+    sheet,
+    rowNumber,
+    headerIndex,
+    "Portfolio",
+    richFields && richFields.portfolio
+  );
+  return true;
+}
+
 function _sync_legacyKey(jobId, email, date) {
   return [
     String(jobId || "").trim().toLowerCase(),
@@ -448,6 +569,37 @@ function _sync_normalizeRef(value) {
   const text = String(value || "").trim();
   if (!text) return "";
   return text.slice(0, 191);
+}
+
+function _sync_rowNeedsRefresh(existingRow, targetRow, skipCols1Based) {
+  if (!existingRow || !targetRow) return true;
+
+  const skipSet = {};
+  (skipCols1Based || []).forEach((col) => {
+    if (col >= 1) skipSet[col] = true;
+  });
+
+  const width = Math.max(existingRow.length, targetRow.length);
+  for (let i = 0; i < width; i++) {
+    if (skipSet[i + 1]) continue;
+    if (_sync_compareCellValues(existingRow[i], targetRow[i])) continue;
+    return true;
+  }
+  return false;
+}
+
+function _sync_compareCellValues(left, right) {
+  const leftNormalized = _sync_normalizeComparableValue(left);
+  const rightNormalized = _sync_normalizeComparableValue(right);
+  return leftNormalized === rightNormalized;
+}
+
+function _sync_normalizeComparableValue(value) {
+  if (Object.prototype.toString.call(value) === "[object Date]" && !isNaN(value)) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+  }
+  if (value == null) return "";
+  return String(value).trim();
 }
 
 function _sync_buildHeaderIndex(headers) {
@@ -474,6 +626,55 @@ function _sync_queueRichText(queue, rowOffset, headerIndex, headerName, richText
   const idx = headerIndex[headerName];
   if (idx == null || idx < 0 || !richText) return;
   queue.push({ rowOffset, colIndex: idx, richText });
+}
+
+function _sync_richRefreshRequested(richFields) {
+  if (!richFields) return false;
+  return Boolean(richFields.cv || richFields.resume || richFields.portfolio);
+}
+
+function _sync_applyRichFieldIfPresent(sheet, rowNumber, headerIndex, headerName, richText) {
+  const idx = headerIndex[headerName];
+  if (idx == null || idx < 0 || !richText) return;
+  try {
+    sheet.getRange(rowNumber, idx + 1, 1, 1).setRichTextValue(richText);
+  } catch (err) {
+    Logger.log(`Could not set rich text for ${headerName} at row ${rowNumber}: ${err}`);
+  }
+}
+
+function _sync_pickDocumentValue(value, richText) {
+  if (_sync_looksLikeUrl(value)) return String(value || "").trim();
+  const link = _sync_extractLinkFromRichText(richText);
+  return link || String(value || "").trim();
+}
+
+function _sync_extractLinkFromRichText(richText) {
+  try {
+    if (!richText) return "";
+    const direct = richText.getLinkUrl ? richText.getLinkUrl() : "";
+    if (direct) return String(direct).trim();
+
+    const runs = richText.getRuns ? richText.getRuns() : [];
+    for (let i = 0; i < runs.length; i++) {
+      const runLink = runs[i].getLinkUrl ? runs[i].getLinkUrl() : "";
+      if (runLink) return String(runLink).trim();
+    }
+  } catch (err) {
+    Logger.log(`Could not parse source hyperlink: ${err}`);
+  }
+  return "";
+}
+
+function _sync_looksLikeUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  try {
+    const parsed = new URL(text);
+    return /^https?:$/i.test(parsed.protocol) && !!parsed.hostname;
+  } catch (err) {
+    return false;
+  }
 }
 
 function _sync_applyQueuedRichText(sheet, startRow, queue) {

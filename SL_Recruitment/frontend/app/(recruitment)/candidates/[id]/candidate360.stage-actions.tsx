@@ -18,7 +18,7 @@ type BuildStageButtonsParams = {
   canSchedule: boolean;
   canAccessOffers: boolean;
   canSkip: boolean;
-  cafLocked: boolean;
+  assessmentLocked: boolean;
   hasL2FeedbackSubmitted: boolean;
   hasL1FeedbackSubmitted: boolean;
   hasInternSelectionEmailSent: boolean;
@@ -46,7 +46,7 @@ export function buildCandidate360StageButtons({
   canSchedule,
   canAccessOffers,
   canSkip,
-  cafLocked,
+  assessmentLocked,
   hasL2FeedbackSubmitted,
   hasL1FeedbackSubmitted,
   hasInternSelectionEmailSent,
@@ -70,17 +70,6 @@ export function buildCandidate360StageButtons({
   const status = String(latestOfferStatus || "").toLowerCase();
   const canCreateRevisionFromLatestOffer = Boolean(latestOfferId && !["draft", "pending_approval"].includes(status));
   const current = currentStageKey;
-  if (cafLocked && current && current !== "rejected" && current !== "declined" && current !== "hired") {
-    return [
-      {
-        label: "Reject (CAF pending)",
-        tone: "btn-action-danger",
-        icon: <XCircle className="h-4 w-4" />,
-        intent: "reject",
-        action: () => handleTransition("rejected", "reject"),
-      },
-    ];
-  }
   if (current === "hr_screening") {
     return [
       {
@@ -128,18 +117,20 @@ export function buildCandidate360StageButtons({
   if (current === "l2_shortlist") {
     const actions: Candidate360StageButton[] = [];
     actions.push({
-      label: "Advance to L2 interview",
+      label: assessmentLocked ? "Advance to L2 interview (assessment pending)" : "Advance to L2 interview",
       tone: "btn-action-success",
       icon: <CheckCircle2 className="h-4 w-4" />,
       intent: "advance",
+      disabled: assessmentLocked,
       action: () => handleTransition("l2_interview", "advance"),
     });
     if (canSchedule) {
       actions.push({
-        label: "Schedule L2 interview",
+        label: assessmentLocked ? "Schedule L2 interview (assessment pending)" : "Schedule L2 interview",
         tone: "btn-action-neutral",
         icon: <CheckCircle2 className="h-4 w-4" />,
         intent: "review",
+        disabled: assessmentLocked,
         action: () => {
           void (async () => {
             await handleTransition("l2_interview", "advance");
@@ -162,10 +153,11 @@ export function buildCandidate360StageButtons({
     const actions: Candidate360StageButton[] = [];
     if (canSchedule) {
       actions.push({
-        label: "Schedule L2 interview",
+        label: assessmentLocked ? "Schedule L2 interview (assessment pending)" : "Schedule L2 interview",
         tone: "btn-action-success",
         icon: <CheckCircle2 className="h-4 w-4" />,
         intent: "advance",
+        disabled: assessmentLocked,
         action: () => {
           focusSection("interviews");
           openSchedule("L2");

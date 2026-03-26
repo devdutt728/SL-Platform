@@ -18,5 +18,6 @@ class CandidateFullOut(BaseModel):
     events: list[CandidateEventOut]
     screening: Optional[ScreeningOut] = None
     assessment: Optional[CandidateAssessmentOut] = None
+    assessment_compensation_visible: bool = True
     joining_profile: Optional[JoiningProfileOut] = None
 

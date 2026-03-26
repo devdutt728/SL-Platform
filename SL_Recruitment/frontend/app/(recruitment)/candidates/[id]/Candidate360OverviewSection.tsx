@@ -25,12 +25,17 @@ type Props = {
   busy: boolean;
   showCafSection: boolean;
   cafState: { label: string; tone: string };
-  cafAssessmentSubmittedAt: string | null;
-  cafAssessmentSentAt: string | null;
+  cafSubmittedAt: string | null;
+  cafSentAt: string | null;
+  assessmentSubmittedAt: string | null;
+  assessmentSentAt: string | null;
   l2FeedbackEvent: { created_at: string } | null;
   l1FeedbackEvent: { created_at: string } | null;
   onCopyCafLink: () => void;
   onInitCafLinkIfNeeded: () => void;
+  onCopyAssessmentLink: () => void;
+  onInitAssessmentLinkIfNeeded: () => void;
+  onSendAssessmentLink: () => void;
   docTone: (status?: string | null) => string;
   chipTone: (kind: "neutral" | "green" | "amber" | "red" | "blue") => string;
   formatDateTime: (raw?: string | null) => string;
@@ -39,9 +44,9 @@ type Props = {
   onExpandAll: () => void;
   onCollapseAll: () => void;
   collapsed: boolean;
-  cafLocked: boolean;
-  cafExpiresAt: Date | null;
-  cafDaysLeft: number | null;
+  assessmentLocked: boolean;
+  assessmentExpiresAt: Date | null;
+  assessmentDaysLeft: number | null;
   l2OwnerSelected: PlatformPersonSuggestion | null;
   l2OwnerQuery: string;
   setL2OwnerSelected: React.Dispatch<React.SetStateAction<PlatformPersonSuggestion | null>>;
@@ -83,6 +88,10 @@ type Props = {
   onJumpOffer: () => void;
 };
 
+function isAssessmentLockedStage(stageKey: string) {
+  return !["enquiry", "hr_screening", "l2_shortlist", "rejected", "declined", "hired"].includes(stageKey);
+}
+
 export function Candidate360OverviewSection({
   candidateId,
   candidate,
@@ -92,12 +101,17 @@ export function Candidate360OverviewSection({
   busy,
   showCafSection,
   cafState,
-  cafAssessmentSubmittedAt,
-  cafAssessmentSentAt,
+  cafSubmittedAt,
+  cafSentAt,
+  assessmentSubmittedAt,
+  assessmentSentAt,
   l2FeedbackEvent,
   l1FeedbackEvent,
   onCopyCafLink,
   onInitCafLinkIfNeeded,
+  onCopyAssessmentLink,
+  onInitAssessmentLinkIfNeeded,
+  onSendAssessmentLink,
   docTone,
   chipTone,
   formatDateTime,
@@ -106,9 +120,9 @@ export function Candidate360OverviewSection({
   onExpandAll,
   onCollapseAll,
   collapsed,
-  cafLocked,
-  cafExpiresAt,
-  cafDaysLeft,
+  assessmentLocked,
+  assessmentExpiresAt,
+  assessmentDaysLeft,
   l2OwnerSelected,
   l2OwnerQuery,
   setL2OwnerSelected,
@@ -149,6 +163,11 @@ export function Candidate360OverviewSection({
   showOfferSection,
   onJumpOffer,
 }: Props) {
+  const assessmentState = assessmentSubmittedAt
+    ? { label: "Assessment submitted", tone: chipTone("green") }
+    : assessmentSentAt
+      ? { label: "Assessment pending", tone: chipTone("amber") }
+      : { label: "Assessment not shared", tone: chipTone("neutral") };
   const [selectedStageKey, setSelectedStageKey] = useState<string | null>(currentStageKey);
 
   useEffect(() => {
@@ -174,7 +193,7 @@ export function Candidate360OverviewSection({
     !!selectedStage &&
     selectedStage.key !== currentStageKey &&
     selectedStageState !== "done" &&
-    (!cafLocked || ["rejected", "declined", "hired"].includes(selectedStage.key));
+    (!assessmentLocked || !isAssessmentLockedStage(selectedStage.key));
   const stageStateCounts = useMemo(() => {
     return stageProgressSteps.reduce(
       (acc, step) => {
@@ -191,14 +210,14 @@ export function Candidate360OverviewSection({
     ? "Updating stage..."
     : !canManageCandidate360
       ? "View-only access"
-      : !selectedStage
+            : !selectedStage
         ? "Select a stage"
         : selectedStage.key === currentStageKey
           ? "Already current stage"
           : selectedStageState === "done"
             ? "Select an upcoming stage"
-            : cafLocked && !["rejected", "declined", "hired"].includes(selectedStage.key)
-              ? "CAF pending: terminal moves only"
+            : assessmentLocked && isAssessmentLockedStage(selectedStage.key)
+              ? "Assessment pending: L2 interview and later stages are locked"
               : `Move to ${selectedStage.label}`;
   return (
     <div className="grid gap-3 xl:grid-cols-[330px_minmax(0,1fr)]">
@@ -216,7 +235,7 @@ export function Candidate360OverviewSection({
 
         {showCafSection ? (
         <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
-          <p className="text-xs uppercase tracking-tight text-slate-500">CAF</p>
+          <p className="text-xs uppercase tracking-tight text-slate-500">CAF & Assessment</p>
 
           <div className="mt-2 rounded-2xl border border-white/60 bg-gradient-to-r from-cyan-500/10 via-white/20 to-violet-500/10 p-3 shadow-sm">
             <div className="flex items-start gap-3">
@@ -247,10 +266,18 @@ export function Candidate360OverviewSection({
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Chip className={cafState.tone}>{cafState.label}</Chip>
-            {cafAssessmentSubmittedAt ? (
-              <span className="text-xs text-slate-600">Submitted: {formatDateTime(cafAssessmentSubmittedAt)}</span>
-            ) : cafAssessmentSentAt ? (
-              <span className="text-xs text-slate-600">Sent: {formatDateTime(cafAssessmentSentAt)}</span>
+            {cafSubmittedAt ? (
+              <span className="text-xs text-slate-600">Submitted: {formatDateTime(cafSubmittedAt)}</span>
+            ) : cafSentAt ? (
+              <span className="text-xs text-slate-600">Sent: {formatDateTime(cafSentAt)}</span>
+            ) : null}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Chip className={assessmentState.tone}>{assessmentState.label}</Chip>
+            {assessmentSubmittedAt ? (
+              <span className="text-xs text-slate-600">Submitted: {formatDateTime(assessmentSubmittedAt)}</span>
+            ) : assessmentSentAt ? (
+              <span className="text-xs text-slate-600">Sent: {formatDateTime(assessmentSentAt)}</span>
             ) : null}
           </div>
           {l2FeedbackEvent ? (
@@ -275,6 +302,25 @@ export function Candidate360OverviewSection({
             >
               <Copy className="h-4 w-4" />
               Copy CAF link
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-white disabled:opacity-60"
+              onClick={onCopyAssessmentLink}
+              onMouseEnter={onInitAssessmentLinkIfNeeded}
+              disabled={busy || !canManageCandidate360 || !!assessmentSubmittedAt}
+            >
+              <Copy className="h-4 w-4" />
+              Copy assessment link
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-white disabled:opacity-60"
+              onClick={onSendAssessmentLink}
+              disabled={busy || !canManageCandidate360 || !!assessmentSubmittedAt}
+            >
+              <Mail className="h-4 w-4" />
+              {assessmentSentAt ? "Resend assessment email" : "Send assessment email"}
             </button>
             <Link
               href={`/candidates/${encodeURIComponent(candidateId)}/caf`}
@@ -328,19 +374,19 @@ export function Candidate360OverviewSection({
 
           {collapsed ? null : (
             <div className="mt-4 space-y-4">
-              {showCafSection && cafLocked ? (
+              {showCafSection && assessmentLocked ? (
                 <div className="rounded-2xl border border-amber-200/70 bg-gradient-to-r from-amber-50 via-white to-cyan-50 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <p className="text-xs uppercase tracking-tight text-amber-700">CAF pending</p>
+                      <p className="text-xs uppercase tracking-tight text-amber-700">Assessment pending</p>
                       <p className="mt-1 text-sm text-slate-700">
-                        Candidate must submit CAF before moving to the next stages.
+                        Candidate must submit the assessment before moving to the L2 interview and later stages.
                       </p>
                     </div>
                     <div className="text-right text-xs text-slate-600">
-                      {cafAssessmentSentAt ? <p>Sent: {formatDateTime(cafAssessmentSentAt)}</p> : null}
-                      {cafExpiresAt ? <p>Expires: {formatDate(cafExpiresAt.toISOString())}</p> : null}
-                      {cafDaysLeft != null ? <p>{cafDaysLeft} days left</p> : null}
+                      {assessmentSentAt ? <p>Sent: {formatDateTime(assessmentSentAt)}</p> : null}
+                      {assessmentExpiresAt ? <p>Expires: {formatDate(assessmentExpiresAt.toISOString())}</p> : null}
+                      {assessmentDaysLeft != null ? <p>{assessmentDaysLeft} days left</p> : null}
                     </div>
                   </div>
                 </div>
@@ -561,10 +607,10 @@ export function Candidate360OverviewSection({
                           ? "Transitions are one-click from this panel and sync live across sessions."
                           : "You can inspect stage readiness here, but transitions require manage access."}
                       </p>
-                      {cafLocked ? (
+                      {assessmentLocked ? (
                         <div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800">
                           <Lock className="h-3.5 w-3.5" />
-                          CAF pending: non-terminal stage transitions are blocked
+                          Assessment pending: L2 interview and later stages are blocked
                         </div>
                       ) : null}
                       <button
@@ -631,10 +677,10 @@ export function Candidate360OverviewSection({
                           type="button"
                           className={clsx(
                             "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-card disabled:opacity-60",
-                            b.disabled || (b.intent !== "reject" && cafLocked) ? "bg-slate-400 cursor-not-allowed" : b.tone
+                            b.disabled ? "bg-slate-400 cursor-not-allowed" : b.tone
                           )}
                           onClick={() => void b.action()}
-                          disabled={busy || (cafLocked && b.intent !== "reject") || b.disabled}
+                          disabled={busy || b.disabled}
                         >
                           {b.icon}
                           {busy ? "Working..." : b.label}
