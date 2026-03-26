@@ -5,7 +5,7 @@ import { CandidateAssessmentPrefill } from "@/lib/types";
 import { AssessmentForm } from "./ui";
 
 async function fetchPrefill(token: string) {
-  const res = await fetch(await internalUrl(`/api/assessment/${token}`), { cache: "no-store" });
+  const res = await fetch(await internalUrl(`/api/candidate-assessment-form/${token}`), { cache: "no-store" });
   if (!res.ok) return null;
   return (await res.json()) as CandidateAssessmentPrefill;
 }
@@ -41,7 +41,7 @@ function TopBar({ logoSrc, shellClass }: { logoSrc: string; shellClass: string }
           </div>
           <div className="hidden sm:block">
             <p className="text-[10px] uppercase tracking-[0.3em] text-[rgba(93,85,82,0.55)]">Candidate Portal</p>
-            <p className="text-[13px] font-semibold text-[var(--dim-grey)]">Assessment form</p>
+            <p className="text-[13px] font-semibold text-[var(--dim-grey)]">Candidate Assessment Form</p>
           </div>
         </div>
 
@@ -74,7 +74,7 @@ export default async function AssessmentPage({ params }: { params: Promise<{ tok
         <TopBar logoSrc={logoSrc} shellClass={shellClass} />
         <div className={`${shellClass} relative z-10 pb-14 pt-24`}>
           <div className="rounded-[28px] border border-[var(--accessible-components--dark-grey)] bg-white p-7 shadow-[var(--shadow-soft)]">
-            <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">CAF</p>
+            <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Candidate Assessment Form</p>
             <h1 className="mt-2 text-xl font-semibold text-[var(--dim-grey)]">Invalid or expired link</h1>
             <p className="mt-2 max-w-2xl text-[13px] text-[var(--dim-grey)]">Please check the URL or contact HR.</p>
           </div>
@@ -83,7 +83,7 @@ export default async function AssessmentPage({ params }: { params: Promise<{ tok
     );
   }
 
-  if (prefill.assessment_submitted_at) {
+  if (prefill.candidate_assessment_form_submitted_at || prefill.assessment_submitted_at) {
     return (
       <main className="apply-font-override relative isolate min-h-screen overflow-hidden bg-[var(--surface-base)] text-[var(--dim-grey)]">
         <BackgroundLayer />
@@ -141,7 +141,7 @@ export default async function AssessmentPage({ params }: { params: Promise<{ tok
             </div>
 
             <div className="mb-4 rounded-[26px] border border-[var(--accessible-components--dark-grey)] bg-white p-5 shadow-[var(--shadow-soft)]">
-              <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Candidate Assessment Form (CAF)</p>
+              <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Candidate Assessment Form</p>
               <h1 className="mt-2 text-[22px] font-semibold text-[var(--dim-grey)]">{prefill.opening_title || "Studio Lotus"}</h1>
               <p className="mt-2 text-[13px] text-[var(--dim-grey)]">Please complete the form below to finish your application.</p>
             </div>

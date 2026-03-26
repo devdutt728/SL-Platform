@@ -4,6 +4,7 @@ import Link from "next/link";
 import { clsx } from "clsx";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, CheckCircle2, CircleDot, Copy, ExternalLink, FileText, Layers, Lock, Mail, Phone, Sparkles } from "lucide-react";
+import { BASIC_DETAILS_FORM_LABEL, CANDIDATE_ASSESSMENT_FORM_LABEL, SCREENING_DETAILS_LABEL } from "@/lib/recruitment-terms";
 import { CandidateEvent, CandidateFull, CandidateOffer, CandidateStage, PlatformPersonSuggestion, Screening } from "@/lib/types";
 import { Chip, Metric } from "./Candidate360Primitives";
 
@@ -164,10 +165,10 @@ export function Candidate360OverviewSection({
   onJumpOffer,
 }: Props) {
   const assessmentState = assessmentSubmittedAt
-    ? { label: "Assessment submitted", tone: chipTone("green") }
+    ? { label: "CAF submitted", tone: chipTone("green") }
     : assessmentSentAt
-      ? { label: "Assessment pending", tone: chipTone("amber") }
-      : { label: "Assessment not shared", tone: chipTone("neutral") };
+      ? { label: "CAF pending", tone: chipTone("amber") }
+      : { label: "CAF not shared", tone: chipTone("neutral") };
   const [selectedStageKey, setSelectedStageKey] = useState<string | null>(currentStageKey);
 
   useEffect(() => {
@@ -235,7 +236,7 @@ export function Candidate360OverviewSection({
 
         {showCafSection ? (
         <div className="rounded-2xl border border-white/60 bg-white/35 p-3">
-          <p className="text-xs uppercase tracking-tight text-slate-500">CAF & Assessment</p>
+          <p className="text-xs uppercase tracking-tight text-slate-500">{`${SCREENING_DETAILS_LABEL} & ${CANDIDATE_ASSESSMENT_FORM_LABEL}`}</p>
 
           <div className="mt-2 rounded-2xl border border-white/60 bg-gradient-to-r from-cyan-500/10 via-white/20 to-violet-500/10 p-3 shadow-sm">
             <div className="flex items-start gap-3">
@@ -301,7 +302,7 @@ export function Candidate360OverviewSection({
               disabled={busy || !canManageCandidate360}
             >
               <Copy className="h-4 w-4" />
-              Copy CAF link
+              {`Copy ${BASIC_DETAILS_FORM_LABEL} link`}
             </button>
             <button
               type="button"
@@ -311,7 +312,7 @@ export function Candidate360OverviewSection({
               disabled={busy || !canManageCandidate360 || !!assessmentSubmittedAt}
             >
               <Copy className="h-4 w-4" />
-              Copy assessment link
+              {`Copy ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()} link`}
             </button>
             <button
               type="button"
@@ -320,16 +321,18 @@ export function Candidate360OverviewSection({
               disabled={busy || !canManageCandidate360 || !!assessmentSubmittedAt}
             >
               <Mail className="h-4 w-4" />
-              {assessmentSentAt ? "Resend assessment email" : "Send assessment email"}
+              {assessmentSentAt
+                ? `Resend ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()} email`
+                : `Send ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()} email`}
             </button>
             <Link
-              href={`/candidates/${encodeURIComponent(candidateId)}/caf`}
+              href={`/candidates/${encodeURIComponent(candidateId)}/basic-details`}
               className={clsx(
                 "btn-action-neutral inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-white shadow-card"
               )}
             >
               <ExternalLink className="h-4 w-4" />
-              View CAF
+              {`View ${BASIC_DETAILS_FORM_LABEL}`}
             </Link>
           </div>
         </div>

@@ -46,6 +46,8 @@ class CafPrefillOut(BaseModel):
     years_of_experience: Optional[float] = None
     city: Optional[str] = None
     cv_url: Optional[str] = None
+    basic_details_form_sent_at: Optional[datetime] = None
+    basic_details_form_submitted_at: Optional[datetime] = None
     caf_sent_at: Optional[datetime] = None
     caf_submitted_at: Optional[datetime] = None
     opening_id: Optional[int] = None

@@ -19,16 +19,21 @@ from app.models.platform_person import DimPerson
 from app.models.sprint_template import RecSprintTemplate
 from app.models.stage import RecCandidateStage
 from app.services.email import send_email
-from app.services.public_links import build_public_link
 from app.services.events import log_event
 from app.services.operation_queue import process_due_operations
 from app.services.platform_identity import active_status_filter
+from app.services.public_links import build_public_link
+from app.services.recruitment_forms import (
+    BASIC_DETAILS_FORM_REMINDER_SENT,
+    build_basic_details_form_link,
+    get_basic_details_form_token,
+)
 from app.services.sprint_brief import render_sprint_brief_html
 from app.services.workflow_policy import get_candidate_workflow_policy
 
 
 def _caf_link(token: str) -> str:
-    return build_public_link(f"/caf/{token}")
+    return build_basic_details_form_link(token)
 
 
 def _sprint_link(token: str) -> str:
@@ -123,9 +128,9 @@ async def run_caf_reminders() -> None:
                 .where(
                     RecCandidateStage.stage_status == "pending",
                     RecCandidateStage.stage_name.in_(["hr_screening", "caf"]),
-                    RecCandidate.caf_submitted_at.is_(None),
-                    RecCandidate.caf_sent_at.is_not(None),
-                    RecCandidate.caf_sent_at <= cutoff,
+                    RecCandidate.basic_details_form_submitted_at.is_(None),
+                    RecCandidate.basic_details_form_sent_at.is_not(None),
+                    RecCandidate.basic_details_form_sent_at <= cutoff,
                 )
             )
         ).scalars().all()
@@ -133,7 +138,8 @@ async def run_caf_reminders() -> None:
             workflow_policy = await get_candidate_workflow_policy(session, candidate)
             if not workflow_policy.requires_caf:
                 continue
-            if not candidate.email or not candidate.caf_token:
+            basic_details_form_token = get_basic_details_form_token(candidate)
+            if not candidate.email or not basic_details_form_token:
                 continue
             if await _email_event_exists(
                 session,
@@ -151,12 +157,16 @@ async def run_caf_reminders() -> None:
                 template_name="caf_reminder",
                 context={
                     "candidate_name": candidate.full_name,
-                    "caf_link": _caf_link(candidate.caf_token),
+                    "caf_link": _caf_link(basic_details_form_token),
                 },
                 email_type="caf_reminder",
                 related_entity_type="candidate",
                 related_entity_id=candidate.candidate_id,
-                meta_extra={"caf_token": candidate.caf_token},
+                meta_extra={
+                    "basic_details_form_token": basic_details_form_token,
+                    "caf_token": basic_details_form_token,
+                    "action_type": BASIC_DETAILS_FORM_REMINDER_SENT,
+                },
             )
         await session.commit()
 

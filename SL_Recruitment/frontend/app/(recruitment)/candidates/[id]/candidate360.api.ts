@@ -45,21 +45,31 @@ export async function fetchFull(candidateId: string) {
 }
 
 export async function fetchCafLink(candidateId: string) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/caf-link`, { cache: "no-store" });
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/basic-details-link`, { cache: "no-store" });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
-  return (await res.json()) as { caf_token: string; caf_url: string };
+  return (await res.json()) as {
+    basic_details_form_token?: string;
+    basic_details_form_url?: string;
+    caf_token?: string;
+    caf_url?: string;
+  };
 }
 
 export async function fetchAssessmentLink(candidateId: string) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/assessment-link`, { cache: "no-store" });
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/candidate-assessment-form-link`, { cache: "no-store" });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await readError(res));
-  return (await res.json()) as { assessment_token: string; assessment_url: string };
+  return (await res.json()) as {
+    candidate_assessment_form_token?: string;
+    candidate_assessment_form_url?: string;
+    assessment_token?: string;
+    assessment_url?: string;
+  };
 }
 
 export async function resendAssessmentLink(candidateId: string) {
-  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/assessment-link/resend`, {
+  const res = await fetch(`/api/rec/candidates/${encodeURIComponent(candidateId)}/candidate-assessment-form-link/resend`, {
     method: "POST",
   });
   if (!res.ok) throw new Error(await readError(res));
@@ -67,6 +77,8 @@ export async function resendAssessmentLink(candidateId: string) {
     candidate_id: number;
     attempted: boolean;
     email_status: string;
+    candidate_assessment_form_token?: string;
+    candidate_assessment_form_url?: string;
     assessment_token?: string;
     assessment_url?: string;
     reason?: string;

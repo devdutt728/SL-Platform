@@ -5,13 +5,13 @@ import { CafPrefill, Screening } from "@/lib/types";
 import { CafForm } from "./ui";
 
 async function fetchPrefill(token: string) {
-  const res = await fetch(await internalUrl(`/api/caf/${token}`), { cache: "no-store" });
+  const res = await fetch(await internalUrl(`/api/basic-details/${token}`), { cache: "no-store" });
   if (!res.ok) return null;
   return (await res.json()) as CafPrefill;
 }
 
 async function fetchScreening(token: string) {
-  const res = await fetch(await internalUrl(`/api/caf/${token}/screening`), { cache: "no-store" });
+  const res = await fetch(await internalUrl(`/api/basic-details/${token}/screening`), { cache: "no-store" });
   if (!res.ok) return null;
   return (await res.json()) as Screening;
 }
@@ -86,7 +86,7 @@ export default async function CafPage({ params }: { params: Promise<{ token: str
         <TopBar logoSrc={logoSrc} shellClass={shellClass} />
         <div className={`${shellClass} relative z-10 pb-14 pt-24`}>
           <div className="rounded-[28px] border border-[var(--accessible-components--dark-grey)] bg-white p-7 shadow-[var(--shadow-soft)]">
-            <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">CAF</p>
+            <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Basic Details Form</p>
             <h1 className="mt-2 text-xl font-semibold text-[var(--dim-grey)]">Invalid or expired link</h1>
             <p className="mt-2 max-w-2xl text-[13px] text-[var(--dim-grey)]">
               Please check the URL or contact HR.
@@ -98,7 +98,7 @@ export default async function CafPage({ params }: { params: Promise<{ token: str
   }
 
   const screening = await fetchScreening(token);
-  const submitted = Boolean(prefill.caf_submitted_at);
+  const submitted = Boolean(prefill.basic_details_form_submitted_at || prefill.caf_submitted_at);
 
   return (
     <main className="apply-font-override relative isolate min-h-screen overflow-hidden bg-[var(--surface-base)] text-[var(--dim-grey)]">
@@ -152,10 +152,10 @@ export default async function CafPage({ params }: { params: Promise<{ token: str
             </div>
 
             <div className="mb-4 rounded-[26px] border border-[var(--accessible-components--dark-grey)] bg-white p-5 shadow-[var(--shadow-soft)]">
-              <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Submitted Form Details</p>
+              <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Basic Details Form</p>
               <h1 className="mt-2 text-[22px] font-semibold text-[var(--dim-grey)]">{prefill.opening_title || "Studio Lotus"}</h1>
               <p className="mt-2 text-[13px] text-[var(--dim-grey)]">
-                This page displays the submitted candidate details in read-only mode.
+                This page displays the submitted basic details in read-only mode.
               </p>
             </div>
 

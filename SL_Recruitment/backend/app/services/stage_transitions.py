@@ -28,6 +28,10 @@ from app.models.interview import RecCandidateInterview
 from app.models.stage import RecCandidateStage
 from app.schemas.user import UserContext
 from app.services.events import log_event
+from app.services.recruitment_forms import (
+    get_candidate_assessment_form_sent_at,
+    get_candidate_assessment_form_submitted_at,
+)
 from app.services.workflow_policy import get_candidate_workflow_policy, is_stage_disabled_for_policy
 
 _CAF_BYPASS_STAGES = {ENQUIRY, HR_SCREENING, L2_SHORTLIST}
@@ -95,7 +99,10 @@ async def _assessment_gate_state(session: AsyncSession, *, candidate_id: int) ->
         return False, False
     if not assessment:
         return False, False
-    return assessment.assessment_sent_at is not None, assessment.assessment_submitted_at is not None
+    return (
+        get_candidate_assessment_form_sent_at(assessment) is not None,
+        get_candidate_assessment_form_submitted_at(assessment) is not None,
+    )
 
 
 async def _has_submitted_interview_feedback(

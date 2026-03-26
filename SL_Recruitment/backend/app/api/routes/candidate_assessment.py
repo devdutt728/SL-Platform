@@ -11,11 +11,22 @@ from app.models.opening import RecOpening
 from app.schemas.candidate_assessment import CandidateAssessmentOut, CandidateAssessmentPrefillOut, CandidateAssessmentUpsertIn
 from app.services.email import send_email
 from app.services.events import log_event
+from app.services.recruitment_forms import (
+    CANDIDATE_ASSESSMENT_FORM_SUBMITTED,
+    LEGACY_CANDIDATE_ASSESSMENT_FORM_SUBMITTED,
+    candidate_assessment_form_token_filter,
+    get_candidate_assessment_form_sent_at,
+    get_candidate_assessment_form_submitted_at,
+    get_candidate_assessment_form_token,
+    set_candidate_assessment_form_submitted_at,
+    sync_candidate_assessment_form_fields,
+)
 from app.services.stage_transitions import apply_stage_transition
 from app.services.workflow_policy import get_candidate_workflow_policy
 from app.core.config import settings
 
-router = APIRouter(prefix="/assessment", tags=["candidate-assessment"])
+router = APIRouter(prefix="/candidate-assessment-form", tags=["candidate-assessment-form"])
+legacy_router = APIRouter(prefix="/assessment", tags=["candidate-assessment"])
 
 
 async def _assert_assessment_available(session: AsyncSession, candidate: RecCandidate) -> None:
@@ -28,9 +39,10 @@ async def _assert_assessment_available(session: AsyncSession, candidate: RecCand
 
 
 def _assessment_expired(assessment: RecCandidateAssessment) -> bool:
-    if assessment.assessment_submitted_at is not None:
+    if get_candidate_assessment_form_submitted_at(assessment) is not None:
         return False
-    if assessment.assessment_sent_at is None:
+    sent_at = get_candidate_assessment_form_sent_at(assessment)
+    if sent_at is None:
         return False
     expiry_hours = max(int(settings.assessment_expiry_hours or 0), 0)
     if expiry_hours <= 0:
@@ -39,9 +51,10 @@ def _assessment_expired(assessment: RecCandidateAssessment) -> bool:
         expiry_hours = max(int(settings.caf_expiry_days or 0), 0) * 24
     if expiry_hours <= 0:
         return False
-    return datetime.utcnow() > (assessment.assessment_sent_at + timedelta(hours=expiry_hours))
+    return datetime.utcnow() > (sent_at + timedelta(hours=expiry_hours))
 
 
+@legacy_router.get("/{token}", response_model=CandidateAssessmentPrefillOut)
 @router.get("/{token}", response_model=CandidateAssessmentPrefillOut)
 async def get_candidate_assessment_prefill(
     token: str,
@@ -49,11 +62,12 @@ async def get_candidate_assessment_prefill(
 ):
     assessment = (
         await session.execute(
-            select(RecCandidateAssessment).where(RecCandidateAssessment.assessment_token == token)
+            select(RecCandidateAssessment).where(candidate_assessment_form_token_filter(token))
         )
     ).scalars().first()
     if not assessment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid assessment token")
+    sync_candidate_assessment_form_fields(assessment)
     if _assessment_expired(assessment):
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Assessment link expired")
 
@@ -85,14 +99,17 @@ async def get_candidate_assessment_prefill(
         name=name or "",
         email=candidate.email,
         phone=candidate.phone,
-        assessment_sent_at=assessment.assessment_sent_at,
-        assessment_submitted_at=assessment.assessment_submitted_at,
+        candidate_assessment_form_sent_at=get_candidate_assessment_form_sent_at(assessment),
+        candidate_assessment_form_submitted_at=get_candidate_assessment_form_submitted_at(assessment),
+        assessment_sent_at=get_candidate_assessment_form_sent_at(assessment),
+        assessment_submitted_at=get_candidate_assessment_form_submitted_at(assessment),
         opening_id=candidate.opening_id,
         opening_title=opening_title,
         opening_description=opening_description,
     )
 
 
+@legacy_router.post("/{token}", response_model=CandidateAssessmentOut, status_code=status.HTTP_201_CREATED)
 @router.post("/{token}", response_model=CandidateAssessmentOut, status_code=status.HTTP_201_CREATED)
 async def submit_candidate_assessment(
     token: str,
@@ -101,14 +118,15 @@ async def submit_candidate_assessment(
 ):
     assessment = (
         await session.execute(
-            select(RecCandidateAssessment).where(RecCandidateAssessment.assessment_token == token)
+            select(RecCandidateAssessment).where(candidate_assessment_form_token_filter(token))
         )
     ).scalars().first()
     if not assessment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid assessment token")
+    sync_candidate_assessment_form_fields(assessment)
     if _assessment_expired(assessment):
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Assessment link expired")
-    if assessment.assessment_submitted_at is not None:
+    if get_candidate_assessment_form_submitted_at(assessment) is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Assessment already submitted")
 
     rating_fields = [
@@ -158,7 +176,7 @@ async def submit_candidate_assessment(
     data = payload.model_dump(exclude_none=True)
     for key, value in data.items():
         setattr(assessment, key, value)
-    assessment.assessment_submitted_at = now
+    set_candidate_assessment_form_submitted_at(assessment, now)
     assessment.updated_at = now
 
     if candidate.status != "in_process":
@@ -202,22 +220,31 @@ async def submit_candidate_assessment(
     await log_event(
         session,
         candidate_id=assessment.candidate_id,
-        action_type="candidate_assessment_submitted",
+        action_type=CANDIDATE_ASSESSMENT_FORM_SUBMITTED,
         performed_by_person_id_platform=None,
         related_entity_type="candidate",
         related_entity_id=assessment.candidate_id,
-        meta_json={"assessment_token": assessment.assessment_token},
+        meta_json={"candidate_assessment_form_token": get_candidate_assessment_form_token(assessment)},
+    )
+    await log_event(
+        session,
+        candidate_id=assessment.candidate_id,
+        action_type=LEGACY_CANDIDATE_ASSESSMENT_FORM_SUBMITTED,
+        performed_by_person_id_platform=None,
+        related_entity_type="candidate",
+        related_entity_id=assessment.candidate_id,
+        meta_json={"assessment_token": get_candidate_assessment_form_token(assessment)},
     )
 
     await send_email(
         session,
         candidate_id=assessment.candidate_id,
         to_emails=[candidate.email],
-        subject="Your Candidate Assessment Form (CAF) is complete",
+        subject="Your Candidate Assessment Form is complete",
         template_name="assessment_completed",
         context={"candidate_name": candidate.full_name},
         email_type="assessment_completed",
-        meta_extra={"assessment_token": assessment.assessment_token},
+        meta_extra={"candidate_assessment_form_token": get_candidate_assessment_form_token(assessment)},
     )
 
     await session.commit()

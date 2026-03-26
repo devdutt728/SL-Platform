@@ -750,7 +750,7 @@ export default function DashboardClient({
                 href: "/candidates?status_view=active",
               },
               {
-                label: "CAF today",
+                label: "Basic Details today",
                 value: metrics?.caf_submitted_today ?? "--",
                 bg: "linear-gradient(135deg, rgba(231, 64, 17, 0.12), rgba(255, 255, 255, 0.93), rgba(93, 85, 82, 0.1))",
                 href: "/candidates?status_view=all&caf_today=1",

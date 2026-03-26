@@ -116,6 +116,9 @@ class CandidateAssessmentUpsertIn(BaseModel):
 
 class CandidateAssessmentOut(BaseModel):
     candidate_id: int
+    candidate_assessment_form_token: Optional[str] = None
+    candidate_assessment_form_sent_at: Optional[datetime] = None
+    candidate_assessment_form_submitted_at: Optional[datetime] = None
     assessment_token: Optional[str] = None
     assessment_sent_at: Optional[datetime] = None
     assessment_submitted_at: Optional[datetime] = None
@@ -241,6 +244,8 @@ class CandidateAssessmentPrefillOut(BaseModel):
     name: str
     email: str
     phone: Optional[str] = None
+    candidate_assessment_form_sent_at: Optional[datetime] = None
+    candidate_assessment_form_submitted_at: Optional[datetime] = None
     assessment_sent_at: Optional[datetime] = None
     assessment_submitted_at: Optional[datetime] = None
     opening_id: Optional[int] = None

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExternalLink, RefreshCw, Search } from "lucide-react";
+import { BASIC_DETAILS_FORM_LABEL, CANDIDATE_ASSESSMENT_FORM_LABEL } from "@/lib/recruitment-terms";
 import type { CandidateCommunicationFeed, CandidateCommunicationItem } from "@/lib/types";
 
 const PAGE_SIZE = 100;
@@ -9,8 +10,8 @@ const PAGE_SIZE = 100;
 const ACTION_OPTIONS = [
   { value: "", label: "All actions" },
   { value: "email_sent", label: "Emails sent" },
-  { value: "caf_link_generated", label: "CAF links generated" },
-  { value: "assessment_link_generated", label: "Assessment links generated" },
+  { value: "basic_details_form_link_generated", label: `${BASIC_DETAILS_FORM_LABEL} links generated` },
+  { value: "candidate_assessment_form_link_generated", label: `${CANDIDATE_ASSESSMENT_FORM_LABEL} links generated` },
 ];
 
 const KNOWN_EMAIL_TYPES = [

@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import {
+  BASIC_DETAILS_FORM_LABEL,
+  CANDIDATE_ASSESSMENT_FORM_LABEL,
+  basicDetailsStatusLabel,
+} from "@/lib/recruitment-terms";
 import { CandidateAssessment, CandidateConvertPayload, CandidateFull, JoiningDoc, JoiningProfile, Screening } from "@/lib/types";
 import { ExternalLink } from "lucide-react";
 import { defaultTransitionDecision, normalizeRecruitmentStage } from "@/lib/recruitment-stages";
@@ -185,8 +190,18 @@ export function Candidate360Client({
     error: null,
     onConfirm: () => undefined,
   });
-  const [cafLink, setCafLink] = useState<{ caf_token: string; caf_url: string } | null>(null);
-  const [assessmentLink, setAssessmentLink] = useState<{ assessment_token: string; assessment_url: string } | null>(null);
+  const [cafLink, setCafLink] = useState<{
+    basic_details_form_token?: string;
+    basic_details_form_url?: string;
+    caf_token?: string;
+    caf_url?: string;
+  } | null>(null);
+  const [assessmentLink, setAssessmentLink] = useState<{
+    candidate_assessment_form_token?: string;
+    candidate_assessment_form_url?: string;
+    assessment_token?: string;
+    assessment_url?: string;
+  } | null>(null);
   const [joiningDocs, setJoiningDocs] = useState<JoiningDoc[] | null>(null);
   const [joiningDocsBusy, setJoiningDocsBusy] = useState(false);
   const [joiningDocsError, setJoiningDocsError] = useState<string | null>(null);
@@ -229,10 +244,14 @@ export function Candidate360Client({
       return emailType === "intern_selection";
     });
   }, [data.events, isInternWorkflow]);
-  const cafSentAt = isInternWorkflow ? null : candidate.caf_sent_at || null;
-  const cafSubmittedAt = isInternWorkflow ? null : candidate.caf_submitted_at || null;
-  const assessmentSentAt = isInternWorkflow ? null : assessment?.assessment_sent_at || null;
-  const assessmentSubmittedAt = isInternWorkflow ? null : assessment?.assessment_submitted_at || null;
+  const cafSentAt = isInternWorkflow ? null : candidate.basic_details_form_sent_at || candidate.caf_sent_at || null;
+  const cafSubmittedAt = isInternWorkflow ? null : candidate.basic_details_form_submitted_at || candidate.caf_submitted_at || null;
+  const assessmentSentAt =
+    isInternWorkflow ? null : assessment?.candidate_assessment_form_sent_at || assessment?.assessment_sent_at || null;
+  const assessmentSubmittedAt =
+    isInternWorkflow
+      ? null
+      : assessment?.candidate_assessment_form_submitted_at || assessment?.assessment_submitted_at || null;
   const assessmentGateActive = !isInternWorkflow && !!assessmentSentAt;
   const assessmentLocked = assessmentGateActive && !assessmentSubmittedAt;
   const assessmentExpiryDays = 3;
@@ -246,12 +265,12 @@ export function Candidate360Client({
       : null;
 
   const cafState = useMemo(() => {
-    if (isInternWorkflow) return { label: "CAF not required", tone: chipTone("blue") };
+    if (isInternWorkflow) return { label: basicDetailsStatusLabel({ required: false }), tone: chipTone("blue") };
     const generated = !!cafSentAt;
     const submitted = !!cafSubmittedAt;
-    if (submitted) return { label: "CAF submitted", tone: chipTone("green") };
-    if (generated) return { label: "CAF pending", tone: chipTone("amber") };
-    return { label: "CAF not shared", tone: chipTone("neutral") };
+    if (submitted) return { label: basicDetailsStatusLabel({ required: true, sentAt: cafSentAt, submittedAt: cafSubmittedAt }), tone: chipTone("green") };
+    if (generated) return { label: basicDetailsStatusLabel({ required: true, sentAt: cafSentAt }), tone: chipTone("amber") };
+    return { label: basicDetailsStatusLabel({ required: true }), tone: chipTone("neutral") };
   }, [cafSentAt, cafSubmittedAt, isInternWorkflow]);
   const needsReviewChip = useMemo(() => {
     if (!candidate.needs_hr_review) return null;
@@ -278,7 +297,7 @@ export function Candidate360Client({
       const nextAssessment = full.assessment as CandidateAssessment | null | undefined;
       const [nextCafLink, nextAssessmentLink] = await Promise.all([
         fetchCafLink(candidateId).catch(() => null),
-        nextAssessment?.assessment_sent_at || assessmentLink
+        nextAssessment?.candidate_assessment_form_sent_at || nextAssessment?.assessment_sent_at || assessmentLink
           ? fetchAssessmentLink(candidateId).catch(() => null)
           : Promise.resolve(null),
       ]);
@@ -598,7 +617,7 @@ export function Candidate360Client({
 
   async function initCafLinkIfNeeded() {
     if (isInternWorkflow) return;
-    if (cafLink || candidate.caf_sent_at) return;
+    if (cafLink || cafSentAt) return;
     try {
       const link = await fetchCafLink(candidateId);
       setCafLink(link);
@@ -609,7 +628,7 @@ export function Candidate360Client({
 
   async function initAssessmentLinkIfNeeded() {
     if (isInternWorkflow) return;
-    if (assessmentLink || assessment?.assessment_sent_at) return;
+    if (assessmentLink || assessmentSentAt) return;
     try {
       const link = await fetchAssessmentLink(candidateId);
       setAssessmentLink(link);
@@ -624,16 +643,17 @@ export function Candidate360Client({
     try {
       const link = cafLink || (await fetchCafLink(candidateId));
       setCafLink(link);
-      if (!link) {
-        setError("CAF link is not available for this candidate yet.");
+      const basicDetailsUrl = link?.basic_details_form_url || link?.caf_url;
+      if (!basicDetailsUrl) {
+        setError(`${BASIC_DETAILS_FORM_LABEL} link is not available for this candidate yet.`);
         return;
       }
-      const absolute = `${window.location.origin}${link.caf_url}`;
+      const absolute = `${window.location.origin}${basicDetailsUrl}`;
       await navigator.clipboard.writeText(absolute);
-      setError("CAF link copied.");
+      setError(`${BASIC_DETAILS_FORM_LABEL} link copied.`);
       window.setTimeout(() => setError(null), 1200);
     } catch (e: any) {
-      setError(e?.message || "Could not copy CAF link");
+      setError(e?.message || `Could not copy ${BASIC_DETAILS_FORM_LABEL} link`);
     }
   }
 
@@ -823,16 +843,17 @@ export function Candidate360Client({
     try {
       const link = assessmentLink || (await fetchAssessmentLink(candidateId));
       setAssessmentLink(link);
-      if (!link) {
-        setError("Assessment link is not available for this candidate yet.");
+      const assessmentUrl = link?.candidate_assessment_form_url || link?.assessment_url;
+      if (!assessmentUrl) {
+        setError(`${CANDIDATE_ASSESSMENT_FORM_LABEL} link is not available for this candidate yet.`);
         return;
       }
-      const absolute = `${window.location.origin}${link.assessment_url}`;
+      const absolute = `${window.location.origin}${assessmentUrl}`;
       await navigator.clipboard.writeText(absolute);
-      setError("Assessment link copied.");
+      setError(`${CANDIDATE_ASSESSMENT_FORM_LABEL} link copied.`);
       window.setTimeout(() => setError(null), 1200);
     } catch (e: any) {
-      setError(e?.message || "Could not copy assessment link");
+      setError(e?.message || `Could not copy ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()} link`);
     }
   }
 
@@ -842,32 +863,39 @@ export function Candidate360Client({
     setError(null);
     try {
       const result = await resendAssessmentLink(candidateId);
-      if (result.assessment_token && result.assessment_url) {
+      const assessmentToken = result.candidate_assessment_form_token || result.assessment_token;
+      const assessmentUrl = result.candidate_assessment_form_url || result.assessment_url;
+      if (assessmentToken && assessmentUrl) {
         setAssessmentLink({
-          assessment_token: result.assessment_token,
-          assessment_url: result.assessment_url,
+          candidate_assessment_form_token: assessmentToken,
+          candidate_assessment_form_url: assessmentUrl,
+          assessment_token: assessmentToken,
+          assessment_url: assessmentUrl,
         });
       }
       await refreshAll();
 
       if (result.attempted && result.email_status !== "failed") {
         pushToast({
-          title: "Assessment email sent",
-          description: result.email_status === "resent" ? "The updated assessment link has been re-sent." : "The updated assessment link has been sent.",
+          title: `${CANDIDATE_ASSESSMENT_FORM_LABEL} email sent`,
+          description:
+            result.email_status === "resent"
+              ? `The updated ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()} link has been re-sent.`
+              : `The updated ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()} link has been sent.`,
           tone: "success",
         });
         return;
       }
 
       if (result.email_status === "failed") {
-        throw new Error(result.email_error || "Assessment email could not be sent.");
+        throw new Error(result.email_error || `${CANDIDATE_ASSESSMENT_FORM_LABEL} email could not be sent.`);
       }
 
       const reason = (result.reason || "").trim();
       if (reason === "already_submitted") {
         pushToast({
-          title: "Assessment already submitted",
-          description: "No new email was sent because this candidate has already completed the assessment.",
+          title: `${CANDIDATE_ASSESSMENT_FORM_LABEL} already submitted`,
+          description: `No new email was sent because this candidate has already completed the ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()}.`,
           tone: "warning",
         });
         return;
@@ -878,16 +906,16 @@ export function Candidate360Client({
       }
 
       if (reason === "disabled_for_workflow") {
-        throw new Error("Candidate assessment is not enabled for this opening.");
+        throw new Error(`${CANDIDATE_ASSESSMENT_FORM_LABEL} is not enabled for this opening.`);
       }
 
       pushToast({
-        title: "Assessment email not sent",
-        description: reason || "No new assessment email was sent.",
+        title: `${CANDIDATE_ASSESSMENT_FORM_LABEL} email not sent`,
+        description: reason || `No new ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()} email was sent.`,
         tone: "warning",
       });
     } catch (e: any) {
-      setError(e?.message || "Could not send assessment email");
+      setError(e?.message || `Could not send ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()} email`);
     } finally {
       setBusy(false);
     }

@@ -27,8 +27,11 @@ export type CandidateListItem = {
   ageing_days: number;
   applied_ageing_days: number;
   created_at?: string | null;
+  basic_details_form_sent_at?: string | null;
+  basic_details_form_submitted_at?: string | null;
   caf_sent_at?: string | null;
   caf_submitted_at?: string | null;
+  candidate_assessment_form_submitted_at?: string | null;
   assessment_submitted_at?: string | null;
   needs_hr_review?: boolean;
   screening_result?: string | null;
@@ -221,8 +224,12 @@ export type CandidateDetail = {
   portfolio_not_uploaded_reason?: string | null;
   questions_from_candidate?: string | null;
   drive_folder_url?: string | null;
+  basic_details_form_sent_at?: string | null;
+  basic_details_form_submitted_at?: string | null;
   caf_sent_at?: string | null;
   caf_submitted_at?: string | null;
+  candidate_assessment_form_sent_at?: string | null;
+  candidate_assessment_form_submitted_at?: string | null;
   needs_hr_review?: boolean;
   application_docs_status: string;
   joining_docs_status: string;
@@ -343,6 +350,8 @@ export type CafPrefill = {
   years_of_experience?: number | null;
   city?: string | null;
   cv_url?: string | null;
+  basic_details_form_sent_at?: string | null;
+  basic_details_form_submitted_at?: string | null;
   caf_sent_at?: string | null;
   caf_submitted_at?: string | null;
   opening_id?: number | null;
@@ -356,6 +365,8 @@ export type CandidateAssessmentPrefill = {
   name: string;
   email: string;
   phone?: string | null;
+  candidate_assessment_form_sent_at?: string | null;
+  candidate_assessment_form_submitted_at?: string | null;
   assessment_sent_at?: string | null;
   assessment_submitted_at?: string | null;
   opening_id?: number | null;
@@ -515,6 +526,9 @@ export type CandidateFull = {
 
 export type CandidateAssessment = {
   candidate_id: number;
+  candidate_assessment_form_token?: string | null;
+  candidate_assessment_form_sent_at?: string | null;
+  candidate_assessment_form_submitted_at?: string | null;
   assessment_token?: string | null;
   assessment_sent_at?: string | null;
   assessment_submitted_at?: string | null;

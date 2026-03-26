@@ -13,6 +13,7 @@ import {
   Phone,
   UserRound,
 } from "lucide-react";
+import { BASIC_DETAILS_FORM_LABEL, CANDIDATE_ASSESSMENT_FORM_LABEL, SCREENING_DETAILS_LABEL } from "@/lib/recruitment-terms";
 import { CandidateAssessment, CandidateDetail, Screening } from "@/lib/types";
 import { Chip, Metric } from "./Candidate360Primitives";
 
@@ -98,6 +99,10 @@ export function Candidate360ScreeningSection({
   formatDate,
   formatDateTime,
 }: Props) {
+  const basicDetailsSentAt = candidate.basic_details_form_sent_at || candidate.caf_sent_at;
+  const basicDetailsSubmittedAt = candidate.basic_details_form_submitted_at || candidate.caf_submitted_at;
+  const candidateAssessmentSubmittedAt =
+    assessment?.candidate_assessment_form_submitted_at || assessment?.assessment_submitted_at;
   const candidateSnapshotMetrics = [
     { label: "Candidate code", value: valueOrDash(candidate.candidate_code) },
     { label: "Opening", value: valueOrDash(candidate.opening_title) },
@@ -244,25 +249,27 @@ export function Candidate360ScreeningSection({
                       className={chipTone(
                         isInternWorkflow
                           ? "amber"
-                          : candidate.caf_submitted_at
+                          : basicDetailsSubmittedAt
                             ? "green"
-                            : candidate.caf_sent_at
+                            : basicDetailsSentAt
                               ? "amber"
                               : "neutral"
                       )}
                     >
                       {isInternWorkflow
                         ? "Screening pending"
-                        : candidate.caf_submitted_at
-                          ? "CAF submitted"
-                          : candidate.caf_sent_at
-                            ? "CAF pending"
-                            : "CAF not shared"}
+                        : basicDetailsSubmittedAt
+                          ? `${BASIC_DETAILS_FORM_LABEL} submitted`
+                          : basicDetailsSentAt
+                            ? `${BASIC_DETAILS_FORM_LABEL} pending`
+                            : `${BASIC_DETAILS_FORM_LABEL} not shared`}
                     </Chip>
                   )}
                   {!isInternWorkflow ? (
-                    <Chip className={assessment?.assessment_submitted_at ? chipTone("green") : chipTone("amber")}>
-                      {assessment?.assessment_submitted_at ? "Assessment submitted" : "Assessment pending"}
+                    <Chip className={candidateAssessmentSubmittedAt ? chipTone("green") : chipTone("amber")}>
+                      {candidateAssessmentSubmittedAt
+                        ? "CAF submitted"
+                        : "CAF pending"}
                     </Chip>
                   ) : null}
                 </div>
@@ -330,19 +337,19 @@ export function Candidate360ScreeningSection({
             </SectionBlock>
           ) : (
             <EmptyBlock
-              title={isInternWorkflow ? "No screening submission yet" : "No CAF screening yet"}
+              title={isInternWorkflow ? "No screening submission yet" : `No ${SCREENING_DETAILS_LABEL} yet`}
               description={
                 isInternWorkflow
                   ? "This candidate has not submitted screening data yet."
-                  : "This candidate has not submitted CAF screening data yet."
+                  : `This candidate has not submitted ${SCREENING_DETAILS_LABEL.toLowerCase()} yet.`
               }
             />
           )}
 
           {isInternWorkflow ? null : !assessment ? (
             <EmptyBlock
-              title="CAF assessment form"
-              description="No CAF assessment data has been submitted yet."
+              title={CANDIDATE_ASSESSMENT_FORM_LABEL}
+              description={`No ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()} data has been submitted yet.`}
             />
           ) : (
             <>
@@ -363,7 +370,7 @@ export function Candidate360ScreeningSection({
                 title="Compensation"
                 subtitle={
                   assessmentCompensationVisible
-                    ? "Compensation inputs from the CAF assessment."
+                    ? `Compensation inputs from the ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()}.`
                     : "Compensation values are hidden for this account."
                 }
               >

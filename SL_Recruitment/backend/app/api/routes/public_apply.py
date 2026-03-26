@@ -24,8 +24,18 @@ from app.services.email import send_email
 from app.services.external_documents import download_external_document
 from app.services.events import log_event
 from app.services.opening_config import get_opening_config
+from app.services.recruitment_forms import (
+    BASIC_DETAILS_FORM_LINK_GENERATED,
+    build_basic_details_form_link,
+    build_basic_details_form_path,
+    get_basic_details_form_submitted_at,
+    get_basic_details_form_token,
+    set_basic_details_form_sent_at,
+    set_basic_details_form_submitted_at,
+    set_basic_details_form_token,
+    sync_basic_details_form_fields,
+)
 from app.services.screening_rules import evaluate_screening
-from app.services.public_links import build_public_link, build_public_path
 from app.services.stage_transitions import apply_stage_transition
 from app.services.workflow_policy import workflow_policy_for_opening
 from app.schemas.screening import ScreeningUpsertIn
@@ -53,6 +63,8 @@ class PublicApplyIn(BaseModel):
 class PublicApplyOut(BaseModel):
     candidate_id: int
     candidate_code: str | None = None
+    basic_details_form_token: str | None = None
+    basic_details_form_url: str | None = None
     caf_token: str | None = None
     caf_url: str | None = None
     screening_result: str | None = None
@@ -518,19 +530,24 @@ async def apply_for_opening(
     ).scalars().first()
     if existing_candidate and _is_recent_public_apply_duplicate(existing_candidate, now=now):
         duplicate_message = "Candidate already exists for this opening/email within last 24 hours."
-        caf_token_existing = existing_candidate.caf_token or uuid4().hex if workflow_policy.requires_caf else None
-        if workflow_policy.requires_caf and existing_candidate.caf_token != caf_token_existing:
-            existing_candidate.caf_token = caf_token_existing
-            existing_candidate.caf_sent_at = now
+        sync_basic_details_form_fields(existing_candidate)
+        basic_details_form_token_existing = get_basic_details_form_token(existing_candidate) or uuid4().hex if workflow_policy.requires_caf else None
+        if workflow_policy.requires_caf and get_basic_details_form_token(existing_candidate) != basic_details_form_token_existing:
+            set_basic_details_form_token(existing_candidate, basic_details_form_token_existing)
+            set_basic_details_form_sent_at(existing_candidate, now)
             existing_candidate.updated_at = now
             await log_event(
                 session,
                 candidate_id=existing_candidate.candidate_id,
-                action_type="caf_link_generated",
+                action_type=BASIC_DETAILS_FORM_LINK_GENERATED,
                 performed_by_person_id_platform=None,
                 related_entity_type="candidate",
                 related_entity_id=existing_candidate.candidate_id,
-                meta_json={"caf_token": caf_token_existing, "reason": "apply_deduped"},
+                meta_json={
+                    "basic_details_form_token": basic_details_form_token_existing,
+                    "caf_token": basic_details_form_token_existing,
+                    "reason": "apply_deduped",
+                },
             )
         if not existing_candidate.source_channel:
             existing_candidate.source_channel = "website"
@@ -554,8 +571,10 @@ async def apply_for_opening(
         response_payload = PublicApplyOut(
             candidate_id=existing_candidate.candidate_id,
             candidate_code=existing_candidate.candidate_code,
-            caf_token=caf_token_existing,
-            caf_url=build_public_path(f"/caf/{caf_token_existing}") if caf_token_existing else None,
+            basic_details_form_token=basic_details_form_token_existing,
+            basic_details_form_url=build_basic_details_form_path(basic_details_form_token_existing) if basic_details_form_token_existing else None,
+            caf_token=basic_details_form_token_existing,
+            caf_url=build_basic_details_form_path(basic_details_form_token_existing) if basic_details_form_token_existing else None,
             screening_result=None,
             already_applied=True,
             reapplied=False,
@@ -568,10 +587,11 @@ async def apply_for_opening(
 
     is_reapplied = bool(existing_candidate)
     candidate: RecCandidate
-    caf_token: str | None
+    basic_details_form_token: str | None
     if existing_candidate:
         candidate = existing_candidate
-        caf_token = candidate.caf_token or uuid4().hex if workflow_policy.requires_caf else None
+        sync_basic_details_form_fields(candidate)
+        basic_details_form_token = get_basic_details_form_token(candidate) or uuid4().hex if workflow_policy.requires_caf else None
         candidate.first_name = first_name_clean
         candidate.last_name = last_name_clean
         candidate.full_name = _compose_full_name(first_name_clean, last_name_clean)
@@ -591,9 +611,15 @@ async def apply_for_opening(
         candidate.portfolio_url = portfolio_source_url or candidate.portfolio_url
         candidate.resume_url = resume_source_url or candidate.resume_url
         candidate.questions_from_candidate = questions_value
-        candidate.caf_token = caf_token
-        candidate.caf_sent_at = now if workflow_policy.requires_caf else None
-        candidate.caf_submitted_at = candidate.caf_submitted_at or (now if workflow_policy.requires_caf else None)
+        if workflow_policy.requires_caf:
+            set_basic_details_form_token(candidate, basic_details_form_token)
+            set_basic_details_form_sent_at(candidate, now)
+            if get_basic_details_form_submitted_at(candidate) is None:
+                set_basic_details_form_submitted_at(candidate, now)
+        else:
+            set_basic_details_form_token(candidate, None)
+            set_basic_details_form_sent_at(candidate, None)
+            set_basic_details_form_submitted_at(candidate, None)
         candidate.updated_at = now
         candidate.application_docs_status = _application_docs_status(
             cv_url=cv_source_url if has_cv_file or cv_source_url else candidate.cv_url,
@@ -618,18 +644,22 @@ async def apply_for_opening(
                 "external_source_ref": external_source_ref,
             },
         )
-        if workflow_policy.requires_caf and caf_token:
+        if workflow_policy.requires_caf and basic_details_form_token:
             await log_event(
                 session,
                 candidate_id=candidate.candidate_id,
-                action_type="caf_link_generated",
+                action_type=BASIC_DETAILS_FORM_LINK_GENERATED,
                 performed_by_person_id_platform=None,
                 related_entity_type="candidate",
                 related_entity_id=candidate.candidate_id,
-                meta_json={"caf_token": caf_token, "reason": "public_apply_reapply"},
+                meta_json={
+                    "basic_details_form_token": basic_details_form_token,
+                    "caf_token": basic_details_form_token,
+                    "reason": "public_apply_reapply",
+                },
             )
     else:
-        caf_token = uuid4().hex if workflow_policy.requires_caf else None
+        basic_details_form_token = uuid4().hex if workflow_policy.requires_caf else None
         full_name = _compose_full_name(first_name_clean, last_name_clean)
         application_docs_status = _application_docs_status(
             cv_url=cv_source_url if has_cv_file or cv_source_url else None,
@@ -658,14 +688,15 @@ async def apply_for_opening(
             cv_url=cv_source_url,
             portfolio_url=portfolio_source_url,
             resume_url=resume_source_url,
-            caf_token=caf_token,
-            caf_sent_at=now if workflow_policy.requires_caf else None,
-            caf_submitted_at=now if workflow_policy.requires_caf else None,
             application_docs_status=application_docs_status,
             joining_docs_status="none",
             created_at=now,
             updated_at=now,
         )
+        if workflow_policy.requires_caf:
+            set_basic_details_form_token(candidate, basic_details_form_token)
+            set_basic_details_form_sent_at(candidate, now)
+            set_basic_details_form_submitted_at(candidate, now)
         try:
             await assign_candidate_code(session, candidate, legacy_code_factory=_candidate_code)
         except IntegrityError:
@@ -682,25 +713,28 @@ async def apply_for_opening(
                 )
             ).scalars().first()
             if existing_candidate:
-                caf_token_existing = existing_candidate.caf_token or uuid4().hex if workflow_policy.requires_caf else None
+                sync_basic_details_form_fields(existing_candidate)
+                basic_details_form_token_existing = get_basic_details_form_token(existing_candidate) or uuid4().hex if workflow_policy.requires_caf else None
                 if workflow_policy.requires_caf:
                     candidate_changed = False
-                    if existing_candidate.caf_token != caf_token_existing:
-                        existing_candidate.caf_token = caf_token_existing
+                    if get_basic_details_form_token(existing_candidate) != basic_details_form_token_existing:
+                        set_basic_details_form_token(existing_candidate, basic_details_form_token_existing)
                         candidate_changed = True
-                    if existing_candidate.caf_sent_at is None:
-                        existing_candidate.caf_sent_at = now
+                    if existing_candidate.basic_details_form_sent_at is None:
+                        set_basic_details_form_sent_at(existing_candidate, now)
                         candidate_changed = True
-                    if existing_candidate.caf_submitted_at is None:
-                        existing_candidate.caf_submitted_at = now
+                    if get_basic_details_form_submitted_at(existing_candidate) is None:
+                        set_basic_details_form_submitted_at(existing_candidate, now)
                         candidate_changed = True
                     if candidate_changed:
                         existing_candidate.updated_at = now
                 response_payload = PublicApplyOut(
                     candidate_id=existing_candidate.candidate_id,
                     candidate_code=existing_candidate.candidate_code,
-                    caf_token=caf_token_existing,
-                    caf_url=build_public_path(f"/caf/{caf_token_existing}") if caf_token_existing else None,
+                    basic_details_form_token=basic_details_form_token_existing,
+                    basic_details_form_url=build_basic_details_form_path(basic_details_form_token_existing) if basic_details_form_token_existing else None,
+                    caf_token=basic_details_form_token_existing,
+                    caf_url=build_basic_details_form_path(basic_details_form_token_existing) if basic_details_form_token_existing else None,
                     screening_result=None,
                     already_applied=True,
                     reapplied=False,
@@ -769,15 +803,18 @@ async def apply_for_opening(
                 "terms_consent": True,
             },
         )
-        if workflow_policy.requires_caf and caf_token:
+        if workflow_policy.requires_caf and basic_details_form_token:
             await log_event(
                 session,
                 candidate_id=candidate.candidate_id,
-                action_type="caf_link_generated",
+                action_type=BASIC_DETAILS_FORM_LINK_GENERATED,
                 performed_by_person_id_platform=None,
                 related_entity_type="candidate",
                 related_entity_id=candidate.candidate_id,
-                meta_json={"caf_token": caf_token},
+                meta_json={
+                    "basic_details_form_token": basic_details_form_token,
+                    "caf_token": basic_details_form_token,
+                },
             )
 
     # Re-use existing folder for reapply; create only if missing.
@@ -998,8 +1035,10 @@ async def apply_for_opening(
     response_payload = PublicApplyOut(
         candidate_id=candidate.candidate_id,
         candidate_code=candidate.candidate_code,
-        caf_token=caf_token,
-        caf_url=build_public_path(f"/caf/{caf_token}") if caf_token else None,
+        basic_details_form_token=basic_details_form_token,
+        basic_details_form_url=build_basic_details_form_path(basic_details_form_token) if basic_details_form_token else None,
+        caf_token=basic_details_form_token,
+        caf_url=build_basic_details_form_path(basic_details_form_token) if basic_details_form_token else None,
         screening_result=decision,
         already_applied=False,
         reapplied=is_reapplied,
@@ -1014,17 +1053,18 @@ async def apply_for_opening(
         context={
             "candidate_name": candidate.full_name,
             "candidate_code": candidate.candidate_code,
-            "caf_link": build_public_link(f"/caf/{caf_token}") if caf_token else "",
+            "caf_link": build_basic_details_form_link(basic_details_form_token) if basic_details_form_token else "",
             "candidate_email": candidate.email,
             "candidate_phone": candidate.phone or "—",
             "willing_to_relocate": _label_yes_no(screening_data.get("willing_to_relocate")),
         },
         email_type="application_links",
         meta_extra={
-            "caf_token": caf_token,
+            "basic_details_form_token": basic_details_form_token,
+            "caf_token": basic_details_form_token,
             "reason": "public_apply_reapply" if is_reapplied else "public_apply",
         }
-        if caf_token
+        if basic_details_form_token
         else {"reason": "public_apply_reapply" if is_reapplied else "public_apply"},
     )
 

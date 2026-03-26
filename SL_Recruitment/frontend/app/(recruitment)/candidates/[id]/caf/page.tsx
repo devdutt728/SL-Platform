@@ -18,6 +18,7 @@ import { getAuthMe } from "@/lib/auth-me";
 import { cookieHeader } from "@/lib/cookie-header";
 import { parseDateUtc } from "@/lib/datetime";
 import { internalUrl } from "@/lib/internal";
+import { BASIC_DETAILS_FORM_LABEL, CANDIDATE_ASSESSMENT_FORM_LABEL, SCREENING_DETAILS_LABEL } from "@/lib/recruitment-terms";
 import { CandidateAssessment, CandidateFull } from "@/lib/types";
 
 type Me = {
@@ -179,27 +180,32 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
   const roleId = typeof roleIdRaw === "number" ? roleIdRaw : Number(roleIdRaw);
   const canDelete = roleId === 2 || (me?.platform_role_code ?? "").trim() === "2";
 
-  const cafStatus = candidate.caf_submitted_at
+  const basicDetailsSubmittedAt = candidate.basic_details_form_submitted_at || candidate.caf_submitted_at;
+  const basicDetailsSentAt = candidate.basic_details_form_sent_at || candidate.caf_sent_at;
+  const candidateAssessmentSubmittedAt =
+    assessment?.candidate_assessment_form_submitted_at || assessment?.assessment_submitted_at;
+
+  const cafStatus = basicDetailsSubmittedAt
     ? "Submitted"
-    : candidate.caf_sent_at
+    : basicDetailsSentAt
       ? "Shared"
       : "Not shared";
   const screeningStatus = screening?.screening_result || (screening ? "Submitted" : "No screening response");
-  const assessmentStatus = assessment?.assessment_submitted_at ? "Submitted" : assessment ? "Draft / Pending" : "Not submitted";
+  const assessmentStatus = candidateAssessmentSubmittedAt ? "Submitted" : assessment ? "Draft / Pending" : "Not submitted";
 
   const heroMetrics = [
     { label: "Candidate code", value: valueOrDash(candidate.candidate_code) },
     { label: "Opening", value: valueOrDash(candidate.opening_title) },
-    { label: "CAF status", value: cafStatus },
-    { label: "CAF submitted", value: candidate.caf_submitted_at ? formatDateTime(candidate.caf_submitted_at) : "-" },
-    { label: "Assessment status", value: assessmentStatus },
+    { label: `${BASIC_DETAILS_FORM_LABEL} status`, value: cafStatus },
+    { label: `${BASIC_DETAILS_FORM_LABEL} submitted`, value: basicDetailsSubmittedAt ? formatDateTime(basicDetailsSubmittedAt) : "-" },
+    { label: `${CANDIDATE_ASSESSMENT_FORM_LABEL} status`, value: assessmentStatus },
     { label: "Source", value: valueOrDash(candidate.source_channel) },
   ];
 
   const screeningMetrics = metricItems([
     { label: "Screening result", value: screeningStatus },
     { label: "Relocation", value: screening ? yesNo(screening.willing_to_relocate) : "" },
-    { label: "Submitted at", value: candidate.caf_submitted_at ? formatDateTime(candidate.caf_submitted_at) : "" },
+    { label: "Submitted at", value: basicDetailsSubmittedAt ? formatDateTime(basicDetailsSubmittedAt) : "" },
     { label: "Updated at", value: screening?.updated_at ? formatDateTime(screening.updated_at) : "" },
   ]);
 
@@ -215,7 +221,7 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
     { label: "Earliest joining date", value: assessment?.earliest_joining_date ? formatDate(assessment.earliest_joining_date) : "" },
     { label: "Current location", value: assessment?.current_location ?? "" },
     { label: "Interviewer", value: assessment?.interviewer_name ?? "" },
-    { label: "Assessment submitted", value: assessment?.assessment_submitted_at ? formatDateTime(assessment.assessment_submitted_at) : "" },
+    { label: `${CANDIDATE_ASSESSMENT_FORM_LABEL} submitted`, value: candidateAssessmentSubmittedAt ? formatDateTime(candidateAssessmentSubmittedAt) : "" },
   ]);
 
   const compensationMetrics = metricItems([
@@ -347,7 +353,7 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
       <section className="rounded-[32px] border border-white/80 bg-gradient-to-br from-white via-cyan-50/75 to-slate-100/80 p-6 shadow-card">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">CAF Review</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{SCREENING_DETAILS_LABEL}</p>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{candidate.name}</h1>
             <p className="mt-2 text-sm text-slate-600">
               {valueOrDash(candidate.candidate_code)} · {valueOrDash(candidate.opening_title)}
@@ -416,7 +422,7 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Review guidance</p>
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 This page is intentionally read-only. Empty blocks are hidden where possible so the submitted signal stands
-                out, especially for legacy candidates whose CAF was backfilled after initial creation.
+                out, especially for legacy candidates whose basic details form was backfilled after initial creation.
               </p>
             </div>
           </div>
@@ -438,7 +444,7 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
         id="screening"
         icon={<ClipboardCheck className="h-4 w-4" />}
         title="Screening Review"
-        subtitle="Basic CAF submission and screening context grouped together for faster review."
+        subtitle="Basic details submission and screening context grouped together for faster review."
       >
         <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
           <div className="space-y-4">
@@ -465,7 +471,7 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
             ) : (
               <EmptyBlock
                 title="No screening notes yet"
-                description="The candidate may have CAF/basic-details submitted already, but no explicit reviewer notes were stored for this record."
+                description="The candidate may have basic details submitted already, but no explicit reviewer notes were stored for this record."
               />
             )}
           </div>
@@ -474,8 +480,8 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
 
       {!assessment ? (
         <EmptyBlock
-          title="No CAF assessment form submitted"
-          description="This candidate currently has basic CAF status only. The detailed assessment form has not been submitted yet."
+          title={`No ${CANDIDATE_ASSESSMENT_FORM_LABEL} submitted`}
+          description={`This candidate currently has ${BASIC_DETAILS_FORM_LABEL.toLowerCase()} status only. The detailed ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()} has not been submitted yet.`}
         />
       ) : (
         <>
@@ -643,7 +649,7 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
                 ) : (
                   <EmptyBlock
                     title="No training records"
-                    description="No training or certification entries were submitted in the CAF assessment."
+                    description={`No training or certification entries were submitted in the ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()}.`}
                   />
                 )}
               </div>
@@ -811,8 +817,8 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
 
       <div className="rounded-2xl border border-white/80 bg-white/45 px-4 py-3 text-xs leading-6 text-slate-500">
         {canDelete
-          ? "Superadmin can still adjust CAF-related data through admin tools, but this page remains read-only by design."
-          : "CAF remains read-only for non-superadmin users."}
+          ? `Superadmin can still adjust ${BASIC_DETAILS_FORM_LABEL.toLowerCase()} and ${SCREENING_DETAILS_LABEL.toLowerCase()} data through admin tools, but this page remains read-only by design.`
+          : `${BASIC_DETAILS_FORM_LABEL} remains read-only for non-superadmin users.`}
       </div>
     </main>
   );

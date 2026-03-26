@@ -12,11 +12,21 @@ from app.schemas.screening import CafPrefillOut, ScreeningOut, ScreeningUpsertIn
 from app.services.events import log_event
 from app.core.config import settings
 from app.services.opening_config import get_opening_config
+from app.services.recruitment_forms import (
+    BASIC_DETAILS_FORM_SUBMITTED,
+    LEGACY_BASIC_DETAILS_FORM_SUBMITTED,
+    basic_details_form_token_filter,
+    get_basic_details_form_sent_at,
+    get_basic_details_form_submitted_at,
+    set_basic_details_form_submitted_at,
+    sync_basic_details_form_fields,
+)
 from app.services.screening_rules import evaluate_screening
 from app.services.stage_transitions import apply_stage_transition
 from app.services.workflow_policy import get_candidate_workflow_policy
 
-router = APIRouter(prefix="/caf", tags=["caf"])
+router = APIRouter(prefix="/basic-details", tags=["basic-details"])
+legacy_router = APIRouter(prefix="/caf", tags=["caf"])
 
 
 async def _assert_caf_available(session: AsyncSession, candidate: RecCandidate) -> None:
@@ -24,7 +34,7 @@ async def _assert_caf_available(session: AsyncSession, candidate: RecCandidate) 
     if not workflow_policy.requires_caf:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
-            detail="CAF is not required for this opening.",
+            detail="Basic details form is not required for this opening.",
         )
 
 
@@ -38,29 +48,32 @@ def _caf_expiry_window() -> timedelta | None:
 
 
 def _caf_expired(candidate: RecCandidate) -> bool:
-    if candidate.caf_submitted_at is not None:
+    if get_basic_details_form_submitted_at(candidate) is not None:
         return False
-    if candidate.caf_sent_at is None:
+    sent_at = get_basic_details_form_sent_at(candidate)
+    if sent_at is None:
         return False
     window = _caf_expiry_window()
     if window is None:
         return False
-    return datetime.utcnow() > (candidate.caf_sent_at + window)
+    return datetime.utcnow() > (sent_at + window)
 
 
+@legacy_router.get("/{token}", response_model=CafPrefillOut)
 @router.get("/{token}", response_model=CafPrefillOut)
 async def get_caf_prefill(
     token: str,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
     candidate = (
-        await session.execute(select(RecCandidate).where(RecCandidate.caf_token == token))
+        await session.execute(select(RecCandidate).where(basic_details_form_token_filter(token)))
     ).scalars().first()
     if not candidate:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid CAF token")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid basic details form token")
+    sync_basic_details_form_fields(candidate)
     await _assert_caf_available(session, candidate)
     if _caf_expired(candidate):
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="CAF link expired")
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Basic details form link expired")
 
     opening_title = None
     opening_description = None
@@ -85,24 +98,28 @@ async def get_caf_prefill(
         years_of_experience=candidate.years_of_experience,
         city=candidate.city,
         cv_url=candidate.cv_url,
-        caf_sent_at=candidate.caf_sent_at,
-        caf_submitted_at=candidate.caf_submitted_at,
+        basic_details_form_sent_at=get_basic_details_form_sent_at(candidate),
+        basic_details_form_submitted_at=get_basic_details_form_submitted_at(candidate),
+        caf_sent_at=get_basic_details_form_sent_at(candidate),
+        caf_submitted_at=get_basic_details_form_submitted_at(candidate),
         opening_id=candidate.opening_id,
         opening_title=opening_title,
         opening_description=opening_description,
     )
 
 
+@legacy_router.get("/{token}/screening", response_model=ScreeningOut)
 @router.get("/{token}/screening", response_model=ScreeningOut)
 async def get_caf_screening(
     token: str,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
     candidate = (
-        await session.execute(select(RecCandidate).where(RecCandidate.caf_token == token))
+        await session.execute(select(RecCandidate).where(basic_details_form_token_filter(token)))
     ).scalars().first()
     if not candidate:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid CAF token")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid basic details form token")
+    sync_basic_details_form_fields(candidate)
     await _assert_caf_available(session, candidate)
 
     screening = (
@@ -115,6 +132,7 @@ async def get_caf_screening(
     return ScreeningOut.model_validate(screening)
 
 
+@legacy_router.post("/{token}", response_model=ScreeningOut, status_code=status.HTTP_201_CREATED)
 @router.post("/{token}", response_model=ScreeningOut, status_code=status.HTTP_201_CREATED)
 async def submit_caf(
     token: str,
@@ -122,15 +140,16 @@ async def submit_caf(
     session: AsyncSession = Depends(deps.get_db_session),
 ):
     candidate = (
-        await session.execute(select(RecCandidate).where(RecCandidate.caf_token == token))
+        await session.execute(select(RecCandidate).where(basic_details_form_token_filter(token)))
     ).scalars().first()
     if not candidate:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid CAF token")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid basic details form token")
+    sync_basic_details_form_fields(candidate)
     await _assert_caf_available(session, candidate)
     if _caf_expired(candidate):
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="CAF link expired")
-    if candidate.caf_submitted_at is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="CAF already submitted")
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Basic details form link expired")
+    if get_basic_details_form_submitted_at(candidate) is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Basic details form already submitted")
 
     now = datetime.utcnow()
 
@@ -155,7 +174,7 @@ async def submit_caf(
         setattr(screening, key, value)
     screening.updated_at = now
 
-    candidate.caf_submitted_at = now
+    set_basic_details_form_submitted_at(candidate, now)
 
     opening_config = get_opening_config(candidate.opening_id)
     decision = evaluate_screening(payload, opening_config)
@@ -213,7 +232,16 @@ async def submit_caf(
     await log_event(
         session,
         candidate_id=candidate.candidate_id,
-        action_type="caf_submitted",
+        action_type=BASIC_DETAILS_FORM_SUBMITTED,
+        performed_by_person_id_platform=None,
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={"screening_result": decision},
+    )
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type=LEGACY_BASIC_DETAILS_FORM_SUBMITTED,
         performed_by_person_id_platform=None,
         related_entity_type="candidate",
         related_entity_id=candidate.candidate_id,

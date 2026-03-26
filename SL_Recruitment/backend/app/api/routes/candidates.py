@@ -64,6 +64,29 @@ from app.services.events import log_event
 from app.services.offers import convert_candidate_to_employee, create_offer, offer_pdf_signed_url, preview_candidate_person_code
 from app.services.public_links import build_public_link, build_public_path
 from app.services.opening_config import get_opening_config
+from app.services.recruitment_forms import (
+    BASIC_DETAILS_COMMUNICATION_ACTION_TYPES,
+    BASIC_DETAILS_FORM_LINK_GENERATED,
+    CANDIDATE_ASSESSMENT_COMMUNICATION_ACTION_TYPES,
+    CANDIDATE_ASSESSMENT_FORM_LINK_GENERATED,
+    build_basic_details_form_link,
+    build_basic_details_form_path,
+    build_candidate_assessment_form_link,
+    build_candidate_assessment_form_path,
+    get_basic_details_form_sent_at,
+    get_basic_details_form_submitted_at,
+    get_basic_details_form_token,
+    get_candidate_assessment_form_sent_at,
+    get_candidate_assessment_form_submitted_at,
+    get_candidate_assessment_form_token,
+    set_basic_details_form_sent_at,
+    set_basic_details_form_submitted_at,
+    set_basic_details_form_token,
+    set_candidate_assessment_form_sent_at,
+    set_candidate_assessment_form_token,
+    sync_basic_details_form_fields,
+    sync_candidate_assessment_form_fields,
+)
 from app.services.screening_rules import evaluate_screening
 from app.services.stage_transitions import apply_stage_transition
 from app.services.workflow_policy import (
@@ -96,9 +119,15 @@ INGEST_ALLOWED_STATES = {
 }
 INGEST_DEFAULT_TRANSIENT_HINT = "Retry later. If the issue repeats, inspect payload and external dependencies."
 INGEST_DEFAULT_PERMANENT_HINT = "Fix the row data and retry, or mark resolved if no action is needed."
-COMMUNICATION_ACTION_TYPES = {"email_sent", "caf_link_generated", "assessment_link_generated"}
+COMMUNICATION_ACTION_TYPES = {
+    "email_sent",
+    *BASIC_DETAILS_COMMUNICATION_ACTION_TYPES,
+    *CANDIDATE_ASSESSMENT_COMMUNICATION_ACTION_TYPES,
+}
 COMMUNICATION_LINK_SEGMENTS = (
+    "/basic-details/",
     "/caf/",
+    "/candidate-assessment-form/",
     "/assessment/",
     "/offer/",
     "/sprint/",
@@ -148,7 +177,9 @@ async def _send_candidate_application_acknowledgement(
     meta_extra: dict[str, object] | None = None,
 ) -> dict[str, object]:
     policy = await _workflow_policy_for_opening_id(session, candidate.opening_id)
-    if policy.requires_caf and candidate.caf_token:
+    sync_basic_details_form_fields(candidate)
+    basic_details_form_token = get_basic_details_form_token(candidate)
+    if policy.requires_caf and basic_details_form_token:
         return await send_email(
             session,
             candidate_id=candidate.candidate_id,
@@ -158,7 +189,7 @@ async def _send_candidate_application_acknowledgement(
             context={
                 "candidate_name": candidate.full_name,
                 "candidate_code": candidate.candidate_code,
-                "caf_link": build_public_link(f"/caf/{candidate.caf_token}"),
+                "caf_link": build_basic_details_form_link(basic_details_form_token),
                 "candidate_email": candidate.email,
                 "candidate_phone": candidate.phone or "—",
                 "willing_to_relocate": _label_yes_no(willing_to_relocate),
@@ -808,9 +839,10 @@ def _normalize_source_channel(source_channel: str | None, *, fallback: str) -> s
 
 
 def _caf_expired_for_candidate(candidate: RecCandidate, *, now: datetime | None = None) -> bool:
-    if candidate.caf_submitted_at is not None:
+    if get_basic_details_form_submitted_at(candidate) is not None:
         return False
-    if candidate.caf_sent_at is None:
+    sent_at = get_basic_details_form_sent_at(candidate)
+    if sent_at is None:
         return False
     expiry_hours = max(int(settings.caf_expiry_hours or 0), 0)
     if expiry_hours <= 0:
@@ -818,7 +850,7 @@ def _caf_expired_for_candidate(candidate: RecCandidate, *, now: datetime | None 
     if expiry_hours <= 0:
         return False
     current = now or now_ist_naive()
-    return current > (candidate.caf_sent_at + timedelta(hours=expiry_hours))
+    return current > (sent_at + timedelta(hours=expiry_hours))
 
 
 def _is_recent_google_sheet_duplicate(candidate: RecCandidate, *, now: datetime) -> bool:
@@ -1351,9 +1383,10 @@ async def _apply_ui_reapplication(
     candidate.l2_owner_name = l2_owner_name
     workflow_policy = await _workflow_policy_for_opening_id(session, opening_id)
     if workflow_policy.requires_caf:
-        candidate.caf_token = candidate.caf_token or uuid4().hex
-        candidate.caf_sent_at = attempted_at
-        candidate.caf_submitted_at = candidate.caf_submitted_at or attempted_at
+        set_basic_details_form_token(candidate, get_basic_details_form_token(candidate) or uuid4().hex)
+        set_basic_details_form_sent_at(candidate, attempted_at)
+        if get_basic_details_form_submitted_at(candidate) is None:
+            set_basic_details_form_submitted_at(candidate, attempted_at)
     candidate.updated_at = attempted_at
     candidate.application_docs_status = _application_docs_status(
         cv_url=candidate.cv_url,
@@ -1377,15 +1410,20 @@ async def _apply_ui_reapplication(
         },
     )
 
-    if workflow_policy.requires_caf and candidate.caf_token:
+    basic_details_form_token = get_basic_details_form_token(candidate)
+    if workflow_policy.requires_caf and basic_details_form_token:
         await log_event(
             session,
             candidate_id=candidate.candidate_id,
-            action_type="caf_link_generated",
+            action_type=BASIC_DETAILS_FORM_LINK_GENERATED,
             performed_by_person_id_platform=performed_by_person_id_platform,
             related_entity_type="candidate",
             related_entity_id=candidate.candidate_id,
-            meta_json={"caf_token": candidate.caf_token, "reason": "ui_reapply"},
+            meta_json={
+                "basic_details_form_token": basic_details_form_token,
+                "caf_token": basic_details_form_token,
+                "reason": "ui_reapply",
+            },
         )
 
     await _send_candidate_application_acknowledgement(
@@ -1393,10 +1431,11 @@ async def _apply_ui_reapplication(
         candidate=candidate,
         willing_to_relocate=None,
         meta_extra={
-            "caf_token": candidate.caf_token,
+            "basic_details_form_token": basic_details_form_token,
+            "caf_token": basic_details_form_token,
             "source": "ui_reapply",
         }
-        if candidate.caf_token
+        if basic_details_form_token
         else {"source": "ui_reapply"},
     )
 
@@ -1465,24 +1504,27 @@ async def _send_assessment_link_for_l2_shortlist(
     if assessment is None:
         assessment = RecCandidateAssessment(
             candidate_id=candidate.candidate_id,
-            assessment_token=uuid4().hex,
             created_at=now,
             updated_at=now,
         )
+        set_candidate_assessment_form_token(assessment, uuid4().hex)
         session.add(assessment)
-    elif not assessment.assessment_token:
-        assessment.assessment_token = uuid4().hex
+    else:
+        sync_candidate_assessment_form_fields(assessment)
+    if not get_candidate_assessment_form_token(assessment):
+        set_candidate_assessment_form_token(assessment, uuid4().hex)
         assessment.updated_at = now
 
-    if not assessment.assessment_token:
+    assessment_token = get_candidate_assessment_form_token(assessment)
+    if not assessment_token:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Assessment token unavailable")
 
-    if assessment.assessment_submitted_at is not None:
+    if get_candidate_assessment_form_submitted_at(assessment) is not None:
         return {
             "attempted": False,
             "status": "skipped",
             "reason": "already_submitted",
-            "assessment_token": assessment.assessment_token,
+            "assessment_token": assessment_token,
         }
 
     latest_email_meta = await _latest_email_meta(
@@ -1492,7 +1534,7 @@ async def _send_assessment_link_for_l2_shortlist(
     )
     latest_status = _strip_optional(str((latest_email_meta or {}).get("status") or ""))
 
-    should_send = force_resend or assessment.assessment_sent_at is None
+    should_send = force_resend or get_candidate_assessment_form_sent_at(assessment) is None
     # Optional auto-retry: if an earlier assessment email failed, retry on next L2 transition.
     if not should_send and latest_status == "failed":
         should_send = True
@@ -1501,28 +1543,29 @@ async def _send_assessment_link_for_l2_shortlist(
             "attempted": False,
             "status": "skipped",
             "reason": "already_sent",
-            "assessment_token": assessment.assessment_token,
+            "assessment_token": assessment_token,
         }
 
     await log_event(
         session,
         candidate_id=candidate.candidate_id,
-        action_type="assessment_link_generated",
+        action_type=CANDIDATE_ASSESSMENT_FORM_LINK_GENERATED,
         performed_by_person_id_platform=_platform_person_id(user),
         related_entity_type="candidate",
         related_entity_id=candidate.candidate_id,
         meta_json={
-            "assessment_token": assessment.assessment_token,
+            "candidate_assessment_form_token": assessment_token,
+            "assessment_token": assessment_token,
             "reason": "l2_shortlist" if trigger_source == "l2_shortlist" else trigger_source,
         },
     )
 
-    assessment_link = build_public_link(f"/assessment/{assessment.assessment_token}")
+    assessment_link = build_candidate_assessment_form_link(assessment_token)
     email_meta = await send_email(
         session,
         candidate_id=candidate.candidate_id,
         to_emails=[candidate.email],
-        subject="Your Studio Lotus assessment form",
+        subject="Your Studio Lotus candidate assessment form",
         template_name="assessment_link",
         context={
             "candidate_name": candidate.full_name,
@@ -1531,20 +1574,21 @@ async def _send_assessment_link_for_l2_shortlist(
         },
         email_type="assessment_link",
         meta_extra={
-            "assessment_token": assessment.assessment_token,
+            "candidate_assessment_form_token": assessment_token,
+            "assessment_token": assessment_token,
             "trigger_stage": trigger_source,
         },
     )
     email_status = _strip_optional(str(email_meta.get("status") or "")) or "unknown"
     if email_status != "failed":
-        assessment.assessment_sent_at = now
+        set_candidate_assessment_form_sent_at(assessment, now)
         assessment.updated_at = now
 
     return {
         "attempted": True,
         "status": email_status,
         "reason": None,
-        "assessment_token": assessment.assessment_token,
+        "assessment_token": assessment_token,
         "error": _strip_optional(str(email_meta.get("error") or "")),
     }
 
@@ -1682,13 +1726,17 @@ def _extract_communication_links(
         seen_urls.add(cleaned)
         links.append(CandidateCommunicationLinkOut(label=label, url=cleaned))
 
-    caf_token = _strip_optional(str(meta.get("caf_token") or ""))
-    if caf_token:
-        add_link("CAF form", build_public_path(f"/caf/{caf_token}"))
+    basic_details_form_token = _strip_optional(
+        str(meta.get("basic_details_form_token") or meta.get("caf_token") or "")
+    )
+    if basic_details_form_token:
+        add_link("Basic Details Form", build_basic_details_form_path(basic_details_form_token))
 
-    assessment_token = _strip_optional(str(meta.get("assessment_token") or ""))
+    assessment_token = _strip_optional(
+        str(meta.get("candidate_assessment_form_token") or meta.get("assessment_token") or "")
+    )
     if assessment_token:
-        add_link("Assessment form", build_public_path(f"/assessment/{assessment_token}"))
+        add_link("Candidate Assessment Form", build_candidate_assessment_form_path(assessment_token))
 
     offer_raw = _strip_optional(str(meta.get("offer_id") or ""))
     if offer_raw:
@@ -1710,15 +1758,15 @@ def _extract_communication_links(
             token = sprint_public_tokens[sprint_id]
             add_link("Sprint page", build_public_path(f"/sprint/{token}"))
 
-    if action_type == "caf_link_generated" and caf_token:
-        add_link("CAF form", build_public_path(f"/caf/{caf_token}"))
-    if action_type == "assessment_link_generated" and assessment_token:
-        add_link("Assessment form", build_public_path(f"/assessment/{assessment_token}"))
+    if action_type in BASIC_DETAILS_COMMUNICATION_ACTION_TYPES and basic_details_form_token:
+        add_link("Basic Details Form", build_basic_details_form_path(basic_details_form_token))
+    if action_type in CANDIDATE_ASSESSMENT_COMMUNICATION_ACTION_TYPES and assessment_token:
+        add_link("Candidate Assessment Form", build_candidate_assessment_form_path(assessment_token))
 
     if current_caf_token:
-        add_link("CAF form", build_public_path(f"/caf/{current_caf_token}"))
+        add_link("Basic Details Form", build_basic_details_form_path(current_caf_token))
     if current_assessment_token:
-        add_link("Assessment form", build_public_path(f"/assessment/{current_assessment_token}"))
+        add_link("Candidate Assessment Form", build_candidate_assessment_form_path(current_assessment_token))
 
     for key, value in meta.items():
         if not isinstance(value, str):
@@ -2064,14 +2112,15 @@ async def _create_candidate_with_automation(
         cv_url=cv_url,
         portfolio_url=portfolio_url,
         resume_url=resume_url,
-        caf_token=uuid4().hex if workflow_policy.requires_caf else None,
-        caf_sent_at=link_sent_at if workflow_policy.requires_caf else None,
-        caf_submitted_at=created_at if workflow_policy.requires_caf else None,
         application_docs_status=application_docs_status,
         joining_docs_status="none",
         created_at=created_at,
         updated_at=created_at,
     )
+    if workflow_policy.requires_caf:
+        set_basic_details_form_token(candidate, uuid4().hex)
+        set_basic_details_form_sent_at(candidate, link_sent_at)
+        set_basic_details_form_submitted_at(candidate, created_at)
     await assign_candidate_code(session, candidate, legacy_code_factory=_candidate_code)
 
     await log_event(
@@ -2095,22 +2144,31 @@ async def _create_candidate_with_automation(
         },
     )
 
-    if workflow_policy.requires_caf and candidate.caf_token:
+    basic_details_form_token = get_basic_details_form_token(candidate)
+    if workflow_policy.requires_caf and basic_details_form_token:
         await log_event(
             session,
             candidate_id=candidate.candidate_id,
-            action_type="caf_link_generated",
+            action_type=BASIC_DETAILS_FORM_LINK_GENERATED,
             performed_by_person_id_platform=performed_by_person_id_platform,
             related_entity_type="candidate",
             related_entity_id=candidate.candidate_id,
-            meta_json={"caf_token": candidate.caf_token},
+            meta_json={
+                "basic_details_form_token": basic_details_form_token,
+                "caf_token": basic_details_form_token,
+            },
         )
 
     await _send_candidate_application_acknowledgement(
         session,
         candidate=candidate,
         willing_to_relocate=willing_to_relocate,
-        meta_extra={"caf_token": candidate.caf_token} if candidate.caf_token else None,
+        meta_extra={
+            "basic_details_form_token": basic_details_form_token,
+            "caf_token": basic_details_form_token,
+        }
+        if basic_details_form_token
+        else None,
     )
 
     folder_id, folder_url = await anyio.to_thread.run_sync(
@@ -2886,10 +2944,13 @@ async def import_candidates_from_google_sheet(
                 existing_candidate.external_source_ref = external_source_ref
                 workflow_policy = await _workflow_policy_for_opening_id(session, opening.opening_id)
                 if workflow_policy.requires_caf:
-                    if not existing_candidate.caf_token:
-                        existing_candidate.caf_token = uuid4().hex
-                    existing_candidate.caf_sent_at = row_now
-                    existing_candidate.caf_submitted_at = existing_candidate.caf_submitted_at or row_now
+                    set_basic_details_form_token(
+                        existing_candidate,
+                        get_basic_details_form_token(existing_candidate) or uuid4().hex,
+                    )
+                    set_basic_details_form_sent_at(existing_candidate, row_now)
+                    if get_basic_details_form_submitted_at(existing_candidate) is None:
+                        set_basic_details_form_submitted_at(existing_candidate, row_now)
                 existing_candidate.updated_at = row_now
 
                 await log_event(
@@ -2908,15 +2969,17 @@ async def import_candidates_from_google_sheet(
                     },
                 )
 
+                existing_basic_details_form_token = get_basic_details_form_token(existing_candidate)
                 reapply_email_meta = await _send_candidate_application_acknowledgement(
                     session,
                     candidate=existing_candidate,
                     willing_to_relocate=willing_to_relocate,
                     meta_extra={
-                        "caf_token": existing_candidate.caf_token,
+                        "basic_details_form_token": existing_basic_details_form_token,
+                        "caf_token": existing_basic_details_form_token,
                         "reason": "google_sheet_reapply",
                     }
-                    if existing_candidate.caf_token
+                    if existing_basic_details_form_token
                     else {"reason": "google_sheet_reapply"},
                 )
 
@@ -4007,9 +4070,11 @@ async def list_candidates(
             RecCandidate.source_origin.label("source_origin"),
             RecCandidate.external_source_ref.label("external_source_ref"),
             RecCandidate.created_at.label("created_at"),
-            RecCandidate.caf_sent_at.label("caf_sent_at"),
-            RecCandidate.caf_submitted_at.label("caf_submitted_at"),
-            RecCandidateAssessment.assessment_submitted_at.label("assessment_submitted_at"),
+            RecCandidate.basic_details_form_sent_at.label("basic_details_form_sent_at"),
+            RecCandidate.basic_details_form_submitted_at.label(
+                "basic_details_form_submitted_at"
+            ),
+            RecCandidateAssessment.candidate_assessment_form_submitted_at.label("candidate_assessment_form_submitted_at"),
             RecCandidate.needs_hr_review.label("needs_hr_review"),
             RecOpening.opening_code.label("opening_code"),
             RecOpening.title.label("opening_title"),
@@ -4099,9 +4164,12 @@ async def list_candidates(
             ageing_days=int(row.ageing_days or 0),
             applied_ageing_days=int(row.applied_ageing_days or 0),
             created_at=row.created_at,
-            caf_sent_at=row.caf_sent_at,
-            caf_submitted_at=row.caf_submitted_at,
-            assessment_submitted_at=row.assessment_submitted_at,
+            basic_details_form_sent_at=row.basic_details_form_sent_at,
+            basic_details_form_submitted_at=row.basic_details_form_submitted_at,
+            caf_sent_at=row.basic_details_form_sent_at,
+            caf_submitted_at=row.basic_details_form_submitted_at,
+            candidate_assessment_form_submitted_at=row.candidate_assessment_form_submitted_at,
+            assessment_submitted_at=row.candidate_assessment_form_submitted_at,
             needs_hr_review=bool(row.needs_hr_review),
             screening_result=row.screening_result,
             l1_interview_count=int(row.l1_interview_count or 0),
@@ -4167,18 +4235,23 @@ async def mark_legacy_caf_complete(
             )
             continue
 
-        legacy_timestamp = candidate.caf_sent_at or candidate.caf_submitted_at or now_ist_naive()
+        sync_basic_details_form_fields(candidate)
+        legacy_timestamp = (
+            get_basic_details_form_sent_at(candidate)
+            or get_basic_details_form_submitted_at(candidate)
+            or now_ist_naive()
+        )
         screening_seeded = False
         changed = False
 
-        if candidate.caf_sent_at is None:
-            candidate.caf_sent_at = legacy_timestamp
+        if get_basic_details_form_sent_at(candidate) is None:
+            set_basic_details_form_sent_at(candidate, legacy_timestamp)
             changed = True
-        if candidate.caf_submitted_at is None:
-            candidate.caf_submitted_at = legacy_timestamp
+        if get_basic_details_form_submitted_at(candidate) is None:
+            set_basic_details_form_submitted_at(candidate, legacy_timestamp)
             changed = True
-        if not candidate.caf_token:
-            candidate.caf_token = uuid4().hex
+        if not get_basic_details_form_token(candidate):
+            set_basic_details_form_token(candidate, uuid4().hex)
             changed = True
 
         screening = screening_map.get(candidate_id)
@@ -4238,8 +4311,22 @@ async def mark_legacy_caf_complete(
                 "candidate_id": candidate_id,
                 "candidate_code": candidate.candidate_code or _candidate_code(candidate_id),
                 "status": "updated",
-                "caf_sent_at": candidate.caf_sent_at.isoformat() if candidate.caf_sent_at else None,
-                "caf_submitted_at": candidate.caf_submitted_at.isoformat() if candidate.caf_submitted_at else None,
+                "basic_details_form_sent_at": (
+                    get_basic_details_form_sent_at(candidate).isoformat()
+                    if get_basic_details_form_sent_at(candidate)
+                    else None
+                ),
+                "basic_details_form_submitted_at": (
+                    get_basic_details_form_submitted_at(candidate).isoformat()
+                    if get_basic_details_form_submitted_at(candidate)
+                    else None
+                ),
+                "caf_sent_at": get_basic_details_form_sent_at(candidate).isoformat()
+                if get_basic_details_form_sent_at(candidate)
+                else None,
+                "caf_submitted_at": get_basic_details_form_submitted_at(candidate).isoformat()
+                if get_basic_details_form_submitted_at(candidate)
+                else None,
                 "screening_seeded": screening_seeded,
             }
         )
@@ -4274,9 +4361,14 @@ async def list_candidate_communications(
         event_filters.append(RecCandidateEvent.candidate_id == candidate_id)
     if normalized_action_type:
         normalized_action_type = normalized_action_type.lower()
-        if normalized_action_type not in COMMUNICATION_ACTION_TYPES:
+        if normalized_action_type == BASIC_DETAILS_FORM_LINK_GENERATED:
+            event_filters.append(RecCandidateEvent.action_type.in_(list(BASIC_DETAILS_COMMUNICATION_ACTION_TYPES)))
+        elif normalized_action_type == CANDIDATE_ASSESSMENT_FORM_LINK_GENERATED:
+            event_filters.append(RecCandidateEvent.action_type.in_(list(CANDIDATE_ASSESSMENT_COMMUNICATION_ACTION_TYPES)))
+        elif normalized_action_type not in COMMUNICATION_ACTION_TYPES:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported action_type filter.")
-        event_filters.append(RecCandidateEvent.action_type == normalized_action_type)
+        else:
+            event_filters.append(RecCandidateEvent.action_type == normalized_action_type)
     if normalized_email_type:
         email_pattern = f'%\"email_type\":\"{normalized_email_type.lower()}\"%'
         event_filters.append(func.lower(func.coalesce(RecCandidateEvent.meta_json, "")).like(email_pattern))
@@ -4353,7 +4445,10 @@ async def list_candidate_communications(
     if candidate_ids:
         candidate_token_rows = (
             await session.execute(
-                select(RecCandidate.candidate_id, RecCandidate.caf_token).where(
+                select(
+                    RecCandidate.candidate_id,
+                    RecCandidate.basic_details_form_token,
+                ).where(
                     RecCandidate.candidate_id.in_(list(candidate_ids))
                 )
             )
@@ -4365,7 +4460,10 @@ async def list_candidate_communications(
 
         assessment_token_rows = (
             await session.execute(
-                select(RecCandidateAssessment.candidate_id, RecCandidateAssessment.assessment_token).where(
+                select(
+                    RecCandidateAssessment.candidate_id,
+                    RecCandidateAssessment.candidate_assessment_form_token,
+                ).where(
                     RecCandidateAssessment.candidate_id.in_(list(candidate_ids))
                 )
             )
@@ -4417,6 +4515,7 @@ async def get_candidate(
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     await _assert_candidate_access(session, candidate_id, user)
+    sync_basic_details_form_fields(candidate)
 
     opening = None
     if candidate.opening_id is not None:
@@ -4458,8 +4557,10 @@ async def get_candidate(
         portfolio_url=candidate.portfolio_url,
         portfolio_not_uploaded_reason=candidate.portfolio_not_uploaded_reason,
         drive_folder_url=candidate.drive_folder_url,
-        caf_sent_at=candidate.caf_sent_at,
-        caf_submitted_at=candidate.caf_submitted_at,
+        basic_details_form_sent_at=get_basic_details_form_sent_at(candidate),
+        basic_details_form_submitted_at=get_basic_details_form_submitted_at(candidate),
+        caf_sent_at=get_basic_details_form_sent_at(candidate),
+        caf_submitted_at=get_basic_details_form_submitted_at(candidate),
         needs_hr_review=bool(candidate.needs_hr_review),
         application_docs_status=candidate.application_docs_status,
         joining_docs_status=candidate.joining_docs_status,
@@ -4549,6 +4650,7 @@ async def get_candidate_full(
             )
         ).scalars().first()
         if assessment_row:
+            sync_candidate_assessment_form_fields(assessment_row)
             assessment = CandidateAssessmentOut.model_validate(assessment_row)
             if not assessment_compensation_visible:
                 assessment = assessment.model_copy(
@@ -4656,7 +4758,8 @@ async def upsert_candidate_screening(
 
 
 @router.get("/{candidate_id}/caf-link")
-async def get_candidate_caf_link(
+@router.get("/{candidate_id}/basic-details-link")
+async def get_candidate_basic_details_link(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
@@ -4668,32 +4771,47 @@ async def get_candidate_caf_link(
     if not workflow_policy.requires_caf:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="CAF is not applicable for this opening workflow.",
+            detail="Basic details form is not applicable for this opening workflow.",
         )
     now = now_ist_naive()
     refreshed = False
-    if not candidate.caf_token:
-        candidate.caf_token = uuid4().hex
+    sync_basic_details_form_fields(candidate)
+    basic_details_form_token = get_basic_details_form_token(candidate)
+    if not basic_details_form_token:
+        basic_details_form_token = uuid4().hex
+        set_basic_details_form_token(candidate, basic_details_form_token)
         refreshed = True
-    if candidate.caf_submitted_at is None and (candidate.caf_sent_at is None or _caf_expired_for_candidate(candidate, now=now)):
-        candidate.caf_sent_at = now
+    if get_basic_details_form_submitted_at(candidate) is None and (
+        get_basic_details_form_sent_at(candidate) is None or _caf_expired_for_candidate(candidate, now=now)
+    ):
+        set_basic_details_form_sent_at(candidate, now)
         refreshed = True
     if refreshed:
         candidate.updated_at = now
         await log_event(
             session,
             candidate_id=candidate.candidate_id,
-            action_type="caf_link_generated",
+            action_type=BASIC_DETAILS_FORM_LINK_GENERATED,
             performed_by_person_id_platform=_platform_person_id(user),
             related_entity_type="candidate",
             related_entity_id=candidate.candidate_id,
-            meta_json={"caf_token": candidate.caf_token, "reason": "manual_link_refresh"},
+            meta_json={
+                "basic_details_form_token": basic_details_form_token,
+                "caf_token": basic_details_form_token,
+                "reason": "manual_link_refresh",
+            },
         )
         await session.commit()
-    return {"caf_token": candidate.caf_token, "caf_url": build_public_path(f"/caf/{candidate.caf_token}")}
+    return {
+        "basic_details_form_token": basic_details_form_token,
+        "basic_details_form_url": build_basic_details_form_path(basic_details_form_token),
+        "caf_token": basic_details_form_token,
+        "caf_url": build_basic_details_form_path(basic_details_form_token),
+    }
 
 
 @router.get("/{candidate_id}/assessment-link")
+@router.get("/{candidate_id}/candidate-assessment-form-link")
 async def get_candidate_assessment_link(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
@@ -4720,39 +4838,48 @@ async def get_candidate_assessment_link(
     if not assessment:
         assessment = RecCandidateAssessment(
             candidate_id=candidate_id,
-            assessment_token=uuid4().hex,
             created_at=now,
             updated_at=now,
         )
+        set_candidate_assessment_form_token(assessment, uuid4().hex)
         session.add(assessment)
         generated = True
-    elif not assessment.assessment_token:
-        assessment.assessment_token = uuid4().hex
+    else:
+        sync_candidate_assessment_form_fields(assessment)
+    if not get_candidate_assessment_form_token(assessment):
+        set_candidate_assessment_form_token(assessment, uuid4().hex)
         assessment.updated_at = now
         generated = True
 
-    if not assessment.assessment_token:
+    assessment_token = get_candidate_assessment_form_token(assessment)
+    if not assessment_token:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Assessment token unavailable")
 
     if generated:
         await log_event(
             session,
             candidate_id=candidate_id,
-            action_type="assessment_link_generated",
+            action_type=CANDIDATE_ASSESSMENT_FORM_LINK_GENERATED,
             performed_by_person_id_platform=_platform_person_id(user),
             related_entity_type="candidate",
             related_entity_id=candidate_id,
-            meta_json={"assessment_token": assessment.assessment_token},
+            meta_json={
+                "candidate_assessment_form_token": assessment_token,
+                "assessment_token": assessment_token,
+            },
         )
 
     await session.commit()
     return {
-        "assessment_token": assessment.assessment_token,
-        "assessment_url": build_public_path(f"/assessment/{assessment.assessment_token}"),
+        "candidate_assessment_form_token": assessment_token,
+        "candidate_assessment_form_url": build_candidate_assessment_form_path(assessment_token),
+        "assessment_token": assessment_token,
+        "assessment_url": build_candidate_assessment_form_path(assessment_token),
     }
 
 
 @router.post("/{candidate_id}/assessment-link/resend")
+@router.post("/{candidate_id}/candidate-assessment-form-link/resend")
 async def resend_candidate_assessment_link(
     candidate_id: int,
     session: AsyncSession = Depends(deps.get_db_session),
@@ -4784,8 +4911,10 @@ async def resend_candidate_assessment_link(
         "email_status": _strip_optional(str(send_result.get("status") or "")) or "unknown",
     }
     if assessment_token:
+        payload["candidate_assessment_form_token"] = assessment_token
+        payload["candidate_assessment_form_url"] = build_candidate_assessment_form_path(assessment_token)
         payload["assessment_token"] = assessment_token
-        payload["assessment_url"] = build_public_path(f"/assessment/{assessment_token}")
+        payload["assessment_url"] = build_candidate_assessment_form_path(assessment_token)
     reason = _strip_optional(str(send_result.get("reason") or ""))
     if reason:
         payload["reason"] = reason

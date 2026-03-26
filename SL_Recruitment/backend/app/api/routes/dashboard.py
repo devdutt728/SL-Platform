@@ -220,7 +220,10 @@ async def get_dashboard_metrics(
             _candidate_scope(
                 select(func.count())
                 .select_from(RecCandidate)
-                .where(RecCandidate.caf_submitted_at.is_not(None), RecCandidate.caf_submitted_at >= today)
+                .where(
+                    RecCandidate.basic_details_form_submitted_at.is_not(None),
+                    RecCandidate.basic_details_form_submitted_at >= today,
+                )
             )
         )
     ).scalar_one()
@@ -295,9 +298,9 @@ async def get_dashboard_metrics(
                 .where(
                     RecCandidateStage.stage_status == "pending",
                     RecCandidateStage.stage_name.in_(["hr_screening", "caf"]),
-                    RecCandidate.caf_submitted_at.is_(None),
-                    RecCandidate.caf_sent_at.is_not(None),
-                    RecCandidate.caf_sent_at
+                    RecCandidate.basic_details_form_submitted_at.is_(None),
+                    RecCandidate.basic_details_form_sent_at.is_not(None),
+                    RecCandidate.basic_details_form_sent_at
                     <= func.date_sub(now, text(f"INTERVAL {settings.caf_reminder_days} DAY")),
                     or_(RecOpening.opening_code.is_(None), ~RecOpening.opening_code.in_(tuple(INTERN_OPENING_CODES))),
                 )

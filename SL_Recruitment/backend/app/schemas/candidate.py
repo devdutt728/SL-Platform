@@ -80,8 +80,11 @@ class CandidateListItem(BaseModel):
     ageing_days: int
     applied_ageing_days: int
     created_at: Optional[datetime] = None
+    basic_details_form_sent_at: Optional[datetime] = None
+    basic_details_form_submitted_at: Optional[datetime] = None
     caf_sent_at: Optional[datetime] = None
     caf_submitted_at: Optional[datetime] = None
+    candidate_assessment_form_submitted_at: Optional[datetime] = None
     assessment_submitted_at: Optional[datetime] = None
     needs_hr_review: bool = False
     screening_result: Optional[str] = None
@@ -126,8 +129,12 @@ class CandidateDetailOut(BaseModel):
     questions_from_candidate: Optional[str] = None
     drive_folder_url: Optional[str] = None
 
+    basic_details_form_sent_at: Optional[datetime] = None
+    basic_details_form_submitted_at: Optional[datetime] = None
     caf_sent_at: Optional[datetime] = None
     caf_submitted_at: Optional[datetime] = None
+    candidate_assessment_form_sent_at: Optional[datetime] = None
+    candidate_assessment_form_submitted_at: Optional[datetime] = None
     needs_hr_review: bool = False
 
     application_docs_status: str

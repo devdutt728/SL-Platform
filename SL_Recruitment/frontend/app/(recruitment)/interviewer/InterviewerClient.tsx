@@ -102,7 +102,7 @@ function parseHttpUrl(raw?: string | null) {
 
 function looksLikeCandidateFormPath(url: URL) {
   const path = url.pathname.toLowerCase();
-  return path.includes("/caf/") || path.includes("/assessment/") || path.includes("/apply/");
+  return path.includes("/basic-details/") || path.includes("/caf/") || path.includes("/candidate-assessment-form/") || path.includes("/assessment/") || path.includes("/apply/");
 }
 
 function resolveInterviewMeetingLink(interview: Interview) {

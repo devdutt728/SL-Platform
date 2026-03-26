@@ -48,9 +48,9 @@ class RecCandidate(Base):
     drive_folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     drive_folder_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    caf_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, index=True)
-    caf_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    caf_submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    basic_details_form_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, index=True)
+    basic_details_form_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    basic_details_form_submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     needs_hr_review: Mapped[bool] = mapped_column(Boolean, default=False)
 
     application_docs_status: Mapped[str] = mapped_column(String(20), default="none")

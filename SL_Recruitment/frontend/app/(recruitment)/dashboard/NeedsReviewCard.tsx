@@ -11,13 +11,13 @@ export default function NeedsReviewCard({ initialMetrics, canViewOffers = false 
   const metrics = initialMetrics;
   const cards = [
     {
-      label: "CAF pending > SLA",
-      note: "CAF not submitted in time",
+      label: "Basic Details pending > SLA",
+      note: "Basic Details Form not submitted in time",
       value: metrics?.caf_pending_overdue ?? "--",
       href: "/candidates?status_view=active&stage=hr_screening&needs_attention=1",
     },
     {
-      label: "Medium CAFs",
+      label: "Medium screening cases",
       note: "Screening level = Medium",
       value: metrics?.needs_review_amber ?? "--",
       href: "/candidates?status_view=active&needs_attention=1",

@@ -26,6 +26,7 @@ from app.models.interview_slot import RecCandidateInterviewSlot
 from app.models.opening import RecOpening
 from app.models.platform_person import DimPerson
 from app.models.platform_role import DimRole
+from app.services.recruitment_forms import get_candidate_assessment_form_submitted_at
 from app.schemas.interview import (
     InterviewCancel,
     InterviewCreate,
@@ -140,7 +141,7 @@ async def _assert_assessment_submitted_for_round(
             .limit(1)
         )
     ).scalars().first()
-    if assessment and assessment.assessment_submitted_at is not None:
+    if assessment and get_candidate_assessment_form_submitted_at(assessment) is not None:
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,

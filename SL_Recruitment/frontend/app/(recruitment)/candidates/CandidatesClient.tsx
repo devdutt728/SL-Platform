@@ -9,6 +9,13 @@ import { AlertTriangle, CheckCircle2, Filter, XCircle, Bookmark, Eye, LayoutGrid
 import { parseDateUtc } from "@/lib/datetime";
 import { redirectToLogin } from "@/lib/auth-client";
 import { useToast } from "@/components/ui/toast-provider";
+import {
+  BASIC_DETAILS_FORM_LABEL,
+  SCREENING_DETAILS_LABEL,
+  CANDIDATE_ASSESSMENT_FORM_LABEL,
+  basicDetailsStatusLabel,
+  candidateAssessmentStatusLabel,
+} from "@/lib/recruitment-terms";
 import { trackUxMetric } from "@/lib/ux-metrics";
 import {
   defaultTransitionDecision,
@@ -112,16 +119,19 @@ function isAssessmentLockedStage(toStage: RecruitmentStageKey) {
 }
 
 function cafChip(candidate: CandidateListItem) {
-  if (isInternCandidate(candidate)) return { label: "CAF not required", tone: chipTone("blue") };
-  if (candidate.caf_submitted_at) return { label: "CAF submitted", tone: chipTone("green") };
-  if (candidate.caf_sent_at) return { label: "CAF pending", tone: chipTone("amber") };
-  return { label: "CAF not sent", tone: chipTone("neutral") };
+  const sentAt = candidate.basic_details_form_sent_at || candidate.caf_sent_at;
+  const submittedAt = candidate.basic_details_form_submitted_at || candidate.caf_submitted_at;
+  if (isInternCandidate(candidate)) return { label: basicDetailsStatusLabel({ required: false }), tone: chipTone("blue") };
+  if (submittedAt) return { label: basicDetailsStatusLabel({ required: true, sentAt, submittedAt }), tone: chipTone("green") };
+  if (sentAt) return { label: basicDetailsStatusLabel({ required: true, sentAt }), tone: chipTone("amber") };
+  return { label: `${BASIC_DETAILS_FORM_LABEL} not sent`, tone: chipTone("neutral") };
 }
 
 function assessmentChip(candidate: CandidateListItem) {
-  if (isInternCandidate(candidate)) return { label: "Assessment not required", tone: chipTone("blue") };
-  if (candidate.assessment_submitted_at) return { label: "Assessment submitted", tone: chipTone("green") };
-  return { label: "Assessment pending", tone: chipTone("amber") };
+  const submittedAt = candidate.candidate_assessment_form_submitted_at || candidate.assessment_submitted_at;
+  if (isInternCandidate(candidate)) return { label: candidateAssessmentStatusLabel({ required: false, shortLabel: "CAF" }), tone: chipTone("blue") };
+  if (submittedAt) return { label: candidateAssessmentStatusLabel({ required: true, submittedAt, shortLabel: "CAF" }), tone: chipTone("green") };
+  return { label: candidateAssessmentStatusLabel({ required: true, shortLabel: "CAF" }), tone: chipTone("amber") };
 }
 
 function priorityChip(candidate: CandidateListItem) {
@@ -145,7 +155,7 @@ function isAttentionCandidate(candidate: CandidateListItem) {
   const cafPendingTooLong =
     !isInternCandidate(candidate) &&
     normalizeStage(candidate.current_stage) === "hr_screening" &&
-    !candidate.caf_submitted_at &&
+    !(candidate.basic_details_form_submitted_at || candidate.caf_submitted_at) &&
     (candidate.ageing_days || 0) >= 3;
   return isHighAge || isHigh || isMedium || isLow || cafPendingTooLong || !!candidate.needs_hr_review;
 }
@@ -256,9 +266,15 @@ function canTransitionCandidate(candidate: CandidateListItem, toStage: Recruitme
   const current = normalizeStage(candidate.current_stage);
   if (!current) return { ok: true as const };
   if (current === toStage) return { ok: false as const, reason: "Candidate is already in this stage." };
-  const assessmentLocked = !isInternCandidate(candidate) && isAssessmentLockedStage(toStage) && !candidate.assessment_submitted_at;
+  const assessmentLocked =
+    !isInternCandidate(candidate) &&
+    isAssessmentLockedStage(toStage) &&
+    !(candidate.candidate_assessment_form_submitted_at || candidate.assessment_submitted_at);
   if (assessmentLocked) {
-    return { ok: false as const, reason: "Assessment is pending. Moving to L2 interview and later stages is blocked." };
+    return {
+      ok: false as const,
+      reason: `${CANDIDATE_ASSESSMENT_FORM_LABEL} is pending. Moving to L2 interview and later stages is blocked.`,
+    };
   }
   if (toStage === "hr_screening" && !candidate.l2_owner_email) {
     return { ok: false as const, reason: "GL/L2 owner is required before HR screening." };
@@ -269,11 +285,11 @@ function canTransitionCandidate(candidate: CandidateListItem, toStage: Recruitme
 function nextBestAction(candidate: CandidateListItem) {
   const stage = normalizeStage(candidate.current_stage);
   if (!candidate.l2_owner_email && stage === "enquiry") return "Assign GL/L2 owner to unlock HR screening.";
-  if (!isInternCandidate(candidate) && stage === "hr_screening" && !candidate.caf_submitted_at) {
-    return "CAF/basic details should be marked submitted for this candidate record.";
+  if (!isInternCandidate(candidate) && stage === "hr_screening" && !(candidate.basic_details_form_submitted_at || candidate.caf_submitted_at)) {
+    return `${BASIC_DETAILS_FORM_LABEL} should be marked submitted for this candidate record.`;
   }
-  if (!isInternCandidate(candidate) && stage === "l2_shortlist" && !candidate.assessment_submitted_at) {
-    return "Follow up for assessment submission before scheduling the L2 interview.";
+  if (!isInternCandidate(candidate) && stage === "l2_shortlist" && !(candidate.candidate_assessment_form_submitted_at || candidate.assessment_submitted_at)) {
+    return `Follow up for ${CANDIDATE_ASSESSMENT_FORM_LABEL.toLowerCase()} submission before scheduling the L2 interview.`;
   }
   if (stage === "l2_feedback") return "Capture decision quickly and move to Sprint/Reject.";
   if (stage === "l1_feedback") return "Create and send offer draft immediately.";
@@ -685,7 +701,7 @@ export function CandidatesClient({
       await reloadCandidates();
       pushToast({
         tone: result.skipped_count ? "warning" : "success",
-        title: "Legacy CAF backfill complete",
+        title: `Legacy ${BASIC_DETAILS_FORM_LABEL} backfill complete`,
         description: `${result.updated_count} updated, ${result.skipped_count} skipped.`,
       });
       trackUxMetric({
@@ -702,7 +718,7 @@ export function CandidatesClient({
     } catch (e: any) {
       pushToast({
         tone: "error",
-        title: "Legacy CAF backfill failed",
+        title: `Legacy ${BASIC_DETAILS_FORM_LABEL} backfill failed`,
         description: e?.message || "Could not update selected candidates.",
       });
     } finally {
@@ -778,7 +794,7 @@ export function CandidatesClient({
             )}
             onClick={() => setCafToday((v) => !v)}
           >
-            CAF today
+            Basic Details today
           </button>
           <label className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-slate-600">
             Opening
@@ -913,7 +929,7 @@ export function CandidatesClient({
             className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-semibold text-amber-900 disabled:opacity-60"
           >
             <CheckCircle2 className="h-3.5 w-3.5" />
-            {bulkLegacyCafBusy ? "Marking CAF..." : "Mark selected CAF done"}
+            {bulkLegacyCafBusy ? `Marking ${BASIC_DETAILS_FORM_LABEL}...` : `Mark selected ${BASIC_DETAILS_FORM_LABEL} done`}
           </button>
           <select
             value={bulkTargetStage}
@@ -954,7 +970,7 @@ export function CandidatesClient({
             <span>Candidate</span>
             <span>Opening</span>
             <span>Stage</span>
-            <span>CAF / Screening</span>
+            <span>{SCREENING_DETAILS_LABEL}</span>
             <span className="text-center">Applied age</span>
             <span className="text-center">Stage age</span>
             <span>Status</span>

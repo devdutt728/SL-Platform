@@ -13,9 +13,9 @@ class RecCandidateAssessment(Base):
     candidate_assessment_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     candidate_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
 
-    assessment_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, index=True)
-    assessment_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    assessment_submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    candidate_assessment_form_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, index=True)
+    candidate_assessment_form_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    candidate_assessment_form_submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     position_applied_for: Mapped[str | None] = mapped_column(String(150), nullable=True)
     relevant_experience_years: Mapped[float | None] = mapped_column(Numeric(4, 1), nullable=True)
