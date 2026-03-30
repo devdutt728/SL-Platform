@@ -28,9 +28,9 @@ const INGEST_CONFIG = {
   fallbackSheetNames: ["Website - Candidates", "Sheet 1", "Sheet1"],
   archiveSheetName: "Ingest Archive",
   auditSheetName: "Ingest Audit Log",
-  auditMaxRows: 50000,
-  archiveStatuses: ["created", "reapplied", "duplicate"],
-  archiveMinAgeHours: 24,
+  auditMaxRows: 2000,
+  archiveStatuses: ["created"],
+  archiveMinAgeHours: 0,
   defaultSourceChannel: "google_sheet",
   requiredHeaderHints: ["Job ID", "First name", "Last name", "Email", "Terms"],
   statusColumn: "ingest_status",
@@ -42,8 +42,13 @@ const INGEST_CONFIG = {
   retryCountColumn: "retry_count",
   lastAttemptAtColumn: "last_attempt_at",
   nextRetryAtColumn: "next_retry_at",
+  documentRepairStatusColumn: "doc_repair_status",
+  documentRepairMessageColumn: "doc_repair_message",
+  documentRepairedAtColumn: "doc_repaired_at",
+  rowUidColumn: "ingest_row_uid",
   processingStaleMinutes: 15,
-  batchSize: 1,
+  batchSize: 10,
+  repairBatchSize: 25,
   requestTimeoutMs: 120000,
   maxRetries: 5,
   retryBaseDelaySeconds: 300,
@@ -63,10 +68,21 @@ const INGEST_CONFIG = {
     "exceeds max allowed size",
     "max allowed is"
   ],
-  skipStatuses: ["created", "reapplied", "duplicate", "processing", "failed_permanent"],
+  skipStatuses: [
+    "created",
+    "reapplied",
+    "duplicate",
+    "duplicate_recent",
+    "duplicate_idempotent",
+    "processing",
+    "failed_permanent"
+  ],
   duplicateCooldownHours: 24,
   changeTriggerHandler: "handleIngestSheetChange",
-  scheduledTriggerHandler: "runScheduledIngest",
+  syncTriggerHandler: "runScheduledExternalSync",
+  scheduledTriggerHandler: "runScheduledIngestRetry",
+  legacyScheduledTriggerHandler: "runScheduledIngest",
+  syncEveryMinutes: 5,
   scheduledEveryMinutes: 5
 };
 
@@ -102,7 +118,9 @@ function setupIngestTriggers() {
     const handler = trigger.getHandlerFunction();
     if (
       handler === INGEST_CONFIG.changeTriggerHandler ||
+      handler === INGEST_CONFIG.syncTriggerHandler ||
       handler === INGEST_CONFIG.scheduledTriggerHandler ||
+      handler === INGEST_CONFIG.legacyScheduledTriggerHandler ||
       handler === "handleIngestSheetEdit"
     ) {
       ScriptApp.deleteTrigger(trigger);
@@ -112,6 +130,11 @@ function setupIngestTriggers() {
   ScriptApp.newTrigger(INGEST_CONFIG.changeTriggerHandler)
     .forSpreadsheet(ss)
     .onChange()
+    .create();
+
+  ScriptApp.newTrigger(INGEST_CONFIG.syncTriggerHandler)
+    .timeBased()
+    .everyMinutes(INGEST_CONFIG.syncEveryMinutes)
     .create();
 
   ScriptApp.newTrigger(INGEST_CONFIG.scheduledTriggerHandler)
@@ -162,18 +185,48 @@ function handleIngestSheetChange(e) {
  * Installable time-driven trigger handler.
  * Retries rows missed by onChange or failed due transient errors.
  */
-function runScheduledIngest() {
+function runScheduledExternalSync() {
   try {
     syncExternalUpdatedToIngestQueue(); // pulls correct columns
   } catch (err) {
-    Logger.log(`runScheduledIngest sync failed: ${err}`);
+    Logger.log(`runScheduledExternalSync failed: ${err}`);
   }
+}
 
+function runScheduledIngestRetry() {
   try {
     pushCandidatesToRecruitment({ suppressIdleAudit: true }); // your existing ingest flow
   } catch (err) {
-    Logger.log(`runScheduledIngest ingest failed: ${err}`);
+    Logger.log(`runScheduledIngestRetry failed: ${err}`);
   }
+}
+
+// Legacy combined handler kept only so old triggers do not hard-fail before cleanup.
+function runScheduledIngest() {
+  runScheduledExternalSync();
+  runScheduledIngestRetry();
+}
+
+function deleteExternalSyncTrigger() {
+  let deleted = 0;
+  ScriptApp.getProjectTriggers().forEach((trigger) => {
+    if (trigger.getHandlerFunction() === INGEST_CONFIG.syncTriggerHandler) {
+      ScriptApp.deleteTrigger(trigger);
+      deleted += 1;
+    }
+  });
+  Logger.log(`Deleted ${deleted} external sync trigger(s).`);
+  return deleted;
+}
+
+function showInstalledIngestTriggers() {
+  const output = ScriptApp.getProjectTriggers().map((trigger) => ({
+    handler: trigger.getHandlerFunction(),
+    event_type: String(trigger.getEventType ? trigger.getEventType() : ""),
+    trigger_source: String(trigger.getTriggerSource ? trigger.getTriggerSource() : "")
+  }));
+  Logger.log(JSON.stringify(output));
+  return output;
 }
 
 /**
@@ -182,6 +235,360 @@ function runScheduledIngest() {
  */
 function repairKnownCreatedRows() {
   _resetIngestOpsForRows([5, 6, 7], { rerunIngest: true });
+}
+
+function repairMissingCandidateDocuments(options) {
+  const opts = options || {};
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    Logger.log("Document repair skipped: could not acquire lock.");
+    return;
+  }
+
+  try {
+    const endpoint = _getDocumentRepairEndpoint();
+    const token = _requiredProp("SHEET_INGEST_TOKEN");
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const requestedSheetName = String(opts.sheetName || "").trim();
+    const sheet = requestedSheetName ? ss.getSheetByName(requestedSheetName) : _resolveTargetSheet(ss);
+    if (!sheet) {
+      throw new Error("Target ingest sheet not found (check SHEET_TAB_NAME).");
+    }
+    Logger.log(`Document repair scanning sheet: ${sheet.getName()}`);
+
+    const range = sheet.getDataRange();
+    const values = range.getValues();
+    const richValues = range.getRichTextValues();
+    const formulaValues = range.getFormulas();
+    if (!values.length || values.length === 1) {
+      Logger.log("Document repair skipped: no data rows found.");
+      return {
+        requested_rows: 0,
+        repaired_count: 0,
+        skipped_count: 0,
+        failed_count: 0
+      };
+    }
+
+    const headers = values[0].map((h) => String(h || "").trim());
+    const headerIndex = _buildHeaderIndex(headers);
+    _ensureOpsColumns(sheet, headers, headerIndex);
+
+    const pending = [];
+    let localValidationFailed = 0;
+    let skippedNoLookup = 0;
+    let skippedNoUrls = 0;
+    const validationSamples = [];
+
+    const dataRows = values.slice(1);
+    _ensureRowUidsForLoadedRows(sheet, dataRows, headerIndex);
+
+    dataRows.forEach((row, idx) => {
+      const richRow = richValues[idx + 1] || null;
+      const formulaRow = formulaValues[idx + 1] || null;
+      const rowNumber = idx + 2;
+      const rowKey = String(rowNumber);
+      const rowUid = _readCell(row, headerIndex, INGEST_CONFIG.rowUidColumn);
+      const candidateCode = _readCell(row, headerIndex, INGEST_CONFIG.codeColumn).toUpperCase();
+      const externalSourceRef =
+        _readCell(row, headerIndex, "External Source Ref") ||
+        _readCell(row, headerIndex, "external_source_ref");
+      const email = _readCell(row, headerIndex, "Email").toLowerCase();
+      const jobId = _readCell(row, headerIndex, "Job ID").toUpperCase();
+      const applyingFor = _readCell(row, headerIndex, "Applying for");
+
+      if (!candidateCode && !externalSourceRef && !(email && (jobId || applyingFor))) {
+        skippedNoLookup += 1;
+        return;
+      }
+
+      const portfolioField = _readOptionalDocumentField(row, richRow, formulaRow, headerIndex, "Portfolio");
+      const cvField = _readOptionalDocumentField(row, richRow, formulaRow, headerIndex, "CV");
+      const resumeField = _readOptionalDocumentField(row, richRow, formulaRow, headerIndex, "Resume");
+      const validationErrors = [];
+      const validDocumentCount =
+        (portfolioField.value ? 1 : 0) + (cvField.value ? 1 : 0) + (resumeField.value ? 1 : 0);
+
+      if (portfolioField.error) validationErrors.push(portfolioField.error);
+      if (cvField.error) validationErrors.push(cvField.error);
+      if (resumeField.error) validationErrors.push(resumeField.error);
+
+      if (validationErrors.length && !validDocumentCount) {
+        localValidationFailed += 1;
+        if (validationSamples.length < 5) {
+          validationSamples.push({
+            row: rowNumber,
+            candidate_code: candidateCode || "",
+            errors: validationErrors,
+            portfolio: _debugDocumentFieldSnapshot(row, richRow, formulaRow, headerIndex, "Portfolio"),
+            cv: _debugDocumentFieldSnapshot(row, richRow, formulaRow, headerIndex, "CV"),
+            resume: _debugDocumentFieldSnapshot(row, richRow, formulaRow, headerIndex, "Resume")
+          });
+        }
+        _writeDocumentRepairStatus(
+          sheet,
+          rowNumber,
+          headerIndex,
+          "error",
+          validationErrors.join(" "),
+          new Date().toISOString()
+        );
+        return;
+      }
+
+      if (!validDocumentCount) {
+        skippedNoUrls += 1;
+        return;
+      }
+
+      pending.push({
+        rowNumber,
+        warningMessage: validationErrors.length
+          ? _prefixMessage(validationErrors.join(" "), "Ignored invalid document fields")
+          : "",
+        payload: {
+          row_key: rowKey,
+          candidate_code: candidateCode || "",
+          external_source_ref:
+            externalSourceRef ||
+            _deriveExternalSourceRef(
+              {
+                date: _readCell(row, headerIndex, "Date"),
+                job_id: jobId || "",
+                applying_for: applyingFor || "",
+                email: email || "",
+                first_name: _readCell(row, headerIndex, "First name"),
+                last_name: _readCell(row, headerIndex, "Last name"),
+                portfolio: portfolioField.value || "",
+                cv: cvField.value || "",
+                resume: resumeField.value || ""
+              },
+              {
+                sheetId: ss.getId(),
+                sheetName: sheet.getName(),
+                rowKey: rowKey,
+                rowUid: rowUid
+              }
+            ),
+          opening_code: jobId || "",
+          applying_for: applyingFor || "",
+          email: email || "",
+          portfolio_url: portfolioField.value || "",
+          cv_url: cvField.value || "",
+          resume_url: resumeField.value || ""
+        }
+      });
+    });
+
+    if (!pending.length) {
+      Logger.log(
+        `No document repair rows were eligible. scanned_rows=${Math.max(values.length - 1, 0)}, skipped_no_lookup=${skippedNoLookup}, skipped_no_urls=${skippedNoUrls}, validation_failed=${localValidationFailed}`
+      );
+      if (validationSamples.length) {
+        Logger.log(`Document repair validation samples: ${JSON.stringify(validationSamples)}`);
+      }
+      return {
+        requested_rows: 0,
+        repaired_count: 0,
+        skipped_count: 0,
+        failed_count: localValidationFailed
+      };
+    }
+
+    const summary = {
+      requested_rows: pending.length,
+      repaired_count: 0,
+      skipped_count: 0,
+      failed_count: localValidationFailed
+    };
+
+    if (opts.dryRun) {
+      Logger.log(
+        `Document repair dry run. requested_rows=${summary.requested_rows}, skipped_no_lookup=${skippedNoLookup}, skipped_no_urls=${skippedNoUrls}, validation_failed=${localValidationFailed}`
+      );
+      return summary;
+    }
+
+    for (let i = 0; i < pending.length; i += INGEST_CONFIG.repairBatchSize) {
+      const batch = pending.slice(i, i + INGEST_CONFIG.repairBatchSize);
+      const processedAt = new Date().toISOString();
+      _markDocumentRepairBatchProcessing(sheet, batch, headerIndex, processedAt);
+
+      let response;
+      try {
+        response = UrlFetchApp.fetch(endpoint, {
+          method: "post",
+          contentType: "application/json",
+          headers: { "x-sheet-ingest-token": token },
+          payload: JSON.stringify({
+            batch_id: _newBatchId(i / INGEST_CONFIG.repairBatchSize + 1),
+            sheet_id: ss.getId(),
+            sheet_name: sheet.getName(),
+            replace_existing: !!opts.replaceExisting,
+            rows: batch.map((entry) => entry.payload)
+          }),
+          muteHttpExceptions: true,
+          followRedirects: true
+        });
+      } catch (err) {
+        const message = `Document repair transport failure: ${_toErrorMessage(err)}`;
+        batch.forEach((entry) => {
+          summary.failed_count += 1;
+          _writeDocumentRepairStatus(sheet, entry.rowNumber, headerIndex, "error", message, processedAt);
+        });
+        continue;
+      }
+
+      const statusCode = response.getResponseCode();
+      const bodyText = response.getContentText();
+      if (statusCode < 200 || statusCode >= 300) {
+        const message = `Document repair failed (${statusCode}): ${bodyText || "no response body"}`;
+        batch.forEach((entry) => {
+          summary.failed_count += 1;
+          _writeDocumentRepairStatus(sheet, entry.rowNumber, headerIndex, "error", message, processedAt);
+        });
+        continue;
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch (err) {
+        const message = `Document repair parse failure: ${_toErrorMessage(err)}`;
+        batch.forEach((entry) => {
+          summary.failed_count += 1;
+          _writeDocumentRepairStatus(sheet, entry.rowNumber, headerIndex, "error", message, processedAt);
+        });
+        continue;
+      }
+
+      const resultByRowKey = {};
+      (parsed.results || []).forEach((result) => {
+        if (!result || result.row_key == null) return;
+        resultByRowKey[String(result.row_key)] = result;
+      });
+
+      batch.forEach((entry) => {
+        const result = resultByRowKey[String(entry.payload.row_key)];
+        if (!result) {
+          summary.failed_count += 1;
+          _writeDocumentRepairStatus(
+            sheet,
+            entry.rowNumber,
+            headerIndex,
+            "error",
+            "No document repair result returned for row.",
+            processedAt
+          );
+          return;
+        }
+
+        const statusValue = String(result.status || "error").trim().toLowerCase();
+        const message = _appendMessages(
+          String(result.message || "").trim(),
+          entry.warningMessage || ""
+        );
+        _writeDocumentRepairStatus(sheet, entry.rowNumber, headerIndex, statusValue, message, processedAt);
+
+        const returnedCode = String(result.candidate_code || "").trim();
+        if (returnedCode && headerIndex[INGEST_CONFIG.codeColumn] != null) {
+          sheet.getRange(entry.rowNumber, headerIndex[INGEST_CONFIG.codeColumn] + 1).setValue(returnedCode);
+        }
+
+        if (statusValue === "repaired") {
+          summary.repaired_count += 1;
+        } else if (statusValue === "skipped") {
+          summary.skipped_count += 1;
+        } else {
+          summary.failed_count += 1;
+        }
+      });
+    }
+
+    Logger.log(
+      `Document repair completed. requested_rows=${summary.requested_rows}, repaired_count=${summary.repaired_count}, skipped_count=${summary.skipped_count}, failed_count=${summary.failed_count}, skipped_no_lookup=${skippedNoLookup}, skipped_no_urls=${skippedNoUrls}`
+    );
+    return summary;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function repairAllCandidateDocumentsFromSheet() {
+  return repairMissingCandidateDocuments({ replaceExisting: false });
+}
+
+function debugDocumentRepairEligibility(sheetName) {
+  return repairMissingCandidateDocuments({
+    replaceExisting: false,
+    sheetName: sheetName || "",
+    dryRun: true
+  });
+}
+
+function inspectDocumentFieldShapes(sheetName, rowNumbers) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const requestedSheetName = String(sheetName || "").trim();
+  const sheet = requestedSheetName ? ss.getSheetByName(requestedSheetName) : _resolveTargetSheet(ss);
+  if (!sheet) {
+    throw new Error("Target ingest sheet not found (check SHEET_TAB_NAME).");
+  }
+
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+  const richValues = range.getRichTextValues();
+  const formulaValues = range.getFormulas();
+  if (!values.length) {
+    throw new Error("Target sheet has no headers.");
+  }
+
+  const headers = values[0].map((h) => String(h || "").trim());
+  const headerIndex = _buildHeaderIndex(headers);
+  const sampleRows = (rowNumbers || []).length ? rowNumbers : [2, 3, 4, 5, 6];
+  const output = [];
+
+  sampleRows.forEach((rowNumberRaw) => {
+    const rowNumber = Math.floor(Number(rowNumberRaw || 0));
+    if (!Number.isFinite(rowNumber) || rowNumber < 2 || rowNumber > values.length) return;
+    const row = values[rowNumber - 1] || [];
+    const richRow = richValues[rowNumber - 1] || null;
+    const formulaRow = formulaValues[rowNumber - 1] || null;
+    output.push({
+      row: rowNumber,
+      candidate_code: _readCell(row, headerIndex, INGEST_CONFIG.codeColumn),
+      email: _readCell(row, headerIndex, "Email"),
+      portfolio: _debugDocumentFieldSnapshot(row, richRow, formulaRow, headerIndex, "Portfolio"),
+      cv: _debugDocumentFieldSnapshot(row, richRow, formulaRow, headerIndex, "CV"),
+      resume: _debugDocumentFieldSnapshot(row, richRow, formulaRow, headerIndex, "Resume")
+    });
+  });
+
+  Logger.log(`Document field shapes for ${sheet.getName()}: ${JSON.stringify(output)}`);
+  return output;
+}
+
+function _markDocumentRepairBatchProcessing(sheet, batch, headerIndex, processedAt) {
+  (batch || []).forEach((entry) => {
+    _writeDocumentRepairStatus(
+      sheet,
+      entry.rowNumber,
+      headerIndex,
+      "processing",
+      "Repairing missing application documents...",
+      processedAt
+    );
+  });
+}
+
+function _writeDocumentRepairStatus(sheet, rowNumber, headerIndex, status, message, processedAt) {
+  const statusIdx = _headerIndexOf(headerIndex, INGEST_CONFIG.documentRepairStatusColumn);
+  const messageIdx = _headerIndexOf(headerIndex, INGEST_CONFIG.documentRepairMessageColumn);
+  const processedIdx = _headerIndexOf(headerIndex, INGEST_CONFIG.documentRepairedAtColumn);
+  if (statusIdx == null || messageIdx == null || processedIdx == null) return;
+
+  sheet.getRange(rowNumber, statusIdx + 1).setValue(String(status || "").trim().toLowerCase());
+  sheet.getRange(rowNumber, messageIdx + 1).setValue(message || "");
+  sheet.getRange(rowNumber, processedIdx + 1).setValue(processedAt || "");
 }
 
 function countCurrentSheetRows() {
@@ -278,6 +685,79 @@ function countCurrentSheetRows() {
   return output;
 }
 
+function archiveResolvedRowsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = _resolveTargetSheet(ss);
+  if (!sheet) {
+    throw new Error("Target ingest sheet not found (check SHEET_TAB_NAME).");
+  }
+
+  const headers = sheet
+    .getRange(1, 1, 1, Math.max(1, sheet.getLastColumn()))
+    .getValues()[0]
+    .map((h) => String(h || "").trim());
+
+  const archivedCount = _archiveSuccessfulRows(ss, sheet, headers, { ignoreAge: true });
+  const output = {
+    archived_count: archivedCount,
+    archive_sheet: INGEST_CONFIG.archiveSheetName,
+    source_sheet: sheet.getName()
+  };
+  Logger.log(JSON.stringify(output));
+  return output;
+}
+
+function trimIngestAuditLog(maxDataRows) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const auditSheet = _getOrCreateAuditSheet(ss);
+  const keepRows = Math.max(0, Math.floor(Number(maxDataRows == null ? 1000 : maxDataRows)));
+  const totalRows = auditSheet.getLastRow();
+  const dataRows = Math.max(0, totalRows - 1);
+  const overflow = dataRows - keepRows;
+
+  if (overflow > 0) {
+    auditSheet.deleteRows(2, overflow);
+  }
+
+  const output = {
+    audit_sheet: auditSheet.getName(),
+    kept_data_rows: keepRows,
+    deleted_data_rows: Math.max(0, overflow),
+    remaining_data_rows: Math.max(0, auditSheet.getLastRow() - 1)
+  };
+  Logger.log(JSON.stringify(output));
+  return output;
+}
+
+function clearIngestAuditLog() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const auditSheet = _getOrCreateAuditSheet(ss);
+  const headers = _ensureAuditHeaders(auditSheet);
+  const lastRow = auditSheet.getLastRow();
+  if (lastRow > 1) {
+    auditSheet.deleteRows(2, lastRow - 1);
+  }
+  const output = {
+    audit_sheet: auditSheet.getName(),
+    cleared: true,
+    remaining_data_rows: 0,
+    header_count: headers.length
+  };
+  Logger.log(JSON.stringify(output));
+  return output;
+}
+
+function runIngestMaintenance() {
+  const archived = archiveResolvedRowsNow();
+  const audit = trimIngestAuditLog(1000);
+  const output = {
+    archived_count: archived.archived_count || 0,
+    audit_remaining_rows: audit.remaining_data_rows || 0
+  };
+  Logger.log(JSON.stringify(output));
+  return output;
+}
+
 function _resetIngestOpsForRows(rowNumbers, options) {
   const opts = options || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -365,6 +845,7 @@ function pushCandidatesToRecruitment(options) {
     const range = sheet.getDataRange();
     const values = range.getValues();
     const richValues = range.getRichTextValues();
+    const formulaValues = range.getFormulas();
     if (!values.length || values.length === 1) {
       if (opts.suppressIdleAudit) {
         auditEntries.length = 0;
@@ -382,8 +863,10 @@ function pushCandidatesToRecruitment(options) {
     _ensureOpsColumns(sheet, headers, headerIndex);
 
     const rows = values.slice(1);
+    _ensureRowUidsForLoadedRows(sheet, rows, headerIndex);
     const richRows = richValues.slice(1);
-    const pending = _collectPendingRows(rows, richRows, headerIndex, {
+    const formulaRows = formulaValues.slice(1);
+    const pending = _collectPendingRows(rows, richRows, formulaRows, headerIndex, {
       sheetId: ss.getId(),
       sheetName: sheet.getName()
     });
@@ -565,7 +1048,10 @@ function pushCandidatesToRecruitment(options) {
 
         const statusValue = String(result.status || "error").trim().toLowerCase();
         const candidateCode = result.candidate_code ? String(result.candidate_code) : "";
-        const message = result.message ? String(result.message) : "";
+        const message = _appendMessages(
+          result.message ? String(result.message) : "",
+          item.localWarning || ""
+        );
         const emailStatus = result.email_status ? String(result.email_status).trim().toLowerCase() : "";
         const emailError = result.email_error ? String(result.email_error) : "";
         _writeRowStatus(
@@ -614,7 +1100,7 @@ function pushCandidatesToRecruitment(options) {
   }
 }
 
-function _collectPendingRows(rows, richRows, headerIndex, context) {
+function _collectPendingRows(rows, richRows, formulaRows, headerIndex, context) {
   const out = [];
   const ctx = context || {};
   const requiredHeaders = [
@@ -627,16 +1113,14 @@ function _collectPendingRows(rows, richRows, headerIndex, context) {
 
   rows.forEach((row, idx) => {
     const richRow = richRows && richRows[idx] ? richRows[idx] : null;
+    const formulaRow = formulaRows && formulaRows[idx] ? formulaRows[idx] : null;
     const rowNumber = idx + 2;
     const status = _readCell(row, headerIndex, INGEST_CONFIG.statusColumn).toLowerCase();
     if (_shouldSkipRowForStatus(status, row, headerIndex)) return;
 
-    const portfolioValue = _readFileField(row, richRow, headerIndex, "Portfolio");
-    const cvValue = _readFileField(row, richRow, headerIndex, "CV");
-    const resumeValue = _readFileField(row, richRow, headerIndex, "Resume");
-    const normalizedPortfolioValue = _normalizeOptionalFileUrl(portfolioValue);
-    const normalizedCvValue = _normalizeOptionalFileUrl(cvValue);
-    const normalizedResumeValue = _normalizeOptionalFileUrl(resumeValue);
+    const portfolioField = _readOptionalDocumentField(row, richRow, formulaRow, headerIndex, "Portfolio");
+    const cvField = _readOptionalDocumentField(row, richRow, formulaRow, headerIndex, "CV");
+    const resumeField = _readOptionalDocumentField(row, richRow, formulaRow, headerIndex, "Resume");
 
     const payload = {
       row_key: String(rowNumber),
@@ -652,9 +1136,9 @@ function _collectPendingRows(rows, richRows, headerIndex, context) {
       city: _readCell(row, headerIndex, "City"),
       willing_to_relocate: _readCell(row, headerIndex, "Willing to Relocate?"),
       terms: _readCell(row, headerIndex, "Terms"),
-      portfolio: normalizedPortfolioValue,
-      cv: normalizedCvValue,
-      resume: normalizedResumeValue,
+      portfolio: portfolioField.value,
+      cv: cvField.value,
+      resume: resumeField.value,
       source_channel:
         _readCell(row, headerIndex, "Source Channel") ||
         _readCell(row, headerIndex, "source_channel") ||
@@ -668,28 +1152,40 @@ function _collectPendingRows(rows, richRows, headerIndex, context) {
       payload.external_source_ref = _deriveExternalSourceRef(payload, {
         sheetId: ctx.sheetId || "",
         sheetName: ctx.sheetName || "",
-        rowKey: String(rowNumber)
+        rowKey: String(rowNumber),
+        rowUid: _readCell(row, headerIndex, INGEST_CONFIG.rowUidColumn)
       });
     }
 
+    const validationErrors = [];
+    const documentWarnings = [];
     const missing = requiredHeaders.filter((h) => !_readCell(row, headerIndex, h));
     if (missing.length) {
-      out.push({
-        rowNumber,
-        rowKey: String(rowNumber),
-        payload,
-        localError: `Missing required columns: ${missing.join(", ")}`
-      });
-      return;
+      validationErrors.push(`Missing required columns: ${missing.join(", ")}`);
     }
+
+    if (portfolioField.error) documentWarnings.push(portfolioField.error);
+    if (cvField.error) documentWarnings.push(cvField.error);
+    if (resumeField.error) documentWarnings.push(resumeField.error);
 
     const termsAccepted = /^(yes|true|1|on|y)$/i.test(payload.terms || "");
     if (!termsAccepted) {
+      validationErrors.push("Terms must be accepted (Yes/True/1).");
+    }
+
+    const validDocumentCount =
+      (portfolioField.value ? 1 : 0) + (cvField.value ? 1 : 0) + (resumeField.value ? 1 : 0);
+    if (documentWarnings.length && !validDocumentCount) {
+      validationErrors.push(documentWarnings.join(" "));
+    }
+
+    if (validationErrors.length) {
       out.push({
         rowNumber,
         rowKey: String(rowNumber),
         payload,
-        localError: "Terms must be accepted (Yes/True/1)."
+        localError: validationErrors.join(" "),
+        localWarning: ""
       });
       return;
     }
@@ -698,7 +1194,10 @@ function _collectPendingRows(rows, richRows, headerIndex, context) {
       rowNumber,
       rowKey: String(rowNumber),
       payload,
-      localError: ""
+      localError: "",
+      localWarning: documentWarnings.length
+        ? _prefixMessage(documentWarnings.join(" "), "Ignored invalid document fields")
+        : ""
     });
   });
 
@@ -713,6 +1212,31 @@ function _normalizeExternalSourceRef(value) {
 
 function _deriveExternalSourceRef(payload, context) {
   const ctx = context || {};
+  const rowUid = String(ctx.rowUid || "").trim();
+  if (rowUid) {
+    const stableFingerprint = [
+      "google_sheet",
+      String(ctx.sheetId || "").trim(),
+      String(ctx.sheetName || "").trim(),
+      rowUid
+    ]
+      .join("|")
+      .toLowerCase();
+    const stableDigest = Utilities.computeDigest(
+      Utilities.DigestAlgorithm.SHA_256,
+      stableFingerprint,
+      Utilities.Charset.UTF_8
+    );
+    const stableHex = stableDigest
+      .map((b) => {
+        const n = b < 0 ? b + 256 : b;
+        const h = n.toString(16);
+        return h.length === 1 ? `0${h}` : h;
+      })
+      .join("");
+    return _normalizeExternalSourceRef(`gs:${stableHex.slice(0, 40)}`);
+  }
+
   const appliedAt = String(payload && payload.date ? payload.date : "").trim();
   const pieces = [
     "google_sheet",
@@ -748,9 +1272,27 @@ function _deriveExternalSourceRef(payload, context) {
   return _normalizeExternalSourceRef(`gs:${hex.slice(0, 40)}`);
 }
 
+function _isDuplicateLikeStatus(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  return (
+    normalized === "duplicate" ||
+    normalized === "duplicate_recent" ||
+    normalized === "duplicate_idempotent"
+  );
+}
+
+function _rowHasResolvedIngestEvidence(row, headerIndex) {
+  const candidateCode = _readCell(row, headerIndex, INGEST_CONFIG.codeColumn);
+  if (String(candidateCode || "").trim()) return true;
+
+  const emailStatus = _readCell(row, headerIndex, INGEST_CONFIG.emailStatusColumn).toLowerCase();
+  const ingestedAt = _readCell(row, headerIndex, INGEST_CONFIG.ingestedAtColumn);
+  return emailStatus === "sent" && Boolean(String(ingestedAt || "").trim());
+}
+
 function _shouldSkipRowForStatus(status, row, headerIndex) {
   const normalized = String(status || "").trim().toLowerCase();
-  if (!normalized) return false;
+  if (!normalized) return _rowHasResolvedIngestEvidence(row, headerIndex);
   if (normalized === "processing" && _isStaleProcessingRow(row, headerIndex)) return false;
   const retryWindowStatus =
     normalized === "error" || normalized === "failed_permanent" || normalized === "processing";
@@ -769,11 +1311,15 @@ function _shouldSkipRowForStatus(status, row, headerIndex) {
     }
   }
 
-  if (normalized !== "duplicate") {
-    return INGEST_CONFIG.skipStatuses.includes(normalized);
+  if (_isDuplicateLikeStatus(normalized)) {
+    return true;
   }
-  const candidateCode = _readCell(row, headerIndex, INGEST_CONFIG.codeColumn);
-  return Boolean(String(candidateCode || "").trim());
+
+  if (_rowHasResolvedIngestEvidence(row, headerIndex)) {
+    return true;
+  }
+
+  return INGEST_CONFIG.skipStatuses.includes(normalized);
 }
 
 function _isStaleProcessingRow(row, headerIndex) {
@@ -792,48 +1338,198 @@ function _isStaleProcessingRow(row, headerIndex) {
   return Date.now() - parsed >= staleMinutes * 60 * 1000;
 }
 
-function _readFileField(row, richRow, headerIndex, headerName) {
+function _readOptionalDocumentField(row, richRow, formulaRow, headerIndex, headerName) {
   const text = _readCell(row, headerIndex, headerName);
-  if (_looksLikeUrl(text)) return text;
-
   const idx = headerIndex[headerName];
-  if (idx == null || idx < 0 || !richRow || idx >= richRow.length) return text;
+  const richText = idx == null || idx < 0 || !richRow || idx >= richRow.length ? null : richRow[idx];
+  const formula = idx == null || idx < 0 || !formulaRow || idx >= formulaRow.length ? "" : formulaRow[idx];
+  const urls = _collectDocumentUrls(text, richText, formula);
+  if (urls.length > 1) {
+    return {
+      value: "",
+      error: `${headerName} contains multiple URLs. Keep exactly one file per field.`
+    };
+  }
+  if (urls.length === 1) {
+    return { value: urls[0], error: "" };
+  }
 
-  const richText = richRow[idx];
-  const link = _extractLinkFromRichText(richText);
-  return link || text;
+  const rawText = String(text || "").trim();
+  if (rawText) {
+    return {
+      value: "",
+      error: `${headerName} must contain one valid public URL.`
+    };
+  }
+
+  return { value: "", error: "" };
 }
 
-function _extractLinkFromRichText(richText) {
+function _debugDocumentFieldSnapshot(row, richRow, formulaRow, headerIndex, headerName) {
+  const text = _readCell(row, headerIndex, headerName);
+  const idx = headerIndex[headerName];
+  const richText = idx == null || idx < 0 || !richRow || idx >= richRow.length ? null : richRow[idx];
+  const formula = idx == null || idx < 0 || !formulaRow || idx >= formulaRow.length ? "" : formulaRow[idx];
+  const directLink = _safeRichTextDirectLink(richText);
+  const runLinks = _safeRichTextRunLinks(richText);
+  const urls = _collectDocumentUrls(text, richText, formula);
+  return {
+    text: _truncateDebugValue(text),
+    formula: _truncateDebugValue(formula),
+    direct_link: _truncateDebugValue(directLink),
+    run_links: runLinks.map((item) => _truncateDebugValue(item)),
+    extracted_urls: urls.map((item) => _truncateDebugValue(item))
+  };
+}
+
+function _collectDocumentUrls(text, richText, formula) {
+  const out = [];
+  const seen = {};
+
+  _extractUrlsFromText(text).forEach((url) => {
+    if (seen[url]) return;
+    seen[url] = true;
+    out.push(url);
+  });
+
+  _extractUrlsFromRichText(richText).forEach((url) => {
+    if (seen[url]) return;
+    seen[url] = true;
+    out.push(url);
+  });
+
+  _extractUrlsFromFormula(formula).forEach((url) => {
+    if (seen[url]) return;
+    seen[url] = true;
+    out.push(url);
+  });
+
+  return out;
+}
+
+function _extractUrlsFromText(value) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+
+  const matches = text.match(/https?:\/\/[^\s<>"']+/gi) || [];
+  const out = [];
+  const seen = {};
+
+  matches.forEach((match) => {
+    const normalized = _normalizeDetectedUrl(match);
+    if (!normalized || seen[normalized]) return;
+    seen[normalized] = true;
+    out.push(normalized);
+  });
+
+  if (!out.length) {
+    const normalized = _normalizeDetectedUrl(text);
+    if (normalized) out.push(normalized);
+  }
+
+  return out;
+}
+
+function _extractUrlsFromRichText(richText) {
+  const out = [];
+  const seen = {};
   try {
-    if (!richText) return "";
-    const direct = richText.getLinkUrl();
-    if (direct) return String(direct).trim();
+    if (!richText) return out;
+    const direct = _normalizeDetectedUrl(richText.getLinkUrl ? richText.getLinkUrl() : "");
+    if (direct) {
+      seen[direct] = true;
+      out.push(direct);
+    }
 
     const runs = richText.getRuns ? richText.getRuns() : [];
     for (let i = 0; i < runs.length; i++) {
-      const runLink = runs[i].getLinkUrl ? runs[i].getLinkUrl() : "";
-      if (runLink) return String(runLink).trim();
+      const runLink = _normalizeDetectedUrl(runs[i].getLinkUrl ? runs[i].getLinkUrl() : "");
+      if (!runLink || seen[runLink]) continue;
+      seen[runLink] = true;
+      out.push(runLink);
     }
   } catch (err) {
     Logger.log(`Could not parse hyperlink from rich text: ${err}`);
   }
-  return "";
+  return out;
+}
+
+function _safeRichTextDirectLink(richText) {
+  try {
+    if (!richText || !richText.getLinkUrl) return "";
+    return String(richText.getLinkUrl() || "").trim();
+  } catch (err) {
+    return "";
+  }
+}
+
+function _safeRichTextRunLinks(richText) {
+  const out = [];
+  const seen = {};
+  try {
+    if (!richText || !richText.getRuns) return out;
+    const runs = richText.getRuns() || [];
+    for (let i = 0; i < runs.length; i++) {
+      const link = runs[i] && runs[i].getLinkUrl ? String(runs[i].getLinkUrl() || "").trim() : "";
+      if (!link || seen[link]) continue;
+      seen[link] = true;
+      out.push(link);
+    }
+  } catch (err) {
+    return out;
+  }
+  return out;
+}
+
+function _normalizeDetectedUrl(value) {
+  const text = String(value || "").trim().replace(/[),.;]+$/, "");
+  if (!_looksLikeUrl(text)) return "";
+  return text;
+}
+
+function _extractUrlsFromFormula(formula) {
+  const text = String(formula || "").trim();
+  if (!text) return [];
+
+  const out = [];
+  const seen = {};
+  const hyperlinkMatch = text.match(/=?\s*HYPERLINK\s*\(\s*"([^"]+)"/i);
+  if (hyperlinkMatch && hyperlinkMatch[1]) {
+    const normalized = _normalizeDetectedUrl(hyperlinkMatch[1]);
+    if (normalized) {
+      seen[normalized] = true;
+      out.push(normalized);
+    }
+  }
+
+  const genericMatches = text.match(/https?:\/\/[^"\s,)]+/gi) || [];
+  genericMatches.forEach((match) => {
+    const normalized = _normalizeDetectedUrl(match);
+    if (!normalized || seen[normalized]) return;
+    seen[normalized] = true;
+    out.push(normalized);
+  });
+
+  return out;
 }
 
 function _looksLikeUrl(value) {
   const text = String(value || "").trim();
   if (!text) return false;
-  try {
-    const parsed = new URL(text);
-    return /^https?:$/i.test(parsed.protocol) && !!parsed.hostname;
-  } catch (err) {
-    return false;
-  }
+  if (!/^https?:\/\//i.test(text)) return false;
+  if (/\s/.test(text)) return false;
+  const withoutProtocol = text.replace(/^https?:\/\//i, "");
+  const host = withoutProtocol.split(/[\/?#]/, 1)[0] || "";
+  if (!host) return false;
+  if (host.indexOf(".") < 0) return false;
+  if (!/^[a-z0-9.-]+$/i.test(host)) return false;
+  return true;
 }
 
-function _normalizeOptionalFileUrl(value) {
-  return _looksLikeUrl(value) ? String(value || "").trim() : "";
+function _truncateDebugValue(value) {
+  const text = String(value || "").trim();
+  if (text.length <= 200) return text;
+  return `${text.slice(0, 197)}...`;
 }
 
 function _shouldReevaluateFailedPermanentRow(message) {
@@ -959,23 +1655,42 @@ function _writeRowStatus(
     finalStatus === "created" ||
     finalStatus === "reapplied" ||
     finalStatus === "duplicate" ||
+    finalStatus === "duplicate_recent" ||
+    finalStatus === "duplicate_idempotent" ||
     finalStatus === "failed_permanent" ||
     finalStatus === "processing"
   ) {
     nextRetryAt = "";
   }
 
-  sheet.getRange(rowNumber, headerIndex[INGEST_CONFIG.statusColumn] + 1).setValue(finalStatus);
-  sheet.getRange(rowNumber, headerIndex[INGEST_CONFIG.codeColumn] + 1).setValue(code || "");
-  sheet.getRange(rowNumber, headerIndex[INGEST_CONFIG.messageColumn] + 1).setValue(finalMessage);
-  sheet.getRange(rowNumber, headerIndex[INGEST_CONFIG.emailStatusColumn] + 1).setValue(
+  const statusIdx = _headerIndexOf(headerIndex, INGEST_CONFIG.statusColumn);
+  const codeIdx = _headerIndexOf(headerIndex, INGEST_CONFIG.codeColumn);
+  const messageIdx = _headerIndexOf(headerIndex, INGEST_CONFIG.messageColumn);
+  const emailStatusIdx = _headerIndexOf(headerIndex, INGEST_CONFIG.emailStatusColumn);
+  const emailErrorIdx = _headerIndexOf(headerIndex, INGEST_CONFIG.emailErrorColumn);
+  const ingestedAtIdx = _headerIndexOf(headerIndex, INGEST_CONFIG.ingestedAtColumn);
+  const nextRetryAtIdx = _headerIndexOf(headerIndex, INGEST_CONFIG.nextRetryAtColumn);
+  if (
+    statusIdx == null ||
+    codeIdx == null ||
+    messageIdx == null ||
+    emailStatusIdx == null ||
+    emailErrorIdx == null ||
+    ingestedAtIdx == null
+  ) {
+    return;
+  }
+
+  sheet.getRange(rowNumber, statusIdx + 1).setValue(finalStatus);
+  sheet.getRange(rowNumber, codeIdx + 1).setValue(code || "");
+  sheet.getRange(rowNumber, messageIdx + 1).setValue(finalMessage);
+  sheet.getRange(rowNumber, emailStatusIdx + 1).setValue(
     emailStatus || ""
   );
-  sheet.getRange(rowNumber, headerIndex[INGEST_CONFIG.emailErrorColumn] + 1).setValue(
+  sheet.getRange(rowNumber, emailErrorIdx + 1).setValue(
     emailError || ""
   );
-  sheet.getRange(rowNumber, headerIndex[INGEST_CONFIG.ingestedAtColumn] + 1).setValue(ingestedAt || "");
-  const nextRetryAtIdx = headerIndex[INGEST_CONFIG.nextRetryAtColumn];
+  sheet.getRange(rowNumber, ingestedAtIdx + 1).setValue(ingestedAt || "");
   if (nextRetryAtIdx != null && nextRetryAtIdx >= 0) {
     sheet.getRange(rowNumber, nextRetryAtIdx + 1).setValue(nextRetryAt || "");
   }
@@ -998,14 +1713,19 @@ function _ensureOpsColumns(sheet, headers, headerIndex) {
     INGEST_CONFIG.ingestedAtColumn,
     INGEST_CONFIG.retryCountColumn,
     INGEST_CONFIG.lastAttemptAtColumn,
-    INGEST_CONFIG.nextRetryAtColumn
+    INGEST_CONFIG.nextRetryAtColumn,
+    INGEST_CONFIG.documentRepairStatusColumn,
+    INGEST_CONFIG.documentRepairMessageColumn,
+    INGEST_CONFIG.documentRepairedAtColumn,
+    INGEST_CONFIG.rowUidColumn
   ];
 
   let changed = false;
   required.forEach((col) => {
-    if (headerIndex[col] != null) return;
+    if (_headerIndexOf(headerIndex, col) != null) return;
     headers.push(col);
     headerIndex[col] = headers.length - 1;
+    headerIndex[_normalizedHeaderLookupKey(col)] = headers.length - 1;
     changed = true;
   });
 
@@ -1014,27 +1734,48 @@ function _ensureOpsColumns(sheet, headers, headerIndex) {
   }
 }
 
-function _archiveSuccessfulRows(ss, sourceSheet, sourceHeaders) {
+function _ensureRowUidsForLoadedRows(sheet, rows, headerIndex) {
+  const idx = headerIndex[INGEST_CONFIG.rowUidColumn];
+  if (idx == null || idx < 0 || !rows || !rows.length) return;
+
+  const pendingWrites = [];
+  rows.forEach((row, rowOffset) => {
+    if (!row) return;
+    const existing = idx < row.length ? String(row[idx] || "").trim() : "";
+    if (existing) return;
+
+    while (row.length <= idx) row.push("");
+    const uid = Utilities.getUuid().replace(/-/g, "");
+    row[idx] = uid;
+    pendingWrites.push({ rowNumber: rowOffset + 2, value: uid });
+  });
+
+  pendingWrites.forEach((entry) => {
+    sheet.getRange(entry.rowNumber, idx + 1).setValue(entry.value);
+  });
+}
+
+function _archiveSuccessfulRows(ss, sourceSheet, sourceHeaders, options) {
+  const opts = options || {};
   const statusColumnName = INGEST_CONFIG.statusColumn;
   const data = sourceSheet.getDataRange().getValues();
-  if (!data || data.length <= 1) return;
+  if (!data || data.length <= 1) return 0;
 
   const headers = data[0].map((h) => String(h || "").trim());
   const headerIndex = _buildHeaderIndex(headers);
   const statusIdx = headerIndex[statusColumnName];
-  if (statusIdx == null || statusIdx < 0) return;
+  if (statusIdx == null || statusIdx < 0) return 0;
 
   const sourceRowsToArchive = [];
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     const status = String(row[statusIdx] || "").trim().toLowerCase();
-    if (!INGEST_CONFIG.archiveStatuses.includes(status)) continue;
-    if (status === "duplicate" && !_readCell(row, headerIndex, INGEST_CONFIG.codeColumn)) continue;
-    if (!_shouldArchiveRowByAge(row, status, headerIndex)) continue;
+    if (!_shouldArchiveStatus(status)) continue;
+    if (!_shouldArchiveRowByAge(row, status, headerIndex, opts)) continue;
     sourceRowsToArchive.push({ rowNumber: i + 1, row, status });
   }
 
-  if (!sourceRowsToArchive.length) return;
+  if (!sourceRowsToArchive.length) return 0;
 
   const archiveSheet = _getOrCreateArchiveSheet(ss);
   const archiveHeaders = _ensureArchiveHeaders(archiveSheet, sourceHeaders || headers);
@@ -1069,9 +1810,18 @@ function _archiveSuccessfulRows(ss, sourceSheet, sourceHeaders) {
   Logger.log(
     `Archived ${sourceRowsToArchive.length} row(s) to "${archiveSheet.getName()}".`
   );
+  return sourceRowsToArchive.length;
 }
 
-function _shouldArchiveRowByAge(row, status, headerIndex) {
+function _shouldArchiveStatus(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (!normalized) return false;
+  return (INGEST_CONFIG.archiveStatuses || []).indexOf(normalized) >= 0;
+}
+
+function _shouldArchiveRowByAge(row, status, headerIndex, options) {
+  const opts = options || {};
+  if (opts.ignoreAge) return true;
   const minAgeHours = Number(INGEST_CONFIG.archiveMinAgeHours || 0);
   if (!Number.isFinite(minAgeHours) || minAgeHours <= 0) return true;
 
@@ -1154,13 +1904,16 @@ function _deleteRowsInDescendingBatches(sheet, rowNumbers) {
 function _buildHeaderIndex(headers) {
   const map = {};
   headers.forEach((h, idx) => {
-    map[String(h || "").trim()] = idx;
+    const exact = String(h || "").trim();
+    const normalized = _normalizedHeaderLookupKey(exact);
+    if (exact && map[exact] == null) map[exact] = idx;
+    if (normalized && map[normalized] == null) map[normalized] = idx;
   });
   return map;
 }
 
 function _readCell(row, headerIndex, headerName) {
-  const idx = headerIndex[headerName];
+  const idx = _headerIndexOf(headerIndex, headerName);
   if (idx == null || idx < 0 || idx >= row.length) return "";
   const raw = row[idx];
   if (raw == null) return "";
@@ -1185,7 +1938,7 @@ function _readInt(row, headerIndex, headerName) {
 }
 
 function _readIntFromSheetCell(sheet, rowNumber, headerIndex, headerName) {
-  const idx = headerIndex[headerName];
+  const idx = _headerIndexOf(headerIndex, headerName);
   if (idx == null || idx < 0) return 0;
   const raw = sheet.getRange(rowNumber, idx + 1).getValue();
   const num = Number(raw);
@@ -1274,6 +2027,29 @@ function _prefixMessage(message, prefix) {
   return `${marker} ${cleanMessage}`;
 }
 
+function _appendMessages(first, second) {
+  const primary = String(first || "").trim();
+  const secondary = String(second || "").trim();
+  if (!primary) return secondary;
+  if (!secondary) return primary;
+  if (primary.indexOf(secondary) >= 0) return primary;
+  return `${primary} ${secondary}`;
+}
+
+function _headerIndexOf(headerIndex, headerName) {
+  if (!headerIndex) return null;
+  const exact = String(headerName || "").trim();
+  if (exact && headerIndex[exact] != null) return headerIndex[exact];
+  const normalized = _normalizedHeaderLookupKey(exact);
+  return normalized && headerIndex[normalized] != null ? headerIndex[normalized] : null;
+}
+
+function _normalizedHeaderLookupKey(headerName) {
+  const text = String(headerName || "").trim().toLowerCase();
+  if (!text) return "";
+  return `__norm__${text.replace(/[^a-z0-9]+/g, "")}`;
+}
+
 function _toErrorMessage(err) {
   if (!err) return "Unknown error.";
   if (typeof err === "string") return err;
@@ -1325,8 +2101,16 @@ function _auditRowStatusTransition(audit, fields) {
   });
 }
 
+function _shouldWriteAuditEntry(level, eventType) {
+  const normalizedLevel = String(level || "INFO").toUpperCase();
+  const normalizedEvent = String(eventType || "").trim().toLowerCase();
+  if (normalizedLevel === "ERROR" || normalizedLevel === "WARN") return true;
+  return normalizedEvent === "run_completed";
+}
+
 function _pushAuditEntry(entries, context, level, eventType, fields) {
   if (!entries || !context) return;
+  if (!_shouldWriteAuditEntry(level, eventType)) return;
   const data = fields || {};
   const detailObject = data.details && typeof data.details === "object" ? data.details : {};
   entries.push([
@@ -1431,6 +2215,15 @@ function _assertEndpointIsHttps(endpoint) {
   if (!/^https:\/\//i.test(url)) {
     throw new Error("RECRUITMENT_INGEST_ENDPOINT must start with https://");
   }
+}
+
+function _getDocumentRepairEndpoint() {
+  const endpoint = _requiredProp("RECRUITMENT_INGEST_ENDPOINT");
+  _assertEndpointIsHttps(endpoint);
+  if (/\/import\/google-sheet\/?$/i.test(endpoint)) {
+    return endpoint.replace(/\/import\/google-sheet\/?$/i, "/import/google-sheet/repair-documents");
+  }
+  return `${endpoint.replace(/\/+$/, "")}/repair-documents`;
 }
 
 function _requiredProp(name) {

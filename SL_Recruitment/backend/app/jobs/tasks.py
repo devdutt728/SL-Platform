@@ -20,6 +20,7 @@ from app.models.sprint_template import RecSprintTemplate
 from app.models.stage import RecCandidateStage
 from app.services.email import send_email
 from app.services.events import log_event
+from app.services.internal_notifications import notify_stale_stage_internal
 from app.services.operation_queue import process_due_operations
 from app.services.platform_identity import active_status_filter
 from app.services.public_links import build_public_link
@@ -34,6 +35,25 @@ from app.services.workflow_policy import get_candidate_workflow_policy
 
 def _caf_link(token: str) -> str:
     return build_basic_details_form_link(token)
+
+
+def _caf_expiry_note_parts() -> tuple[str, str]:
+    hours = max(int(settings.caf_expiry_hours or 0), 0)
+    if hours <= 0:
+        hours = max(int(settings.caf_expiry_days or 0), 0) * 24
+    if hours > 0 and hours % 24 == 0:
+        days = hours // 24
+        label = f"{days} {'day' if days == 1 else 'days'}"
+    elif hours > 0:
+        label = f"{hours} {'hour' if hours == 1 else 'hours'}"
+    else:
+        label = ""
+    note = (
+        f"This secure link will expire in {label}."
+        if label
+        else "This secure link may expire based on the recruitment workflow timeline."
+    )
+    return label, note
 
 
 def _sprint_link(token: str) -> str:
@@ -149,6 +169,7 @@ async def run_caf_reminders() -> None:
                 email_type="caf_reminder",
             ):
                 continue
+            caf_expiry_window, caf_expiry_note = _caf_expiry_note_parts()
             await send_email(
                 session,
                 candidate_id=candidate.candidate_id,
@@ -158,6 +179,8 @@ async def run_caf_reminders() -> None:
                 context={
                     "candidate_name": candidate.full_name,
                     "caf_link": _caf_link(basic_details_form_token),
+                    "caf_expiry_window": caf_expiry_window,
+                    "caf_expiry_note": caf_expiry_note,
                 },
                 email_type="caf_reminder",
                 related_entity_type="candidate",
@@ -464,6 +487,11 @@ async def run_stale_stage_sweep() -> None:
                 related_entity_type="stage",
                 related_entity_id=stage.stage_id,
                 meta_json={"stage": stage.stage_name, "started_at": stage.started_at.isoformat()},
+            )
+            await notify_stale_stage_internal(
+                session,
+                candidate=candidate,
+                stage=stage,
             )
         await session.commit()
 

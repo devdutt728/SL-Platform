@@ -43,6 +43,7 @@ from app.services.calendar import list_calendar_events, list_calendar_list_detai
 from app.services.email import render_template, send_email
 from app.services.public_links import build_public_link
 from app.services.events import log_event
+from app.services.internal_notifications import notify_interview_feedback_submitted, notify_stage_handoff
 from app.services.operation_queue import (
     OP_CALENDAR_CREATE_EVENT,
     OP_CALENDAR_DELETE_EVENT,
@@ -2077,11 +2078,12 @@ async def update_interview(
     if payload.decision:
         to_stage = _round_to_transition(interview.round_type, payload.decision)
 
+    transition_result = None
     if to_stage:
         candidate_for_transition = await session.get(RecCandidate, interview.candidate_id)
         if not candidate_for_transition:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
-        await apply_stage_transition(
+        transition_result = await apply_stage_transition(
             session,
             candidate=candidate_for_transition,
             to_stage=to_stage,
@@ -2091,6 +2093,24 @@ async def update_interview(
             source="interview_feedback",
             allow_noop=True,
         )
+        if transition_result.changed:
+            await notify_stage_handoff(
+                session,
+                candidate=candidate_for_transition,
+                from_stage=transition_result.from_stage,
+                to_stage=transition_result.to_stage,
+            )
+    if feedback_submitted:
+        candidate_for_notification = await session.get(RecCandidate, interview.candidate_id)
+        if candidate_for_notification:
+            await notify_interview_feedback_submitted(
+                session,
+                candidate=candidate_for_notification,
+                interview=interview,
+                decision=payload.decision,
+                next_stage=(transition_result.to_stage if transition_result else None),
+                submitted_by_email=user.email,
+            )
     await session.commit()
 
     await session.refresh(interview)

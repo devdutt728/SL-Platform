@@ -12,6 +12,7 @@ from app.schemas.screening import CafPrefillOut, ScreeningOut, ScreeningUpsertIn
 from app.services.events import log_event
 from app.core.config import settings
 from app.services.opening_config import get_opening_config
+from app.services.internal_notifications import notify_candidate_ready_for_review
 from app.services.recruitment_forms import (
     BASIC_DETAILS_FORM_SUBMITTED,
     LEGACY_BASIC_DETAILS_FORM_SUBMITTED,
@@ -246,6 +247,13 @@ async def submit_caf(
         related_entity_type="candidate",
         related_entity_id=candidate.candidate_id,
         meta_json={"screening_result": decision},
+    )
+
+    await notify_candidate_ready_for_review(
+        session,
+        candidate=candidate,
+        trigger_label="CAF submitted",
+        detail_note=f"CAF was submitted with screening result: {(decision or '-').title()}.",
     )
 
     await session.commit()

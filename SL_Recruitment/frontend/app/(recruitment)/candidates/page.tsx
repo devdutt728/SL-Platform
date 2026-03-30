@@ -81,6 +81,7 @@ export default async function CandidatesPage({}: {}) {
       openings={openings}
       canNavigate={canAccessCandidate360}
       canViewBasicDetails={isHr || isRoleFiveOrSix || isInterviewer}
+      showTagFilters={isHr}
     />
   );
 }

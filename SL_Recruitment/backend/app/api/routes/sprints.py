@@ -45,6 +45,7 @@ from app.services.drive import (
 from app.services.email import send_email
 from app.services.public_links import build_public_link
 from app.services.events import log_event
+from app.services.internal_notifications import notify_sprint_reviewed, notify_sprint_submission_received, notify_stage_handoff
 from app.services.stage_transitions import apply_stage_transition
 from app.services.sprint_brief import render_sprint_brief_html
 from app.services.workflow_policy import INTERN_L2_ONLY_WORKFLOW, get_candidate_workflow_policy
@@ -916,12 +917,13 @@ async def update_sprint(
         meta_json={"status": sprint.status, "decision": sprint.decision, "score_overall": sprint.score_overall},
     )
 
+    transition_result = None
     if sprint.decision in {"advance", "reject"}:
         current_stage = await _current_stage_name(session, candidate_id=sprint.candidate_id)
         if current_stage == "sprint":
             to_stage = "l1_shortlist" if sprint.decision == "advance" else "rejected"
             try:
-                await apply_stage_transition(
+                transition_result = await apply_stage_transition(
                     session,
                     candidate=candidate,
                     to_stage=to_stage,
@@ -934,7 +936,7 @@ async def update_sprint(
                 # Superadmin can still approve/reject sprint with skip semantics.
                 if exc.status_code != status.HTTP_400_BAD_REQUEST or not _is_superadmin_actor(user):
                     raise
-                await apply_stage_transition(
+                transition_result = await apply_stage_transition(
                     session,
                     candidate=candidate,
                     to_stage=to_stage,
@@ -951,6 +953,24 @@ async def update_sprint(
                         "override_reason": "superadmin_sprint_decision",
                     },
                 )
+            if transition_result and transition_result.changed:
+                await notify_stage_handoff(
+                    session,
+                    candidate=candidate,
+                    from_stage=transition_result.from_stage,
+                    to_stage=transition_result.to_stage,
+                )
+
+    if sprint.decision in {"advance", "reject"}:
+        template = await session.get(RecSprintTemplate, sprint.sprint_template_id)
+        await notify_sprint_reviewed(
+            session,
+            candidate=candidate,
+            sprint=sprint,
+            template=template,
+            reviewed_by_email=user.email,
+            next_stage=(transition_result.to_stage if transition_result else None),
+        )
 
     await session.commit()
 
@@ -1147,6 +1167,13 @@ async def submit_public_sprint(
         related_entity_type="sprint",
         related_entity_id=sprint.candidate_sprint_id,
         meta_json={"submission_url": sprint.submission_url},
+    )
+
+    await notify_sprint_submission_received(
+        session,
+        candidate=candidate,
+        sprint=sprint,
+        template=template,
     )
 
     await session.commit()

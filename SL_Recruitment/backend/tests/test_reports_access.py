@@ -16,6 +16,7 @@ def _user(
     platform_role_codes: list[str] | None = None,
     platform_role_name: str | None = None,
     platform_role_names: list[str] | None = None,
+    reports_access: bool = False,
 ) -> UserContext:
     return UserContext(
         user_id="user@example.com",
@@ -29,6 +30,7 @@ def _user(
         platform_role_codes=platform_role_codes,
         platform_role_name=platform_role_name,
         platform_role_names=platform_role_names,
+        reports_access=reports_access,
     )
 
 
@@ -38,15 +40,15 @@ class ReportsAccessTests(unittest.TestCase):
 
         self.assertTrue(has_reports_access(user))
 
-    def test_explicit_reports_role_code_grants_access(self) -> None:
+    def test_explicit_reports_assignment_grants_access(self) -> None:
+        user = _user(reports_access=True, roles=[Role.VIEWER])
+
+        self.assertTrue(has_reports_access(user))
+
+    def test_reports_role_code_no_longer_grants_access(self) -> None:
         user = _user(platform_role_codes=["recruitment_reports"], roles=[Role.VIEWER])
 
-        self.assertTrue(has_reports_access(user))
-
-    def test_explicit_reports_role_name_grants_access(self) -> None:
-        user = _user(platform_role_names=["Recruitment Reports"], roles=[Role.VIEWER])
-
-        self.assertTrue(has_reports_access(user))
+        self.assertFalse(has_reports_access(user))
 
     def test_hr_admin_role_without_feature_assignment_no_longer_grants_access(self) -> None:
         user = _user(roles=[Role.HR_ADMIN], platform_role_ids=[3], platform_role_codes=["hr_admin"])

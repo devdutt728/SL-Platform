@@ -6,11 +6,12 @@ import { BASIC_DETAILS_FORM_LABEL, CANDIDATE_ASSESSMENT_FORM_LABEL } from "@/lib
 import type { CandidateCommunicationFeed, CandidateCommunicationItem } from "@/lib/types";
 
 const PAGE_SIZE = 100;
+const CAF_LABEL = "CAF";
 
 const ACTION_OPTIONS = [
   { value: "", label: "All actions" },
   { value: "email_sent", label: "Emails sent" },
-  { value: "basic_details_form_link_generated", label: `${BASIC_DETAILS_FORM_LABEL} links generated` },
+  { value: "basic_details_form_link_generated", label: `${CAF_LABEL} links generated` },
   { value: "candidate_assessment_form_link_generated", label: `${CANDIDATE_ASSESSMENT_FORM_LABEL} links generated` },
 ];
 
@@ -46,6 +47,15 @@ type CandidateCommunicationCandidateRow = {
   links: CandidateCommunicationItem["links"];
 };
 
+type ExpiredBasicDetailsResendResult = {
+  eligible_count: number;
+  attempted_count: number;
+  sent_count: number;
+  failed_count: number;
+  skipped_count: number;
+  expiry_window?: string | null;
+};
+
 function formatDateTime(raw?: string | null) {
   if (!raw) return "-";
   const value = new Date(raw);
@@ -65,6 +75,12 @@ function toTimeValue(raw?: string | null) {
   if (!raw) return Number.NEGATIVE_INFINITY;
   const value = new Date(raw).getTime();
   return Number.isNaN(value) ? Number.NEGATIVE_INFINITY : value;
+}
+
+function displayLinkLabel(label?: string | null) {
+  const normalized = String(label || "").trim();
+  if (normalized === BASIC_DETAILS_FORM_LABEL) return CAF_LABEL;
+  return normalized || "-";
 }
 
 function aggregateCandidateRows(items: CandidateCommunicationItem[]): CandidateCommunicationCandidateRow[] {
@@ -144,7 +160,9 @@ export function CandidateCommunicationsPanel() {
   const [actionType, setActionType] = useState("");
   const [emailType, setEmailType] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resendBusy, setResendBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
   const [feed, setFeed] = useState<CandidateCommunicationFeed | null>(null);
 
   const loadFeed = useCallback(
@@ -216,6 +234,31 @@ export function CandidateCommunicationsPanel() {
     await loadFeed(loadedCount, true);
   }
 
+  async function handleResendExpiredBasicDetailsLinks() {
+    setResendBusy(true);
+    setError(null);
+    setResendNotice(null);
+    try {
+      const res = await fetch(
+        `${basePath}/api/rec/candidates/communications?action=resend_expired_basic_details_links`,
+        { method: "POST" }
+      );
+      if (!res.ok) throw new Error(await res.text());
+      const result = (await res.json()) as ExpiredBasicDetailsResendResult;
+      const expiryWindow = (result.expiry_window || "").trim();
+      setResendNotice(
+        result.eligible_count === 0
+          ? `No expired ${CAF_LABEL} links found${expiryWindow ? ` for the current ${expiryWindow} window` : ""}.`
+          : `Expired ${CAF_LABEL} resend completed. Eligible: ${result.eligible_count}, sent: ${result.sent_count}, failed: ${result.failed_count}, skipped: ${result.skipped_count}.`
+      );
+      await loadFeed(0, false);
+    } catch (err: any) {
+      setError(err?.message || `Could not resend expired ${CAF_LABEL} links.`);
+    } finally {
+      setResendBusy(false);
+    }
+  }
+
   return (
     <section className="space-y-3.5">
       <section className="rounded-3xl border border-slate-200/80 bg-white/85 p-4 shadow-[0_18px_32px_-30px_rgba(15,23,42,0.6)]">
@@ -235,6 +278,15 @@ export function CandidateCommunicationsPanel() {
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             Refresh
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleResendExpiredBasicDetailsLinks()}
+            className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+            disabled={resendBusy}
+          >
+            <RefreshCw className={`h-4 w-4 ${resendBusy ? "animate-spin" : ""}`} />
+            {resendBusy ? `Resending expired ${CAF_LABEL} links...` : `Resend expired ${CAF_LABEL} links`}
           </button>
         </div>
 
@@ -306,6 +358,11 @@ export function CandidateCommunicationsPanel() {
             Showing {loadedCandidates} candidates ({loadedCount} of {total} communication records)
           </span>
         </div>
+        {resendNotice ? (
+          <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            {resendNotice}
+          </div>
+        ) : null}
       </section>
 
       {error ? (
@@ -397,7 +454,7 @@ function CommunicationCard({ item }: { item: CandidateCommunicationCandidateRow 
                 className="inline-flex items-center gap-1 rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-cyan-800 hover:bg-cyan-100"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
-                {link.label}
+                {displayLinkLabel(link.label)}
               </a>
             ))}
           </div>

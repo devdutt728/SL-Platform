@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ReadonlyURLSearchParams, useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
 import { CandidateListItem, OpeningListItem } from "@/lib/types";
-import { AlertTriangle, CheckCircle2, Filter, XCircle, Bookmark, Eye, LayoutGrid, Rows3, MoveRight } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Filter, XCircle, Bookmark, Eye, LayoutGrid, Rows3, MoveRight } from "lucide-react";
 import { parseDateUtc } from "@/lib/datetime";
 import { redirectToLogin } from "@/lib/auth-client";
 import { useToast } from "@/components/ui/toast-provider";
@@ -30,6 +30,7 @@ type Props = {
   openings: OpeningListItem[];
   canNavigate?: boolean;
   canViewBasicDetails?: boolean;
+  showTagFilters?: boolean;
 };
 
 const stageTone: Record<string, string> = {
@@ -162,6 +163,40 @@ function isAttentionCandidate(candidate: CandidateListItem) {
 
 const STAGE_OPTIONS = recruitmentStageOrder.map((item) => item.key);
 const BOARD_COLUMNS = recruitmentStageOrder;
+const CANDIDATE_TAG_LABELS: Record<string, string> = {
+  standard: "Standard",
+  intern: "Intern",
+  basic_details_submitted: `${BASIC_DETAILS_FORM_LABEL} submitted`,
+  basic_details_pending: `${BASIC_DETAILS_FORM_LABEL} pending`,
+  basic_details_not_sent: `${BASIC_DETAILS_FORM_LABEL} not sent`,
+  caf_submitted: "CAF submitted",
+  caf_pending: "CAF pending",
+  high_priority: "High",
+  medium_priority: "Medium",
+  low_priority: "Low",
+  l1_done: "L1 done",
+  l1_pending: "L1 pending",
+  l2_done: "L2 done",
+  l2_pending: "L2 pending",
+  needs_attention: "Needs attention",
+};
+const CANDIDATE_TAG_ORDER = [
+  "standard",
+  "intern",
+  "basic_details_submitted",
+  "basic_details_pending",
+  "basic_details_not_sent",
+  "caf_submitted",
+  "caf_pending",
+  "high_priority",
+  "medium_priority",
+  "low_priority",
+  "l1_done",
+  "l1_pending",
+  "l2_done",
+  "l2_pending",
+  "needs_attention",
+] as const;
 const STAGE_SLA_DAYS: Record<string, number> = {
   enquiry: 2,
   hr_screening: 2,
@@ -179,24 +214,141 @@ const STAGE_SLA_DAYS: Record<string, number> = {
   rejected: 7,
 };
 
+function candidateFilterTags(candidate: CandidateListItem) {
+  const tags = new Set<string>();
+  const intern = isInternCandidate(candidate);
+  tags.add(intern ? "intern" : "standard");
+
+  if (!intern) {
+    const basicDetailsSent = candidate.basic_details_form_sent_at || candidate.caf_sent_at;
+    const basicDetailsSubmitted = candidate.basic_details_form_submitted_at || candidate.caf_submitted_at;
+    if (basicDetailsSubmitted) tags.add("basic_details_submitted");
+    else if (basicDetailsSent) tags.add("basic_details_pending");
+    else tags.add("basic_details_not_sent");
+
+    const assessmentSubmitted = candidate.candidate_assessment_form_submitted_at || candidate.assessment_submitted_at;
+    tags.add(assessmentSubmitted ? "caf_submitted" : "caf_pending");
+  }
+
+  const screening = (candidate.screening_result || "").trim().toLowerCase();
+  if (screening === "red" || screening === "high" || (candidate.ageing_days || 0) >= 2) tags.add("high_priority");
+  else if (screening === "amber" || screening === "medium") tags.add("medium_priority");
+  else if (screening === "green" || screening === "low") tags.add("low_priority");
+
+  if ((candidate.l1_interview_count || 0) > 0) {
+    tags.add(candidate.l1_feedback_submitted ? "l1_done" : "l1_pending");
+  }
+  if ((candidate.l2_interview_count || 0) > 0) {
+    tags.add(candidate.l2_feedback_submitted ? "l2_done" : "l2_pending");
+  }
+  if (isAttentionCandidate(candidate)) tags.add("needs_attention");
+
+  return Array.from(tags);
+}
+
 type SavedView = {
   id: string;
   name: string;
   selectedStages: string[];
-  openingId: string;
+  openingIds: string[];
+  selectedTags: string[];
+  openingId?: string;
   statusView: "all" | "active" | "hired" | "rejected";
   needsAttention: boolean;
   cafToday: boolean;
 };
 
+function normalizeOpeningSelection(values: Iterable<string | null | undefined>) {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const cleaned = String(value || "").trim();
+    if (!cleaned || seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    normalized.push(cleaned);
+  }
+  return normalized;
+}
+
+function parseOpeningSearchParams(searchParams: ReadonlyURLSearchParams) {
+  const rawValues = searchParams.getAll("opening_id");
+  const values = rawValues.length ? rawValues : [searchParams.get("opening_id") || ""];
+  return normalizeOpeningSelection(values.flatMap((value) => String(value || "").split(",")));
+}
+
+function normalizeCandidateTag(value: string | null | undefined) {
+  const cleaned = String(value || "").trim().toLowerCase();
+  return cleaned in CANDIDATE_TAG_LABELS ? cleaned : "";
+}
+
+function parseCandidateTagSearchParams(searchParams: ReadonlyURLSearchParams) {
+  const rawValues = searchParams.getAll("tag");
+  const values = rawValues.length
+    ? rawValues
+    : searchParams.getAll("opening_tag").length
+      ? searchParams.getAll("opening_tag")
+      : [searchParams.get("tag") || searchParams.get("opening_tag") || ""];
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  values
+    .flatMap((value) => String(value || "").split(","))
+    .forEach((value) => {
+      const cleaned = normalizeCandidateTag(value);
+      if (!cleaned || seen.has(cleaned)) return;
+      seen.add(cleaned);
+      tags.push(cleaned);
+    });
+  return tags;
+}
+
+function normalizeSavedView(raw: unknown): SavedView | null {
+  if (!raw || typeof raw !== "object") return null;
+  const view = raw as Record<string, unknown>;
+  const selectedStages = Array.isArray(view.selectedStages)
+    ? view.selectedStages
+      .map((item) => normalizeStage(String(item || "")))
+      .filter((item): item is RecruitmentStageKey => item !== "")
+    : [];
+  const openingIds = Array.isArray(view.openingIds)
+    ? normalizeOpeningSelection(view.openingIds.map((item) => String(item || "")))
+    : normalizeOpeningSelection([String(view.openingId || "")]);
+  const selectedTags = Array.isArray(view.selectedTags)
+    ? view.selectedTags
+      .map((item) => normalizeCandidateTag(String(item || "")))
+      .filter(Boolean)
+    : Array.isArray(view.selectedOpeningTags)
+      ? view.selectedOpeningTags
+        .map((item) => normalizeCandidateTag(String(item || "")))
+      .filter(Boolean)
+      : [];
+  const statusCandidate = String(view.statusView || "active").trim().toLowerCase();
+  const statusView =
+    statusCandidate === "all" || statusCandidate === "active" || statusCandidate === "hired" || statusCandidate === "rejected"
+      ? statusCandidate
+      : "active";
+  const id = String(view.id || "").trim();
+  const name = String(view.name || "").trim();
+  if (!id || !name) return null;
+  return {
+    id,
+    name,
+    selectedStages,
+    openingIds,
+    selectedTags,
+    statusView,
+    needsAttention: Boolean(view.needsAttention),
+    cafToday: Boolean(view.cafToday),
+  };
+}
+
 async function fetchCandidates(params: {
   stage: string[];
-  openingId: string;
+  openingIds: string[];
   statusView: "all" | "active" | "hired" | "rejected";
 }) {
   const url = new URL("/api/rec/candidates", window.location.origin);
   for (const st of params.stage) url.searchParams.append("stage", st);
-  if (params.openingId) url.searchParams.set("opening_id", params.openingId);
+  for (const openingId of params.openingIds) url.searchParams.append("opening_id", openingId);
 
   if (params.statusView === "hired") url.searchParams.append("status", "hired");
   if (params.statusView === "rejected") {
@@ -303,6 +455,7 @@ export function CandidatesClient({
   openings,
   canNavigate = true,
   canViewBasicDetails = false,
+  showTagFilters = false,
 }: Props) {
   const { pushToast } = useToast();
   const [candidates, setCandidates] = useState<CandidateListItem[]>(initialCandidates);
@@ -311,20 +464,24 @@ export function CandidatesClient({
   const searchParams = useSearchParams();
   const [initialized, setInitialized] = useState(false);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [savedViewsHydrated, setSavedViewsHydrated] = useState(false);
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<"table" | "board">("table");
   const [dragCandidateId, setDragCandidateId] = useState<number | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+  const [openingFilterOpen, setOpeningFilterOpen] = useState(false);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<number>>(new Set());
   const [bulkTargetStage, setBulkTargetStage] = useState<RecruitmentStageKey | "">("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkLegacyCafBusy, setBulkLegacyCafBusy] = useState(false);
+  const openingFilterRef = useRef<HTMLDivElement | null>(null);
 
   const tableGrid =
     "grid grid-cols-[minmax(200px,2.4fr)_minmax(140px,1.2fr)_minmax(170px,1.5fr)_minmax(200px,1.9fr)_minmax(80px,0.7fr)_minmax(80px,0.7fr)_minmax(95px,0.8fr)]";
 
   const [selectedStages, setSelectedStages] = useState<string[]>([]);
-  const [openingId, setOpeningId] = useState("");
+  const [openingIds, setOpeningIds] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [statusView, setStatusView] = useState<"all" | "active" | "hired" | "rejected">("active");
   const [needsAttention, setNeedsAttention] = useState(false);
   const [cafToday, setCafToday] = useState(false);
@@ -333,29 +490,93 @@ export function CandidatesClient({
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchCandidates({ stage: selectedStages, openingId, statusView });
+      const data = await fetchCandidates({ stage: selectedStages, openingIds, statusView });
       setCandidates(data);
     } catch (e: any) {
       setError(e?.message || "Failed to load candidates");
     } finally {
       setLoading(false);
     }
-  }, [selectedStages, openingId, statusView]);
+  }, [selectedStages, openingIds, statusView]);
+
+  const openingLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    openings.forEach((opening) => {
+      const label = (opening.title || opening.opening_code || `Opening ${opening.opening_id}`).slice(0, 80);
+      map.set(String(opening.opening_id), label);
+    });
+    return map;
+  }, [openings]);
+
+  const selectedOpeningLabels = useMemo(
+    () => openingIds.map((id) => openingLabelMap.get(id) || `Opening ${id}`),
+    [openingIds, openingLabelMap]
+  );
+  const allOpeningIds = useMemo(
+    () => openings.map((opening) => String(opening.opening_id)),
+    [openings]
+  );
+  const allOpeningsSelected = openings.length > 0 && openingIds.length === openings.length;
+
+  const openingFilterLabel = useMemo(() => {
+    if (!selectedOpeningLabels.length) return "All openings";
+    if (selectedOpeningLabels.length <= 2) return selectedOpeningLabels.join(", ");
+    return `${selectedOpeningLabels[0]} +${selectedOpeningLabels.length - 1}`;
+  }, [selectedOpeningLabels]);
+
+  const availableTags = useMemo(() => {
+    const seen = new Set<string>();
+    candidates.forEach((candidate) => {
+      candidateFilterTags(candidate).forEach((tag) => {
+        if (tag) seen.add(tag);
+      });
+    });
+    return CANDIDATE_TAG_ORDER.filter((tag) => seen.has(tag) || selectedTags.includes(tag));
+  }, [candidates, selectedTags]);
+
+  const selectedTagLabels = useMemo(
+    () => selectedTags.map((tag) => CANDIDATE_TAG_LABELS[tag] || tag),
+    [selectedTags]
+  );
+
+  function toggleTag(tag: string) {
+    setSelectedTags((prev) => (
+      prev.includes(tag) ? prev.filter((item) => item !== tag) : [...prev, tag]
+    ));
+  }
+
+  function toggleOpeningSelection(openingId: string) {
+    setOpeningIds((prev) => (
+      prev.includes(openingId) ? prev.filter((item) => item !== openingId) : [...prev, openingId]
+    ));
+  }
+
+  function selectAllOpenings() {
+    setOpeningIds(allOpeningIds);
+  }
+
+  function clearAllOpenings() {
+    setOpeningIds([]);
+  }
 
   function resetFilters() {
     setSelectedStages([]);
-    setOpeningId("");
+    setOpeningIds([]);
+    setSelectedTags([]);
     setStatusView("active");
     setNeedsAttention(false);
     setCafToday(false);
+    setOpeningFilterOpen(false);
   }
 
   function applySavedView(view: SavedView) {
     setSelectedStages(view.selectedStages || []);
-    setOpeningId(view.openingId || "");
+    setOpeningIds(normalizeOpeningSelection(view.openingIds || [view.openingId || ""]));
+    setSelectedTags((view.selectedTags || []).filter(Boolean));
     setStatusView(view.statusView || "active");
     setNeedsAttention(Boolean(view.needsAttention));
     setCafToday(Boolean(view.cafToday));
+    setOpeningFilterOpen(false);
     pushToast({ tone: "info", title: `View loaded: ${view.name}` });
     trackUxMetric({ event_name: "candidate_saved_view_applied", entity_type: "saved_view", entity_id: view.id });
   }
@@ -366,7 +587,8 @@ export function CandidatesClient({
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       name,
       selectedStages: [...selectedStages],
-      openingId,
+      openingIds: [...openingIds],
+      selectedTags: [...selectedTags],
       statusView,
       needsAttention,
       cafToday,
@@ -402,8 +624,10 @@ export function CandidatesClient({
     if (nextStatus === "all" || nextStatus === "active" || nextStatus === "hired" || nextStatus === "rejected") {
       setStatusView(nextStatus);
     }
-    const nextOpening = searchParams.get("opening_id") || "";
-    if (nextOpening) setOpeningId(nextOpening);
+    const nextOpenings = parseOpeningSearchParams(searchParams);
+    if (nextOpenings.length) setOpeningIds(nextOpenings);
+    const nextTags = parseCandidateTagSearchParams(searchParams);
+    if (nextTags.length) setSelectedTags(nextTags);
 
     setNeedsAttention(searchParams.get("needs_attention") === "1");
     setCafToday(searchParams.get("caf_today") === "1");
@@ -414,20 +638,47 @@ export function CandidatesClient({
     try {
       const raw = window.localStorage.getItem("rec_candidates_saved_views_v1");
       if (!raw) return;
-      const parsed = JSON.parse(raw) as SavedView[];
-      if (Array.isArray(parsed)) setSavedViews(parsed.slice(0, 12));
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      setSavedViews(
+        parsed
+          .map((item) => normalizeSavedView(item))
+          .filter((item): item is SavedView => item !== null)
+          .slice(0, 12)
+      );
     } catch {
       // Ignore malformed local storage data.
+    } finally {
+      setSavedViewsHydrated(true);
     }
   }, []);
 
   useEffect(() => {
+    if (!savedViewsHydrated) return;
     try {
       window.localStorage.setItem("rec_candidates_saved_views_v1", JSON.stringify(savedViews.slice(0, 12)));
     } catch {
       // Ignore storage write issues.
     }
-  }, [savedViews]);
+  }, [savedViews, savedViewsHydrated]);
+
+  useEffect(() => {
+    if (!openingFilterOpen) return;
+    function handlePointerDown(event: MouseEvent) {
+      if (openingFilterRef.current && !openingFilterRef.current.contains(event.target as Node)) {
+        setOpeningFilterOpen(false);
+      }
+    }
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpeningFilterOpen(false);
+    }
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [openingFilterOpen]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -488,9 +739,17 @@ export function CandidatesClient({
         return toDayKey(parsed, "Asia/Kolkata") === todayKey;
       });
     }
-    if (!needsAttention) return current;
-    return current.filter((candidate) => isAttentionCandidate(candidate));
-  }, [candidates, needsAttention, cafToday]);
+    if (needsAttention) {
+      current = current.filter((candidate) => isAttentionCandidate(candidate));
+    }
+    if (selectedTags.length) {
+      current = current.filter((candidate) => {
+        const tags = candidateFilterTags(candidate);
+        return selectedTags.every((tag) => tags.includes(tag));
+      });
+    }
+    return current;
+  }, [candidates, needsAttention, cafToday, selectedTags]);
 
   useEffect(() => {
     if (!filtered.length) {
@@ -757,133 +1016,308 @@ export function CandidatesClient({
       {error ? <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
 
       <div className="rounded-2xl border border-slate-200 bg-white/70 p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
-            <Filter className="h-3.5 w-3.5 text-slate-500" />
-            Filters
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex flex-1 flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
+                <Filter className="h-3.5 w-3.5 text-slate-500" />
+                Filters
+              </div>
+              <div className="inline-flex flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-white p-1">
+                {(["active", "all", "hired", "rejected"] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className={clsx(
+                      "rounded-full px-3 py-1 text-[11px] font-semibold transition",
+                      statusView === v ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
+                    )}
+                    onClick={() => setStatusView(v)}
+                  >
+                    {v === "all" ? "All" : v === "active" ? "Active" : v === "hired" ? "Hired" : "Rejected"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-1.5 py-1">
+                <span className="px-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Quick</span>
+                <button
+                  type="button"
+                  className={clsx(
+                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-transparent transition",
+                    needsAttention ? "bg-amber-500/15 text-amber-800 ring-amber-500/20" : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
+                  )}
+                  onClick={() => setNeedsAttention((v) => !v)}
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Needs attention
+                </button>
+                <button
+                  type="button"
+                  className={clsx(
+                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-transparent transition",
+                    cafToday ? "bg-emerald-500/15 text-emerald-800 ring-emerald-500/20" : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
+                  )}
+                  onClick={() => setCafToday((v) => !v)}
+                >
+                  Basic Details today
+                </button>
+              </div>
+            </div>
           </div>
-          {(["active", "all", "hired", "rejected"] as const).map((v) => (
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative" ref={openingFilterRef}>
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                <span>Openings</span>
+                <button
+                  type="button"
+                  onClick={() => setOpeningFilterOpen((value) => !value)}
+                  className="inline-flex min-w-[10rem] max-w-[13rem] items-center justify-between gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-left text-xs text-slate-700"
+                  aria-haspopup="dialog"
+                  aria-expanded={openingFilterOpen}
+                >
+                  <span className="truncate">{openingFilterLabel}</span>
+                  <ChevronDown className={clsx("h-3.5 w-3.5 shrink-0 text-slate-500 transition", openingFilterOpen && "rotate-180")} />
+                </button>
+              </div>
+              {openingFilterOpen ? (
+                <div className="absolute right-0 top-full z-20 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                  <div className="mb-2 px-1">
+                    <p className="text-xs font-semibold text-slate-900">Select openings</p>
+                    <p className="text-[11px] text-slate-500">
+                      Choose one or more openings to filter candidates.
+                      {openingIds.length ? ` ${openingIds.length} selected.` : " Showing all openings."}
+                    </p>
+                  </div>
+                  <div className="mb-2 flex items-center gap-2 px-1">
+                    <button
+                      type="button"
+                      onClick={selectAllOpenings}
+                      disabled={allOpeningsSelected}
+                      className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearAllOpenings}
+                      disabled={openingIds.length === 0}
+                      className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Clear all
+                    </button>
+                    <span className="ml-auto text-[11px] font-medium text-slate-500">
+                      {allOpeningsSelected ? "All selected" : `${openingIds.length}/${openings.length}`}
+                    </span>
+                  </div>
+                  <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
+                    {openings.map((opening) => {
+                      const openingId = String(opening.opening_id);
+                      const checked = openingIds.includes(openingId);
+                      const title = (opening.title || opening.opening_code || `Opening ${opening.opening_id}`).slice(0, 80);
+                      return (
+                        <label
+                          key={opening.opening_id}
+                          className={clsx(
+                            "flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 transition",
+                            checked ? "bg-slate-100" : "hover:bg-slate-50"
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleOpeningSelection(openingId)}
+                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[var(--brand-color)] focus:ring-[var(--brand-color)]"
+                          />
+                          <span className="min-w-0 truncate text-xs text-slate-800">
+                            <span className="font-semibold">{title}</span>
+                            {opening.opening_code ? (
+                              <span className="ml-1 text-[11px] font-medium text-slate-500">{opening.opening_code}</span>
+                            ) : null}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1">
+              <button
+                type="button"
+                onClick={() => setViewMode("table")}
+                className={clsx(
+                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
+                  viewMode === "table" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
+                )}
+              >
+                <Rows3 className="h-3.5 w-3.5" />
+                Table
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("board")}
+                className={clsx(
+                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
+                  viewMode === "board" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
+                )}
+              >
+                <LayoutGrid className="h-3.5 w-3.5" />
+                Board
+              </button>
+            </div>
+
             <button
-              key={v}
               type="button"
-              className={clsx(
-                "rounded-full px-3 py-1 text-xs font-semibold transition",
-                statusView === v ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
-              )}
-              onClick={() => setStatusView(v)}
+              onClick={saveCurrentView}
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
             >
-              {v === "all" ? "All" : v === "active" ? "Active" : v === "hired" ? "Hired" : "Rejected"}
+              <Bookmark className="h-3.5 w-3.5" />
+              Save view
             </button>
-          ))}
-          <button
-            type="button"
-            className={clsx(
-              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ring-1",
-              needsAttention ? "bg-amber-500/15 text-amber-800 ring-amber-500/20" : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
-            )}
-            onClick={() => setNeedsAttention((v) => !v)}
-          >
-            <AlertTriangle className="h-3.5 w-3.5" />
-            Needs attention
-          </button>
-          <button
-            type="button"
-            className={clsx(
-              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ring-1",
-              cafToday ? "bg-emerald-500/15 text-emerald-800 ring-emerald-500/20" : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
-            )}
-            onClick={() => setCafToday((v) => !v)}
-          >
-            Basic Details today
-          </button>
-          <label className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-            Opening
-            <select
-              value={openingId}
-              onChange={(e) => setOpeningId(e.target.value)}
-              className="w-56 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
-            >
-              <option value="">All openings</option>
-              {openings.map((o) => (
-                <option key={o.opening_id} value={String(o.opening_id)}>
-                  {(o.title || o.opening_code || `Opening ${o.opening_id}`).slice(0, 80)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={saveCurrentView}
-            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            <Bookmark className="h-3.5 w-3.5" />
-            Save view
-          </button>
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            <XCircle className="h-3.5 w-3.5" />
-            Reset
-          </button>
-          <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1">
             <button
               type="button"
-              onClick={() => setViewMode("table")}
-              className={clsx(
-                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
-                viewMode === "table" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
-              )}
+              onClick={resetFilters}
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
             >
-              <Rows3 className="h-3.5 w-3.5" />
-              Table
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("board")}
-              className={clsx(
-                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
-                viewMode === "board" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
-              )}
-            >
-              <LayoutGrid className="h-3.5 w-3.5" />
-              Board
+              <XCircle className="h-3.5 w-3.5" />
+              Reset
             </button>
           </div>
         </div>
 
-        <div className="mt-2 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-1">
-          {STAGE_OPTIONS.map((stage) => {
-            const active = selectedStages.includes(stage);
-            return (
+        <div className="mt-3 grid gap-2 lg:grid-cols-2">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Stage</span>
               <button
-                key={stage}
                 type="button"
-                onClick={() => {
-                  setSelectedStages((prev) =>
-                    prev.includes(stage) ? prev.filter((s) => s !== stage) : [...prev, stage]
-                  );
-                }}
-                className={clsx(
-                  "rounded-full px-2.5 py-1 text-[11px] font-semibold transition",
-                  active ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
-                )}
+                onClick={() => setSelectedStages([])}
+                className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-white"
+                title="Clear stage filter"
               >
-                {stageLabels[stage] || stage}
+                <XCircle className="h-3 w-3" />
+                Clear
               </button>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => setSelectedStages([])}
-            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
-            title="Clear stage filter"
-          >
-            <XCircle className="h-3 w-3" />
-            Clear stage
-          </button>
+            </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-1">
+              {STAGE_OPTIONS.map((stage) => {
+                const active = selectedStages.includes(stage);
+                return (
+                  <button
+                    key={stage}
+                    type="button"
+                    onClick={() => {
+                      setSelectedStages((prev) =>
+                        prev.includes(stage) ? prev.filter((s) => s !== stage) : [...prev, stage]
+                      );
+                    }}
+                    className={clsx(
+                      "rounded-full px-2.5 py-1 text-[11px] font-semibold transition",
+                      active ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+                    )}
+                  >
+                    {stageLabels[stage] || stage}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {showTagFilters && availableTags.length ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tags</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTags([])}
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-white"
+                  title="Clear tag filter"
+                >
+                  <XCircle className="h-3 w-3" />
+                  Clear
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-1">
+                {availableTags.map((tag) => {
+                  const active = selectedTags.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => toggleTag(tag)}
+                      className={clsx(
+                        "rounded-full px-2.5 py-1 text-[11px] font-semibold transition",
+                        active ? "bg-[rgba(15,118,110,0.16)] text-teal-800 ring-1 ring-teal-600/20" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+                      )}
+                    >
+                      {CANDIDATE_TAG_LABELS[tag] || tag}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </div>
+
+        {openingIds.length || (showTagFilters && selectedTags.length) ? (
+          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2">
+            <div className="flex flex-wrap items-start gap-3">
+              {openingIds.length ? (
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Openings</span>
+                  {openingIds.map((openingId, index) => (
+                    <button
+                      key={openingId}
+                      type="button"
+                      onClick={() => toggleOpeningSelection(openingId)}
+                      className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+                      title="Remove opening filter"
+                    >
+                      {selectedOpeningLabels[index] || `Opening ${openingId}`}
+                      <XCircle className="h-3 w-3 text-slate-400" />
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={clearAllOpenings}
+                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-800"
+                  >
+                    Clear openings
+                  </button>
+                </div>
+              ) : null}
+
+              {showTagFilters && selectedTags.length ? (
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tags</span>
+                  {selectedTags.map((tag, index) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => toggleTag(tag)}
+                      className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+                      title="Remove tag filter"
+                    >
+                      {selectedTagLabels[index] || tag}
+                      <XCircle className="h-3 w-3 text-slate-400" />
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTags([])}
+                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-800"
+                  >
+                    Clear tags
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] font-semibold text-slate-500">Saved</span>

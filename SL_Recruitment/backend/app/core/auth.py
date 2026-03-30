@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,8 +17,13 @@ from app.core.roles import Role, has_required_role
 from app.core.config import settings
 from app.core.paths import resolve_repo_path
 from app.db.platform_session import PlatformSessionLocal
+from app.services.platform_feature_access import REPORTS_FEATURE_CODE, person_has_feature_access
 from app.services.platform_identity import resolve_identity_by_email
 from app.schemas.user import UserContext
+
+_session_table_ready = False
+_session_table_ready_name = ""
+_session_table_lock = asyncio.Lock()
 
 
 async def get_current_user(request: Request) -> UserContext:
@@ -37,6 +43,26 @@ async def get_current_user(request: Request) -> UserContext:
         try:
             async with PlatformSessionLocal() as platform_session:
                 identity = await resolve_identity_by_email(platform_session, email)
+                if not identity:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not found in sl_platform.dim_person")
+
+                if identity.is_deleted:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is deleted")
+                if identity.status and identity.status.lower() != "working":
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not active")
+
+                roles = _map_platform_roles_to_app_roles(identity.role_ids, identity.role_codes)
+                if Role.VIEWER in roles and len(roles) == 1:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
+
+                await _enforce_single_session(platform_session, request, email)
+                reports_access = await person_has_feature_access(
+                    platform_session,
+                    person_id=str(identity.person_id),
+                    feature_code=REPORTS_FEATURE_CODE,
+                )
+        except HTTPException:
+            raise
         except SQLAlchemyError as exc:
             detail = "Platform DB error"
             if settings.environment != "production":
@@ -47,18 +73,6 @@ async def get_current_user(request: Request) -> UserContext:
             if settings.environment != "production":
                 detail = f"Platform identity lookup failed: {exc}"
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
-        if not identity:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not found in sl_platform.dim_person")
-
-        if identity.is_deleted:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is deleted")
-        if identity.status and identity.status.lower() != "working":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not active")
-
-        roles = _map_platform_roles_to_app_roles(identity.role_ids, identity.role_codes)
-        if Role.VIEWER in roles and len(roles) == 1:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
-        await _enforce_single_session(platform_session, request, email)
         return UserContext(
             user_id=email,
             email=email,
@@ -71,6 +85,7 @@ async def get_current_user(request: Request) -> UserContext:
             platform_role_ids=identity.role_ids,
             platform_role_codes=identity.role_codes,
             platform_role_names=identity.role_names,
+            reports_access=reports_access,
         )
 
     if settings.auth_mode == "google":
@@ -104,6 +119,7 @@ async def get_current_user(request: Request) -> UserContext:
         platform_role_id=None,
         platform_role_code=None,
         platform_role_name=None,
+        reports_access=False,
     )
 
 
@@ -115,20 +131,32 @@ def _read_session_id(request: Request) -> Optional[str]:
 
 
 async def _ensure_session_table(platform_session) -> None:
+    global _session_table_ready, _session_table_ready_name
+
     table = settings.session_table
-    await platform_session.execute(
-        text(
-            f"""
-            CREATE TABLE IF NOT EXISTS {table} (
-              email VARCHAR(255) PRIMARY KEY,
-              session_id VARCHAR(64) NOT NULL,
-              last_activity DATETIME NOT NULL,
-              created_at DATETIME NOT NULL,
-              updated_at DATETIME NOT NULL
+    if _session_table_ready and _session_table_ready_name == table:
+        return
+
+    async with _session_table_lock:
+        if _session_table_ready and _session_table_ready_name == table:
+            return
+
+        await platform_session.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS {table} (
+                  email VARCHAR(255) PRIMARY KEY,
+                  session_id VARCHAR(64) NOT NULL,
+                  last_activity DATETIME NOT NULL,
+                  created_at DATETIME NOT NULL,
+                  updated_at DATETIME NOT NULL
+                )
+                """
             )
-            """
         )
-    )
+        await platform_session.commit()
+        _session_table_ready = True
+        _session_table_ready_name = table
 
 
 async def _enforce_single_session(platform_session, request: Request, email: str) -> None:

@@ -12,6 +12,8 @@ from app.models.opening import RecOpening
 
 STANDARD_WORKFLOW = "standard"
 INTERN_L2_ONLY_WORKFLOW = "intern_l2_only"
+STANDARD_OPENING_TAG = "standard"
+INTERN_OPENING_TAG = "intern"
 INTERN_OPENING_CODES = frozenset({"INTR-8299B8", "CMIN-8299B0"})
 INTERN_DISABLED_STAGES = frozenset(
     {
@@ -65,6 +67,13 @@ def workflow_variant_for_opening_code(opening_code: str | None) -> str:
     if normalized in INTERN_OPENING_CODES:
         return INTERN_L2_ONLY_WORKFLOW
     return STANDARD_WORKFLOW
+
+
+def opening_tag_for_opening_code(opening_code: str | None) -> str:
+    workflow_variant = workflow_variant_for_opening_code(opening_code)
+    if workflow_variant == INTERN_L2_ONLY_WORKFLOW:
+        return INTERN_OPENING_TAG
+    return STANDARD_OPENING_TAG
 
 
 def workflow_policy_for_opening(opening: RecOpening | None) -> WorkflowPolicy:

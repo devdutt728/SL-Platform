@@ -13,6 +13,7 @@ export type AuthMe = {
   platform_role_codes?: string[] | null;
   platform_role_name?: string | null;
   platform_role_names?: string[] | null;
+  reports_access?: boolean;
 };
 
 const loadAuthMe = cache(async (): Promise<AuthMe | null> => {

@@ -5,14 +5,10 @@ type ReportsAccessActor = {
   platform_role_codes?: string[] | null;
   platform_role_name?: string | null;
   platform_role_names?: string[] | null;
+  reports_access?: boolean;
 };
 
 const SUPERADMIN_TOKENS = new Set(["2", "superadmin", "s_admin", "super_admin"]);
-const REPORTS_ACCESS_TOKENS = new Set([
-  "recruitment_reports",
-  "recruitment_reports_access",
-  "reports_access",
-]);
 
 function normalizeRoleToken(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -49,8 +45,7 @@ export function isSuperadmin(actor: ReportsAccessActor | null | undefined): bool
 
 export function canAccessReports(actor: ReportsAccessActor | null | undefined): boolean {
   if (isSuperadmin(actor)) return true;
-  const tokens = getRoleTokens(actor);
-  return Array.from(tokens).some((token) => REPORTS_ACCESS_TOKENS.has(token));
+  return Boolean(actor?.reports_access);
 }
 
 export type { ReportsAccessActor };

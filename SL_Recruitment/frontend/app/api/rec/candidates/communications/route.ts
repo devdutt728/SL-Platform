@@ -17,3 +17,21 @@ export async function GET(request: NextRequest) {
     headers: { "content-type": res.headers.get("content-type") || "application/json" },
   });
 }
+
+export async function POST(request: NextRequest) {
+  const incoming = new URL(request.url);
+  const action = incoming.searchParams.get("action") || "";
+  if (action !== "resend_expired_basic_details_links") {
+    return NextResponse.json({ detail: "Unsupported communications action." }, { status: 400 });
+  }
+
+  const res = await fetch(backendUrl("/rec/candidates/basic-details-link/resend-expired"), {
+    method: "POST",
+    headers: { ...(await authHeaderFromCookie()) },
+  });
+  const body = await res.text();
+  return new NextResponse(body, {
+    status: res.status,
+    headers: { "content-type": res.headers.get("content-type") || "application/json" },
+  });
+}

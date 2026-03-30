@@ -44,6 +44,8 @@ class OpeningListItem(BaseModel):
     opening_id: int
     opening_code: Optional[str] = None
     title: Optional[str] = None
+    opening_tag: Optional[str] = None
+    workflow_variant: Optional[str] = None
     location_city: Optional[str] = None
     is_active: Optional[bool] = None
     requested_by_person_id_platform: Optional[str] = None

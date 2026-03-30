@@ -39,6 +39,7 @@ from app.services.screening_rules import evaluate_screening
 from app.services.stage_transitions import apply_stage_transition
 from app.services.workflow_policy import workflow_policy_for_opening
 from app.schemas.screening import ScreeningUpsertIn
+from app.core.config import settings
 from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, SPRINT_EXTENSIONS, SPRINT_MIME_TYPES, sanitize_filename, validate_upload
 
 router = APIRouter(prefix="/apply", tags=["apply"])
@@ -133,6 +134,25 @@ def _label_yes_no(value: bool | None) -> str:
     if value is None:
         return "—"
     return "Yes" if value else "No"
+
+
+def _caf_expiry_note_parts() -> tuple[str, str]:
+    hours = max(int(settings.caf_expiry_hours or 0), 0)
+    if hours <= 0:
+        hours = max(int(settings.caf_expiry_days or 0), 0) * 24
+    if hours > 0 and hours % 24 == 0:
+        days = hours // 24
+        label = f"{days} {'day' if days == 1 else 'days'}"
+    elif hours > 0:
+        label = f"{hours} {'hour' if hours == 1 else 'hours'}"
+    else:
+        label = ""
+    note = (
+        f"This secure link will expire in {label}."
+        if label
+        else "This secure link may expire based on the recruitment workflow timeline."
+    )
+    return label, note
 
 
 def _strip_optional(value: str | None) -> str | None:
@@ -1044,6 +1064,7 @@ async def apply_for_opening(
         reapplied=is_reapplied,
     ).model_dump()
 
+    caf_expiry_window, caf_expiry_note = _caf_expiry_note_parts()
     email_meta = await send_email(
         session,
         candidate_id=candidate.candidate_id,
@@ -1057,6 +1078,8 @@ async def apply_for_opening(
             "candidate_email": candidate.email,
             "candidate_phone": candidate.phone or "—",
             "willing_to_relocate": _label_yes_no(screening_data.get("willing_to_relocate")),
+            "caf_expiry_window": caf_expiry_window,
+            "caf_expiry_note": caf_expiry_note,
         },
         email_type="application_links",
         meta_extra={

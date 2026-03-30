@@ -105,6 +105,15 @@ class DimPersonRole(Base):
     created_by_person_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
+class DimPersonFeatureAccess(Base):
+    __tablename__ = "dim_person_feature_access"
+
+    person_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    feature_code: Mapped[str] = mapped_column(String(64), primary_key=True)
+    granted_at: Mapped[datetime] = mapped_column(DateTime, default=now_ist_naive)
+    granted_by_person_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 class DimPersonExtra(Base):
     __tablename__ = "dim_person_extra"
 

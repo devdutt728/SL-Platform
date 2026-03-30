@@ -98,21 +98,28 @@ export function proxy(request: NextRequest) {
     path === "/login" ||
     path.startsWith("/api/rec/candidates/import/google-sheet") ||
     path.startsWith("/apply") ||
+    path.startsWith("/basic-details") ||
     path.startsWith("/caf") ||
+    path.startsWith("/candidate-assessment-form") ||
     path.startsWith("/assessment") ||
     path.startsWith("/offer") ||
     path.startsWith("/joining") ||
     path.startsWith("/schedule") ||
     path.startsWith("/sprint") ||
+    path.startsWith("/interview/slots") ||
     path.startsWith("/api/auth") ||
     path.startsWith("/api/apply") ||
+    path.startsWith("/api/basic-details") ||
     path.startsWith("/api/caf") ||
+    path.startsWith("/api/candidate-assessment-form") ||
     path.startsWith("/api/assessment") ||
     path.startsWith("/api/sprint") ||
     path.startsWith("/api/offer") ||
     path.startsWith("/api/joining") ||
     path.includes("/api/apply") ||
+    path.includes("/api/basic-details") ||
     path.includes("/api/caf") ||
+    path.includes("/api/candidate-assessment-form") ||
     path.includes("/api/assessment") ||
     path.includes("/api/sprint") ||
     path.includes("/api/offer") ||

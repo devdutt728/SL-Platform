@@ -61,6 +61,7 @@ from app.services.email import send_email
 from app.services.external_documents import download_external_document
 from app.services.candidate_purge import purge_candidate_with_dependents
 from app.services.events import log_event
+from app.services.internal_notifications import notify_l2_owner_assigned, notify_stage_handoff
 from app.services.offers import convert_candidate_to_employee, create_offer, offer_pdf_signed_url, preview_candidate_person_code
 from app.services.public_links import build_public_link, build_public_path
 from app.services.opening_config import get_opening_config
@@ -90,7 +91,10 @@ from app.services.recruitment_forms import (
 from app.services.screening_rules import evaluate_screening
 from app.services.stage_transitions import apply_stage_transition
 from app.services.workflow_policy import (
+    INTERN_OPENING_CODES,
     INTERN_L2_ONLY_WORKFLOW,
+    INTERN_OPENING_TAG,
+    STANDARD_OPENING_TAG,
     WorkflowPolicy,
     extract_intern_hiring_recommendation,
     get_candidate_workflow_policy,
@@ -143,6 +147,58 @@ def _strip_optional(value: str | None) -> str | None:
     return cleaned or None
 
 
+def _normalize_opening_filter_ids(values: list[str] | None) -> list[int] | None:
+    if not values:
+        return None
+
+    normalized: list[int] = []
+    seen: set[int] = set()
+    for raw in values:
+        for piece in str(raw or "").split(","):
+            cleaned = _strip_optional(piece)
+            if not cleaned:
+                continue
+            try:
+                opening_id = int(cleaned)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="opening_id must be an integer.",
+                ) from exc
+            if opening_id in seen:
+                continue
+            seen.add(opening_id)
+            normalized.append(opening_id)
+
+    return normalized or None
+
+
+def _normalize_opening_tags(values: list[str] | None) -> list[str] | None:
+    if not values:
+        return None
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    allowed = {STANDARD_OPENING_TAG, INTERN_OPENING_TAG}
+    for raw in values:
+        for piece in str(raw or "").split(","):
+            cleaned = _strip_optional(piece)
+            if not cleaned:
+                continue
+            tag = cleaned.lower()
+            if tag not in allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="opening_tag must be one of: standard, intern.",
+                )
+            if tag in seen:
+                continue
+            seen.add(tag)
+            normalized.append(tag)
+
+    return normalized or None
+
+
 def _parse_yes_no(value: str | bool | None) -> bool | None:
     if value is None:
         return None
@@ -180,6 +236,7 @@ async def _send_candidate_application_acknowledgement(
     sync_basic_details_form_fields(candidate)
     basic_details_form_token = get_basic_details_form_token(candidate)
     if policy.requires_caf and basic_details_form_token:
+        expiry_label = _basic_details_form_expiry_label()
         return await send_email(
             session,
             candidate_id=candidate.candidate_id,
@@ -193,6 +250,10 @@ async def _send_candidate_application_acknowledgement(
                 "candidate_email": candidate.email,
                 "candidate_phone": candidate.phone or "—",
                 "willing_to_relocate": _label_yes_no(willing_to_relocate),
+                "caf_expiry_window": expiry_label,
+                "caf_expiry_note": f"This secure link will expire in {expiry_label}."
+                if expiry_label
+                else "This secure link may expire based on the recruitment workflow timeline.",
             },
             email_type="application_links",
             meta_extra=meta_extra,
@@ -214,6 +275,119 @@ async def _send_candidate_application_acknowledgement(
         email_type="application_links",
         meta_extra=meta_extra,
     )
+
+
+async def _send_basic_details_link_email(
+    session: AsyncSession,
+    *,
+    candidate: RecCandidate,
+    user: UserContext,
+    force_resend: bool = False,
+    require_expired: bool = False,
+    trigger_source: str = "manual_resend",
+) -> dict[str, str | bool | None]:
+    if not candidate.email:
+        return {
+            "attempted": False,
+            "status": "skipped",
+            "reason": "missing_recipient",
+            "caf_token": None,
+        }
+
+    workflow_policy = await get_candidate_workflow_policy(session, candidate)
+    if not workflow_policy.requires_caf:
+        return {
+            "attempted": False,
+            "status": "skipped",
+            "reason": "disabled_for_workflow",
+            "caf_token": None,
+        }
+
+    now = now_ist_naive()
+    sync_basic_details_form_fields(candidate)
+    basic_details_form_token = get_basic_details_form_token(candidate)
+    if not basic_details_form_token:
+        basic_details_form_token = uuid4().hex
+        set_basic_details_form_token(candidate, basic_details_form_token)
+
+    if get_basic_details_form_submitted_at(candidate) is not None:
+        return {
+            "attempted": False,
+            "status": "skipped",
+            "reason": "already_submitted",
+            "caf_token": basic_details_form_token,
+        }
+
+    expired = _caf_expired_for_candidate(candidate, now=now)
+    if require_expired and not expired:
+        return {
+            "attempted": False,
+            "status": "skipped",
+            "reason": "not_expired",
+            "caf_token": basic_details_form_token,
+        }
+
+    should_send = force_resend or get_basic_details_form_sent_at(candidate) is None or expired
+    if not should_send:
+        return {
+            "attempted": False,
+            "status": "skipped",
+            "reason": "already_sent",
+            "caf_token": basic_details_form_token,
+        }
+
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type=BASIC_DETAILS_FORM_LINK_GENERATED,
+        performed_by_person_id_platform=_platform_person_id(user),
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={
+            "basic_details_form_token": basic_details_form_token,
+            "caf_token": basic_details_form_token,
+            "reason": trigger_source,
+            "expired_before_send": expired,
+        },
+    )
+
+    expiry_label = _basic_details_form_expiry_label()
+    subject = "Updated Studio Lotus candidate application form link" if force_resend else "Your Studio Lotus candidate application form"
+    email_meta = await send_email(
+        session,
+        candidate_id=candidate.candidate_id,
+        to_emails=[candidate.email],
+        subject=subject,
+        template_name="caf_link",
+        context={
+            "candidate_name": candidate.full_name,
+            "candidate_code": candidate.candidate_code,
+            "caf_link": build_basic_details_form_link(basic_details_form_token),
+            "caf_expiry_window": expiry_label,
+            "caf_expiry_note": f"This secure link will expire in {expiry_label}."
+            if expiry_label
+            else "This secure link may expire based on the recruitment workflow timeline.",
+        },
+        email_type="basic_details_link",
+        meta_extra={
+            "basic_details_form_token": basic_details_form_token,
+            "caf_token": basic_details_form_token,
+            "trigger_stage": trigger_source,
+            "expired_before_send": expired,
+        },
+    )
+    email_status = _strip_optional(str(email_meta.get("status") or "")) or "unknown"
+    if email_status != "failed":
+        set_basic_details_form_sent_at(candidate, now)
+        candidate.updated_at = now
+
+    return {
+        "attempted": True,
+        "status": email_status,
+        "reason": None,
+        "caf_token": basic_details_form_token,
+        "error": _strip_optional(str(email_meta.get("error") or "")),
+    }
 
 
 async def _latest_submitted_l2_recommendation(
@@ -320,6 +494,23 @@ def _application_docs_status(*, cv_url: str | None, portfolio_url: str | None, r
     if count >= 3:
         return "complete"
     return "partial"
+
+
+def _normalize_single_optional_document_url(value: str | None) -> str | None:
+    cleaned = _strip_optional(value)
+    if cleaned is None:
+        return None
+    lowered = cleaned.lower()
+    if not (lowered.startswith("http://") or lowered.startswith("https://")):
+        return None
+    if " " in cleaned:
+        return None
+    if lowered.find("http://", 8) >= 0 or lowered.find("https://", 8) >= 0:
+        return None
+    parsed = urlparse(cleaned)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return cleaned
 
 
 @dataclass(slots=True)
@@ -432,6 +623,110 @@ async def _prepare_candidate_external_documents(
     return prepared
 
 
+def _candidate_document_attr(kind: str) -> str:
+    if kind not in {"cv", "portfolio", "resume"}:
+        raise ValueError(f"Unsupported candidate document kind: {kind}")
+    return f"{kind}_url"
+
+
+async def _ensure_candidate_drive_folder(
+    session: AsyncSession,
+    *,
+    candidate: RecCandidate,
+    performed_by_person_id_platform: int | None,
+) -> tuple[str, str | None]:
+    folder_id = _strip_optional(candidate.drive_folder_id)
+    folder_url = _strip_optional(candidate.drive_folder_url)
+    if folder_id:
+        return folder_id, folder_url
+
+    folder_id, folder_url = await anyio.to_thread.run_sync(
+        create_candidate_folder,
+        candidate.candidate_code or _candidate_code(candidate.candidate_id),
+        candidate.full_name,
+    )
+    candidate.drive_folder_id = folder_id
+    candidate.drive_folder_url = folder_url
+    await log_event(
+        session,
+        candidate_id=candidate.candidate_id,
+        action_type="drive_folder_created",
+        performed_by_person_id_platform=performed_by_person_id_platform,
+        related_entity_type="candidate",
+        related_entity_id=candidate.candidate_id,
+        meta_json={"drive_folder_id": folder_id, "drive_folder_url": folder_url},
+    )
+    return folder_id, folder_url
+
+
+async def _repair_candidate_application_documents(
+    session: AsyncSession,
+    *,
+    candidate: RecCandidate,
+    cv_url: str | None,
+    portfolio_url: str | None,
+    resume_url: str | None,
+    replace_existing: bool = False,
+    performed_by_person_id_platform: int | None,
+) -> dict[str, list[str] | bool]:
+    requested = {
+        "cv": _normalize_single_optional_document_url(cv_url),
+        "portfolio": _normalize_single_optional_document_url(portfolio_url),
+        "resume": _normalize_single_optional_document_url(resume_url),
+    }
+    work_items = []
+    skipped_existing: list[str] = []
+    skipped_missing_source: list[str] = []
+    uploaded: list[str] = []
+
+    for kind, source_url in requested.items():
+        current_url = _strip_optional(getattr(candidate, _candidate_document_attr(kind)))
+        if not source_url:
+            if not current_url:
+                skipped_missing_source.append(kind)
+            continue
+        if current_url and not replace_existing:
+            skipped_existing.append(kind)
+            continue
+        work_items.append((kind, source_url))
+
+    if work_items:
+        folder_id, folder_url = await _ensure_candidate_drive_folder(
+            session,
+            candidate=candidate,
+            performed_by_person_id_platform=performed_by_person_id_platform,
+        )
+        for kind, source_url in work_items:
+            uploaded_url = await _upload_external_document(
+                session,
+                candidate=candidate,
+                kind=kind,
+                drive_folder_id=folder_id,
+                drive_folder_url=folder_url,
+                performed_by_person_id_platform=performed_by_person_id_platform,
+                source_url=source_url,
+            )
+            setattr(candidate, _candidate_document_attr(kind), uploaded_url)
+            if kind == "portfolio":
+                candidate.portfolio_not_uploaded_reason = None
+            uploaded.append(kind)
+
+    if uploaded:
+        candidate.application_docs_status = _application_docs_status(
+            cv_url=candidate.cv_url,
+            portfolio_url=candidate.portfolio_url,
+            resume_url=candidate.resume_url,
+        )
+        candidate.updated_at = now_ist_naive()
+
+    return {
+        "uploaded": uploaded,
+        "skipped_existing": skipped_existing,
+        "skipped_missing_source": skipped_missing_source,
+        "updated": bool(uploaded),
+    }
+
+
 class GoogleSheetCandidateRow(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -538,20 +833,7 @@ class GoogleSheetCandidateRow(BaseModel):
     @field_validator("portfolio_url", "cv_url", "resume_url")
     @classmethod
     def _normalize_optional_document_urls(cls, value: str | None) -> str | None:
-        cleaned = _strip_optional(value)
-        if cleaned is None:
-            return None
-        lowered = cleaned.lower()
-        if not (lowered.startswith("http://") or lowered.startswith("https://")):
-            return None
-        if " " in cleaned:
-            return None
-        if lowered.find("http://", 8) >= 0 or lowered.find("https://", 8) >= 0:
-            return None
-        parsed = urlparse(cleaned)
-        if not parsed.scheme or not parsed.netloc:
-            return None
-        return cleaned
+        return _normalize_single_optional_document_url(value)
 
     @model_validator(mode="after")
     def _validate_required_fields(self):
@@ -580,6 +862,104 @@ class GoogleSheetIngestIn(BaseModel):
     @classmethod
     def _strip_batch_fields(cls, value: str | None) -> str | None:
         return _strip_optional(value)
+
+
+class GoogleSheetDocumentRepairRow(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    row_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("row_key", "row", "Row", "Row ID", "row_id"),
+    )
+    candidate_code: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("candidate_code", "Candidate Code", "candidate code"),
+    )
+    opening_code: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("opening_code", "job_id", "Job ID", "Job Id", "job id"),
+    )
+    applying_for: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("applying_for", "Applying For", "Applying for", "applying for"),
+    )
+    email: EmailStr | None = Field(default=None, validation_alias=AliasChoices("email", "Email"))
+    portfolio_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("portfolio_url", "portfolio", "Portfolio"),
+    )
+    cv_url: str | None = Field(default=None, validation_alias=AliasChoices("cv_url", "cv", "CV"))
+    resume_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("resume_url", "resume", "Resume"),
+    )
+    external_source_ref: str | None = None
+
+    @field_validator(
+        "row_key",
+        "candidate_code",
+        "opening_code",
+        "applying_for",
+        "portfolio_url",
+        "cv_url",
+        "resume_url",
+        "external_source_ref",
+    )
+    @classmethod
+    def _strip_document_repair_fields(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+    @field_validator("candidate_code")
+    @classmethod
+    def _normalize_document_repair_candidate_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip().upper()
+
+    @field_validator("opening_code")
+    @classmethod
+    def _normalize_document_repair_opening_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip().upper()
+
+    @field_validator("portfolio_url", "cv_url", "resume_url")
+    @classmethod
+    def _normalize_document_repair_urls(cls, value: str | None) -> str | None:
+        return _normalize_single_optional_document_url(value)
+
+    @model_validator(mode="after")
+    def _validate_document_repair_lookup(self):
+        has_lookup = bool(
+            self.candidate_code
+            or self.external_source_ref
+            or (self.email and (self.opening_code or self.applying_for))
+        )
+        if not has_lookup:
+            raise ValueError("candidate lookup requires candidate_code, external_source_ref, or email plus opening.")
+        return self
+
+
+class GoogleSheetDocumentRepairIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    batch_id: str | None = None
+    sheet_id: str | None = None
+    sheet_name: str | None = None
+    replace_existing: bool = False
+    rows: list[dict[str, object]]
+
+    @field_validator("batch_id", "sheet_id", "sheet_name")
+    @classmethod
+    def _strip_document_repair_batch_fields(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+    @field_validator("rows")
+    @classmethod
+    def _validate_document_repair_rows(cls, value: list[dict[str, object]]) -> list[dict[str, object]]:
+        if not value:
+            raise ValueError("rows cannot be empty.")
+        return value
 
 
 class IngestRetryRowIn(BaseModel):
@@ -844,13 +1224,44 @@ def _caf_expired_for_candidate(candidate: RecCandidate, *, now: datetime | None 
     sent_at = get_basic_details_form_sent_at(candidate)
     if sent_at is None:
         return False
-    expiry_hours = max(int(settings.caf_expiry_hours or 0), 0)
-    if expiry_hours <= 0:
-        expiry_hours = max(int(settings.caf_expiry_days or 0), 0) * 24
+    expiry_hours = _caf_expiry_hours_value()
     if expiry_hours <= 0:
         return False
     current = now or now_ist_naive()
     return current > (sent_at + timedelta(hours=expiry_hours))
+
+
+def _caf_expiry_hours_value() -> int:
+    expiry_hours = max(int(settings.caf_expiry_hours or 0), 0)
+    if expiry_hours <= 0:
+        expiry_hours = max(int(settings.caf_expiry_days or 0), 0) * 24
+    return expiry_hours
+
+
+def _format_hours_label(total_hours: int) -> str:
+    if total_hours <= 0:
+        return ""
+    if total_hours % 24 == 0:
+        days = total_hours // 24
+        unit = "day" if days == 1 else "days"
+        return f"{days} {unit}"
+    unit = "hour" if total_hours == 1 else "hours"
+    return f"{total_hours} {unit}"
+
+
+def _basic_details_form_expiry_label() -> str:
+    return _format_hours_label(_caf_expiry_hours_value())
+
+
+def _candidate_assessment_expiry_hours_value() -> int:
+    expiry_hours = max(int(settings.assessment_expiry_hours or 0), 0)
+    if expiry_hours <= 0:
+        expiry_hours = _caf_expiry_hours_value()
+    return expiry_hours
+
+
+def _candidate_assessment_expiry_label() -> str:
+    return _format_hours_label(_candidate_assessment_expiry_hours_value())
 
 
 def _is_recent_google_sheet_duplicate(candidate: RecCandidate, *, now: datetime) -> bool:
@@ -1058,6 +1469,41 @@ async def _find_ingest_idempotency(
         ).scalars().first()
     except OperationalError:
         return None
+
+
+async def _candidate_has_google_sheet_attempt_for_external_ref(
+    session: AsyncSession,
+    *,
+    external_source_ref: str | None,
+    candidate_id: int | None = None,
+) -> bool:
+    ref = _normalize_external_source_ref(external_source_ref)
+    if not ref:
+        return False
+
+    filters = [
+        RecCandidateIngestAttempt.source_origin == SOURCE_ORIGIN_GOOGLE_SHEET,
+        RecCandidateIngestAttempt.external_source_ref == ref,
+    ]
+    if candidate_id is not None:
+        filters.append(RecCandidateIngestAttempt.candidate_id == candidate_id)
+
+    try:
+        existing_attempt = (
+            await session.execute(
+                select(RecCandidateIngestAttempt.candidate_ingest_attempt_id)
+                .where(*filters)
+                .order_by(
+                    RecCandidateIngestAttempt.attempted_at.desc(),
+                    RecCandidateIngestAttempt.candidate_ingest_attempt_id.desc(),
+                )
+                .limit(1)
+            )
+        ).scalars().first()
+    except OperationalError:
+        return False
+
+    return existing_attempt is not None
 
 
 async def _upsert_ingest_idempotency(
@@ -1561,6 +2007,7 @@ async def _send_assessment_link_for_l2_shortlist(
     )
 
     assessment_link = build_candidate_assessment_form_link(assessment_token)
+    expiry_label = _candidate_assessment_expiry_label()
     email_meta = await send_email(
         session,
         candidate_id=candidate.candidate_id,
@@ -1571,6 +2018,10 @@ async def _send_assessment_link_for_l2_shortlist(
             "candidate_name": candidate.full_name,
             "candidate_code": candidate.candidate_code,
             "assessment_link": assessment_link,
+            "assessment_expiry_window": expiry_label,
+            "assessment_expiry_note": f"This secure link will expire in {expiry_label}."
+            if expiry_label
+            else "This secure link may expire based on the recruitment workflow timeline.",
         },
         email_type="assessment_link",
         meta_extra={
@@ -2683,6 +3134,25 @@ async def import_candidates_from_google_sheet(
                 result_attempt_status = "created" if is_idempotent_created else "duplicate_idempotent"
                 result_error_code = None if is_idempotent_created else "idempotent_duplicate"
                 result_resolution = None if is_idempotent_created else _error_hint_for_code("idempotent_duplicate", transient=False)
+                repair_result: dict[str, object] | None = None
+                if not validate_only and idempotent_candidate is not None:
+                    repair_result = await _repair_candidate_application_documents(
+                        session,
+                        candidate=idempotent_candidate,
+                        cv_url=row.cv_url,
+                        portfolio_url=row.portfolio_url,
+                        resume_url=row.resume_url,
+                        replace_existing=False,
+                        performed_by_person_id_platform=None,
+                    )
+                    uploaded_kinds = list(repair_result.get("uploaded") or [])
+                    if uploaded_kinds:
+                        repair_message = f"Missing application docs repaired: {', '.join(uploaded_kinds)}."
+                        idempotent_message = (
+                            f"{idempotent_message} {repair_message}".strip()
+                            if idempotent_message
+                            else repair_message
+                        )
                 if not validate_only:
                     await _record_ingest_attempt(
                         session,
@@ -2731,6 +3201,10 @@ async def import_candidates_from_google_sheet(
                     "resolution_hint": result_resolution,
                     "matching_key": "external_source_ref",
                 }
+                if repair_result:
+                    result_payload["uploaded"] = list(repair_result.get("uploaded") or [])
+                    result_payload["skipped_existing"] = list(repair_result.get("skipped_existing") or [])
+                    result_payload["skipped_missing_source"] = list(repair_result.get("skipped_missing_source") or [])
                 if is_idempotent_created and idempotent_candidate is not None:
                     email_meta = await _latest_email_meta(
                         session,
@@ -2841,12 +3315,31 @@ async def import_candidates_from_google_sheet(
                     .limit(1)
                 )
             ).scalars().first()
-            if existing_candidate and _is_recent_google_sheet_duplicate(existing_candidate, now=row_now):
-                duplicate_message = "Candidate already exists for this opening/email within last 24 hours."
+            same_source_repeat = False
+            if existing_candidate and external_source_ref:
+                same_source_repeat = (
+                    _normalize_external_source_ref(existing_candidate.external_source_ref) == external_source_ref
+                    or await _candidate_has_google_sheet_attempt_for_external_ref(
+                        session,
+                        external_source_ref=external_source_ref,
+                        candidate_id=existing_candidate.candidate_id,
+                    )
+                )
+            if existing_candidate and same_source_repeat:
+                duplicate_message = "This source application row was already ingested for this candidate."
                 duplicate_count += 1
-                duplicate_error_code = "duplicate_recent_window"
-                duplicate_resolution = "Row is within duplicate cooldown window; retry after 24 hours if needed."
+                duplicate_error_code = "idempotent_duplicate"
+                duplicate_resolution = _error_hint_for_code("idempotent_duplicate", transient=False)
                 if not validate_only:
+                    repair_result = await _repair_candidate_application_documents(
+                        session,
+                        candidate=existing_candidate,
+                        cv_url=row.cv_url,
+                        portfolio_url=row.portfolio_url,
+                        resume_url=row.resume_url,
+                        replace_existing=False,
+                        performed_by_person_id_platform=None,
+                    )
                     if not existing_candidate.source_origin:
                         existing_candidate.source_origin = SOURCE_ORIGIN_GOOGLE_SHEET
                     if not existing_candidate.source_channel:
@@ -2857,6 +3350,86 @@ async def import_candidates_from_google_sheet(
                     if not existing_candidate.external_source_ref:
                         existing_candidate.external_source_ref = external_source_ref
                     existing_candidate.updated_at = now_ist_naive()
+                    uploaded_kinds = list(repair_result.get("uploaded") or [])
+                    if uploaded_kinds:
+                        duplicate_message = (
+                            f"{duplicate_message} Missing application docs repaired: {', '.join(uploaded_kinds)}."
+                        )
+                    await _record_ingest_attempt(
+                        session,
+                        payload=payload,
+                        row_key=row_key,
+                        row=row,
+                        email_normalized=email_normalized,
+                        external_source_ref=external_source_ref,
+                        attempt_status="duplicate_idempotent",
+                        candidate_id=existing_candidate.candidate_id,
+                        opening_id=opening.opening_id,
+                        message=duplicate_message,
+                        raw_row=raw_row,
+                        attempted_at=row_now,
+                        ingest_state=INGEST_STATE_DUPLICATE,
+                        error_code=duplicate_error_code,
+                        resolution_hint=duplicate_resolution,
+                    )
+                    await _upsert_ingest_idempotency(
+                        session,
+                        source_origin=SOURCE_ORIGIN_GOOGLE_SHEET,
+                        external_source_ref=external_source_ref,
+                        candidate_id=existing_candidate.candidate_id,
+                        result_status="duplicate",
+                        result_message=duplicate_message,
+                        ingest_state=INGEST_STATE_DUPLICATE,
+                        error_code=duplicate_error_code,
+                        resolution_hint=duplicate_resolution,
+                        matching_key="external_source_ref",
+                    )
+                    await session.commit()
+                results.append(
+                    {
+                        "row_key": row_key,
+                        "status": "duplicate",
+                        "ingest_state": INGEST_STATE_DUPLICATE,
+                        "candidate_id": existing_candidate.candidate_id,
+                        "candidate_code": existing_candidate.candidate_code,
+                        "message": duplicate_message,
+                        "error_code": duplicate_error_code,
+                        "resolution_hint": duplicate_resolution,
+                        "matching_key": "external_source_ref",
+                    }
+                )
+                continue
+            if existing_candidate and _is_recent_google_sheet_duplicate(existing_candidate, now=row_now):
+                duplicate_message = "Candidate already exists for this opening/email within last 24 hours."
+                duplicate_count += 1
+                duplicate_error_code = "duplicate_recent_window"
+                duplicate_resolution = "Row is within duplicate cooldown window; retry after 24 hours if needed."
+                if not validate_only:
+                    repair_result = await _repair_candidate_application_documents(
+                        session,
+                        candidate=existing_candidate,
+                        cv_url=row.cv_url,
+                        portfolio_url=row.portfolio_url,
+                        resume_url=row.resume_url,
+                        replace_existing=False,
+                        performed_by_person_id_platform=None,
+                    )
+                    if not existing_candidate.source_origin:
+                        existing_candidate.source_origin = SOURCE_ORIGIN_GOOGLE_SHEET
+                    if not existing_candidate.source_channel:
+                        existing_candidate.source_channel = _normalize_source_channel(
+                            row.source_channel,
+                            fallback=SOURCE_ORIGIN_GOOGLE_SHEET,
+                        )
+                    if not existing_candidate.external_source_ref:
+                        existing_candidate.external_source_ref = external_source_ref
+                    existing_candidate.updated_at = now_ist_naive()
+                    uploaded_kinds = list(repair_result.get("uploaded") or [])
+                    if uploaded_kinds:
+                        duplicate_message = (
+                            "Candidate already exists for this opening/email within last 24 hours. "
+                            f"Missing application docs repaired: {', '.join(uploaded_kinds)}."
+                        )
                     await _record_ingest_attempt(
                         session,
                         payload=payload,
@@ -2952,6 +3525,15 @@ async def import_candidates_from_google_sheet(
                     if get_basic_details_form_submitted_at(existing_candidate) is None:
                         set_basic_details_form_submitted_at(existing_candidate, row_now)
                 existing_candidate.updated_at = row_now
+                repair_result = await _repair_candidate_application_documents(
+                    session,
+                    candidate=existing_candidate,
+                    cv_url=row.cv_url,
+                    portfolio_url=row.portfolio_url,
+                    resume_url=row.resume_url,
+                    replace_existing=False,
+                    performed_by_person_id_platform=None,
+                )
 
                 await log_event(
                     session,
@@ -2969,29 +3551,15 @@ async def import_candidates_from_google_sheet(
                     },
                 )
 
-                existing_basic_details_form_token = get_basic_details_form_token(existing_candidate)
-                reapply_email_meta = await _send_candidate_application_acknowledgement(
-                    session,
-                    candidate=existing_candidate,
-                    willing_to_relocate=willing_to_relocate,
-                    meta_extra={
-                        "basic_details_form_token": existing_basic_details_form_token,
-                        "caf_token": existing_basic_details_form_token,
-                        "reason": "google_sheet_reapply",
-                    }
-                    if existing_basic_details_form_token
-                    else {"reason": "google_sheet_reapply"},
+                reapply_status = "skipped"
+                reapply_error = ""
+                reapply_message = (
+                    "Candidate re-applied and profile refreshed. "
+                    "Automatic application links resend suppressed for Google Sheet reapplications."
                 )
-
-                reapply_status = _strip_optional(str((reapply_email_meta or {}).get("status") or ""))
-                reapply_error = _strip_optional(str((reapply_email_meta or {}).get("error") or ""))
-                reapply_message = "Candidate re-applied and profile refreshed."
-                if reapply_status == "sent":
-                    reapply_message = "Candidate re-applied and application links email sent."
-                elif reapply_status == "failed":
-                    reapply_message = "Candidate re-applied, but application links email failed."
-                elif reapply_status == "skipped":
-                    reapply_message = "Candidate re-applied, but application links email was skipped."
+                uploaded_kinds = list(repair_result.get("uploaded") or [])
+                if uploaded_kinds:
+                    reapply_message = f"{reapply_message} Missing application docs repaired: {', '.join(uploaded_kinds)}."
 
                 await _record_ingest_attempt(
                     session,
@@ -3392,6 +3960,168 @@ async def import_candidates_from_google_sheet(
         "success_pct": round((success_count / safe_denom) * 100, 2),
         "duplicate_pct": round((duplicate_count / safe_denom) * 100, 2),
         "failed_pct": round((failed_count / safe_denom) * 100, 2),
+        "results": results,
+    }
+
+
+@router.post("/import/google-sheet/repair-documents", status_code=status.HTTP_200_OK)
+async def repair_candidate_documents_from_google_sheet(
+    payload: GoogleSheetDocumentRepairIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    x_sheet_ingest_token: str | None = Header(default=None, alias="x-sheet-ingest-token"),
+):
+    _require_sheet_ingest_token(x_sheet_ingest_token)
+
+    results: list[dict[str, object]] = []
+    repaired_count = 0
+    skipped_count = 0
+    failed_count = 0
+
+    for idx, raw_row in enumerate(payload.rows or [], start=1):
+        row_key = _extract_row_key(raw_row, idx)
+        try:
+            row = GoogleSheetDocumentRepairRow.model_validate(raw_row)
+            candidate: RecCandidate | None = None
+
+            if row.candidate_code:
+                candidate = (
+                    await session.execute(
+                        select(RecCandidate)
+                        .where(RecCandidate.candidate_code == row.candidate_code)
+                        .limit(1)
+                    )
+                ).scalars().first()
+
+            if candidate is None and row.external_source_ref:
+                candidate = (
+                    await session.execute(
+                        select(RecCandidate)
+                        .where(RecCandidate.external_source_ref == row.external_source_ref)
+                        .order_by(RecCandidate.candidate_id.desc())
+                        .limit(1)
+                    )
+                ).scalars().first()
+                if candidate is None:
+                    candidate_id = (
+                        await session.execute(
+                            select(RecCandidateIngestAttempt.candidate_id)
+                            .where(
+                                RecCandidateIngestAttempt.source_origin == SOURCE_ORIGIN_GOOGLE_SHEET,
+                                RecCandidateIngestAttempt.external_source_ref == row.external_source_ref,
+                                RecCandidateIngestAttempt.candidate_id.is_not(None),
+                            )
+                            .order_by(
+                                RecCandidateIngestAttempt.attempted_at.desc(),
+                                RecCandidateIngestAttempt.candidate_ingest_attempt_id.desc(),
+                            )
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if candidate_id:
+                        candidate = await session.get(RecCandidate, candidate_id)
+
+            if candidate is None and row.email and (row.opening_code or row.applying_for):
+                opening: RecOpening | None = None
+                opening_code = (row.opening_code or "").strip().upper()
+                applying_for = (row.applying_for or "").strip()
+                if opening_code:
+                    opening = (
+                        await session.execute(
+                            select(RecOpening).where(RecOpening.opening_code == opening_code).limit(1)
+                        )
+                    ).scalars().first()
+                elif applying_for:
+                    candidates_for_title = (
+                        await session.execute(
+                            select(RecOpening)
+                            .where(func.lower(RecOpening.title) == applying_for.lower())
+                            .order_by(RecOpening.updated_at.desc(), RecOpening.opening_id.desc())
+                        )
+                    ).scalars().all()
+                    active_openings = [item for item in candidates_for_title if bool(item.is_active)]
+                    opening = active_openings[0] if active_openings else (candidates_for_title[0] if candidates_for_title else None)
+
+                if opening:
+                    candidate = (
+                        await session.execute(
+                            select(RecCandidate)
+                            .where(
+                                RecCandidate.opening_id == opening.opening_id,
+                                func.lower(RecCandidate.email) == str(row.email).strip().lower(),
+                            )
+                            .order_by(RecCandidate.candidate_id.desc())
+                            .limit(1)
+                        )
+                    ).scalars().first()
+
+            if candidate is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Candidate not found for document repair row.",
+                )
+
+            repair_result = await _repair_candidate_application_documents(
+                session,
+                candidate=candidate,
+                cv_url=row.cv_url,
+                portfolio_url=row.portfolio_url,
+                resume_url=row.resume_url,
+                replace_existing=bool(payload.replace_existing),
+                performed_by_person_id_platform=None,
+            )
+            await session.commit()
+
+            uploaded_kinds = list(repair_result.get("uploaded") or [])
+            row_status = "repaired" if uploaded_kinds else "skipped"
+            if uploaded_kinds:
+                repaired_count += 1
+                message = f"Uploaded missing docs: {', '.join(uploaded_kinds)}."
+            else:
+                skipped_count += 1
+                message = "No document changes required."
+
+            results.append(
+                {
+                    "row_key": row_key,
+                    "status": row_status,
+                    "candidate_id": candidate.candidate_id,
+                    "candidate_code": candidate.candidate_code,
+                    "message": message,
+                    "uploaded": uploaded_kinds,
+                    "skipped_existing": list(repair_result.get("skipped_existing") or []),
+                    "skipped_missing_source": list(repair_result.get("skipped_missing_source") or []),
+                }
+            )
+        except ValidationError as exc:
+            await session.rollback()
+            failed_count += 1
+            message = "; ".join(error.get("msg", "invalid row") for error in exc.errors()) or "Invalid document repair row."
+            results.append({"row_key": row_key, "status": "error", "message": message})
+        except HTTPException as exc:
+            await session.rollback()
+            failed_count += 1
+            results.append({"row_key": row_key, "status": "error", "message": str(exc.detail)})
+        except Exception as exc:
+            await session.rollback()
+            failed_count += 1
+            logger.exception("Google sheet document repair failed for row %s: %s", row_key, exc)
+            results.append(
+                {
+                    "row_key": row_key,
+                    "status": "error",
+                    "message": _truncate_text(f"Document repair failed: {exc}", max_len=500) or "Document repair failed.",
+                }
+            )
+
+    return {
+        "batch_id": payload.batch_id,
+        "sheet_id": payload.sheet_id,
+        "sheet_name": payload.sheet_name,
+        "replace_existing": bool(payload.replace_existing),
+        "requested_rows": len(payload.rows or []),
+        "repaired_count": repaired_count,
+        "skipped_count": skipped_count,
+        "failed_count": failed_count,
         "results": results,
     }
 
@@ -3988,7 +4718,8 @@ async def export_google_sheet_failed_rows(
 
 @router.get("", response_model=list[CandidateListItem])
 async def list_candidates(
-    opening_id: int | None = Query(default=None),
+    opening_id: list[str] | None = Query(default=None),
+    opening_tag: list[str] | None = Query(default=None),
     status_filter: list[str] | None = Query(default=None, alias="status"),
     stage: list[str] | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
@@ -3996,6 +4727,8 @@ async def list_candidates(
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER])),
 ):
+    opening_ids = _normalize_opening_filter_ids(opening_id)
+    opening_tags = _normalize_opening_tags(opening_tag)
     can_view_basic_details = _can_view_candidate_basic_details(user)
     latest_stage_subq = (
         select(RecCandidateStage.candidate_id, func.max(RecCandidateStage.stage_id).label("stage_id"))
@@ -4099,8 +4832,18 @@ async def list_candidates(
         .offset(offset)
     )
 
-    if opening_id is not None:
-        query = query.where(RecCandidate.opening_id == opening_id)
+    if opening_ids:
+        query = query.where(RecCandidate.opening_id.in_(opening_ids))
+    if opening_tags:
+        opening_tag_filters = []
+        if INTERN_OPENING_TAG in opening_tags:
+            opening_tag_filters.append(RecOpening.opening_code.in_(list(INTERN_OPENING_CODES)))
+        if STANDARD_OPENING_TAG in opening_tags:
+            opening_tag_filters.append(
+                or_(RecOpening.opening_code.is_(None), RecOpening.opening_code.not_in(list(INTERN_OPENING_CODES)))
+            )
+        if opening_tag_filters:
+            query = query.where(or_(*opening_tag_filters))
     if status_filter:
         query = query.where(RecCandidate.status.in_(status_filter))
     if stage:
@@ -4878,6 +5621,127 @@ async def get_candidate_assessment_link(
     }
 
 
+@router.post("/{candidate_id}/basic-details-link/resend")
+@router.post("/{candidate_id}/caf-link/resend")
+async def resend_candidate_basic_details_link(
+    candidate_id: int,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    candidate = await session.get(RecCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+
+    send_result = await _send_basic_details_link_email(
+        session,
+        candidate=candidate,
+        user=user,
+        force_resend=True,
+        require_expired=True,
+        trigger_source="manual_expired_resend",
+    )
+    await session.commit()
+
+    caf_token = _strip_optional(str(send_result.get("caf_token") or ""))
+    payload = {
+        "candidate_id": candidate_id,
+        "attempted": bool(send_result.get("attempted")),
+        "email_status": _strip_optional(str(send_result.get("status") or "")) or "unknown",
+    }
+    if caf_token:
+        payload["basic_details_form_token"] = caf_token
+        payload["basic_details_form_url"] = build_basic_details_form_path(caf_token)
+        payload["caf_token"] = caf_token
+        payload["caf_url"] = build_basic_details_form_path(caf_token)
+    reason = _strip_optional(str(send_result.get("reason") or ""))
+    if reason:
+        payload["reason"] = reason
+    error = _strip_optional(str(send_result.get("error") or ""))
+    if error:
+        payload["email_error"] = error
+    return payload
+
+
+@router.post("/basic-details-link/resend-expired")
+@router.post("/caf-link/resend-expired")
+async def resend_expired_basic_details_links(
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    latest_stage_subq = (
+        select(RecCandidateStage.candidate_id, func.max(RecCandidateStage.stage_id).label("stage_id"))
+        .where(RecCandidateStage.stage_status == "pending")
+        .group_by(RecCandidateStage.candidate_id)
+        .subquery()
+    )
+    candidate_rows = (
+        await session.execute(
+            select(RecCandidate)
+            .join(latest_stage_subq, latest_stage_subq.c.candidate_id == RecCandidate.candidate_id)
+            .join(RecCandidateStage, RecCandidateStage.stage_id == latest_stage_subq.c.stage_id)
+            .where(
+                RecCandidateStage.stage_name.in_(["hr_screening", "caf"]),
+                RecCandidate.basic_details_form_sent_at.is_not(None),
+                RecCandidate.basic_details_form_submitted_at.is_(None),
+            )
+            .order_by(RecCandidate.basic_details_form_sent_at.asc(), RecCandidate.candidate_id.asc())
+        )
+    ).scalars().all()
+
+    processed: list[dict[str, object]] = []
+    attempted_count = 0
+    sent_count = 0
+    failed_count = 0
+    skipped_count = 0
+
+    for candidate in candidate_rows:
+        if not _caf_expired_for_candidate(candidate):
+            continue
+        result = await _send_basic_details_link_email(
+            session,
+            candidate=candidate,
+            user=user,
+            force_resend=True,
+            require_expired=True,
+            trigger_source="superadmin_bulk_expired_resend",
+        )
+        attempted = bool(result.get("attempted"))
+        status_value = _strip_optional(str(result.get("status") or "")) or "unknown"
+        reason = _strip_optional(str(result.get("reason") or ""))
+        error = _strip_optional(str(result.get("error") or ""))
+        processed.append(
+            {
+                "candidate_id": candidate.candidate_id,
+                "candidate_code": candidate.candidate_code,
+                "candidate_name": candidate.full_name,
+                "email": candidate.email,
+                "status": status_value,
+                "attempted": attempted,
+                "reason": reason,
+                "error": error,
+            }
+        )
+        if attempted:
+            attempted_count += 1
+        else:
+            skipped_count += 1
+        if status_value in {"sent", "resent"}:
+            sent_count += 1
+        elif status_value == "failed":
+            failed_count += 1
+
+    await session.commit()
+    return {
+        "eligible_count": len(processed),
+        "attempted_count": attempted_count,
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "skipped_count": skipped_count,
+        "items": processed,
+        "expiry_window": _basic_details_form_expiry_label(),
+    }
+
+
 @router.post("/{candidate_id}/assessment-link/resend")
 @router.post("/{candidate_id}/candidate-assessment-form-link/resend")
 async def resend_candidate_assessment_link(
@@ -4934,6 +5798,7 @@ async def update_candidate(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    previous_l2_owner_email = candidate.l2_owner_email
 
     now = now_ist_naive()
     updates = payload.model_dump(exclude_none=True)
@@ -4990,6 +5855,13 @@ async def update_candidate(
         related_entity_type="candidate",
         related_entity_id=candidate_id,
         meta_json=payload.model_dump(exclude_none=True),
+    )
+
+    await notify_l2_owner_assigned(
+        session,
+        candidate=candidate,
+        previous_owner_email=previous_l2_owner_email,
+        assigned_by_email=user.email,
     )
 
     await session.commit()
@@ -5210,6 +6082,13 @@ async def transition_stage(
 
     if result.changed and result.to_stage == "l2_shortlist":
         await _send_assessment_link_for_l2_shortlist(session, candidate=candidate, user=user)
+    if result.changed:
+        await notify_stage_handoff(
+            session,
+            candidate=candidate,
+            from_stage=result.from_stage,
+            to_stage=result.to_stage,
+        )
 
     await session.commit()
     return {

@@ -395,6 +395,8 @@ export type OpeningListItem = {
   opening_id: number;
   opening_code?: string | null;
   title?: string | null;
+  opening_tag?: string | null;
+  workflow_variant?: string | null;
   location_city?: string | null;
   is_active?: boolean | null;
   requested_by_person_id_platform?: string | null;
@@ -490,6 +492,18 @@ export type PlatformRole = {
   role_id: number;
   role_code: string;
   role_name?: string | null;
+};
+
+export type ReportsAccessAssignment = {
+  person_id: string;
+  person_code?: string | null;
+  full_name: string;
+  email: string;
+  status?: string | null;
+  is_deleted?: number | null;
+  granted_at?: string | null;
+  granted_by_person_id?: string | null;
+  enabled: boolean;
 };
 
 export type Screening = {

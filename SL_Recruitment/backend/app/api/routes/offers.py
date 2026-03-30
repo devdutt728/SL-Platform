@@ -55,6 +55,7 @@ from app.services.offers import (
 from app.services.events import log_event
 from app.services.drive import delete_drive_item, download_drive_file, upload_offer_doc
 from app.services.email import render_template, send_email
+from app.services.internal_notifications import notify_offer_response_internal
 from app.services.operation_queue import OP_DRIVE_DELETE_ITEM, enqueue_operation
 
 router = APIRouter(prefix="/rec/offers", tags=["offers"])
@@ -638,6 +639,14 @@ async def admin_offer_decision(
             decision_reason=payload.reason,
             source="admin_offer_decision",
         )
+    candidate = await session.get(RecCandidate, offer.candidate_id)
+    await notify_offer_response_internal(
+        session,
+        candidate=candidate,
+        offer=offer,
+        decision=decision_normalized,
+        reason=payload.reason,
+    )
     await session.commit()
     await session.refresh(offer)
     return OfferOut(
@@ -1053,6 +1062,13 @@ async def decide_public_offer(
             decision_reason=payload.reason,
             source="public_offer_decision",
         )
+    await notify_offer_response_internal(
+        session,
+        candidate=candidate,
+        offer=offer,
+        decision=decision_normalized,
+        reason=payload.reason,
+    )
     await session.commit()
     return OfferPublicOut(
         candidate_name=candidate.full_name if candidate else None,

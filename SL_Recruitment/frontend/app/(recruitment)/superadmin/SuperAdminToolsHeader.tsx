@@ -1,6 +1,12 @@
 import Link from "next/link";
 
-type SuperAdminTool = "ingest-ops" | "roles" | "people" | "sprint-templates" | "candidate-communications";
+type SuperAdminTool =
+  | "ingest-ops"
+  | "roles"
+  | "reports-access"
+  | "people"
+  | "sprint-templates"
+  | "candidate-communications";
 
 type Props = {
   active: SuperAdminTool;
@@ -10,6 +16,7 @@ const TOOL_LINKS: Array<{ key: SuperAdminTool; href: string; label: string }> = 
   { key: "ingest-ops", href: "/superadmin/ingest-ops", label: "Ingest Operations" },
   { key: "candidate-communications", href: "/superadmin/candidate-communications", label: "Candidate Communications" },
   { key: "roles", href: "/superadmin/roles", label: "Role Management" },
+  { key: "reports-access", href: "/superadmin/reports-access", label: "Reports Access" },
   { key: "people", href: "/superadmin/people", label: "People Management" },
   { key: "sprint-templates", href: "/superadmin/sprint-templates", label: "Sprint Templates" },
 ];
@@ -30,7 +37,7 @@ export function SuperAdminToolsHeader({ active }: Props) {
         <div className="relative flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-[10px] uppercase tracking-[0.28em] text-slate-500">SuperAdmin Command Deck</p>
-            <p className="text-sm text-slate-600">Run compact workflows for ingest, roles, people, and templates.</p>
+            <p className="text-sm text-slate-600">Run compact workflows for ingest, access, people, and templates.</p>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             {TOOL_LINKS.map((item) => (

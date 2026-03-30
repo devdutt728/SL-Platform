@@ -33,6 +33,7 @@ from uuid import uuid4
 from app.models.opening_request import RecOpeningRequest
 from app.services.candidate_purge import purge_candidate_with_dependents
 from app.services.platform_identity import active_status_filter
+from app.services.workflow_policy import opening_tag_for_opening_code, workflow_variant_for_opening_code
 
 router = APIRouter(prefix="/rec/openings", tags=["openings"])
 logger = logging.getLogger("slr.openings")
@@ -274,10 +275,13 @@ def _opening_to_list_item(
     person_lookup = person_lookup or {}
     hiring_manager_id = _clean_platform_person_id(opening.reporting_person_id_platform)
     actor_meta = person_lookup.get(hiring_manager_id or "", {})
+    workflow_variant = workflow_variant_for_opening_code(opening.opening_code)
     return OpeningListItem(
         opening_id=opening.opening_id,
         opening_code=opening.opening_code,
         title=opening.title,
+        opening_tag=opening_tag_for_opening_code(opening.opening_code),
+        workflow_variant=workflow_variant,
         location_city=opening.location_city,
         is_active=bool(opening.is_active) if opening.is_active is not None else None,
         requested_by_person_id_platform=hiring_manager_id,

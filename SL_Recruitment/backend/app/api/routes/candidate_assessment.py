@@ -11,6 +11,7 @@ from app.models.opening import RecOpening
 from app.schemas.candidate_assessment import CandidateAssessmentOut, CandidateAssessmentPrefillOut, CandidateAssessmentUpsertIn
 from app.services.email import send_email
 from app.services.events import log_event
+from app.services.internal_notifications import notify_candidate_ready_for_review
 from app.services.recruitment_forms import (
     CANDIDATE_ASSESSMENT_FORM_SUBMITTED,
     LEGACY_CANDIDATE_ASSESSMENT_FORM_SUBMITTED,
@@ -245,6 +246,13 @@ async def submit_candidate_assessment(
         context={"candidate_name": candidate.full_name},
         email_type="assessment_completed",
         meta_extra={"candidate_assessment_form_token": get_candidate_assessment_form_token(assessment)},
+    )
+
+    await notify_candidate_ready_for_review(
+        session,
+        candidate=candidate,
+        trigger_label="Assessment submitted",
+        detail_note="Candidate Assessment Form has been submitted and is ready for internal review.",
     )
 
     await session.commit()
