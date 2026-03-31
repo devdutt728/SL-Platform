@@ -4,6 +4,7 @@ import { CandidateFull } from "@/lib/types";
 import { internalUrl } from "@/lib/internal";
 import { Candidate360Client } from "./Candidate360Client";
 import { getAuthMe } from "@/lib/auth-me";
+import { fetchJsonOr } from "@/lib/server-json";
 
 type Me = {
   platform_role_id?: number | string | null;
@@ -29,9 +30,11 @@ function isHrRole(value: string) {
 async function fetchCandidateFull(id: string): Promise<CandidateFull | null> {
   const url = await internalUrl(`/api/rec/candidates/${encodeURIComponent(id)}/full`);
   const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return null;
-  return (await res.json()) as CandidateFull;
+  return fetchJsonOr<CandidateFull | null>(url, {
+    fallback: null,
+    cookie: cookieValue,
+    label: "candidate360.full",
+  });
 }
 
 export default async function CandidateDetailPage({ params }: { params: Promise<{ id: string }> }) {

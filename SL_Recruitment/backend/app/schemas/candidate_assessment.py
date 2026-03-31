@@ -1,7 +1,10 @@
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+TRAINING_NAME_MAX_LENGTH = 255
 
 
 class CandidateAssessmentUpsertIn(BaseModel):
@@ -46,10 +49,10 @@ class CandidateAssessmentUpsertIn(BaseModel):
     education_post_graduation_institution: Optional[str] = None
     education_post_graduation_marks: Optional[str] = None
 
-    training1_name: Optional[str] = None
+    training1_name: Optional[str] = Field(default=None, max_length=TRAINING_NAME_MAX_LENGTH)
     training1_year: Optional[str] = None
     training1_institute: Optional[str] = None
-    training2_name: Optional[str] = None
+    training2_name: Optional[str] = Field(default=None, max_length=TRAINING_NAME_MAX_LENGTH)
     training2_year: Optional[str] = None
     training2_institute: Optional[str] = None
 
@@ -164,10 +167,10 @@ class CandidateAssessmentOut(BaseModel):
     education_post_graduation_institution: Optional[str] = None
     education_post_graduation_marks: Optional[str] = None
 
-    training1_name: Optional[str] = None
+    training1_name: Optional[str] = Field(default=None, max_length=TRAINING_NAME_MAX_LENGTH)
     training1_year: Optional[str] = None
     training1_institute: Optional[str] = None
-    training2_name: Optional[str] = None
+    training2_name: Optional[str] = Field(default=None, max_length=TRAINING_NAME_MAX_LENGTH)
     training2_year: Optional[str] = None
     training2_institute: Optional[str] = None
 

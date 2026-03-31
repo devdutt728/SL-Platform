@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getAuthMe } from "@/lib/auth-me";
 import { internalUrl } from "@/lib/internal";
 import { cookieHeader } from "@/lib/cookie-header";
+import { fetchJsonOr } from "@/lib/server-json";
 import type { OpeningListItem } from "@/lib/types";
 
 type Me = {
@@ -23,11 +24,9 @@ export async function requireSuperadminAccess() {
 export async function fetchOpeningsForSuperadmin() {
   const url = await internalUrl("/api/rec/openings");
   const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return [] as OpeningListItem[];
-  try {
-    return (await res.json()) as OpeningListItem[];
-  } catch {
-    return [] as OpeningListItem[];
-  }
+  return fetchJsonOr<OpeningListItem[]>(url, {
+    fallback: [],
+    cookie: cookieValue,
+    label: "superadmin.openings",
+  });
 }

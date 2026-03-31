@@ -6,13 +6,13 @@ import { BASIC_DETAILS_FORM_LABEL, CANDIDATE_ASSESSMENT_FORM_LABEL } from "@/lib
 import type { CandidateCommunicationFeed, CandidateCommunicationItem } from "@/lib/types";
 
 const PAGE_SIZE = 100;
-const CAF_LABEL = "CAF";
+const CAF_LINK_LABEL = "CAF";
 
 const ACTION_OPTIONS = [
   { value: "", label: "All actions" },
   { value: "email_sent", label: "Emails sent" },
-  { value: "basic_details_form_link_generated", label: `${CAF_LABEL} links generated` },
-  { value: "candidate_assessment_form_link_generated", label: `${CANDIDATE_ASSESSMENT_FORM_LABEL} links generated` },
+  { value: "basic_details_form_link_generated", label: `${BASIC_DETAILS_FORM_LABEL} links generated` },
+  { value: "candidate_assessment_form_link_generated", label: `${CAF_LINK_LABEL} links generated` },
 ];
 
 const KNOWN_EMAIL_TYPES = [
@@ -79,8 +79,18 @@ function toTimeValue(raw?: string | null) {
 
 function displayLinkLabel(label?: string | null) {
   const normalized = String(label || "").trim();
-  if (normalized === BASIC_DETAILS_FORM_LABEL) return CAF_LABEL;
+  if (!normalized) return "-";
+  if (normalized === CANDIDATE_ASSESSMENT_FORM_LABEL) return CAF_LINK_LABEL;
+  if (normalized.toLowerCase() === "caf") return CAF_LINK_LABEL;
   return normalized || "-";
+}
+
+function displayEmailType(emailType?: string | null) {
+  const normalized = String(emailType || "").trim().toLowerCase();
+  if (!normalized) return "-";
+  if (normalized === "assessment_link") return `${CAF_LINK_LABEL} link`;
+  if (normalized === "application_links") return `${BASIC_DETAILS_FORM_LABEL} link`;
+  return emailType || "-";
 }
 
 function aggregateCandidateRows(items: CandidateCommunicationItem[]): CandidateCommunicationCandidateRow[] {
@@ -240,23 +250,22 @@ export function CandidateCommunicationsPanel() {
     setResendNotice(null);
     try {
       const res = await fetch(
-        `${basePath}/api/rec/candidates/communications?action=resend_expired_basic_details_links`,
+        `${basePath}/api/rec/candidates/communications?action=resend_expired_caf_links`,
         { method: "POST" }
       );
       if (!res.ok) throw new Error(await res.text());
-      const result = (await res.json()) as ExpiredBasicDetailsResendResult;
-      const expiryWindow = (result.expiry_window || "").trim();
-      setResendNotice(
-        result.eligible_count === 0
-          ? `No expired ${CAF_LABEL} links found${expiryWindow ? ` for the current ${expiryWindow} window` : ""}.`
-          : `Expired ${CAF_LABEL} resend completed. Eligible: ${result.eligible_count}, sent: ${result.sent_count}, failed: ${result.failed_count}, skipped: ${result.skipped_count}.`
-      );
-      await loadFeed(0, false);
-    } catch (err: any) {
-      setError(err?.message || `Could not resend expired ${CAF_LABEL} links.`);
-    } finally {
-      setResendBusy(false);
-    }
+        const result = (await res.json()) as ExpiredBasicDetailsResendResult;
+        setResendNotice(
+          result.eligible_count === 0
+            ? `No expired ${CAF_LINK_LABEL} links found for candidates currently waiting on the form.`
+            : `Expired ${CAF_LINK_LABEL} resend completed. Eligible: ${result.eligible_count}, sent: ${result.sent_count}, failed: ${result.failed_count}, skipped: ${result.skipped_count}.`
+        );
+        await loadFeed(0, false);
+      } catch (err: any) {
+        setError(err?.message || `Could not resend expired ${CAF_LINK_LABEL} links.`);
+      } finally {
+        setResendBusy(false);
+      }
   }
 
   return (
@@ -284,10 +293,12 @@ export function CandidateCommunicationsPanel() {
             onClick={() => void handleResendExpiredBasicDetailsLinks()}
             className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
             disabled={resendBusy}
-          >
-            <RefreshCw className={`h-4 w-4 ${resendBusy ? "animate-spin" : ""}`} />
-            {resendBusy ? `Resending expired ${CAF_LABEL} links...` : `Resend expired ${CAF_LABEL} links`}
-          </button>
+            >
+              <RefreshCw className={`h-4 w-4 ${resendBusy ? "animate-spin" : ""}`} />
+              {resendBusy
+                ? `Resending expired ${CAF_LINK_LABEL} links...`
+                : `Resend expired ${CAF_LINK_LABEL} links`}
+            </button>
         </div>
 
         <div className="mt-3 grid gap-2.5 md:grid-cols-4">
@@ -431,7 +442,7 @@ function CommunicationCard({ item }: { item: CandidateCommunicationCandidateRow 
 
       <div className="mt-3 grid gap-2 md:grid-cols-2">
         <p className="text-xs text-slate-600">
-          <span className="font-semibold text-slate-800">Latest email type:</span> {item.latest_email_type || "-"}
+          <span className="font-semibold text-slate-800">Latest email type:</span> {displayEmailType(item.latest_email_type)}
         </p>
         <p className="text-xs text-slate-600">
           <span className="font-semibold text-slate-800">Latest timestamp:</span> {formatDateTime(item.latest_created_at)}

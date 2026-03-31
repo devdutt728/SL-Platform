@@ -31,7 +31,9 @@ export type CandidateListItem = {
   basic_details_form_submitted_at?: string | null;
   caf_sent_at?: string | null;
   caf_submitted_at?: string | null;
+  candidate_assessment_form_sent_at?: string | null;
   candidate_assessment_form_submitted_at?: string | null;
+  assessment_sent_at?: string | null;
   assessment_submitted_at?: string | null;
   needs_hr_review?: boolean;
   screening_result?: string | null;
@@ -379,12 +381,18 @@ export type OpeningApplyPrefill = {
   opening_code: string;
   opening_title?: string | null;
   opening_description?: string | null;
+  location_city?: string | null;
+  location_country?: string | null;
+  jd_available?: boolean | null;
+  jd_display_name?: string | null;
   is_active?: boolean | null;
 };
 
 export type OpeningPublicListItem = {
   opening_code: string;
   opening_title?: string | null;
+  jd_available?: boolean | null;
+  jd_display_name?: string | null;
   location_city?: string | null;
   location_country?: string | null;
   is_active?: boolean | null;
@@ -408,6 +416,10 @@ export type OpeningListItem = {
   requested_by_person_code?: string | null;
   requested_by_email?: string | null;
   requested_by_phone?: string | null;
+  jd_file_name?: string | null;
+  resolved_jd_file_name?: string | null;
+  jd_display_name?: string | null;
+  jd_available?: boolean | null;
   headcount_required?: number | null;
   headcount_filled?: number | null;
 };

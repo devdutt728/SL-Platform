@@ -24,19 +24,13 @@ from app.services.recruitment_forms import (
 )
 from app.services.screening_rules import evaluate_screening
 from app.services.stage_transitions import apply_stage_transition
-from app.services.workflow_policy import get_candidate_workflow_policy
 
 router = APIRouter(prefix="/basic-details", tags=["basic-details"])
 legacy_router = APIRouter(prefix="/caf", tags=["caf"])
 
 
 async def _assert_caf_available(session: AsyncSession, candidate: RecCandidate) -> None:
-    workflow_policy = await get_candidate_workflow_policy(session, candidate)
-    if not workflow_policy.requires_caf:
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail="Basic details form is not required for this opening.",
-        )
+    return None
 
 
 def _caf_expiry_window() -> timedelta | None:

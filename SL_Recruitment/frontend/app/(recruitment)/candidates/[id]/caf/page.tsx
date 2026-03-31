@@ -19,6 +19,7 @@ import { cookieHeader } from "@/lib/cookie-header";
 import { parseDateUtc } from "@/lib/datetime";
 import { internalUrl } from "@/lib/internal";
 import { BASIC_DETAILS_FORM_LABEL, CANDIDATE_ASSESSMENT_FORM_LABEL, SCREENING_DETAILS_LABEL } from "@/lib/recruitment-terms";
+import { fetchJsonOr } from "@/lib/server-json";
 import { CandidateAssessment, CandidateFull } from "@/lib/types";
 
 type Me = {
@@ -34,12 +35,11 @@ type MetricItem = {
 async function fetchCandidateFull(id: string): Promise<CandidateFull | null> {
   const url = await internalUrl(`/api/rec/candidates/${encodeURIComponent(id)}/full`);
   const cookieValue = await cookieHeader();
-  const res = await fetch(url, {
-    cache: "no-store",
-    headers: cookieValue ? { cookie: cookieValue } : undefined,
+  return fetchJsonOr<CandidateFull | null>(url, {
+    fallback: null,
+    cookie: cookieValue,
+    label: "candidate_caf.full",
   });
-  if (!res.ok) return null;
-  return (await res.json()) as CandidateFull;
 }
 
 function valueOrDash(value: unknown) {

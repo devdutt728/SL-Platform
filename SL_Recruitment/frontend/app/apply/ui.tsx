@@ -67,10 +67,17 @@ export function PublicOpeningsClient({
                           <div className="experience">EXPERIENCE</div>
                           <div className="experience">{experience}</div>
                         </div>
+                        <div className="div-block-55">
+                          <div className="experience">LOCATION</div>
+                          <div className="experience">{[o.location_city, o.location_country].filter(Boolean).join(", ") || "India"}</div>
+                        </div>
                         <div className="div-block-55-copy">
                           <Link href={`/apply/${encodeURIComponent(o.opening_code)}`} className="link-block-3">
-                            <div className="text-block-19">Job Description</div>
+                            <div className="text-block-19">View JD & Apply</div>
                           </Link>
+                        </div>
+                        <div className="mt-3 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                          {o.jd_available ? o.jd_display_name || "PDF available" : "Role overview available"}
                         </div>
                       </div>
                     </article>

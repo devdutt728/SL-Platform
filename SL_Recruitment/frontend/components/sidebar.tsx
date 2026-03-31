@@ -130,12 +130,14 @@ export function Sidebar({ initialMe }: { initialMe: SidebarMe | null }) {
   return (
     <aside className="glass-panel fixed bottom-4 left-4 top-4 z-20 w-16 overflow-hidden rounded-2xl p-2 sm:w-20 sm:p-3 2xl:w-56 2xl:p-4">
       <div className="px-0.5 pb-3 2xl:px-2">
-        <div className="hidden h-12 w-full 2xl:block">
-          <img src={logoSrc} alt="Studio Lotus" className="h-full w-auto object-contain object-left" />
-        </div>
-        <div className="flex h-8 items-center justify-center 2xl:hidden">
-          <img src={logoSrc} alt="Studio Lotus" className="h-8 w-8 object-contain" />
-        </div>
+        <Link href="/" aria-label="Studio Lotus home" className="block">
+          <div className="hidden h-12 w-full 2xl:block">
+            <img src={logoSrc} alt="Studio Lotus" className="h-full w-auto object-contain object-left" />
+          </div>
+          <div className="flex h-8 items-center justify-center 2xl:hidden">
+            <img src={logoSrc} alt="Studio Lotus" className="h-8 w-8 object-contain" />
+          </div>
+        </Link>
       </div>
       <nav className="space-y-1">
         {navItems.filter((item) => guards[item.guard as keyof typeof guards]).map((item) => {

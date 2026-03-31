@@ -1,12 +1,14 @@
 import { internalUrl } from "@/lib/internal";
 import { OpeningListItem } from "@/lib/types";
+import { fetchJsonOr } from "@/lib/server-json";
 import { OpeningsClient } from "./ui";
 import { getAuthMe } from "@/lib/auth-me";
 
 async function fetchOpenings() {
-  const res = await fetch(await internalUrl("/api/rec/openings"), { cache: "no-store" });
-  if (!res.ok) return [] as OpeningListItem[];
-  return (await res.json()) as OpeningListItem[];
+  return fetchJsonOr<OpeningListItem[]>(await internalUrl("/api/rec/openings"), {
+    fallback: [],
+    label: "openings.list",
+  });
 }
 
 export default async function OpeningsPage() {

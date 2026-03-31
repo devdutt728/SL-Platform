@@ -1012,6 +1012,25 @@ class CandidateCommunicationFeedOut(BaseModel):
     items: list[CandidateCommunicationItemOut]
 
 
+class ExpiredBasicDetailsBulkResendIn(BaseModel):
+    candidate_ids: list[int] = Field(default_factory=list)
+
+    @field_validator("candidate_ids")
+    @classmethod
+    def _validate_candidate_ids(cls, value: list[int]) -> list[int]:
+        normalized: list[int] = []
+        seen: set[int] = set()
+        for raw in value:
+            candidate_id = int(raw)
+            if candidate_id <= 0 or candidate_id in seen:
+                continue
+            seen.add(candidate_id)
+            normalized.append(candidate_id)
+        if len(normalized) > 500:
+            raise ValueError("candidate_ids cannot exceed 500 items.")
+        return normalized
+
+
 class LegacyCafCompleteIn(BaseModel):
     candidate_ids: list[int] = Field(default_factory=list)
     note: str | None = None
@@ -1225,6 +1244,21 @@ def _caf_expired_for_candidate(candidate: RecCandidate, *, now: datetime | None 
     if sent_at is None:
         return False
     expiry_hours = _caf_expiry_hours_value()
+    if expiry_hours <= 0:
+        return False
+    current = now or now_ist_naive()
+    return current > (sent_at + timedelta(hours=expiry_hours))
+
+
+def _assessment_expired_for_assessment(
+    assessment: RecCandidateAssessment, *, now: datetime | None = None
+) -> bool:
+    if get_candidate_assessment_form_submitted_at(assessment) is not None:
+        return False
+    sent_at = get_candidate_assessment_form_sent_at(assessment)
+    if sent_at is None:
+        return False
+    expiry_hours = _candidate_assessment_expiry_hours_value()
     if expiry_hours <= 0:
         return False
     current = now or now_ist_naive()
@@ -1921,6 +1955,7 @@ async def _send_assessment_link_for_l2_shortlist(
     candidate: RecCandidate,
     user: UserContext,
     force_resend: bool = False,
+    require_expired: bool = False,
     trigger_source: str = "l2_shortlist",
 ) -> dict[str, str | bool | None]:
     if not candidate.email:
@@ -1973,6 +2008,15 @@ async def _send_assessment_link_for_l2_shortlist(
             "assessment_token": assessment_token,
         }
 
+    expired = _assessment_expired_for_assessment(assessment, now=now)
+    if require_expired and not expired:
+        return {
+            "attempted": False,
+            "status": "skipped",
+            "reason": "link_not_expired",
+            "assessment_token": assessment_token,
+        }
+
     latest_email_meta = await _latest_email_meta(
         session,
         candidate_id=candidate.candidate_id,
@@ -1980,7 +2024,7 @@ async def _send_assessment_link_for_l2_shortlist(
     )
     latest_status = _strip_optional(str((latest_email_meta or {}).get("status") or ""))
 
-    should_send = force_resend or get_candidate_assessment_form_sent_at(assessment) is None
+    should_send = force_resend or get_candidate_assessment_form_sent_at(assessment) is None or expired
     # Optional auto-retry: if an earlier assessment email failed, retry on next L2 transition.
     if not should_send and latest_status == "failed":
         should_send = True
@@ -2118,8 +2162,55 @@ def _clean_string_list(value: object) -> list[str]:
 
 
 def _is_public_link_value(raw: str) -> bool:
-    lowered = raw.lower()
-    return any(segment in lowered for segment in COMMUNICATION_LINK_SEGMENTS)
+    cleaned = _strip_optional(raw)
+    if not cleaned:
+        return False
+    try:
+        parsed = urlparse(cleaned)
+    except Exception:
+        return False
+    path = (parsed.path if parsed.scheme or parsed.netloc else cleaned).strip()
+    if not path:
+        return False
+    if not path.startswith("/"):
+        path = f"/{path}"
+    lowered = path.lower()
+    base_path = (settings.public_app_base_path or "").strip().lower()
+    if base_path and not base_path.startswith("/"):
+        base_path = f"/{base_path}"
+    base_path = base_path.rstrip("/")
+    if base_path and (lowered == base_path or lowered.startswith(f"{base_path}/")):
+        lowered = lowered[len(base_path) :] or "/"
+    return any(lowered.startswith(segment) for segment in COMMUNICATION_LINK_SEGMENTS)
+
+
+def _normalize_absolute_public_candidate_link(raw_url: str) -> str | None:
+    cleaned = _strip_optional(raw_url)
+    if not cleaned:
+        return None
+    try:
+        parsed = urlparse(cleaned)
+    except Exception:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+
+    configured_origin = _strip_optional(build_public_link(""))
+    if not configured_origin:
+        return None
+    try:
+        configured = urlparse(configured_origin)
+    except Exception:
+        return None
+    if not configured.netloc:
+        return None
+    if parsed.netloc.lower() != configured.netloc.lower():
+        return None
+
+    normalized_path = parsed.path or "/"
+    if parsed.query:
+        normalized_path = f"{normalized_path}?{parsed.query}"
+    return _normalize_public_candidate_link(normalized_path)
 
 
 def _normalize_public_candidate_link(raw_path: str) -> str | None:
@@ -2154,6 +2245,8 @@ def _extract_communication_links(
     sprint_public_tokens: dict[int, str],
     current_caf_token: str | None = None,
     current_assessment_token: str | None = None,
+    allow_caf_links: bool = True,
+    allow_assessment_links: bool = True,
 ) -> list[CandidateCommunicationLinkOut]:
     links: list[CandidateCommunicationLinkOut] = []
     seen_urls: set[str] = set()
@@ -2168,8 +2261,10 @@ def _extract_communication_links(
                 return
             cleaned = normalized_path
         elif cleaned.startswith("http://") or cleaned.startswith("https://"):
-            if not _is_public_link_value(cleaned):
+            normalized_path = _normalize_absolute_public_candidate_link(cleaned)
+            if not normalized_path:
                 return
+            cleaned = normalized_path
         else:
             return
         if cleaned in seen_urls:
@@ -2180,13 +2275,13 @@ def _extract_communication_links(
     basic_details_form_token = _strip_optional(
         str(meta.get("basic_details_form_token") or meta.get("caf_token") or "")
     )
-    if basic_details_form_token:
+    if allow_caf_links and basic_details_form_token:
         add_link("Basic Details Form", build_basic_details_form_path(basic_details_form_token))
 
     assessment_token = _strip_optional(
         str(meta.get("candidate_assessment_form_token") or meta.get("assessment_token") or "")
     )
-    if assessment_token:
+    if allow_assessment_links and assessment_token:
         add_link("Candidate Assessment Form", build_candidate_assessment_form_path(assessment_token))
 
     offer_raw = _strip_optional(str(meta.get("offer_id") or ""))
@@ -2209,14 +2304,18 @@ def _extract_communication_links(
             token = sprint_public_tokens[sprint_id]
             add_link("Sprint page", build_public_path(f"/sprint/{token}"))
 
-    if action_type in BASIC_DETAILS_COMMUNICATION_ACTION_TYPES and basic_details_form_token:
+    if allow_caf_links and action_type in BASIC_DETAILS_COMMUNICATION_ACTION_TYPES and basic_details_form_token:
         add_link("Basic Details Form", build_basic_details_form_path(basic_details_form_token))
-    if action_type in CANDIDATE_ASSESSMENT_COMMUNICATION_ACTION_TYPES and assessment_token:
+    if (
+        allow_assessment_links
+        and action_type in CANDIDATE_ASSESSMENT_COMMUNICATION_ACTION_TYPES
+        and assessment_token
+    ):
         add_link("Candidate Assessment Form", build_candidate_assessment_form_path(assessment_token))
 
-    if current_caf_token:
+    if allow_caf_links and current_caf_token:
         add_link("Basic Details Form", build_basic_details_form_path(current_caf_token))
-    if current_assessment_token:
+    if allow_assessment_links and current_assessment_token:
         add_link("Candidate Assessment Form", build_candidate_assessment_form_path(current_assessment_token))
 
     for key, value in meta.items():
@@ -4807,6 +4906,7 @@ async def list_candidates(
             RecCandidate.basic_details_form_submitted_at.label(
                 "basic_details_form_submitted_at"
             ),
+            RecCandidateAssessment.candidate_assessment_form_sent_at.label("candidate_assessment_form_sent_at"),
             RecCandidateAssessment.candidate_assessment_form_submitted_at.label("candidate_assessment_form_submitted_at"),
             RecCandidate.needs_hr_review.label("needs_hr_review"),
             RecOpening.opening_code.label("opening_code"),
@@ -4911,7 +5011,9 @@ async def list_candidates(
             basic_details_form_submitted_at=row.basic_details_form_submitted_at,
             caf_sent_at=row.basic_details_form_sent_at,
             caf_submitted_at=row.basic_details_form_submitted_at,
+            candidate_assessment_form_sent_at=row.candidate_assessment_form_sent_at,
             candidate_assessment_form_submitted_at=row.candidate_assessment_form_submitted_at,
+            assessment_sent_at=row.candidate_assessment_form_sent_at,
             assessment_submitted_at=row.candidate_assessment_form_submitted_at,
             needs_hr_review=bool(row.needs_hr_review),
             screening_result=row.screening_result,
@@ -5185,21 +5287,48 @@ async def list_candidate_communications(
     sprint_public_tokens = await _load_sprint_public_tokens(session, sprint_ids)
     current_caf_tokens: dict[int, str] = {}
     current_assessment_tokens: dict[int, str] = {}
+    candidate_allows_caf_links: dict[int, bool] = {}
+    candidate_allows_assessment_links: dict[int, bool] = {}
     if candidate_ids:
-        candidate_token_rows = (
+        candidate_rows = (
             await session.execute(
-                select(
-                    RecCandidate.candidate_id,
-                    RecCandidate.basic_details_form_token,
-                ).where(
+                select(RecCandidate).where(
                     RecCandidate.candidate_id.in_(list(candidate_ids))
                 )
             )
-        ).all()
-        for candidate_id_value, caf_token in candidate_token_rows:
-            cleaned = _strip_optional(caf_token)
-            if cleaned:
-                current_caf_tokens[int(candidate_id_value)] = cleaned
+        ).scalars().all()
+        opening_ids = {int(candidate_row.opening_id) for candidate_row in candidate_rows if candidate_row.opening_id is not None}
+        opening_rows = (
+            await session.execute(
+                select(RecOpening).where(RecOpening.opening_id.in_(list(opening_ids)))
+            )
+        ).scalars().all() if opening_ids else []
+        opening_policy_by_id = {
+            int(opening.opening_id): workflow_policy_for_opening(opening)
+            for opening in opening_rows
+        }
+        tokens_backfilled = False
+        token_backfill_at = now_ist_naive()
+        for candidate_row in candidate_rows:
+            candidate_id_value = int(candidate_row.candidate_id)
+            policy = opening_policy_by_id.get(
+                int(candidate_row.opening_id) if candidate_row.opening_id is not None else -1,
+                WorkflowPolicy(),
+            )
+            candidate_allows_caf_links[candidate_id_value] = bool(policy.requires_caf)
+            candidate_allows_assessment_links[candidate_id_value] = bool(policy.requires_candidate_assessment)
+            if not policy.requires_caf:
+                continue
+            sync_basic_details_form_fields(candidate_row)
+            cleaned = _strip_optional(get_basic_details_form_token(candidate_row))
+            if not cleaned:
+                cleaned = uuid4().hex
+                set_basic_details_form_token(candidate_row, cleaned)
+                candidate_row.updated_at = token_backfill_at
+                tokens_backfilled = True
+            current_caf_tokens[candidate_id_value] = cleaned
+        if tokens_backfilled:
+            await session.commit()
 
         assessment_token_rows = (
             await session.execute(
@@ -5212,6 +5341,8 @@ async def list_candidate_communications(
             )
         ).all()
         for candidate_id_value, assessment_token in assessment_token_rows:
+            if not candidate_allows_assessment_links.get(int(candidate_id_value), False):
+                continue
             cleaned = _strip_optional(assessment_token)
             if cleaned:
                 current_assessment_tokens[int(candidate_id_value)] = cleaned
@@ -5240,6 +5371,8 @@ async def list_candidate_communications(
                     sprint_public_tokens=sprint_public_tokens,
                     current_caf_token=current_caf_tokens.get(int(event.candidate_id)),
                     current_assessment_token=current_assessment_tokens.get(int(event.candidate_id)),
+                    allow_caf_links=candidate_allows_caf_links.get(int(event.candidate_id), False),
+                    allow_assessment_links=candidate_allows_assessment_links.get(int(event.candidate_id), False),
                 ),
                 created_at=event.created_at,
             )
@@ -5510,12 +5643,6 @@ async def get_candidate_basic_details_link(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
-    workflow_policy = await get_candidate_workflow_policy(session, candidate)
-    if not workflow_policy.requires_caf:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Basic details form is not applicable for this opening workflow.",
-        )
     now = now_ist_naive()
     refreshed = False
     sync_basic_details_form_fields(candidate)
@@ -5665,45 +5792,104 @@ async def resend_candidate_basic_details_link(
 @router.post("/basic-details-link/resend-expired")
 @router.post("/caf-link/resend-expired")
 async def resend_expired_basic_details_links(
+    payload: ExpiredBasicDetailsBulkResendIn | None = None,
     session: AsyncSession = Depends(deps.get_db_session),
     user: UserContext = Depends(require_superadmin()),
 ):
-    latest_stage_subq = (
-        select(RecCandidateStage.candidate_id, func.max(RecCandidateStage.stage_id).label("stage_id"))
-        .where(RecCandidateStage.stage_status == "pending")
-        .group_by(RecCandidateStage.candidate_id)
-        .subquery()
-    )
-    candidate_rows = (
-        await session.execute(
-            select(RecCandidate)
-            .join(latest_stage_subq, latest_stage_subq.c.candidate_id == RecCandidate.candidate_id)
-            .join(RecCandidateStage, RecCandidateStage.stage_id == latest_stage_subq.c.stage_id)
-            .where(
-                RecCandidateStage.stage_name.in_(["hr_screening", "caf"]),
-                RecCandidate.basic_details_form_sent_at.is_not(None),
-                RecCandidate.basic_details_form_submitted_at.is_(None),
-            )
-            .order_by(RecCandidate.basic_details_form_sent_at.asc(), RecCandidate.candidate_id.asc())
-        )
-    ).scalars().all()
-
     processed: list[dict[str, object]] = []
     attempted_count = 0
     sent_count = 0
     failed_count = 0
     skipped_count = 0
+    requested_ids = list(payload.candidate_ids) if payload and payload.candidate_ids else []
 
-    for candidate in candidate_rows:
-        if not _caf_expired_for_candidate(candidate):
-            continue
+    if requested_ids:
+        latest_stage_subq = (
+            select(RecCandidateStage.candidate_id, func.max(RecCandidateStage.stage_id).label("stage_id"))
+            .where(
+                RecCandidateStage.stage_status == "pending",
+                RecCandidateStage.candidate_id.in_(requested_ids),
+            )
+            .group_by(RecCandidateStage.candidate_id)
+            .subquery()
+        )
+        stage_rows = (
+            await session.execute(
+                select(RecCandidateStage.candidate_id, RecCandidateStage.stage_name).join(
+                    latest_stage_subq, latest_stage_subq.c.stage_id == RecCandidateStage.stage_id
+                )
+            )
+        ).all()
+        latest_stage_by_candidate = {int(candidate_id): _strip_optional(stage_name) for candidate_id, stage_name in stage_rows}
+        candidate_rows = (
+            await session.execute(select(RecCandidate).where(RecCandidate.candidate_id.in_(requested_ids)))
+        ).scalars().all()
+        candidate_by_id = {int(candidate.candidate_id): candidate for candidate in candidate_rows}
+        iterable_candidates: list[RecCandidate] = []
+
+        for candidate_id in requested_ids:
+            candidate = candidate_by_id.get(int(candidate_id))
+            if not candidate:
+                processed.append(
+                    {
+                        "candidate_id": candidate_id,
+                        "candidate_code": None,
+                        "candidate_name": "Candidate not found",
+                        "email": None,
+                        "status": "skipped",
+                        "attempted": False,
+                        "reason": "not_found",
+                        "error": None,
+                    }
+                )
+                skipped_count += 1
+                continue
+            latest_stage = latest_stage_by_candidate.get(int(candidate.candidate_id))
+            if latest_stage not in {"hr_screening", "caf"}:
+                processed.append(
+                    {
+                        "candidate_id": candidate.candidate_id,
+                        "candidate_code": candidate.candidate_code,
+                        "candidate_name": candidate.full_name,
+                        "email": candidate.email,
+                        "status": "skipped",
+                        "attempted": False,
+                        "reason": "stage_not_eligible",
+                        "error": None,
+                    }
+                )
+                skipped_count += 1
+                continue
+            iterable_candidates.append(candidate)
+    else:
+        latest_stage_subq = (
+            select(RecCandidateStage.candidate_id, func.max(RecCandidateStage.stage_id).label("stage_id"))
+            .where(RecCandidateStage.stage_status == "pending")
+            .group_by(RecCandidateStage.candidate_id)
+            .subquery()
+        )
+        iterable_candidates = (
+            await session.execute(
+                select(RecCandidate)
+                .join(latest_stage_subq, latest_stage_subq.c.candidate_id == RecCandidate.candidate_id)
+                .join(RecCandidateStage, RecCandidateStage.stage_id == latest_stage_subq.c.stage_id)
+                .where(
+                    RecCandidateStage.stage_name.in_(["hr_screening", "caf"]),
+                    RecCandidate.basic_details_form_sent_at.is_not(None),
+                    RecCandidate.basic_details_form_submitted_at.is_(None),
+                )
+                .order_by(RecCandidate.basic_details_form_sent_at.asc(), RecCandidate.candidate_id.asc())
+            )
+        ).scalars().all()
+
+    for candidate in iterable_candidates:
         result = await _send_basic_details_link_email(
             session,
             candidate=candidate,
             user=user,
             force_resend=True,
             require_expired=True,
-            trigger_source="superadmin_bulk_expired_resend",
+            trigger_source="superadmin_bulk_expired_resend_selected" if requested_ids else "superadmin_bulk_expired_resend",
         )
         attempted = bool(result.get("attempted"))
         status_value = _strip_optional(str(result.get("status") or "")) or "unknown"
@@ -5732,6 +5918,7 @@ async def resend_expired_basic_details_links(
 
     await session.commit()
     return {
+        "requested_count": len(requested_ids) if requested_ids else None,
         "eligible_count": len(processed),
         "attempted_count": attempted_count,
         "sent_count": sent_count,
@@ -5739,6 +5926,156 @@ async def resend_expired_basic_details_links(
         "skipped_count": skipped_count,
         "items": processed,
         "expiry_window": _basic_details_form_expiry_label(),
+    }
+
+
+@router.post("/assessment-link/resend-expired")
+@router.post("/candidate-assessment-form-link/resend-expired")
+async def resend_expired_candidate_assessment_links(
+    payload: ExpiredBasicDetailsBulkResendIn | None = None,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    processed: list[dict[str, object]] = []
+    attempted_count = 0
+    sent_count = 0
+    failed_count = 0
+    skipped_count = 0
+    requested_ids = list(payload.candidate_ids) if payload and payload.candidate_ids else []
+
+    if requested_ids:
+        latest_stage_subq = (
+            select(RecCandidateStage.candidate_id, func.max(RecCandidateStage.stage_id).label("stage_id"))
+            .where(
+                RecCandidateStage.stage_status == "pending",
+                RecCandidateStage.candidate_id.in_(requested_ids),
+            )
+            .group_by(RecCandidateStage.candidate_id)
+            .subquery()
+        )
+        stage_rows = (
+            await session.execute(
+                select(RecCandidateStage.candidate_id, RecCandidateStage.stage_name).join(
+                    latest_stage_subq, latest_stage_subq.c.stage_id == RecCandidateStage.stage_id
+                )
+            )
+        ).all()
+        latest_stage_by_candidate = {
+            int(candidate_id): _strip_optional(stage_name) for candidate_id, stage_name in stage_rows
+        }
+        candidate_rows = (
+            await session.execute(select(RecCandidate).where(RecCandidate.candidate_id.in_(requested_ids)))
+        ).scalars().all()
+        candidate_by_id = {int(candidate.candidate_id): candidate for candidate in candidate_rows}
+        iterable_candidates: list[RecCandidate] = []
+
+        for candidate_id in requested_ids:
+            candidate = candidate_by_id.get(int(candidate_id))
+            if not candidate:
+                processed.append(
+                    {
+                        "candidate_id": candidate_id,
+                        "candidate_code": None,
+                        "candidate_name": "Candidate not found",
+                        "email": None,
+                        "status": "skipped",
+                        "attempted": False,
+                        "reason": "not_found",
+                        "error": None,
+                    }
+                )
+                skipped_count += 1
+                continue
+            latest_stage = latest_stage_by_candidate.get(int(candidate.candidate_id))
+            if latest_stage != "l2_shortlist":
+                processed.append(
+                    {
+                        "candidate_id": candidate.candidate_id,
+                        "candidate_code": candidate.candidate_code,
+                        "candidate_name": candidate.full_name,
+                        "email": candidate.email,
+                        "status": "skipped",
+                        "attempted": False,
+                        "reason": "stage_not_eligible",
+                        "error": None,
+                    }
+                )
+                skipped_count += 1
+                continue
+            iterable_candidates.append(candidate)
+    else:
+        latest_stage_subq = (
+            select(RecCandidateStage.candidate_id, func.max(RecCandidateStage.stage_id).label("stage_id"))
+            .where(RecCandidateStage.stage_status == "pending")
+            .group_by(RecCandidateStage.candidate_id)
+            .subquery()
+        )
+        iterable_candidates = (
+            await session.execute(
+                select(RecCandidate)
+                .join(RecCandidateAssessment, RecCandidateAssessment.candidate_id == RecCandidate.candidate_id)
+                .join(latest_stage_subq, latest_stage_subq.c.candidate_id == RecCandidate.candidate_id)
+                .join(RecCandidateStage, RecCandidateStage.stage_id == latest_stage_subq.c.stage_id)
+                .where(
+                    RecCandidateStage.stage_name == "l2_shortlist",
+                    RecCandidateAssessment.candidate_assessment_form_sent_at.is_not(None),
+                    RecCandidateAssessment.candidate_assessment_form_submitted_at.is_(None),
+                )
+                .order_by(
+                    RecCandidateAssessment.candidate_assessment_form_sent_at.asc(),
+                    RecCandidate.candidate_id.asc(),
+                )
+            )
+        ).scalars().all()
+
+    for candidate in iterable_candidates:
+        result = await _send_assessment_link_for_l2_shortlist(
+            session,
+            candidate=candidate,
+            user=user,
+            force_resend=True,
+            require_expired=True,
+            trigger_source=(
+                "superadmin_bulk_expired_assessment_resend_selected"
+                if requested_ids
+                else "superadmin_bulk_expired_assessment_resend"
+            ),
+        )
+        attempted = bool(result.get("attempted"))
+        status_value = _strip_optional(str(result.get("status") or "")) or "unknown"
+        reason = _strip_optional(str(result.get("reason") or ""))
+        error = _strip_optional(str(result.get("error") or ""))
+        processed.append(
+            {
+                "candidate_id": candidate.candidate_id,
+                "candidate_code": candidate.candidate_code,
+                "candidate_name": candidate.full_name,
+                "email": candidate.email,
+                "status": status_value,
+                "attempted": attempted,
+                "reason": reason,
+                "error": error,
+            }
+        )
+        if attempted:
+            attempted_count += 1
+        else:
+            skipped_count += 1
+        if status_value in {"sent", "resent"}:
+            sent_count += 1
+        elif status_value == "failed":
+            failed_count += 1
+
+    await session.commit()
+    return {
+        "requested_count": len(requested_ids) if requested_ids else None,
+        "eligible_count": len(processed),
+        "attempted_count": attempted_count,
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "skipped_count": skipped_count,
+        "items": processed,
+        "expiry_window": _candidate_assessment_expiry_label(),
     }
 
 

@@ -29,6 +29,7 @@
     "Droid Sans",
     "Helvetica Neue",
     sans-serif;
+  --font-primary: var(--font-stack-fallback);
 
   --page-width: 1680px;
   --page-gutter: clamp(1rem, 1.1vw, 2.2rem);

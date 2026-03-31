@@ -474,6 +474,7 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
           <Field label="Training 1 name">
             <input
               name="training1_name"
+              maxLength={255}
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
             />
           </Field>
@@ -492,6 +493,7 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
           <Field label="Training 2 name">
             <input
               name="training2_name"
+              maxLength={255}
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
             />
           </Field>

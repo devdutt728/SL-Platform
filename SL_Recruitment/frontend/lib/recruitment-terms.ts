@@ -7,8 +7,9 @@ export function basicDetailsStatusLabel(options: {
   sentAt?: string | null;
   submittedAt?: string | null;
   unsentLabel?: string;
+  notRequiredLabel?: string;
 }) {
-  if (!options.required) return `${BASIC_DETAILS_FORM_LABEL} not required`;
+  if (!options.required) return options.notRequiredLabel || `${BASIC_DETAILS_FORM_LABEL} not required`;
   if (options.submittedAt) return `${BASIC_DETAILS_FORM_LABEL} submitted`;
   if (options.sentAt) return `${BASIC_DETAILS_FORM_LABEL} pending`;
   return options.unsentLabel || `${BASIC_DETAILS_FORM_LABEL} not shared`;

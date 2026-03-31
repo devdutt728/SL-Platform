@@ -1,6 +1,6 @@
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const publicPortalPath =
-  process.env.NEXT_PUBLIC_PUBLIC_PORTAL_PATH || process.env.NEXT_PUBLIC_PUBLIC_PORTAL_URL || "/";
+  process.env.NEXT_PUBLIC_PUBLIC_PORTAL_PATH || process.env.NEXT_PUBLIC_PUBLIC_PORTAL_URL || "/apply";
 
 export function loginUrl(): string {
   return `${basePath}/login`;

@@ -10,6 +10,7 @@ class OpeningCreate(BaseModel):
     opening_code: Optional[str] = None
     title: str
     description: Optional[str] = None
+    jd_file_name: Optional[str] = None
     location_city: Optional[str] = None
     location_country: Optional[str] = None
     requested_by_person_id_platform: Optional[str] = None
@@ -25,12 +26,21 @@ class OpeningCreate(BaseModel):
         v = v.strip()
         return v or None
 
+    @field_validator("jd_file_name")
+    @classmethod
+    def _strip_jd_file_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
 
 class OpeningUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: Optional[str] = None
     description: Optional[str] = None
+    jd_file_name: Optional[str] = None
     location_city: Optional[str] = None
     location_country: Optional[str] = None
     requested_by_person_id_platform: Optional[str] = None
@@ -38,6 +48,14 @@ class OpeningUpdate(BaseModel):
     headcount_required: Optional[int] = None
     headcount_filled: Optional[int] = None
     is_active: Optional[bool] = None
+
+    @field_validator("jd_file_name")
+    @classmethod
+    def _strip_jd_file_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
 
 
 class OpeningListItem(BaseModel):
@@ -57,6 +75,10 @@ class OpeningListItem(BaseModel):
     requested_by_person_code: Optional[str] = None
     requested_by_email: Optional[str] = None
     requested_by_phone: Optional[str] = None
+    jd_file_name: Optional[str] = None
+    resolved_jd_file_name: Optional[str] = None
+    jd_display_name: Optional[str] = None
+    jd_available: Optional[bool] = None
     headcount_required: Optional[int] = None
     headcount_filled: Optional[int] = None
 

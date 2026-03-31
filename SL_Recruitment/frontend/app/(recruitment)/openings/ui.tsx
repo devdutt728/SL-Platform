@@ -45,9 +45,11 @@ function isGlRoleToken(value: unknown): boolean {
 }
 
 export function OpeningsClient({ initialOpenings, initialMe }: Props) {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
   const [openings, setOpenings] = useState<OpeningListItem[]>(initialOpenings);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [jdLibrary, setJdLibrary] = useState<string[]>([]);
   const [requestedByTooltip, setRequestedByTooltip] = useState<{ opening: OpeningListItem; rect: DOMRect } | null>(null);
   const [requestedByTooltipPos, setRequestedByTooltipPos] = useState<{ left: number; top: number } | null>(null);
   const requestedByTooltipRef = useRef<HTMLDivElement | null>(null);
@@ -58,6 +60,7 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
   const [requestedBySelected, setRequestedBySelected] = useState<PlatformPersonSuggestion | null>(null);
   const [requestedByOpen, setRequestedByOpen] = useState(false);
   const [updatingOpening, setUpdatingOpening] = useState<OpeningDetail | null>(null);
+  const [jdFileName, setJdFileName] = useState("");
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -162,8 +165,20 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
     }
   };
 
+  const refreshJdLibrary = async () => {
+    try {
+      const res = await fetchDeduped("/api/rec/openings/jd-library", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as string[];
+      setJdLibrary(data);
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     void refreshOpenings();
+    void refreshJdLibrary();
   }, []);
 
   useEffect(() => {
@@ -259,17 +274,22 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
     setCreating(true);
     setError(null);
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       title: title.trim(),
       description: description.trim() || null,
+      jd_file_name: jdFileName || null,
       location_city: city.trim() || null,
       location_country: country.trim() || null,
-      requested_by_person_id_platform: requestedBySelected?.person_id ?? null,
       headcount_required: headcount || 1,
-      is_active: true,
     };
 
     const isUpdate = !!updatingOpening;
+    if (!isUpdate) {
+      payload.requested_by_person_id_platform = requestedBySelected?.person_id ?? null;
+      payload.is_active = true;
+    } else if (requestedBySelected?.person_id) {
+      payload.requested_by_person_id_platform = requestedBySelected.person_id;
+    }
 
     const res = await fetch(isUpdate ? `/api/rec/openings/${updatingOpening?.opening_id}` : "/api/rec/openings", {
       method: isUpdate ? "PATCH" : "POST",
@@ -296,6 +316,7 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
     setCity("Delhi");
     setCountry("India");
     setHeadcount(1);
+    setJdFileName("");
     setRequestedBySelected(null);
     setRequestedByQuery("");
     setRequestedByOptions([]);
@@ -336,7 +357,7 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
   }
 
   async function copyApplyLink(openingCode: string) {
-    const url = `${window.location.origin}/apply/${encodeURIComponent(openingCode)}`;
+    const url = `${window.location.origin}${basePath}/apply/${encodeURIComponent(openingCode)}`;
     try {
       await navigator.clipboard.writeText(url);
       setError("Copied apply link.");
@@ -344,6 +365,15 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
     } catch {
       setError(url);
     }
+  }
+
+  function jobDetailUrl(openingCode: string) {
+    return `${basePath}/apply/${encodeURIComponent(openingCode)}`;
+  }
+
+  function jobJdUrl(openingCode: string, download = false) {
+    const base = `${basePath}/api/apply/${encodeURIComponent(openingCode)}/jd`;
+    return download ? `${base}?download=1` : base;
   }
 
   async function editOpening(openingId: number) {
@@ -359,9 +389,13 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
       setUpdatingOpening(data);
       setTitle(data.title || "");
       setDescription(data.description || "");
+      setJdFileName(data.jd_file_name || data.resolved_jd_file_name || "");
       setCity(data.location_city || "Delhi");
       setCountry(data.location_country || "India");
       setHeadcount(data.headcount_required ?? 1);
+      setRequestedBySelected(null);
+      setRequestedByQuery("");
+      setRequestedByOptions([]);
     } catch {
       setError("Could not load opening for edit.");
     }
@@ -473,6 +507,30 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
               placeholder="1"
             />
           </label>
+          <label className="space-y-1 md:col-span-2">
+            <span className="text-xs text-slate-600">JD PDF</span>
+            <select
+              value={jdFileName}
+              onChange={(e) => setJdFileName(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-transparent px-3 py-2"
+            >
+              <option value="">Auto-match from role title</option>
+              {jdLibrary.map((fileName) => (
+                <option key={fileName} value={fileName}>
+                  {fileName}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-slate-500">
+              Keep this on auto when the JD file name already tracks the role title. Pick a file explicitly when similar titles could match the wrong PDF.
+            </p>
+            {updatingOpening?.resolved_jd_file_name ? (
+              <p className="text-xs text-slate-500">
+                Current resolution:{" "}
+                <span className="font-semibold text-slate-700">{updatingOpening.jd_display_name || updatingOpening.resolved_jd_file_name}</span>
+              </p>
+            ) : null}
+          </label>
           <div className="space-y-1 md:col-span-2">
             <span className="text-xs text-slate-600">Requested by</span>
             <div className="relative">
@@ -532,13 +590,14 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
       <div className="relative overflow-x-auto overflow-y-visible rounded-2xl border border-slate-200 bg-white/60">
         <table className="min-w-[980px] w-full table-fixed border-collapse">
           <colgroup>
-            <col className="w-[13%]" />
-            <col className="w-[21%]" />
-            <col className="w-[12%]" />
+            <col className="w-[11%]" />
+            <col className="w-[18%]" />
+            <col className="w-[10%]" />
             <col className="w-[15%]" />
             <col className="w-[10%]" />
+            <col className="w-[10%]" />
             <col className="w-[8%]" />
-            <col className="w-[21%]" />
+            <col className="w-[18%]" />
           </colgroup>
           <thead className="bg-white/30">
             <tr className="text-xs uppercase tracking-wide text-slate-500">
@@ -546,6 +605,7 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
               <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">Title</th>
               <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">City</th>
               <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">Requested by</th>
+              <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">JD</th>
               <th className="whitespace-nowrap border-b border-slate-200 px-2 py-2 text-left font-semibold">Status</th>
               <th className="whitespace-nowrap border-b border-slate-200 px-2 py-2 text-left font-semibold">Filled / Req</th>
               <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2 text-center font-semibold">Actions</th>
@@ -575,6 +635,18 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
                     </span>
                   </div>
                 </td>
+                <td className="border-b border-slate-200 px-3 py-2 text-left text-slate-600">
+                  {opening.jd_available ? (
+                    <div className="space-y-1">
+                      <div className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">Ready</div>
+                      <div className="truncate text-xs" title={opening.jd_display_name || opening.resolved_jd_file_name || ""}>
+                        {opening.jd_display_name || opening.resolved_jd_file_name || "PDF"}
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">Not linked</span>
+                  )}
+                </td>
                 <td className="border-b border-slate-200 px-2 py-2 text-left">
                   <span
                     className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -600,6 +672,28 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
                       >
                         Copy
                       </button>
+                    ) : null}
+                    {opening.opening_code ? (
+                      <a
+                        className="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 text-[11px] font-semibold leading-5 text-slate-700 hover:bg-white/80"
+                        href={jobDetailUrl(opening.opening_code)}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open public role page"
+                      >
+                        Role
+                      </a>
+                    ) : null}
+                    {opening.opening_code && opening.jd_available ? (
+                      <a
+                        className="rounded-full border border-slate-200 bg-white/60 px-2 py-0.5 text-[11px] font-semibold leading-5 text-slate-700 hover:bg-white/80"
+                        href={jobJdUrl(opening.opening_code)}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open JD PDF"
+                      >
+                        JD
+                      </a>
                     ) : null}
                     {canEditOpenings ? (
                       <button
@@ -643,7 +737,7 @@ export function OpeningsClient({ initialOpenings, initialMe }: Props) {
             ))}
             {openings.length === 0 && (
               <tr>
-                <td className="px-3 py-10 text-center text-sm text-slate-500" colSpan={7}>
+                <td className="px-3 py-10 text-center text-sm text-slate-500" colSpan={8}>
                   No openings yet.
                 </td>
               </tr>

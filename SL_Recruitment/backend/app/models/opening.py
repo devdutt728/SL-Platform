@@ -14,6 +14,7 @@ class RecOpening(Base):
     opening_code: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    jd_file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     location_city: Mapped[str | None] = mapped_column(String(100), nullable=True)
     location_country: Mapped[str | None] = mapped_column(String(100), nullable=True)
 

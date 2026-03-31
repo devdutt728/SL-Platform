@@ -39,6 +39,7 @@ function firstName(me: Me) {
 
 export function Topbar({ initialMe }: { initialMe: Me | null }) {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const publicPortalHref = process.env.NEXT_PUBLIC_PUBLIC_PORTAL_PATH || process.env.NEXT_PUBLIC_PUBLIC_PORTAL_URL || "/apply";
   const pathname = usePathname();
   const me = initialMe;
   const [interviewNotifications, setInterviewNotifications] = useState<InterviewNotificationCounts | null>(null);
@@ -149,7 +150,7 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
               Apps
             </summary>
             <div className="absolute right-0 mt-2 w-44 rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white/95 p-2 text-xs font-semibold text-[var(--dim-grey)] shadow-lg">
-              <a href="/" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
+              <a href={publicPortalHref} className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
                 Public portal
               </a>
               <a href="/employee" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">

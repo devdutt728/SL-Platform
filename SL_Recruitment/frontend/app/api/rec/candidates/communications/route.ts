@@ -21,11 +21,16 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const incoming = new URL(request.url);
   const action = incoming.searchParams.get("action") || "";
-  if (action !== "resend_expired_basic_details_links") {
+  if (action !== "resend_expired_basic_details_links" && action !== "resend_expired_caf_links") {
     return NextResponse.json({ detail: "Unsupported communications action." }, { status: 400 });
   }
 
-  const res = await fetch(backendUrl("/rec/candidates/basic-details-link/resend-expired"), {
+  const backendPath =
+    action === "resend_expired_caf_links"
+      ? "/rec/candidates/candidate-assessment-form-link/resend-expired"
+      : "/rec/candidates/basic-details-link/resend-expired";
+
+  const res = await fetch(backendUrl(backendPath), {
     method: "POST",
     headers: { ...(await authHeaderFromCookie()) },
   });

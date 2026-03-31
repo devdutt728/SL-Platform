@@ -265,7 +265,12 @@ export function Candidate360Client({
       : null;
 
   const cafState = useMemo(() => {
-    if (isInternWorkflow) return { label: basicDetailsStatusLabel({ required: false }), tone: chipTone("blue") };
+    if (isInternWorkflow) {
+      return {
+        label: basicDetailsStatusLabel({ required: false, notRequiredLabel: "Basic details already available" }),
+        tone: chipTone("blue"),
+      };
+    }
     const generated = !!cafSentAt;
     const submitted = !!cafSubmittedAt;
     if (submitted) return { label: basicDetailsStatusLabel({ required: true, sentAt: cafSentAt, submittedAt: cafSubmittedAt }), tone: chipTone("green") };

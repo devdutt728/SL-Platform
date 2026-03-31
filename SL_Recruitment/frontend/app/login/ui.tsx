@@ -16,13 +16,13 @@ export function LoginPanel({ clientId, sessionExpired }: { clientId: string; ses
 
   return (
     <div className="section-card w-full max-w-md">
-      <div className="mx-auto mb-4 h-12 w-48">
+      <Link href="/" aria-label="Studio Lotus home" className="mx-auto mb-4 block h-12 w-48">
         <img
           src={logoSrc}
           alt="Studio Lotus"
           className="h-full w-full object-contain"
         />
-      </div>
+      </Link>
       <h1 className="text-center text-2xl font-semibold">Recruitment OS</h1>
       <p className="mt-2 text-center text-sm text-[var(--text-secondary)]">
         Sign in with your Studio Lotus Google account.

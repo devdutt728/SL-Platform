@@ -3,7 +3,7 @@ import { OpeningApplyPrefill } from "@/lib/types";
 import { ApplyForm } from "./ui";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ShieldCheck } from "lucide-react";
 
 async function fetchOpening(openingCode: string) {
   const url = backendUrl(`/apply/${openingCode}`);
@@ -40,7 +40,7 @@ function TopBar({
     <header className="fixed inset-x-0 top-0 z-30 border-b border-[var(--accessible-components--dark-grey)] bg-white/94 backdrop-blur-xl">
       <div className={`${shellClass} flex h-[68px] items-center justify-between gap-4`}>
         <div className="flex items-center gap-3">
-          <div className="rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-1.5 shadow-[var(--shadow-soft)]">
+          <Link href="/" aria-label="Studio Lotus home" className="rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-1.5 shadow-[var(--shadow-soft)]">
             <div className="relative h-7 w-28">
               <Image
                 src={logoSrc}
@@ -52,7 +52,7 @@ function TopBar({
                 unoptimized
               />
             </div>
-          </div>
+          </Link>
           <div className="hidden sm:block">
             <p className="text-[10px] uppercase tracking-[0.3em] text-[rgba(93,85,82,0.55)]">Application Grid</p>
             <p className="text-[13px] font-semibold text-[var(--dim-grey)]">{title}</p>
@@ -87,10 +87,11 @@ function TopBar({
 export default async function ApplyPage({ params }: { params: Promise<{ opening_code: string }> }) {
   const { opening_code } = await params;
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
-  const backHref = "/apply";
   const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
   const opening = await fetchOpening(opening_code);
-  const shellClass = "mx-auto w-full max-w-[1320px] px-4 sm:px-6 lg:px-7";
+  const backHref = "/apply";
+  const shellClass = "mx-auto w-full max-w-[1680px] px-4 sm:px-6 lg:px-8";
+  const jdBaseHref = opening ? `${basePath}/api/apply/${encodeURIComponent(opening.opening_code)}/jd` : null;
 
   if (!opening) {
     return (
@@ -127,89 +128,69 @@ export default async function ApplyPage({ params }: { params: Promise<{ opening_
         backHref={backHref}
       />
 
-      <div className={`${shellClass} relative z-10 pb-12 pt-24 text-[13px]`}>
-        <div className="grid items-start gap-5 xl:grid-cols-[350px_minmax(0,1fr)]">
-          <section className="hidden xl:block">
-            <div className="sticky top-[88px] space-y-4 rounded-[28px] border border-[var(--accessible-components--dark-grey)] bg-white p-5 shadow-[var(--shadow-soft)]">
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Role Overview</p>
-                <p className="mt-2 text-lg font-semibold text-[var(--dim-grey)]">{opening.opening_title || "Job opening"}</p>
-                <p className="mt-2 text-[13px] text-[var(--dim-grey)]">
-                  Apply with code <span className="font-semibold text-[var(--dim-grey)]">{opening.opening_code}</span>
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white p-4">
-                <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">
-                  <Sparkles className="h-4 w-4 text-[var(--brand-color)]" />
-                  Intake Flow
-                </div>
-                <div className="mt-3 space-y-2.5">
-                  <div className="rounded-2xl border border-[rgba(231,64,17,0.3)] bg-[linear-gradient(90deg,rgba(231,64,17,0.1),rgba(255,255,255,1))] p-3">
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[var(--brand-color)]/15 text-[11px] font-semibold text-[var(--brand-color)]">
-                        01
-                      </span>
-                      <div>
-                        <p className="text-[12px] font-semibold text-[var(--dim-grey)]">Basics + documents</p>
-                        <p className="text-[11px] text-[var(--dim-grey)]">Share essentials and files</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-[rgba(19,120,209,0.35)] bg-[linear-gradient(90deg,rgba(19,120,209,0.1),rgba(255,255,255,1))] p-3">
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[var(--accessible-components--dodger-blue)]/14 text-[11px] font-semibold text-[var(--accessible-components--dodger-blue)]">
-                        02
-                      </span>
-                      <div>
-                        <p className="text-[12px] font-semibold text-[var(--dim-grey)]">Quick screening (CAF)</p>
-                        <p className="text-[11px] text-[var(--dim-grey)]">Short form after review</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white p-3">
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[rgba(93,85,82,0.12)] text-[11px] font-semibold text-[var(--dim-grey)]">
-                        03
-                      </span>
-                      <div>
-                        <p className="text-[12px] font-semibold text-[var(--dim-grey)]">Submit once</p>
-                        <p className="text-[11px] text-[var(--dim-grey)]">Single profile for the full pipeline</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {opening.opening_description ? (
-                <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white p-4">
-                  <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Role Description</p>
-                  <p className="mt-3 whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--dim-grey)]">
-                    {opening.opening_description}
-                  </p>
-                </div>
-              ) : null}
-
-              <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white p-4">
-                <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Privacy</p>
-                <p className="mt-2 text-[12px] text-[var(--dim-grey)]">
-                  We never share your details publicly. Submissions are reviewed only by the hiring team.
-                </p>
+      <div className={`${shellClass} relative z-10 pb-4 pt-24 text-[13px] xl:h-[calc(100vh-84px)] xl:pb-6`}>
+        <div className="xl:grid xl:h-full xl:grid-cols-[390px_minmax(0,1fr)] xl:gap-5 2xl:grid-cols-[400px_minmax(0,1fr)]">
+          <section className="flex min-h-0 flex-col">
+            <div className="mb-4 rounded-[26px] border border-[var(--accessible-components--dark-grey)] bg-white/95 p-4 shadow-[var(--shadow-soft)] backdrop-blur xl:hidden">
+              <p className="text-[10px] uppercase tracking-[0.34em] text-[var(--light-grey)]">Candidate Intake Console</p>
+              <p className="mt-2 text-[22px] font-semibold leading-tight text-[var(--dim-grey)]">
+                {opening.opening_title || "Job opening"}
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+                <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-[rgba(19,120,209,0.08)] px-3 py-1 font-semibold text-[var(--accessible-components--dodger-blue)]">
+                  Code: {opening.opening_code}
+                </span>
+                <span className="rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-1 font-medium text-[var(--dim-grey)]">
+                  {[opening.location_city, opening.location_country].filter(Boolean).join(", ") || "India"}
+                </span>
               </div>
             </div>
+
+            <ApplyForm openingCode={opening.opening_code} compact />
           </section>
 
-          <section className="min-w-0 xl:max-w-[910px] xl:justify-self-end">
-            <div className="xl:hidden">
-              <div className="mb-4 rounded-[26px] border border-[var(--accessible-components--dark-grey)] bg-white p-5 shadow-[var(--shadow-soft)]">
-                <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Role Overview</p>
-                <p className="mt-2 text-base font-semibold text-[var(--dim-grey)]">{opening.opening_title || "Job opening"}</p>
-                <p className="mt-2 text-[12px] text-[var(--dim-grey)]">
-                  Apply with code <span className="font-semibold text-[var(--dim-grey)]">{opening.opening_code}</span>
+          <section className="mt-5 min-w-0 xl:mt-0 xl:min-h-0">
+            {opening.jd_available ? (
+              <div className="flex h-full min-h-[520px] flex-col overflow-hidden rounded-[30px] border border-[var(--accessible-components--dark-grey)] bg-white shadow-[var(--shadow-soft)]">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--accessible-components--dark-grey)] px-5 py-4 sm:px-6">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">JD Preview</p>
+                    <p className="mt-1 text-[12px] text-[var(--dim-grey)]">
+                      {opening.opening_title || "Job opening"} · {opening.jd_display_name || "PDF"} with browser zoom, print, and save controls.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <a
+                      href={jdBaseHref || "#"}
+                      target="_blank"
+                      rel="noopener"
+                      className="inline-flex items-center rounded-full border border-[var(--accessible-components--dark-grey)] bg-white px-4 py-2 text-[11px] font-semibold text-[var(--dim-grey)] transition hover:bg-[var(--surface-card)]"
+                    >
+                      Open in tab
+                    </a>
+                    <a
+                      href={jdBaseHref ? `${jdBaseHref}?download=1` : "#"}
+                      className="inline-flex items-center rounded-full bg-[var(--dim-grey)] px-4 py-2 text-[11px] font-semibold text-white transition hover:opacity-90"
+                    >
+                      Download PDF
+                    </a>
+                  </div>
+                </div>
+                <iframe
+                  src={jdBaseHref || undefined}
+                  title={`${opening.opening_title || "Job opening"} job description`}
+                  className="h-[66vh] min-h-[520px] w-full bg-white xl:h-auto xl:min-h-0 xl:flex-1"
+                />
+              </div>
+            ) : (
+              <div className="rounded-[30px] border border-[var(--accessible-components--dark-grey)] bg-white p-6 shadow-[var(--shadow-soft)] xl:flex xl:h-full xl:flex-col xl:justify-center">
+                <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">JD Preview</p>
+                <p className="mt-2 text-[16px] font-semibold text-[var(--dim-grey)]">JD preview is not linked for this opening yet</p>
+                <p className="mt-2 max-w-3xl text-[13px] leading-relaxed text-[var(--dim-grey)]">
+                  You can still complete the application from the compact intake console on the left.
                 </p>
               </div>
-            </div>
-            <ApplyForm openingCode={opening.opening_code} />
+            )}
           </section>
         </div>
       </div>

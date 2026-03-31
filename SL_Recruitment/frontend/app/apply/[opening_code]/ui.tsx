@@ -20,7 +20,7 @@ const APPLY_STEPS = [
   { id: 3, label: "Additional" },
 ] as const;
 
-export function ApplyForm({ openingCode }: { openingCode: string }) {
+export function ApplyForm({ openingCode, compact = false }: { openingCode: string; compact?: boolean }) {
   const { pushToast } = useToast();
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const runtimeBasePath =
@@ -184,7 +184,7 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
 
   if (submitted) {
     return (
-      <div className="rounded-[28px] border border-[var(--accessible-components--dark-grey)] bg-white p-6 shadow-[var(--shadow-soft)]">
+      <div className="rounded-[28px] border border-[var(--accessible-components--dark-grey)] bg-white p-6 shadow-[var(--shadow-soft)] xl:h-full">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[rgba(231,64,17,0.12)] text-[var(--brand-color)]">
             <ShieldCheck className="h-5 w-5" />
@@ -217,7 +217,9 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
 
   return (
     <form
-      className="overflow-hidden rounded-[30px] border border-[var(--accessible-components--dark-grey)] bg-white shadow-[var(--shadow-soft)]"
+      className={`overflow-hidden rounded-[30px] border border-[var(--accessible-components--dark-grey)] bg-white shadow-[var(--shadow-soft)] ${
+        compact ? "xl:flex xl:h-full xl:min-h-0 xl:flex-col" : ""
+      }`}
       onSubmit={(e) => {
         e.preventDefault();
         void onSubmit(new FormData(e.currentTarget));
@@ -235,7 +237,11 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
         setDraftField(target.name, value);
       }}
     >
-      <div className="border-b border-[var(--accessible-components--dark-grey)] bg-[rgba(19,120,209,0.05)] px-5 py-4 sm:px-6 sm:py-5">
+      <div
+        className={`border-b border-[var(--accessible-components--dark-grey)] bg-[rgba(19,120,209,0.05)] ${
+          compact ? "px-4 py-3 sm:px-4 sm:py-3 xl:px-4 xl:py-3.5" : "px-5 py-4 sm:px-6 sm:py-5"
+        }`}
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-[180px]">
             <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Apply</p>
@@ -276,7 +282,11 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
         </div>
       </div>
 
-      <div className="space-y-4 p-4 sm:p-5 lg:p-6">
+      <div
+        className={`space-y-3 p-4 sm:p-5 ${
+          compact ? "xl:flex-1 xl:min-h-0 xl:overflow-hidden xl:p-4" : "lg:p-6"
+        }`}
+      >
         <div className={step === 0 ? "" : "hidden"}>
         <Group index="01" title="Basics" subtitle="Identity and professional details" className="motion-fade-up">
           <div className="grid gap-3 md:grid-cols-2">
@@ -430,14 +440,20 @@ export function ApplyForm({ openingCode }: { openingCode: string }) {
         </div>
       </div>
 
-      <div className="border-t border-[var(--accessible-components--dark-grey)] bg-white p-4 sm:px-5">
+      <div
+        className={`border-t border-[var(--accessible-components--dark-grey)] bg-white ${
+          compact ? "p-3 sm:px-4 xl:px-4 xl:py-3" : "p-4 sm:px-5"
+        }`}
+      >
         {error ? (
           <div className="mb-3 rounded-xl border border-[rgba(231,64,17,0.35)] bg-[rgba(231,64,17,0.1)] px-3 py-2 text-[12px] text-[var(--brand-color)]">
             {error}
           </div>
         ) : null}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-[11px] text-[var(--dim-grey)]">Draft auto-saves in this browser for this opening.</p>
+          <p className="text-[11px] text-[var(--dim-grey)]">
+            {compact ? "Draft auto-saves in this browser." : "Draft auto-saves in this browser for this opening."}
+          </p>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"

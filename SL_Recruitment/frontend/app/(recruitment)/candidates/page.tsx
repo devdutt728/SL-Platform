@@ -4,6 +4,7 @@ import { internalUrl } from "@/lib/internal";
 import { OpeningListItem } from "@/lib/types";
 import { CandidatesClient } from "./CandidatesClient";
 import { getAuthMe } from "@/lib/auth-me";
+import { fetchJsonOr } from "@/lib/server-json";
 
 function normalizeRoleToken(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -19,27 +20,21 @@ function isHrRoleToken(value: string): boolean {
 async function fetchCandidates() {
   const url = new URL(await internalUrl("/api/rec/candidates"));
   const cookieValue = await cookieHeader();
-  const res = await fetch(url.toString(), {
-    cache: "no-store",
-    headers: cookieValue ? { cookie: cookieValue } : undefined,
+  return fetchJsonOr<CandidateListItem[]>(url.toString(), {
+    fallback: [],
+    cookie: cookieValue,
+    label: "candidates.list",
   });
-  if (!res.ok) {
-    console.error("Failed to load candidates", res.status, await res.text());
-    return [] as CandidateListItem[];
-  }
-  return (await res.json()) as CandidateListItem[];
 }
 
 async function fetchOpenings() {
   const url = await internalUrl("/api/rec/openings");
   const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return [] as OpeningListItem[];
-  try {
-    return (await res.json()) as OpeningListItem[];
-  } catch {
-    return [] as OpeningListItem[];
-  }
+  return fetchJsonOr<OpeningListItem[]>(url, {
+    fallback: [],
+    cookie: cookieValue,
+    label: "candidates.openings",
+  });
 }
 
 export default async function CandidatesPage({}: {}) {
@@ -82,6 +77,7 @@ export default async function CandidatesPage({}: {}) {
       canNavigate={canAccessCandidate360}
       canViewBasicDetails={isHr || isRoleFiveOrSix || isInterviewer}
       showTagFilters={isHr}
+      canUseSuperadminExpiredCafResend={isSuperadmin}
     />
   );
 }

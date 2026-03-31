@@ -2,6 +2,7 @@ import { cookieHeader } from "@/lib/cookie-header";
 import { internalUrl } from "@/lib/internal";
 import { getAuthMe } from "@/lib/auth-me";
 import type { CandidateEvent, CandidateListItem, CandidateOffer, DashboardMetrics, OpeningListItem, OpeningRequest } from "@/lib/types";
+import { fetchJsonOr } from "@/lib/server-json";
 import DashboardClient from "./DashboardClient";
 
 function normalizeRole(value: unknown) {
@@ -18,61 +19,61 @@ function isHrRole(value: string) {
 async function fetchDashboard() {
   const url = await internalUrl("/api/rec/dashboard?stuck_days=5");
   const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return null;
-  return (await res.json()) as DashboardMetrics;
+  return fetchJsonOr<DashboardMetrics | null>(url, {
+    fallback: null,
+    cookie: cookieValue,
+    label: "dashboard.metrics",
+  });
 }
 
 async function fetchRecentEvents() {
   const url = await internalUrl("/api/rec/events?limit=10");
   const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return [] as CandidateEvent[];
-  return (await res.json()) as CandidateEvent[];
+  return fetchJsonOr<CandidateEvent[]>(url, {
+    fallback: [],
+    cookie: cookieValue,
+    label: "dashboard.events",
+  });
 }
 
 async function fetchOffers() {
   const url = await internalUrl("/api/rec/offers");
   const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return [] as CandidateOffer[];
-  return (await res.json()) as CandidateOffer[];
+  return fetchJsonOr<CandidateOffer[]>(url, {
+    fallback: [],
+    cookie: cookieValue,
+    label: "dashboard.offers",
+  });
 }
 
 async function fetchOpenings() {
   const url = await internalUrl("/api/rec/openings");
   const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return [] as OpeningListItem[];
-  try {
-    return (await res.json()) as OpeningListItem[];
-  } catch {
-    return [] as OpeningListItem[];
-  }
+  return fetchJsonOr<OpeningListItem[]>(url, {
+    fallback: [],
+    cookie: cookieValue,
+    label: "dashboard.openings",
+  });
 }
 
 async function fetchCandidates() {
   const url = await internalUrl("/api/rec/candidates");
   const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return [] as CandidateListItem[];
-  try {
-    return (await res.json()) as CandidateListItem[];
-  } catch {
-    return [] as CandidateListItem[];
-  }
+  return fetchJsonOr<CandidateListItem[]>(url, {
+    fallback: [],
+    cookie: cookieValue,
+    label: "dashboard.candidates",
+  });
 }
 
 async function fetchPendingOpeningRequests() {
   const url = await internalUrl("/api/rec/openings/requests?status=pending_hr_approval");
   const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return [] as OpeningRequest[];
-  try {
-    return (await res.json()) as OpeningRequest[];
-  } catch {
-    return [] as OpeningRequest[];
-  }
+  return fetchJsonOr<OpeningRequest[]>(url, {
+    fallback: [],
+    cookie: cookieValue,
+    label: "dashboard.opening_requests",
+  });
 }
 
 export default async function DashboardPage() {

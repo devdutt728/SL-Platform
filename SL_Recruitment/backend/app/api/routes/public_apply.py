@@ -5,8 +5,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import anyio
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -38,6 +38,7 @@ from app.services.recruitment_forms import (
 from app.services.screening_rules import evaluate_screening
 from app.services.stage_transitions import apply_stage_transition
 from app.services.workflow_policy import workflow_policy_for_opening
+from app.services.jd_assets import resolve_opening_jd_asset
 from app.schemas.screening import ScreeningUpsertIn
 from app.core.config import settings
 from app.core.uploads import DOC_EXTENSIONS, DOC_MIME_TYPES, SPRINT_EXTENSIONS, SPRINT_MIME_TYPES, sanitize_filename, validate_upload
@@ -78,12 +79,18 @@ class OpeningApplyPrefillOut(BaseModel):
     opening_code: str
     opening_title: str | None = None
     opening_description: str | None = None
+    location_city: str | None = None
+    location_country: str | None = None
+    jd_available: bool = False
+    jd_display_name: str | None = None
     is_active: bool | None = None
 
 
 class OpeningPublicListItemOut(BaseModel):
     opening_code: str
     opening_title: str | None = None
+    jd_available: bool = False
+    jd_display_name: str | None = None
     is_active: bool | None = None
     location_city: str | None = None
     location_country: str | None = None
@@ -319,17 +326,45 @@ async def list_public_openings(session: AsyncSession = Depends(deps.get_db_sessi
             .order_by(RecOpening.updated_at.is_(None), RecOpening.updated_at.desc(), RecOpening.opening_id.desc())
         )
     ).scalars().all()
-    return [
-        OpeningPublicListItemOut(
-            opening_code=o.opening_code,
-            opening_title=o.title,
-            is_active=bool(o.is_active) if o.is_active is not None else None,
-            location_city=o.location_city,
-            location_country=o.location_country,
-            headcount_required=o.headcount_required,
+    items: list[OpeningPublicListItemOut] = []
+    for opening in rows:
+        jd_asset = resolve_opening_jd_asset(opening)
+        items.append(
+            OpeningPublicListItemOut(
+                opening_code=opening.opening_code,
+                opening_title=opening.title,
+                jd_available=jd_asset is not None,
+                jd_display_name=jd_asset.display_name if jd_asset else None,
+                is_active=bool(opening.is_active) if opening.is_active is not None else None,
+                location_city=opening.location_city,
+                location_country=opening.location_country,
+                headcount_required=opening.headcount_required,
+            )
         )
-        for o in rows
-    ]
+    return items
+
+
+@router.get("/{opening_code}/jd")
+async def get_opening_jd(
+    opening_code: str,
+    download: bool = Query(False),
+    session: AsyncSession = Depends(deps.get_db_session),
+):
+    opening = (
+        await session.execute(select(RecOpening).where(RecOpening.opening_code == opening_code))
+    ).scalars().first()
+    if not opening or not bool(opening.is_active):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not available")
+    jd_asset = resolve_opening_jd_asset(opening)
+    if not jd_asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job description not available")
+    disposition = "attachment" if download else "inline"
+    return FileResponse(
+        path=jd_asset.path,
+        media_type="application/pdf",
+        filename=sanitize_filename(jd_asset.file_name, default=f"{opening.opening_code}-jd.pdf"),
+        headers={"content-disposition": f'{disposition}; filename="{sanitize_filename(jd_asset.file_name, default=f"{opening.opening_code}-jd.pdf")}"'},
+    )
 
 
 @router.get("/{opening_code}", response_model=OpeningApplyPrefillOut)
@@ -343,11 +378,16 @@ async def get_opening_apply_prefill(
     if not opening or not bool(opening.is_active):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not available")
     workflow_policy = workflow_policy_for_opening(opening)
+    jd_asset = resolve_opening_jd_asset(opening)
     return OpeningApplyPrefillOut(
         opening_id=opening.opening_id,
         opening_code=opening_code,
         opening_title=opening.title,
         opening_description=opening.description,
+        location_city=opening.location_city,
+        location_country=opening.location_country,
+        jd_available=jd_asset is not None,
+        jd_display_name=jd_asset.display_name if jd_asset else None,
         is_active=bool(opening.is_active) if opening.is_active is not None else None,
     )
 

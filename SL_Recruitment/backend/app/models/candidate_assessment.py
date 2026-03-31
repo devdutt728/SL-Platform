@@ -58,10 +58,10 @@ class RecCandidateAssessment(Base):
     education_post_graduation_institution: Mapped[str | None] = mapped_column(String(255), nullable=True)
     education_post_graduation_marks: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    training1_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    training1_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     training1_year: Mapped[str | None] = mapped_column(String(10), nullable=True)
     training1_institute: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    training2_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    training2_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     training2_year: Mapped[str | None] = mapped_column(String(10), nullable=True)
     training2_institute: Mapped[str | None] = mapped_column(String(255), nullable=True)
 

@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { CheckCircle2, ShieldCheck } from "lucide-react";
 import { internalUrl } from "@/lib/internal";
 import { CandidateAssessmentPrefill } from "@/lib/types";
@@ -26,7 +27,7 @@ function TopBar({ logoSrc, shellClass }: { logoSrc: string; shellClass: string }
     <header className="fixed inset-x-0 top-0 z-30 border-b border-[var(--accessible-components--dark-grey)] bg-white/94 backdrop-blur-xl">
       <div className={`${shellClass} flex h-[68px] items-center justify-between gap-4`}>
         <div className="flex items-center gap-3">
-          <div className="rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-1.5 shadow-[var(--shadow-soft)]">
+          <Link href="/" aria-label="Studio Lotus home" className="rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-1.5 shadow-[var(--shadow-soft)]">
             <div className="relative h-7 w-28">
               <Image
                 src={logoSrc}
@@ -38,7 +39,7 @@ function TopBar({ logoSrc, shellClass }: { logoSrc: string; shellClass: string }
                 unoptimized
               />
             </div>
-          </div>
+          </Link>
           <div className="hidden sm:block">
             <p className="text-[10px] uppercase tracking-[0.3em] text-[rgba(93,85,82,0.55)]">Candidate Portal</p>
             <p className="text-[13px] font-semibold text-[var(--dim-grey)]">Candidate Assessment Form</p>

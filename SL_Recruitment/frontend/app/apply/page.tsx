@@ -14,6 +14,8 @@ export default async function PublicApplyIndexPage() {
   const openings = await fetchPublicOpenings();
   const visible = openings.filter((o) => o.is_active !== false);
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
+  const publicPortalHref =
+    process.env.NEXT_PUBLIC_PUBLIC_PORTAL_PATH || process.env.NEXT_PUBLIC_PUBLIC_PORTAL_URL || "/apply";
   const bannerSrc = `${basePath}/careers-team-banner.webp`;
   const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
 
@@ -28,10 +30,10 @@ export default async function PublicApplyIndexPage() {
           </Link>
 
           <div className="apply-topbar-actions">
-            <Link href="/" className="apply-topbar-link">
+            <Link href={publicPortalHref} className="apply-topbar-link">
               Back
             </Link>
-            <Link href="/" className="apply-topbar-link">
+            <Link href={publicPortalHref} className="apply-topbar-link">
               Public portal
             </Link>
           </div>

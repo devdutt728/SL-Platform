@@ -9,6 +9,10 @@ class OpeningDetailOut(BaseModel):
     opening_code: str | None = None
     title: str | None = None
     description: str | None = None
+    jd_file_name: str | None = None
+    resolved_jd_file_name: str | None = None
+    jd_display_name: str | None = None
+    jd_available: bool | None = None
     location_city: str | None = None
     location_country: str | None = None
     is_active: bool | None = None

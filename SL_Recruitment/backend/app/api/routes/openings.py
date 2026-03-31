@@ -34,6 +34,7 @@ from app.models.opening_request import RecOpeningRequest
 from app.services.candidate_purge import purge_candidate_with_dependents
 from app.services.platform_identity import active_status_filter
 from app.services.workflow_policy import opening_tag_for_opening_code, workflow_variant_for_opening_code
+from app.services.jd_assets import get_jd_asset_by_file_name, list_jd_assets, resolve_opening_jd_asset
 
 router = APIRouter(prefix="/rec/openings", tags=["openings"])
 logger = logging.getLogger("slr.openings")
@@ -276,6 +277,7 @@ def _opening_to_list_item(
     hiring_manager_id = _clean_platform_person_id(opening.reporting_person_id_platform)
     actor_meta = person_lookup.get(hiring_manager_id or "", {})
     workflow_variant = workflow_variant_for_opening_code(opening.opening_code)
+    jd_asset = resolve_opening_jd_asset(opening)
     return OpeningListItem(
         opening_id=opening.opening_id,
         opening_code=opening.opening_code,
@@ -293,9 +295,22 @@ def _opening_to_list_item(
         requested_by_person_code=actor_meta.get("person_code"),
         requested_by_email=actor_meta.get("email"),
         requested_by_phone=actor_meta.get("phone"),
+        jd_file_name=opening.jd_file_name,
+        resolved_jd_file_name=jd_asset.file_name if jd_asset else None,
+        jd_display_name=jd_asset.display_name if jd_asset else None,
+        jd_available=jd_asset is not None,
         headcount_required=opening.headcount_required,
         headcount_filled=opening.headcount_filled,
     )
+
+
+@router.get("/jd-library", response_model=list[str])
+async def list_opening_jd_library(
+    user: UserContext = Depends(deps.get_user),
+):
+    if not _can_view_openings(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+    return [asset.file_name for asset in list_jd_assets()]
 
 
 async def _build_person_lookup(
@@ -605,11 +620,16 @@ async def get_opening_by_code(
         requested_by = _clean_platform_person_id(user.person_id_platform)
         if not requested_by or requested_by != _clean_platform_person_id(opening.reporting_person_id_platform):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
+    jd_asset = resolve_opening_jd_asset(opening)
     return OpeningDetailOut(
         opening_id=opening.opening_id,
         opening_code=opening.opening_code,
         title=opening.title,
         description=opening.description,
+        jd_file_name=opening.jd_file_name,
+        resolved_jd_file_name=jd_asset.file_name if jd_asset else None,
+        jd_display_name=jd_asset.display_name if jd_asset else None,
+        jd_available=jd_asset is not None,
         location_city=opening.location_city,
         location_country=opening.location_country,
         is_active=bool(opening.is_active) if opening.is_active is not None else None,
@@ -631,6 +651,8 @@ async def create_opening(
     now = datetime.utcnow()
     if payload.opening_code:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Opening code is auto-generated and cannot be set manually.")
+    if payload.jd_file_name and not get_jd_asset_by_file_name(payload.jd_file_name):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected JD file was not found in the library.")
     opening_code = _generate_opening_code(payload.title)
     # Prevent duplicates: if code already exists, return 409 and let caller PATCH instead
     existing = (
@@ -642,6 +664,7 @@ async def create_opening(
         opening_code=opening_code,
         title=payload.title,
         description=payload.description,
+        jd_file_name=payload.jd_file_name,
         location_city=payload.location_city or "Delhi",
         location_country=payload.location_country or "India",
         reporting_person_id_platform=_clean_platform_person_id(payload.hiring_manager_person_id_platform)
@@ -1180,11 +1203,16 @@ async def get_opening(
         requested_by = _clean_platform_person_id(user.person_id_platform)
         if not requested_by or requested_by != _clean_platform_person_id(opening.reporting_person_id_platform):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
+    jd_asset = resolve_opening_jd_asset(opening)
     return OpeningDetail(
         opening_id=opening.opening_id,
         opening_code=opening.opening_code,
         title=opening.title,
         description=opening.description,
+        jd_file_name=opening.jd_file_name,
+        resolved_jd_file_name=jd_asset.file_name if jd_asset else None,
+        jd_display_name=jd_asset.display_name if jd_asset else None,
+        jd_available=jd_asset is not None,
         location_city=opening.location_city,
         location_country=opening.location_country,
         is_active=bool(opening.is_active) if opening.is_active is not None else None,
@@ -1210,9 +1238,11 @@ async def update_opening(
     if not opening:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Opening not found")
 
-    updates = payload.model_dump(exclude_none=True)
+    updates = payload.model_dump(exclude_unset=True)
     if "opening_code" in updates:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Opening code cannot be edited.")
+    if "jd_file_name" in updates and updates["jd_file_name"] is not None and not get_jd_asset_by_file_name(updates["jd_file_name"]):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected JD file was not found in the library.")
     is_superadmin = _is_superadmin_actor(user)
     is_hr_actor = _is_hr_actor(user)
 

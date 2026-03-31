@@ -60,7 +60,8 @@ export function proxy(request: NextRequest) {
   const lastSeenRaw = request.cookies.get("slp_last")?.value;
   const { pathname } = request.nextUrl;
   const publicOrigin = normalizeOrigin(process.env.PUBLIC_APP_ORIGIN || "");
-  const publicPortalPath = process.env.PUBLIC_PORTAL_PATH || process.env.NEXT_PUBLIC_PUBLIC_PORTAL_PATH || "/";
+  const publicPortalPath =
+    process.env.PUBLIC_PORTAL_PATH || process.env.NEXT_PUBLIC_PUBLIC_PORTAL_PATH || "/apply";
   const detectedBasePath = request.nextUrl.basePath || (pathname.startsWith("/recruitment") ? "/recruitment" : "");
   const collapsedPathname = collapseDuplicatedBase(pathname, detectedBasePath);
   const hasCollapsed = collapsedPathname !== pathname;
@@ -176,7 +177,8 @@ export function proxy(request: NextRequest) {
       response.cookies.set("slp_session_expired", "", { ...cookieOptions(isSecure), maxAge: 0 });
       return response;
     }
-    url.pathname = "/login";
+    url.pathname = stripBasePrefix(publicPortalPath, basePath);
+    url.search = "";
     return NextResponse.redirect(url);
   }
 

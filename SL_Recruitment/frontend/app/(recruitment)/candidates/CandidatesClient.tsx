@@ -31,6 +31,7 @@ type Props = {
   canNavigate?: boolean;
   canViewBasicDetails?: boolean;
   showTagFilters?: boolean;
+  canUseSuperadminExpiredCafResend?: boolean;
 };
 
 const stageTone: Record<string, string> = {
@@ -110,6 +111,8 @@ function chipTone(kind: "neutral" | "green" | "amber" | "red" | "blue") {
 }
 
 const INTERN_OPENING_CODES = new Set(["INTR-8299B8", "CMIN-8299B0"]);
+const BASIC_DETAILS_LINK_EXPIRY_HOURS = 72;
+const ASSESSMENT_LINK_EXPIRY_HOURS = 72;
 
 function isInternCandidate(candidate: CandidateListItem) {
   return INTERN_OPENING_CODES.has(String(candidate.opening_code || "").toUpperCase());
@@ -119,18 +122,37 @@ function isAssessmentLockedStage(toStage: RecruitmentStageKey) {
   return !["enquiry", "hr_screening", "l2_shortlist", "rejected", "declined", "hired"].includes(toStage);
 }
 
+function linkExpired(sentAt?: string | null, submittedAt?: string | null, expiryHours = 72) {
+  if (!sentAt || submittedAt) return false;
+  const sent = parseDateUtc(sentAt);
+  if (!sent || Number.isNaN(sent.getTime())) return false;
+  return Date.now() > sent.getTime() + expiryHours * 60 * 60 * 1000;
+}
+
 function cafChip(candidate: CandidateListItem) {
   const sentAt = candidate.basic_details_form_sent_at || candidate.caf_sent_at;
   const submittedAt = candidate.basic_details_form_submitted_at || candidate.caf_submitted_at;
-  if (isInternCandidate(candidate)) return { label: basicDetailsStatusLabel({ required: false }), tone: chipTone("blue") };
+  if (isInternCandidate(candidate)) {
+    return {
+      label: basicDetailsStatusLabel({ required: false, notRequiredLabel: "Basic details already available" }),
+      tone: chipTone("blue"),
+    };
+  }
+  if (linkExpired(sentAt, submittedAt, BASIC_DETAILS_LINK_EXPIRY_HOURS)) {
+    return { label: `${BASIC_DETAILS_FORM_LABEL} link expired`, tone: chipTone("red"), expired: true };
+  }
   if (submittedAt) return { label: basicDetailsStatusLabel({ required: true, sentAt, submittedAt }), tone: chipTone("green") };
   if (sentAt) return { label: basicDetailsStatusLabel({ required: true, sentAt }), tone: chipTone("amber") };
   return { label: `${BASIC_DETAILS_FORM_LABEL} not sent`, tone: chipTone("neutral") };
 }
 
 function assessmentChip(candidate: CandidateListItem) {
+  const sentAt = candidate.candidate_assessment_form_sent_at || candidate.assessment_sent_at;
   const submittedAt = candidate.candidate_assessment_form_submitted_at || candidate.assessment_submitted_at;
   if (isInternCandidate(candidate)) return { label: candidateAssessmentStatusLabel({ required: false, shortLabel: "CAF" }), tone: chipTone("blue") };
+  if (linkExpired(sentAt, submittedAt, ASSESSMENT_LINK_EXPIRY_HOURS)) {
+    return { label: "CAF link expired", tone: chipTone("red"), expired: true };
+  }
   if (submittedAt) return { label: candidateAssessmentStatusLabel({ required: true, submittedAt, shortLabel: "CAF" }), tone: chipTone("green") };
   return { label: candidateAssessmentStatusLabel({ required: true, shortLabel: "CAF" }), tone: chipTone("amber") };
 }
@@ -168,9 +190,11 @@ const CANDIDATE_TAG_LABELS: Record<string, string> = {
   intern: "Intern",
   basic_details_submitted: `${BASIC_DETAILS_FORM_LABEL} submitted`,
   basic_details_pending: `${BASIC_DETAILS_FORM_LABEL} pending`,
+  basic_details_expired: `${BASIC_DETAILS_FORM_LABEL} expired`,
   basic_details_not_sent: `${BASIC_DETAILS_FORM_LABEL} not sent`,
   caf_submitted: "CAF submitted",
   caf_pending: "CAF pending",
+  caf_expired: "CAF expired",
   high_priority: "High",
   medium_priority: "Medium",
   low_priority: "Low",
@@ -185,9 +209,11 @@ const CANDIDATE_TAG_ORDER = [
   "intern",
   "basic_details_submitted",
   "basic_details_pending",
+  "basic_details_expired",
   "basic_details_not_sent",
   "caf_submitted",
   "caf_pending",
+  "caf_expired",
   "high_priority",
   "medium_priority",
   "low_priority",
@@ -223,11 +249,15 @@ function candidateFilterTags(candidate: CandidateListItem) {
     const basicDetailsSent = candidate.basic_details_form_sent_at || candidate.caf_sent_at;
     const basicDetailsSubmitted = candidate.basic_details_form_submitted_at || candidate.caf_submitted_at;
     if (basicDetailsSubmitted) tags.add("basic_details_submitted");
+    else if (linkExpired(basicDetailsSent, basicDetailsSubmitted, BASIC_DETAILS_LINK_EXPIRY_HOURS)) tags.add("basic_details_expired");
     else if (basicDetailsSent) tags.add("basic_details_pending");
     else tags.add("basic_details_not_sent");
 
+    const assessmentSent = candidate.candidate_assessment_form_sent_at || candidate.assessment_sent_at;
     const assessmentSubmitted = candidate.candidate_assessment_form_submitted_at || candidate.assessment_submitted_at;
-    tags.add(assessmentSubmitted ? "caf_submitted" : "caf_pending");
+    if (assessmentSubmitted) tags.add("caf_submitted");
+    else if (linkExpired(assessmentSent, assessmentSubmitted, ASSESSMENT_LINK_EXPIRY_HOURS)) tags.add("caf_expired");
+    else tags.add("caf_pending");
   }
 
   const screening = (candidate.screening_result || "").trim().toLowerCase();
@@ -414,6 +444,30 @@ async function markLegacyCafComplete(candidateIds: number[]) {
   };
 }
 
+async function resendExpiredAssessmentLinks(candidateIds: number[]) {
+  const res = await fetch("/api/rec/candidates/candidate-assessment-form-link/resend-expired", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      candidate_ids: candidateIds,
+    }),
+  });
+  if (res.status === 401) {
+    redirectToLogin();
+    return null;
+  }
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as {
+    requested_count?: number | null;
+    eligible_count: number;
+    attempted_count: number;
+    sent_count: number;
+    failed_count: number;
+    skipped_count: number;
+    expiry_window?: string | null;
+  };
+}
+
 function canTransitionCandidate(candidate: CandidateListItem, toStage: RecruitmentStageKey) {
   const current = normalizeStage(candidate.current_stage);
   if (!current) return { ok: true as const };
@@ -456,6 +510,7 @@ export function CandidatesClient({
   canNavigate = true,
   canViewBasicDetails = false,
   showTagFilters = false,
+  canUseSuperadminExpiredCafResend = false,
 }: Props) {
   const { pushToast } = useToast();
   const [candidates, setCandidates] = useState<CandidateListItem[]>(initialCandidates);
@@ -474,6 +529,7 @@ export function CandidatesClient({
   const [bulkTargetStage, setBulkTargetStage] = useState<RecruitmentStageKey | "">("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkLegacyCafBusy, setBulkLegacyCafBusy] = useState(false);
+  const [bulkExpiredCafBusy, setBulkExpiredCafBusy] = useState(false);
   const openingFilterRef = useRef<HTMLDivElement | null>(null);
 
   const tableGrid =
@@ -858,6 +914,16 @@ export function CandidatesClient({
     () => filtered.filter((candidate) => selectedCandidateIds.has(candidate.candidate_id)),
     [filtered, selectedCandidateIds]
   );
+  const selectedExpiredCafCandidates = useMemo(
+    () =>
+      selectedCandidates.filter((candidate) => {
+        if (isInternCandidate(candidate)) return false;
+        const sentAt = candidate.basic_details_form_sent_at || candidate.caf_sent_at;
+        const submittedAt = candidate.basic_details_form_submitted_at || candidate.caf_submitted_at;
+        return linkExpired(sentAt, submittedAt, BASIC_DETAILS_LINK_EXPIRY_HOURS);
+      }),
+    [selectedCandidates]
+  );
 
   const allFilteredSelected = filtered.length > 0 && filtered.every((candidate) => selectedCandidateIds.has(candidate.candidate_id));
 
@@ -982,6 +1048,58 @@ export function CandidatesClient({
       });
     } finally {
       setBulkLegacyCafBusy(false);
+    }
+  }
+
+  async function runExpiredCafResend() {
+    if (!selectedCandidateIds.size) {
+      pushToast({ tone: "warning", title: "No candidates selected" });
+      return;
+    }
+    if (!selectedExpiredCafCandidates.length) {
+      pushToast({
+        tone: "warning",
+        title: "No expired CAF links in selection",
+        description: "Apply CAF-expired filters or select candidates whose assessment links are already expired.",
+      });
+      return;
+    }
+    setBulkExpiredCafBusy(true);
+    try {
+      const result = await resendExpiredAssessmentLinks(
+        selectedExpiredCafCandidates.map((candidate) => candidate.candidate_id)
+      );
+      if (!result) return;
+      await reloadCandidates();
+      pushToast({
+        tone: result.failed_count || result.skipped_count ? "warning" : "success",
+        title: "Expired CAF resend complete",
+        description:
+          result.sent_count > 0
+            ? `${result.sent_count} sent, ${result.failed_count} failed, ${result.skipped_count} skipped.`
+            : "No expired CAF links were found in the selected candidates.",
+      });
+      trackUxMetric({
+        event_name: "candidate_expired_assessment_resend_bulk",
+        entity_type: "candidate_bulk",
+        entity_id: String(Date.now()),
+        metadata: {
+          requested: result.requested_count ?? selectedExpiredCafCandidates.length,
+          eligible: result.eligible_count,
+          attempted: result.attempted_count,
+          sent: result.sent_count,
+          failed: result.failed_count,
+          skipped: result.skipped_count,
+        },
+      });
+    } catch (e: any) {
+      pushToast({
+        tone: "error",
+        title: "Expired CAF resend failed",
+        description: e?.message || "Could not resend expired CAF links for the selected candidates.",
+      });
+    } finally {
+      setBulkExpiredCafBusy(false);
     }
   }
 
@@ -1338,10 +1456,10 @@ export function CandidatesClient({
           <span className="ml-auto text-[11px] text-slate-500">Shortcuts: J/K move · E open profile</span>
         </div>
 
-        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-2.5 py-2">
-          <span className="text-[11px] font-semibold text-amber-900">Bulk transition</span>
-          <button
-            type="button"
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-2.5 py-2">
+            <span className="text-[11px] font-semibold text-amber-900">Bulk transition</span>
+            <button
+              type="button"
             className="rounded-full border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100"
             onClick={() => {
               if (allFilteredSelected) {
@@ -1350,26 +1468,50 @@ export function CandidatesClient({
               }
               setSelectedCandidateIds(new Set(filtered.map((candidate) => candidate.candidate_id)));
             }}
-          >
-            {allFilteredSelected ? "Clear selection" : "Select filtered"}
-          </button>
-          <span className="text-[11px] text-amber-800">{selectedCandidateIds.size} selected</span>
-          <button
-            type="button"
-            onClick={() => {
-              void runLegacyCafBackfill();
-            }}
-            disabled={bulkBusy || bulkLegacyCafBusy || selectedCandidateIds.size === 0}
-            className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-semibold text-amber-900 disabled:opacity-60"
-          >
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            {bulkLegacyCafBusy ? `Marking ${BASIC_DETAILS_FORM_LABEL}...` : `Mark selected ${BASIC_DETAILS_FORM_LABEL} done`}
-          </button>
+            >
+              {allFilteredSelected ? "Clear selection" : "Select filtered"}
+            </button>
+            <span className="text-[11px] text-amber-800">{selectedCandidateIds.size} selected</span>
+            {canUseSuperadminExpiredCafResend ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void runExpiredCafResend();
+                  }}
+                  disabled={
+                    bulkBusy ||
+                    bulkLegacyCafBusy ||
+                    bulkExpiredCafBusy ||
+                    selectedCandidateIds.size === 0 ||
+                    selectedExpiredCafCandidates.length === 0
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-semibold text-amber-900 disabled:opacity-60"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {bulkExpiredCafBusy ? "Resending expired CAF..." : "Resend expired CAF links"}
+                </button>
+                <span className="text-[11px] text-amber-800">
+                  {selectedExpiredCafCandidates.length} expired in selection
+                </span>
+              </>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                void runLegacyCafBackfill();
+              }}
+              disabled={bulkBusy || bulkLegacyCafBusy || bulkExpiredCafBusy || selectedCandidateIds.size === 0}
+              className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-semibold text-amber-900 disabled:opacity-60"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {bulkLegacyCafBusy ? `Marking ${BASIC_DETAILS_FORM_LABEL}...` : `Mark selected ${BASIC_DETAILS_FORM_LABEL} done`}
+            </button>
           <select
-            value={bulkTargetStage}
-            onChange={(e) => setBulkTargetStage((e.target.value || "") as RecruitmentStageKey | "")}
-            className="rounded-lg border border-amber-300 bg-white px-2 py-1 text-[11px] text-slate-700"
-          >
+              value={bulkTargetStage}
+              onChange={(e) => setBulkTargetStage((e.target.value || "") as RecruitmentStageKey | "")}
+              className="rounded-lg border border-amber-300 bg-white px-2 py-1 text-[11px] text-slate-700"
+            >
             <option value="">Move selected to...</option>
             {BOARD_COLUMNS.map((stage) => (
               <option key={stage.key} value={stage.key}>
@@ -1378,13 +1520,13 @@ export function CandidatesClient({
             ))}
           </select>
           <button
-            type="button"
-            onClick={() => {
-              void runBulkTransition();
-            }}
-            disabled={bulkBusy || bulkLegacyCafBusy || !bulkTargetStage || selectedCandidateIds.size === 0}
-            className="inline-flex items-center gap-1.5 rounded-full bg-amber-700 px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
-          >
+              type="button"
+              onClick={() => {
+                void runBulkTransition();
+              }}
+              disabled={bulkBusy || bulkLegacyCafBusy || bulkExpiredCafBusy || !bulkTargetStage || selectedCandidateIds.size === 0}
+              className="inline-flex items-center gap-1.5 rounded-full bg-amber-700 px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
+            >
             <MoveRight className="h-3.5 w-3.5" />
             {bulkBusy ? "Moving..." : "Run bulk move"}
           </button>
@@ -1460,8 +1602,12 @@ export function CandidatesClient({
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 whitespace-nowrap">
-                    <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", caf.tone)}>{caf.label}</span>
-                    <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", assessment.tone)}>
+                    <span className={clsx("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold", caf.tone)}>
+                      {caf.expired ? <AlertTriangle className="h-3 w-3" /> : null}
+                      {caf.label}
+                    </span>
+                    <span className={clsx("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold", assessment.tone)}>
+                      {assessment.expired ? <AlertTriangle className="h-3 w-3" /> : null}
                       {assessment.label}
                     </span>
                     {screening ? (

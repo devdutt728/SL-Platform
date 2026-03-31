@@ -43,6 +43,10 @@ const nextConfig = {
         headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
       },
       {
+        source: "/api/apply/:path*/jd",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
+      {
         source: "/(.*)",
         headers: securityHeaders,
       },

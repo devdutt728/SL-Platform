@@ -4,6 +4,7 @@ import { Interview, OpeningListItem } from "@/lib/types";
 import { GLPortalClient } from "./GLPortalClient";
 import { getAuthMe } from "@/lib/auth-me";
 import { internalUrl } from "@/lib/internal";
+import { fetchJsonOr } from "@/lib/server-json";
 
 type Me = {
   email?: string | null;
@@ -38,25 +39,21 @@ async function fetchInterviews(params: Record<string, string>) {
   const url = new URL(await internalUrl("/api/rec/interviews"));
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   const cookieValue = await cookieHeader();
-  const res = await fetch(url.toString(), { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return [] as Interview[];
-  try {
-    return (await res.json()) as Interview[];
-  } catch {
-    return [] as Interview[];
-  }
+  return fetchJsonOr<Interview[]>(url.toString(), {
+    fallback: [],
+    cookie: cookieValue,
+    label: "gl_portal.interviews",
+  });
 }
 
 async function fetchOpenings() {
   const url = await internalUrl("/api/rec/openings");
   const cookieValue = await cookieHeader();
-  const res = await fetch(url, { cache: "no-store", headers: cookieValue ? { cookie: cookieValue } : undefined });
-  if (!res.ok) return [] as OpeningListItem[];
-  try {
-    return (await res.json()) as OpeningListItem[];
-  } catch {
-    return [] as OpeningListItem[];
-  }
+  return fetchJsonOr<OpeningListItem[]>(url, {
+    fallback: [],
+    cookie: cookieValue,
+    label: "gl_portal.openings",
+  });
 }
 
 export default async function GLPortalPage() {

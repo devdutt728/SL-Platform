@@ -84,7 +84,9 @@ class CandidateListItem(BaseModel):
     basic_details_form_submitted_at: Optional[datetime] = None
     caf_sent_at: Optional[datetime] = None
     caf_submitted_at: Optional[datetime] = None
+    candidate_assessment_form_sent_at: Optional[datetime] = None
     candidate_assessment_form_submitted_at: Optional[datetime] = None
+    assessment_sent_at: Optional[datetime] = None
     assessment_submitted_at: Optional[datetime] = None
     needs_hr_review: bool = False
     screening_result: Optional[str] = None

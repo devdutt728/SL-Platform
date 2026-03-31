@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { CheckCircle2, ShieldCheck } from "lucide-react";
 import { internalUrl } from "@/lib/internal";
 import { CafPrefill, Screening } from "@/lib/types";
@@ -38,7 +39,7 @@ function TopBar({
     <header className="fixed inset-x-0 top-0 z-30 border-b border-[var(--accessible-components--dark-grey)] bg-white/94 backdrop-blur-xl">
       <div className={`${shellClass} flex h-[68px] items-center justify-between gap-4`}>
         <div className="flex items-center gap-3">
-          <div className="rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-1.5 shadow-[var(--shadow-soft)]">
+          <Link href="/" aria-label="Studio Lotus home" className="rounded-xl border border-[var(--accessible-components--dark-grey)] bg-white px-3 py-1.5 shadow-[var(--shadow-soft)]">
             <div className="relative h-7 w-28">
               <Image
                 src={logoSrc}
@@ -50,7 +51,7 @@ function TopBar({
                 unoptimized
               />
             </div>
-          </div>
+          </Link>
           <div className="hidden sm:block">
             <p className="text-[10px] uppercase tracking-[0.3em] text-[rgba(93,85,82,0.55)]">Candidate Portal</p>
             <p className="text-[13px] font-semibold text-[var(--dim-grey)]">Application details</p>
@@ -86,7 +87,7 @@ export default async function CafPage({ params }: { params: Promise<{ token: str
         <TopBar logoSrc={logoSrc} shellClass={shellClass} />
         <div className={`${shellClass} relative z-10 pb-14 pt-24`}>
           <div className="rounded-[28px] border border-[var(--accessible-components--dark-grey)] bg-white p-7 shadow-[var(--shadow-soft)]">
-            <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Basic Details Form</p>
+            <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">CAF</p>
             <h1 className="mt-2 text-xl font-semibold text-[var(--dim-grey)]">Invalid or expired link</h1>
             <p className="mt-2 max-w-2xl text-[13px] text-[var(--dim-grey)]">
               Please check the URL or contact HR.
@@ -152,10 +153,10 @@ export default async function CafPage({ params }: { params: Promise<{ token: str
             </div>
 
             <div className="mb-4 rounded-[26px] border border-[var(--accessible-components--dark-grey)] bg-white p-5 shadow-[var(--shadow-soft)]">
-              <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">Basic Details Form</p>
+              <p className="text-[10px] uppercase tracking-[0.3em] text-[var(--light-grey)]">CAF</p>
               <h1 className="mt-2 text-[22px] font-semibold text-[var(--dim-grey)]">{prefill.opening_title || "Studio Lotus"}</h1>
               <p className="mt-2 text-[13px] text-[var(--dim-grey)]">
-                This page displays the submitted basic details in read-only mode.
+                  This page displays the submitted CAF in read-only mode.
               </p>
             </div>
 
