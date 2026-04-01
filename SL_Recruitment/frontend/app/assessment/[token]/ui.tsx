@@ -9,6 +9,19 @@ type AssessmentFormProps = {
 };
 
 const RATING_OPTIONS = Array.from({ length: 10 }, (_, i) => i + 1);
+const PASSING_YEAR_INPUT_PROPS = {
+  maxLength: 4,
+  inputMode: "numeric" as const,
+  pattern: "\\d{4}",
+  placeholder: "YYYY",
+  title: "Use a 4-digit year, for example 2026.",
+};
+const TRAINING_YEAR_INPUT_PROPS = {
+  maxLength: 10,
+  pattern: "(?:\\d{4}|[A-Za-z]{3}\\s\\d{4})",
+  placeholder: "YYYY or Mon YYYY",
+  title: "Use YYYY or Mon YYYY, for example 2024 or Dec 2024.",
+};
 
 export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
   const [submitting, setSubmitting] = useState(false);
@@ -369,6 +382,7 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
             <input
               name="education_10th_year"
               required
+              {...PASSING_YEAR_INPUT_PROPS}
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
             />
           </Field>
@@ -397,6 +411,7 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
             <input
               name="education_12th_year"
               required
+              {...PASSING_YEAR_INPUT_PROPS}
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
             />
           </Field>
@@ -425,6 +440,7 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
             <input
               name="education_graduation_year"
               required
+              {...PASSING_YEAR_INPUT_PROPS}
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
             />
           </Field>
@@ -451,6 +467,7 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
           <Field label="Post-graduation year of passing (if any)">
             <input
               name="education_post_graduation_year"
+              {...PASSING_YEAR_INPUT_PROPS}
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
             />
           </Field>
@@ -481,6 +498,7 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
           <Field label="Training 1 year">
             <input
               name="training1_year"
+              {...TRAINING_YEAR_INPUT_PROPS}
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
             />
           </Field>
@@ -500,6 +518,7 @@ export function AssessmentForm({ token, prefill }: AssessmentFormProps) {
           <Field label="Training 2 year">
             <input
               name="training2_year"
+              {...TRAINING_YEAR_INPUT_PROPS}
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2"
             />
           </Field>

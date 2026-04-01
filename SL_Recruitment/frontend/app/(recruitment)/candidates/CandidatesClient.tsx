@@ -1846,38 +1846,38 @@ export function CandidatesClient({
                     </div>
                     <div className="mt-2 flex flex-wrap justify-end gap-1.5">
                       {selectedCandidate.portfolio_url ? (
-                        <a
+                        <Link
                           href={documentPreviewHref(selectedCandidate.candidate_id, "portfolio")}
                           target="_blank"
                           rel="noreferrer"
                           className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
                         >
                           Portfolio
-                        </a>
+                        </Link>
                       ) : (
                         <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-400">Portfolio</span>
                       )}
                       {selectedCandidate.cv_url ? (
-                        <a
+                        <Link
                           href={documentPreviewHref(selectedCandidate.candidate_id, "cv")}
                           target="_blank"
                           rel="noreferrer"
                           className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
                         >
                           CV
-                        </a>
+                        </Link>
                       ) : (
                         <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-400">CV</span>
                       )}
                       {selectedCandidate.resume_url ? (
-                        <a
+                        <Link
                           href={documentPreviewHref(selectedCandidate.candidate_id, "resume")}
                           target="_blank"
                           rel="noreferrer"
                           className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
                         >
                           Resume
-                        </a>
+                        </Link>
                       ) : (
                         <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-400">Resume</span>
                       )}

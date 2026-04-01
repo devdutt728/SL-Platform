@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { backendUrl } from "@/lib/backend";
+import { getPublicPortalHref } from "@/lib/public-portal";
 import { OpeningPublicListItem } from "@/lib/types";
 import { PublicOpeningsClient } from "./ui";
 
@@ -14,8 +15,7 @@ export default async function PublicApplyIndexPage() {
   const openings = await fetchPublicOpenings();
   const visible = openings.filter((o) => o.is_active !== false);
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
-  const publicPortalHref =
-    process.env.NEXT_PUBLIC_PUBLIC_PORTAL_PATH || process.env.NEXT_PUBLIC_PUBLIC_PORTAL_URL || "/apply";
+  const publicPortalHref = getPublicPortalHref();
   const bannerSrc = `${basePath}/careers-team-banner.webp`;
   const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
 
@@ -30,12 +30,12 @@ export default async function PublicApplyIndexPage() {
           </Link>
 
           <div className="apply-topbar-actions">
-            <Link href={publicPortalHref} className="apply-topbar-link">
+            <a href={publicPortalHref} className="apply-topbar-link">
               Back
-            </Link>
-            <Link href={publicPortalHref} className="apply-topbar-link">
+            </a>
+            <a href={publicPortalHref} className="apply-topbar-link">
               Public portal
-            </Link>
+            </a>
           </div>
         </div>
       </header>

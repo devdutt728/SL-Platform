@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getPublicPortalPath } from "@/lib/public-portal";
 
 function normalizeOrigin(origin: string) {
   return origin.replace(/\/$/, "");
@@ -60,8 +61,7 @@ export function proxy(request: NextRequest) {
   const lastSeenRaw = request.cookies.get("slp_last")?.value;
   const { pathname } = request.nextUrl;
   const publicOrigin = normalizeOrigin(process.env.PUBLIC_APP_ORIGIN || "");
-  const publicPortalPath =
-    process.env.PUBLIC_PORTAL_PATH || process.env.NEXT_PUBLIC_PUBLIC_PORTAL_PATH || "/apply";
+  const publicPortalPath = getPublicPortalPath();
   const detectedBasePath = request.nextUrl.basePath || (pathname.startsWith("/recruitment") ? "/recruitment" : "");
   const collapsedPathname = collapseDuplicatedBase(pathname, detectedBasePath);
   const hasCollapsed = collapsedPathname !== pathname;

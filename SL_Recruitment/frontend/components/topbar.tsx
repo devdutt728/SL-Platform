@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { LogOut, Sparkles, User } from "lucide-react";
 import type { InterviewNotificationCounts } from "@/lib/types";
 import { RecruitmentModeToggle } from "@/components/recruitment-mode-toggle";
+import { getPublicPortalHref } from "@/lib/public-portal";
 
 type Me = {
   email?: string;
@@ -39,7 +40,7 @@ function firstName(me: Me) {
 
 export function Topbar({ initialMe }: { initialMe: Me | null }) {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-  const publicPortalHref = process.env.NEXT_PUBLIC_PUBLIC_PORTAL_PATH || process.env.NEXT_PUBLIC_PUBLIC_PORTAL_URL || "/apply";
+  const publicPortalHref = getPublicPortalHref();
   const pathname = usePathname();
   const me = initialMe;
   const [interviewNotifications, setInterviewNotifications] = useState<InterviewNotificationCounts | null>(null);
@@ -121,7 +122,7 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
 
   async function signOut() {
     await fetch(`${basePath}/api/auth/logout`, { method: "POST" });
-    window.location.href = "/";
+    window.location.assign(publicPortalHref);
   }
 
   return (

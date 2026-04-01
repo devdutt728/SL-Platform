@@ -129,6 +129,10 @@ export function PeoplePanel() {
   async function savePerson() {
     setError(null);
     setNotice(null);
+    if (mode === "edit" && !form.person_id.trim()) {
+      setError("Load a person record before saving.");
+      return;
+    }
     const payload = normalizePayload();
     try {
       const url =
@@ -225,6 +229,8 @@ export function PeoplePanel() {
   );
   const formName = (form.display_name || form.full_name || `${form.first_name} ${form.last_name}`.trim()).trim();
   const formMeta = [form.person_code, form.person_id].filter(Boolean).join(" / ");
+  const canSavePerson = !loading && (mode === "create" || Boolean(form.person_id.trim()));
+  const canDeletePerson = Boolean(form.person_id.trim());
 
   return (
     <section className="space-y-4">
@@ -463,7 +469,7 @@ export function PeoplePanel() {
             <button
               type="button"
               onClick={() => void savePerson()}
-              disabled={loading}
+              disabled={!canSavePerson}
               className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-white shadow-sm disabled:opacity-60"
             >
               <Check className="h-4 w-4" /> {mode === "create" ? "Create" : "Save"}
@@ -471,6 +477,7 @@ export function PeoplePanel() {
             <button
               type="button"
               onClick={() => void deletePerson()}
+              disabled={!canDeletePerson}
               className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-rose-700"
             >
               <Trash2 className="h-4 w-4" /> Delete

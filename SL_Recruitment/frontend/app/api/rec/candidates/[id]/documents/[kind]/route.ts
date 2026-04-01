@@ -19,6 +19,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   if (contentDisposition) headers.set("content-disposition", contentDisposition);
   const cacheControl = res.headers.get("cache-control");
   if (cacheControl) headers.set("cache-control", cacheControl);
+  const location = res.headers.get("location");
+  if (location) headers.set("location", location);
 
   return new NextResponse(res.body, {
     status: res.status,

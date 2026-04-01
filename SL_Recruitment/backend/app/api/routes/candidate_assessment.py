@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import DataError
 
 from app.api import deps
 from app.models.candidate import RecCandidate
@@ -180,20 +181,35 @@ async def submit_candidate_assessment(
     set_candidate_assessment_form_submitted_at(assessment, now)
     assessment.updated_at = now
 
-    if candidate.status != "in_process":
-        candidate.status = "in_process"
-        if candidate.l2_owner_email:
-            try:
-                await apply_stage_transition(
-                    session,
-                    candidate=candidate,
-                    to_stage="hr_screening",
-                    decision="advance",
-                    note="assessment_submit",
-                    source="assessment_submit",
-                    allow_noop=True,
-                )
-            except HTTPException as exc:
+    try:
+        if candidate.status != "in_process":
+            candidate.status = "in_process"
+            if candidate.l2_owner_email:
+                try:
+                    await apply_stage_transition(
+                        session,
+                        candidate=candidate,
+                        to_stage="hr_screening",
+                        decision="advance",
+                        note="assessment_submit",
+                        source="assessment_submit",
+                        allow_noop=True,
+                    )
+                except HTTPException as exc:
+                    await log_event(
+                        session,
+                        candidate_id=candidate.candidate_id,
+                        action_type="stage_blocked",
+                        performed_by_person_id_platform=None,
+                        related_entity_type="candidate",
+                        related_entity_id=candidate.candidate_id,
+                        meta_json={
+                            "stage": "hr_screening",
+                            "reason": "transition_guard_rejected",
+                            "detail": str(exc.detail),
+                        },
+                    )
+            else:
                 await log_event(
                     session,
                     candidate_id=candidate.candidate_id,
@@ -201,60 +217,53 @@ async def submit_candidate_assessment(
                     performed_by_person_id_platform=None,
                     related_entity_type="candidate",
                     related_entity_id=candidate.candidate_id,
-                    meta_json={
-                        "stage": "hr_screening",
-                        "reason": "transition_guard_rejected",
-                        "detail": str(exc.detail),
-                    },
+                    meta_json={"stage": "hr_screening", "reason": "missing_l2_owner_email"},
                 )
-        else:
-            await log_event(
-                session,
-                candidate_id=candidate.candidate_id,
-                action_type="stage_blocked",
-                performed_by_person_id_platform=None,
-                related_entity_type="candidate",
-                related_entity_id=candidate.candidate_id,
-                meta_json={"stage": "hr_screening", "reason": "missing_l2_owner_email"},
-            )
 
-    await log_event(
-        session,
-        candidate_id=assessment.candidate_id,
-        action_type=CANDIDATE_ASSESSMENT_FORM_SUBMITTED,
-        performed_by_person_id_platform=None,
-        related_entity_type="candidate",
-        related_entity_id=assessment.candidate_id,
-        meta_json={"candidate_assessment_form_token": get_candidate_assessment_form_token(assessment)},
-    )
-    await log_event(
-        session,
-        candidate_id=assessment.candidate_id,
-        action_type=LEGACY_CANDIDATE_ASSESSMENT_FORM_SUBMITTED,
-        performed_by_person_id_platform=None,
-        related_entity_type="candidate",
-        related_entity_id=assessment.candidate_id,
-        meta_json={"assessment_token": get_candidate_assessment_form_token(assessment)},
-    )
+        await log_event(
+            session,
+            candidate_id=assessment.candidate_id,
+            action_type=CANDIDATE_ASSESSMENT_FORM_SUBMITTED,
+            performed_by_person_id_platform=None,
+            related_entity_type="candidate",
+            related_entity_id=assessment.candidate_id,
+            meta_json={"candidate_assessment_form_token": get_candidate_assessment_form_token(assessment)},
+        )
+        await log_event(
+            session,
+            candidate_id=assessment.candidate_id,
+            action_type=LEGACY_CANDIDATE_ASSESSMENT_FORM_SUBMITTED,
+            performed_by_person_id_platform=None,
+            related_entity_type="candidate",
+            related_entity_id=assessment.candidate_id,
+            meta_json={"assessment_token": get_candidate_assessment_form_token(assessment)},
+        )
 
-    await send_email(
-        session,
-        candidate_id=assessment.candidate_id,
-        to_emails=[candidate.email],
-        subject="Your Candidate Assessment Form is complete",
-        template_name="assessment_completed",
-        context={"candidate_name": candidate.full_name},
-        email_type="assessment_completed",
-        meta_extra={"candidate_assessment_form_token": get_candidate_assessment_form_token(assessment)},
-    )
+        await send_email(
+            session,
+            candidate_id=assessment.candidate_id,
+            to_emails=[candidate.email],
+            subject="Your Candidate Assessment Form is complete",
+            template_name="assessment_completed",
+            context={"candidate_name": candidate.full_name},
+            email_type="assessment_completed",
+            meta_extra={"candidate_assessment_form_token": get_candidate_assessment_form_token(assessment)},
+        )
 
-    await notify_candidate_ready_for_review(
-        session,
-        candidate=candidate,
-        trigger_label="Assessment submitted",
-        detail_note="Candidate Assessment Form has been submitted and is ready for internal review.",
-    )
+        await notify_candidate_ready_for_review(
+            session,
+            candidate=candidate,
+            trigger_label="Assessment submitted",
+            detail_note="Candidate Assessment Form has been submitted and is ready for internal review.",
+        )
 
-    await session.commit()
+        await session.commit()
+    except DataError as exc:
+        await session.rollback()
+        message = str(getattr(exc, "orig", exc))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Assessment could not be saved: {message}",
+        ) from exc
     await session.refresh(assessment)
     return CandidateAssessmentOut.model_validate(assessment)

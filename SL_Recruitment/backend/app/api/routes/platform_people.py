@@ -10,7 +10,7 @@ from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from sqlalchemy import Integer, delete, func, or_, select
+from sqlalchemy import Integer, delete, func, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -133,12 +133,65 @@ _MANDATORY_FIELDS = {"person_code", "first_name", "email"}
 _UPDATABLE_TO_NONE_FIELDS = {"exit_date", "is_deleted"}
 _NULLISH_TEXT = {"na", "n/a", "none", "null", "not_available", "not_applicable", "-"}
 _REPLACE_CONFIRM_TOKEN = "REPLACE_DIM_PERSON"
+_DEFAULT_EXTERNAL_IDENTITY_SOURCE = "emp_master_upload"
 
 
 @dataclass
 class _BulkRow:
     row_number: int
     normalized: dict[str, Any]
+
+
+@dataclass
+class _PendingManagerAssignment:
+    row_number: int
+    person: DimPerson
+    normalized: dict[str, Any]
+    was_unchanged: bool
+
+
+@dataclass
+class _PersonCodeCounterState:
+    code_type: str
+    next_seq: int
+    original_next_seq: int
+    max_seq: int | None = None
+
+
+def _external_identity_source_from_payload(payload: dict[str, Any]) -> str:
+    source = _normalize_text(payload.get("external_identity_source")) or _normalize_text(payload.get("source_system"))
+    return (source or _DEFAULT_EXTERNAL_IDENTITY_SOURCE).strip().lower()
+
+
+def _external_identity_key(source: str, external_employee_code: str) -> str:
+    return f"{source.strip().lower()}::{external_employee_code.strip().lower()}"
+
+
+def _external_employee_code(normalized: dict[str, Any]) -> str:
+    return _normalize_text(normalized.get("external_employee_code"))
+
+
+def _external_manager_code(normalized: dict[str, Any]) -> str:
+    return _normalize_text(normalized.get("external_manager_code"))
+
+
+def _incoming_internal_person_code(normalized: dict[str, Any]) -> str:
+    person_code = _normalize_text(normalized.get("person_code"))
+    external_code = _external_employee_code(normalized)
+    if person_code and external_code and person_code == external_code:
+        return ""
+    return person_code
+
+
+def _missing_bulk_required_fields(normalized: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    if not (_incoming_internal_person_code(normalized) or _external_employee_code(normalized)):
+        missing.append("person_code")
+    if not _normalize_text(normalized.get("first_name")):
+        missing.append("first_name")
+    if not _normalize_email(normalized.get("email")):
+        missing.append("email")
+    return missing
 
 def _is_superadmin_user(user: UserContext) -> bool:
     if Role.HR_ADMIN in (getattr(user, "roles", None) or []):
@@ -355,19 +408,30 @@ async def bulk_upload_people(
 
     existing_people = await _load_existing_people(session, rows)
     by_person_id, by_person_code, by_email = _build_people_maps(existing_people)
+    by_external_employee_code = await _load_external_employee_identity_map(
+        session=session,
+        by_person_id=by_person_id,
+        warnings=result.warnings,
+    )
+    person_code_counters = await _lock_person_code_counters(session)
     next_seq: int | None = None
     used_ids = {person.person_id for person in existing_people if (person.person_id or "").strip()}
     used_ids.discard("")
+    preserved_person_code_count = 0
+    unresolved_manager_count = 0
+    pending_manager_assignments: list[_PendingManagerAssignment] = []
 
     for row in rows:
         normalized = row.normalized
+        _apply_external_identity_defaults(normalized)
         row_number = row.row_number
-        person_code = _normalize_text(normalized.get("person_code"))
+        external_employee_code = _external_employee_code(normalized)
+        person_code = _incoming_internal_person_code(normalized) or external_employee_code
         first_name = _normalize_text(normalized.get("first_name"))
         email = _normalize_email(normalized.get("email"))
         incoming_person_id = _normalize_text(normalized.get("person_id"))
 
-        if person_code:
+        if _incoming_internal_person_code(normalized):
             normalized["person_code"] = person_code
         if first_name:
             normalized["first_name"] = first_name
@@ -376,7 +440,7 @@ async def bulk_upload_people(
         if incoming_person_id:
             normalized["person_id"] = incoming_person_id
 
-        missing = [field for field in _MANDATORY_FIELDS if not _normalize_text(normalized.get(field))]
+        missing = _missing_bulk_required_fields(normalized)
         if missing:
             result.skipped += 1
             result.errors.append(
@@ -395,12 +459,18 @@ async def bulk_upload_people(
                 row=row,
                 by_person_id=by_person_id,
                 by_person_code=by_person_code,
+                by_external_employee_code=by_external_employee_code,
                 by_email=by_email,
                 warnings=result.warnings,
             )
             updates = _apply_status_defaults(_apply_name_defaults(_apply_row_updates(normalized)))
 
             if existing is not None:
+                if _preserve_existing_person_code(
+                    existing=existing,
+                    updates=updates,
+                ):
+                    preserved_person_code_count += 1
                 if incoming_person_id and incoming_person_id != existing.person_id:
                     result.warnings.append(
                         BulkUploadWarning(
@@ -415,13 +485,22 @@ async def bulk_upload_people(
                     )
                 updates.pop("person_id", None)
                 patch = _build_safe_update_payload(existing, updates)
-                manager_id = _resolve_manager_id(patch.get("manager_id"), by_person_id, by_person_code)
-                if manager_id == existing.person_id:
-                    manager_id = None
-                if manager_id is not None or "manager_id" in patch:
-                    patch["manager_id"] = manager_id
+                patch.pop("manager_id", None)
                 _assert_no_update_conflicts(existing, patch, by_person_code, by_email)
                 if not patch:
+                    _refresh_external_employee_identity_map(
+                        person=existing,
+                        normalized=normalized,
+                        by_external_employee_code=by_external_employee_code,
+                    )
+                    pending_manager_assignments.append(
+                        _PendingManagerAssignment(
+                            row_number=row_number,
+                            person=existing,
+                            normalized=dict(normalized),
+                            was_unchanged=True,
+                        )
+                    )
                     await _upsert_person_extra(
                         session=session,
                         person=existing,
@@ -442,6 +521,19 @@ async def bulk_upload_people(
                     by_person_code=by_person_code,
                     by_email=by_email,
                 )
+                _refresh_external_employee_identity_map(
+                    person=existing,
+                    normalized=normalized,
+                    by_external_employee_code=by_external_employee_code,
+                )
+                pending_manager_assignments.append(
+                    _PendingManagerAssignment(
+                        row_number=row_number,
+                        person=existing,
+                        normalized=dict(normalized),
+                        was_unchanged=False,
+                    )
+                )
                 await _upsert_person_extra(
                     session=session,
                     person=existing,
@@ -454,18 +546,20 @@ async def bulk_upload_people(
 
             create_payload = updates
             create_payload.pop("person_id", None)
-            resolved_manager_id = _resolve_manager_id(
-                create_payload.get("manager_id"),
-                by_person_id,
-                by_person_code,
+            create_payload["manager_id"] = None
+
+            resolved_person_code, normalized_employment_type = await _resolve_bulk_person_code(
+                session=session,
+                normalized=normalized,
+                payload=create_payload,
+                by_person_code=by_person_code,
+                counters=person_code_counters,
             )
-            if resolved_manager_id:
-                create_payload["manager_id"] = resolved_manager_id
-            elif "manager_id" in create_payload:
-                create_payload["manager_id"] = None
+            create_payload["person_code"] = resolved_person_code
+            create_payload["employment_type"] = normalized_employment_type
 
             if not create_payload.get("source_system"):
-                create_payload["source_system"] = "emp_master_upload"
+                create_payload["source_system"] = _DEFAULT_EXTERNAL_IDENTITY_SOURCE
             if not create_payload.get("person_id"):
                 next_seq = await _ensure_next_seq(session, next_seq)
                 seq_value = _consume_next_seq(_build_person_prefix(first_name, _normalize_text(normalized.get("last_name"))), next_seq, used_ids)
@@ -492,6 +586,19 @@ async def bulk_upload_people(
                 by_person_code=by_person_code,
                 by_email=by_email,
             )
+            _refresh_external_employee_identity_map(
+                person=person,
+                normalized=normalized,
+                by_external_employee_code=by_external_employee_code,
+            )
+            pending_manager_assignments.append(
+                _PendingManagerAssignment(
+                    row_number=row_number,
+                    person=person,
+                    normalized=dict(normalized),
+                    was_unchanged=False,
+                )
+            )
             await _upsert_person_extra(
                 session=session,
                 person=person,
@@ -514,10 +621,55 @@ async def bulk_upload_people(
                 )
             )
 
+    for pending in pending_manager_assignments:
+        requested_manager_token = _requested_manager_reference(pending.normalized)
+        if not requested_manager_token:
+            continue
+        manager_id = _resolve_manager_reference(
+            normalized=pending.normalized,
+            by_person_id=by_person_id,
+            by_person_code=by_person_code,
+            by_external_employee_code=by_external_employee_code,
+        )
+        if manager_id == pending.person.person_id:
+            manager_id = None
+        if manager_id is None:
+            unresolved_manager_count += 1
+        current_manager_id = _normalize_text(pending.person.manager_id)
+        next_manager_id = _normalize_text(manager_id)
+        if current_manager_id == next_manager_id:
+            continue
+        if not dry_run:
+            pending.person.manager_id = manager_id
+            pending.person.updated_at = datetime.utcnow()
+        if pending.was_unchanged:
+            result.unchanged -= 1
+            result.updated += 1
+
+    if preserved_person_code_count:
+        result.warnings.append(
+            BulkUploadWarning(
+                message=(
+                    f"Safe merge kept the existing person_code for {preserved_person_code_count} "
+                    "matched record(s). Use manual edits if you need to rewrite person_code values."
+                )
+            )
+        )
+    if unresolved_manager_count:
+        result.warnings.append(
+            BulkUploadWarning(
+                message=(
+                    f"Bulk import cleared unresolved manager references for {unresolved_manager_count} "
+                    "row(s) because manager_id must reference an existing person_id."
+                )
+            )
+        )
+
     result.processed = result.created + result.updated + result.unchanged
     if dry_run:
         await session.rollback()
     else:
+        await _save_person_code_counters(session, person_code_counters)
         await session.commit()
     return result
 
@@ -965,6 +1117,26 @@ def _serialize_row_payloads(normalized: dict[str, Any]) -> tuple[dict[str, Any],
     return raw_payload, extra_payload
 
 
+def _parse_extra_payload_json(payload_text: str | None) -> dict[str, Any]:
+    if not (payload_text or "").strip():
+        return {}
+    try:
+        parsed = json.loads(payload_text)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _external_employee_code_from_raw_payload(payload: dict[str, Any]) -> str:
+    direct = _normalize_text(payload.get("external_employee_code")) or _normalize_text(payload.get("employee_number"))
+    if direct:
+        return direct
+    source = _external_identity_source_from_payload(payload)
+    if source == _DEFAULT_EXTERNAL_IDENTITY_SOURCE:
+        return _normalize_text(payload.get("person_code"))
+    return ""
+
+
 def _to_json_compatible(value: Any) -> Any:
     if value is None:
         return None
@@ -1083,7 +1255,10 @@ def _dedupe_bulk_rows(rows: list[_BulkRow]) -> list[_BulkRow]:
 
 
 def _bulk_row_key(row: _BulkRow) -> str:
-    person_code = _normalize_text(row.normalized.get("person_code"))
+    external_employee_code = _external_employee_code(row.normalized)
+    if external_employee_code:
+        return f"external:{_external_identity_key(_external_identity_source_from_payload(row.normalized), external_employee_code)}"
+    person_code = _incoming_internal_person_code(row.normalized)
     email = _normalize_email(row.normalized.get("email"))
     person_id = _normalize_text(row.normalized.get("person_id"))
     if person_code:
@@ -1096,33 +1271,8 @@ def _bulk_row_key(row: _BulkRow) -> str:
 
 
 async def _load_existing_people(session: AsyncSession, rows: list[_BulkRow]) -> list[DimPerson]:
-    person_ids = {_normalize_text(row.normalized.get("person_id")) for row in rows}
-    person_codes = {_normalize_text(row.normalized.get("person_code")) for row in rows}
-    emails = {_normalize_email(row.normalized.get("email")) for row in rows}
-    manager_codes = {
-        _normalize_text(row.normalized.get("manager_id"))
-        for row in rows
-        if _normalize_text(row.normalized.get("manager_id"))
-    }
-
-    person_ids.discard("")
-    person_codes.discard("")
-    emails.discard("")
-    manager_codes.discard("")
-
-    filters = []
-    if person_ids:
-        filters.append(DimPerson.person_id.in_(person_ids))
-    if person_codes:
-        filters.append(DimPerson.person_code.in_(person_codes))
-    if manager_codes:
-        filters.append(DimPerson.person_code.in_(manager_codes))
-    if emails:
-        filters.append(func.lower(DimPerson.email).in_(emails))
-    if not filters:
-        return []
-
-    rows_db = await session.execute(select(DimPerson).where(or_(*filters)))
+    del rows
+    rows_db = await session.execute(select(DimPerson))
     return rows_db.scalars().all()
 
 
@@ -1143,29 +1293,106 @@ def _build_people_maps(
     return by_person_id, by_person_code, by_email
 
 
+async def _load_external_employee_identity_map(
+    *,
+    session: AsyncSession,
+    by_person_id: dict[str, list[DimPerson]],
+    warnings: list[BulkUploadWarning],
+) -> dict[str, list[DimPerson]]:
+    rows = (
+        await session.execute(
+            select(
+                DimPersonExtra.person_id,
+                DimPersonExtra.raw_payload_json,
+            )
+        )
+    ).all()
+    by_external_employee_code: dict[str, list[DimPerson]] = {}
+    for row in rows:
+        person_matches = by_person_id.get(_normalize_text(row.person_id), [])
+        if len(person_matches) != 1:
+            continue
+        payload = _parse_extra_payload_json(row.raw_payload_json)
+        if not payload:
+            continue
+        external_employee_code = _external_employee_code_from_raw_payload(payload)
+        if not external_employee_code:
+            continue
+        key = _external_identity_key(_external_identity_source_from_payload(payload), external_employee_code)
+        by_external_employee_code.setdefault(key, []).append(person_matches[0])
+
+    for key, matches in by_external_employee_code.items():
+        unique_person_ids = {person.person_id for person in matches}
+        if len(unique_person_ids) > 1:
+            warnings.append(
+                BulkUploadWarning(
+                    message=(
+                        f"Existing external employee mapping '{key}' points to multiple people. "
+                        "Resolve the duplicate mapping before relying on automatic reconciliation."
+                    ),
+                )
+            )
+    return by_external_employee_code
+
+
 def _resolve_existing_person(
     *,
     row: _BulkRow,
     by_person_id: dict[str, list[DimPerson]],
     by_person_code: dict[str, list[DimPerson]],
+    by_external_employee_code: dict[str, list[DimPerson]],
     by_email: dict[str, list[DimPerson]],
     warnings: list[BulkUploadWarning],
 ) -> DimPerson | None:
     normalized = row.normalized
     person_id = _normalize_text(normalized.get("person_id"))
-    person_code = _normalize_text(normalized.get("person_code"))
+    person_code = _incoming_internal_person_code(normalized)
+    external_employee_code = _external_employee_code(normalized)
     email = _normalize_email(normalized.get("email"))
 
     match_by_id = _single_person_match(by_person_id, person_id, "person_id") if person_id else None
+    match_by_external = (
+        _single_person_match(
+            by_external_employee_code,
+            _external_identity_key(_external_identity_source_from_payload(normalized), external_employee_code),
+            "external_employee_code",
+        )
+        if external_employee_code
+        else None
+    )
     match_by_code = _single_person_match(by_person_code, person_code.lower() if person_code else "", "person_code") if person_code else None
     match_by_email = _single_person_match(by_email, email, "email") if email else None
 
-    anchor = match_by_code or match_by_email or match_by_id
+    anchor = match_by_external or match_by_code or match_by_email or match_by_id
     if anchor is None:
         return None
 
-    if match_by_code and match_by_email and match_by_code.person_id != match_by_email.person_id:
-        # Business key wins: preserve anchor resolved by person_code and avoid email hijack.
+    if match_by_external and match_by_email and match_by_external.person_id != match_by_email.person_id:
+        warnings.append(
+            BulkUploadWarning(
+                row=row.row_number,
+                message=(
+                    f"Email '{email}' belongs to another record. External employee code match was used; email was ignored."
+                ),
+                person_id=anchor.person_id,
+                person_code=person_code or external_employee_code,
+                email=email,
+            )
+        )
+        normalized.pop("email", None)
+    elif match_by_external and match_by_code and match_by_external.person_id != match_by_code.person_id:
+        warnings.append(
+            BulkUploadWarning(
+                row=row.row_number,
+                message="External employee code conflicts with incoming internal person_code. External mapping was kept.",
+                person_id=anchor.person_id,
+                person_code=person_code or external_employee_code,
+                email=email,
+            )
+        )
+        normalized.pop("person_code", None)
+    elif match_by_code and match_by_email and match_by_code.person_id != match_by_email.person_id:
+        # Canonical internal business key wins: preserve anchor resolved by person_code and avoid email hijack.
         warnings.append(
             BulkUploadWarning(
                 row=row.row_number,
@@ -1224,6 +1451,20 @@ def _build_safe_update_payload(existing: DimPerson, updates: dict[str, Any]) -> 
     return patch
 
 
+def _preserve_existing_person_code(
+    *,
+    existing: DimPerson,
+    updates: dict[str, Any],
+) -> bool:
+    incoming_code = _normalize_text(updates.get("person_code"))
+    existing_code = _normalize_text(existing.person_code)
+    if not incoming_code or not existing_code or incoming_code == existing_code:
+        return False
+
+    updates["person_code"] = existing_code
+    return True
+
+
 def _assert_no_update_conflicts(
     existing: DimPerson,
     patch: dict[str, Any],
@@ -1276,6 +1517,25 @@ def _refresh_person_maps(
         by_email.setdefault(email, []).append(person)
 
 
+def _refresh_external_employee_identity_map(
+    *,
+    person: DimPerson,
+    normalized: dict[str, Any],
+    by_external_employee_code: dict[str, list[DimPerson]],
+) -> None:
+    external_employee_code = _external_employee_code(normalized)
+    if not external_employee_code:
+        return
+    key = _external_identity_key(_external_identity_source_from_payload(normalized), external_employee_code)
+    for existing_key in list(by_external_employee_code.keys()):
+        by_external_employee_code[existing_key] = [
+            item for item in by_external_employee_code[existing_key] if item.person_id != person.person_id
+        ]
+        if not by_external_employee_code[existing_key]:
+            by_external_employee_code.pop(existing_key, None)
+    by_external_employee_code.setdefault(key, []).append(person)
+
+
 def _resolve_manager_id(
     manager_value: Any,
     by_person_id: dict[str, list[DimPerson]],
@@ -1290,7 +1550,34 @@ def _resolve_manager_id(
     by_code = by_person_code.get(manager_token.lower(), [])
     if len(by_code) == 1:
         return by_code[0].person_id
-    return manager_token
+    return None
+
+
+def _requested_manager_reference(normalized: dict[str, Any]) -> str:
+    return _external_manager_code(normalized) or _normalize_text(normalized.get("manager_id"))
+
+
+def _resolve_manager_reference(
+    *,
+    normalized: dict[str, Any],
+    by_person_id: dict[str, list[DimPerson]],
+    by_person_code: dict[str, list[DimPerson]],
+    by_external_employee_code: dict[str, list[DimPerson]],
+) -> str | None:
+    external_manager_code = _external_manager_code(normalized)
+    direct_manager_value = _normalize_text(normalized.get("manager_id"))
+    if external_manager_code:
+        manager = _single_person_match(
+            by_external_employee_code,
+            _external_identity_key(_external_identity_source_from_payload(normalized), external_manager_code),
+            "external_manager_code",
+        )
+        if manager is not None:
+            return manager.person_id
+        if direct_manager_value and direct_manager_value != external_manager_code:
+            return _resolve_manager_id(direct_manager_value, by_person_id, by_person_code)
+        return None
+    return _resolve_manager_id(direct_manager_value, by_person_id, by_person_code)
 
 
 @router.get("/{person_id}", response_model=PlatformPersonOut)
@@ -1474,12 +1761,28 @@ def _apply_status_defaults(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _apply_external_identity_defaults(normalized: dict[str, Any]) -> None:
+    external_employee_code = _external_employee_code(normalized)
+    if not external_employee_code:
+        return
+    normalized["external_employee_code"] = external_employee_code
+    external_manager_code = _external_manager_code(normalized)
+    if external_manager_code:
+        normalized["external_manager_code"] = external_manager_code
+    if not _normalize_text(normalized.get("external_identity_source")):
+        normalized["external_identity_source"] = _normalize_text(normalized.get("source_system")) or _DEFAULT_EXTERNAL_IDENTITY_SOURCE
+
+
 def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
     for key, value in row.items():
         if key is None:
             continue
         norm_key = _normalize_header_key(key)
+        if norm_key == "employee_number":
+            normalized["external_employee_code"] = value.strip() if isinstance(value, str) else value
+        if norm_key == "reporting_manager_employee_number":
+            normalized["external_manager_code"] = value.strip() if isinstance(value, str) else value
         mapped_key = _HEADER_ALIASES.get(norm_key, norm_key)
         mapped_value: Any = value.strip() if isinstance(value, str) else value
         if mapped_key in {"email"} and isinstance(mapped_value, str):
@@ -1672,6 +1975,171 @@ def _second_letter_or(value: str, fallback: str) -> str:
     if len(letters) >= 2:
         return letters[1]
     return fallback
+
+
+async def _lock_person_code_counters(session: AsyncSession) -> dict[str, _PersonCodeCounterState]:
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT `code_type`, `next_seq`, `max_seq`
+                FROM `dim_person_code_counter`
+                FOR UPDATE
+                """
+            )
+        )
+    ).all()
+    states: dict[str, _PersonCodeCounterState] = {}
+    for row in rows:
+        code_type = _normalize_text(row.code_type).upper()
+        next_seq = int(row.next_seq or 0)
+        states[code_type] = _PersonCodeCounterState(
+            code_type=code_type,
+            next_seq=next_seq,
+            original_next_seq=next_seq,
+            max_seq=int(row.max_seq) if row.max_seq is not None else None,
+        )
+    return states
+
+
+async def _normalize_bulk_employment_type(
+    *,
+    session: AsyncSession,
+    value: str | None,
+    job_title: str | None,
+    email: str | None,
+) -> str:
+    normalized = (
+        await session.execute(
+            text(
+                """
+                SELECT fn_dim_person_normalize_employment_type(
+                  :employment_type,
+                  :job_title,
+                  :email
+                ) AS normalized_employment_type
+                """
+            ),
+            {
+                "employment_type": _normalize_text(value) or None,
+                "job_title": _normalize_text(job_title) or None,
+                "email": _normalize_email(email) or None,
+            },
+        )
+    ).scalar_one_or_none()
+    return str(normalized or "Permanent").strip() or "Permanent"
+
+
+async def _bulk_person_code_type(
+    *,
+    session: AsyncSession,
+    employment_type: str,
+) -> str:
+    code_type = (
+        await session.execute(
+            text("SELECT fn_dim_person_code_type(:principal_flag, :employment_type) AS code_type"),
+            {"principal_flag": 0, "employment_type": employment_type},
+        )
+    ).scalar_one_or_none()
+    if not code_type:
+        raise ValueError("Could not resolve person_code series for upload row.")
+    return str(code_type).strip().upper()
+
+
+async def _bulk_person_code_is_valid(
+    *,
+    session: AsyncSession,
+    code_type: str,
+    person_code: str | None,
+) -> bool:
+    candidate = _normalize_text(person_code).upper()
+    if not candidate:
+        return False
+    is_valid = (
+        await session.execute(
+            text("SELECT fn_dim_person_code_is_valid(:code_type, :person_code) AS is_valid"),
+            {"code_type": code_type, "person_code": candidate},
+        )
+    ).scalar_one_or_none()
+    return bool(int(is_valid or 0))
+
+
+async def _format_bulk_person_code(
+    *,
+    session: AsyncSession,
+    code_type: str,
+    seq: int,
+) -> str:
+    candidate = (
+        await session.execute(
+            text("SELECT fn_dim_person_format_code(:code_type, :seq) AS candidate_code"),
+            {"code_type": code_type, "seq": seq},
+        )
+    ).scalar_one_or_none()
+    if not candidate:
+        raise ValueError("Could not format person_code for upload row.")
+    return str(candidate).strip().upper()
+
+
+async def _resolve_bulk_person_code(
+    *,
+    session: AsyncSession,
+    normalized: dict[str, Any],
+    payload: dict[str, Any],
+    by_person_code: dict[str, list[DimPerson]],
+    counters: dict[str, _PersonCodeCounterState],
+) -> tuple[str, str]:
+    normalized_employment_type = await _normalize_bulk_employment_type(
+        session=session,
+        value=_normalize_text(payload.get("employment_type")) or None,
+        job_title=_normalize_text(payload.get("job_title")) or None,
+        email=_normalize_email(payload.get("email")) or None,
+    )
+    code_type = await _bulk_person_code_type(session=session, employment_type=normalized_employment_type)
+    explicit_internal_code = _incoming_internal_person_code(normalized)
+    if explicit_internal_code:
+        explicit_internal_code = explicit_internal_code.upper()
+        if await _bulk_person_code_is_valid(
+            session=session,
+            code_type=code_type,
+            person_code=explicit_internal_code,
+        ) and not by_person_code.get(explicit_internal_code.lower()):
+            return explicit_internal_code, normalized_employment_type
+
+    state = counters.get(code_type)
+    if state is None:
+        raise ValueError(f"Person code counter is not configured for code type '{code_type}'.")
+
+    seq = state.next_seq
+    while True:
+        if state.max_seq is not None and seq > state.max_seq:
+            raise ValueError(f"No remaining person_code sequence for code type '{code_type}'.")
+        candidate = await _format_bulk_person_code(session=session, code_type=code_type, seq=seq)
+        seq += 1
+        if by_person_code.get(candidate.lower()):
+            continue
+        state.next_seq = seq
+        return candidate, normalized_employment_type
+
+
+async def _save_person_code_counters(
+    session: AsyncSession,
+    counters: dict[str, _PersonCodeCounterState],
+) -> None:
+    for state in counters.values():
+        if state.next_seq == state.original_next_seq:
+            continue
+        await session.execute(
+            text(
+                """
+                UPDATE `dim_person_code_counter`
+                SET `next_seq` = :next_seq,
+                    `updated_at` = NOW()
+                WHERE `code_type` = :code_type
+                """
+            ),
+            {"code_type": state.code_type, "next_seq": state.next_seq},
+        )
 
 
 async def _generate_person_id(session: AsyncSession, first_name: str | None, last_name: str | None) -> str:

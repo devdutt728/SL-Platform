@@ -1,13 +1,13 @@
+import { getPublicPortalHref } from "@/lib/public-portal";
+
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-const publicPortalPath =
-  process.env.NEXT_PUBLIC_PUBLIC_PORTAL_PATH || process.env.NEXT_PUBLIC_PUBLIC_PORTAL_URL || "/apply";
 
 export function loginUrl(): string {
   return `${basePath}/login`;
 }
 
 function resolvePublicPortalUrl(): string {
-  const raw = publicPortalPath.trim() || "/";
+  const raw = getPublicPortalHref().trim() || "/";
   if (raw.startsWith("http://") || raw.startsWith("https://")) return raw.replace(/\/+$/, "") + "/";
   const normalizedPath = raw.startsWith("/") ? raw : `/${raw}`;
   return `${window.location.origin}${normalizedPath}`;

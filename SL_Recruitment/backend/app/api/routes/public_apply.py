@@ -470,6 +470,7 @@ async def apply_for_opening(
     ).scalars().first()
     if not opening or not bool(opening.is_active):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not available")
+    workflow_policy = workflow_policy_for_opening(opening)
 
     now = datetime.utcnow()
     email_normalized = str(email).strip().lower()
