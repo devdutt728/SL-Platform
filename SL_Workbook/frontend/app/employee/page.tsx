@@ -12,6 +12,15 @@ const apps = [
     tags: ["Live Sync", "Encrypted access", "Audit-ready"],
     icon: <OrbitIcon />,
   },
+  {
+    label: "PROJECT CONTROL",
+    title: "Project Planner",
+    description: "Baselines, live plans, approvals, and schedule visibility.",
+    href: "/employee/planner",
+    accent: "from-[#0F766E]/28 to-[#0F172A]/12",
+    tags: ["Role scoped", "Change control", "Live schedule"],
+    icon: <GridOrbitIcon />,
+  },
 ];
 
 type UserSummary = {
@@ -22,6 +31,8 @@ type UserSummary = {
   platform_role_name?: string;
   platform_role_code?: string;
   platform_role_names?: string[];
+  can_access_recruitment?: boolean;
+  can_access_planner?: boolean;
 };
 
 function asString(value: unknown) {
@@ -86,6 +97,8 @@ async function fetchCurrentUser(): Promise<UserSummary | null> {
       platform_role_names: Array.isArray(data.platform_role_names)
         ? (data.platform_role_names.filter((item) => typeof item === "string") as string[])
         : [],
+      can_access_recruitment: Boolean(data.can_access_recruitment),
+      can_access_planner: Boolean(data.can_access_planner),
     };
   } catch {
     return null;
@@ -100,6 +113,11 @@ export default async function EmployeeConsolePage() {
   const initials = initialsFrom(displayName);
   const firstName = firstNameFrom(displayName);
   const role = roleFromUser(user);
+  const visibleApps = apps.filter((app) => {
+    if (app.href === "/recruitment/dashboard") return Boolean(user?.can_access_recruitment);
+    if (app.title === "Project Planner") return Boolean(user?.can_access_planner);
+    return true;
+  });
 
   return (
     <div className="page-shell min-h-screen pb-12 pt-24">
@@ -118,7 +136,8 @@ export default async function EmployeeConsolePage() {
             <div className="employee-menu__panel">
               <a href="/" className="employee-menu__item">Public portal</a>
               <a href="/employee" className="employee-menu__item">Workbook</a>
-              <a href="/recruitment/dashboard" className="employee-menu__item">Recruitment</a>
+              {user?.can_access_recruitment ? <a href="/recruitment/dashboard" className="employee-menu__item">Recruitment</a> : null}
+              {user?.can_access_planner ? <a href="/employee/planner" className="employee-menu__item">Project Planner</a> : null}
             </div>
           </details>
           <a href="/" className="public-button public-button--ghost">
@@ -153,7 +172,7 @@ export default async function EmployeeConsolePage() {
         </div>
 
         <div className="mt-10 grid gap-5">
-          {apps.map((app) => (
+          {visibleApps.map((app) => (
             <a key={app.title} href={app.href} className="section-card workbook-card group min-h-[184px]">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-3">
@@ -179,6 +198,15 @@ export default async function EmployeeConsolePage() {
               </div>
             </a>
           ))}
+          {visibleApps.length === 0 ? (
+            <div className="section-card workbook-card min-h-[184px]">
+              <div className="flex h-full flex-col justify-center">
+                <p className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-steel">No App Access</p>
+                <h2 className="mt-1 text-xl font-semibold text-slate-900">No modules are enabled for your account yet.</h2>
+                <p className="mt-4 text-sm text-steel">Ask a superadmin to grant Recruitment or Project Planner access in the platform directory.</p>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-10 flex flex-wrap items-center gap-3 text-xs text-steel">
@@ -210,6 +238,17 @@ function OrbitIcon() {
         strokeLinecap="round"
       />
       <circle cx="17.5" cy="13.5" r="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+function GridOrbitIcon() {
+  return (
+    <svg className="h-5 w-5 text-slate-900" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="4" y="4" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="14" y="4" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="4" y="14" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M14 17h6m-3-3v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }

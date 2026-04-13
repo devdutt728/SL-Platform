@@ -17,6 +17,8 @@ from app.core.roles import Role, has_required_role
 from app.core.config import settings
 from app.core.paths import resolve_repo_path
 from app.db.platform_session import PlatformSessionLocal
+from app.models.platform_person import DimPerson
+from app.services.app_access import is_planner_profile_eligible, is_recruitment_role_eligible, is_superadmin_identity
 from app.services.platform_feature_access import REPORTS_FEATURE_CODE, person_has_feature_access
 from app.services.platform_identity import resolve_identity_by_email
 from app.schemas.user import UserContext
@@ -56,6 +58,34 @@ async def get_current_user(request: Request) -> UserContext:
                     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
 
                 await _enforce_single_session(platform_session, request, email)
+                person = await platform_session.get(DimPerson, str(identity.person_id))
+                is_superadmin = is_superadmin_identity(
+                    role_ids=identity.role_ids,
+                    role_values=[*identity.role_codes, *identity.role_names, identity.role_code, identity.role_name],
+                )
+                can_access_recruitment = is_recruitment_role_eligible(
+                    app_roles=roles,
+                    role_ids=identity.role_ids,
+                    role_values=[*identity.role_codes, *identity.role_names, identity.role_code, identity.role_name],
+                ) and (is_superadmin or await person_has_feature_access(
+                    platform_session,
+                    person_id=str(identity.person_id),
+                    feature_code="recruitment_app",
+                ))
+                can_access_planner = is_planner_profile_eligible(
+                    role_ids=identity.role_ids,
+                    role_values=[*identity.role_codes, *identity.role_names, identity.role_code, identity.role_name],
+                    title_values=[
+                        person.job_title if person else None,
+                        person.secondary_job_title if person else None,
+                        person.department if person else None,
+                        person.sub_department if person else None,
+                    ],
+                ) and (is_superadmin or await person_has_feature_access(
+                    platform_session,
+                    person_id=str(identity.person_id),
+                    feature_code="planner_app",
+                ))
                 reports_access = await person_has_feature_access(
                     platform_session,
                     person_id=str(identity.person_id),
@@ -85,6 +115,8 @@ async def get_current_user(request: Request) -> UserContext:
             platform_role_ids=identity.role_ids,
             platform_role_codes=identity.role_codes,
             platform_role_names=identity.role_names,
+            can_access_recruitment=can_access_recruitment,
+            can_access_planner=can_access_planner,
             reports_access=reports_access,
         )
 
@@ -119,6 +151,8 @@ async def get_current_user(request: Request) -> UserContext:
         platform_role_id=None,
         platform_role_code=None,
         platform_role_name=None,
+        can_access_recruitment=True,
+        can_access_planner=True,
         reports_access=False,
     )
 

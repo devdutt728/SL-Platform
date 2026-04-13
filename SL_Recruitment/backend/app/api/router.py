@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api.routes import auth
 from app.api.routes import caf
@@ -16,29 +16,30 @@ from app.api.routes import platform_roles
 from app.api.routes import public_apply
 from app.api.routes import reports
 from app.api.routes import sprints
+from app.core.app_access import require_recruitment_app_access
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
-api_router.include_router(candidates.router)
+api_router.include_router(candidates.router, dependencies=[Depends(require_recruitment_app_access())])
 api_router.include_router(candidate_assessment.router)
 api_router.include_router(candidate_assessment.legacy_router)
 api_router.include_router(caf.router)
 api_router.include_router(caf.legacy_router)
-api_router.include_router(openings.router)
-api_router.include_router(offers.router)
+api_router.include_router(openings.router, dependencies=[Depends(require_recruitment_app_access())])
+api_router.include_router(offers.router, dependencies=[Depends(require_recruitment_app_access())])
 api_router.include_router(offers.public_router)
 api_router.include_router(offers.approval_public_router)
-api_router.include_router(platform_people.router)
-api_router.include_router(platform_feature_access.router)
-api_router.include_router(platform_roles.router)
+api_router.include_router(platform_people.router, dependencies=[Depends(require_recruitment_app_access())])
+api_router.include_router(platform_feature_access.router, dependencies=[Depends(require_recruitment_app_access())])
+api_router.include_router(platform_roles.router, dependencies=[Depends(require_recruitment_app_access())])
 api_router.include_router(public_apply.router)
-api_router.include_router(dashboard.router)
-api_router.include_router(interviews.router)
+api_router.include_router(dashboard.router, dependencies=[Depends(require_recruitment_app_access())])
+api_router.include_router(interviews.router, dependencies=[Depends(require_recruitment_app_access())])
 api_router.include_router(interviews.public_router)
 api_router.include_router(interviews.public_recruitment_router)
-api_router.include_router(interview_assessments.router)
-api_router.include_router(joining_docs.router)
+api_router.include_router(interview_assessments.router, dependencies=[Depends(require_recruitment_app_access())])
+api_router.include_router(joining_docs.router, dependencies=[Depends(require_recruitment_app_access())])
 api_router.include_router(joining_docs.public_router)
-api_router.include_router(reports.router)
-api_router.include_router(sprints.router)
+api_router.include_router(reports.router, dependencies=[Depends(require_recruitment_app_access())])
+api_router.include_router(sprints.router, dependencies=[Depends(require_recruitment_app_access())])
 api_router.include_router(sprints.public_router)

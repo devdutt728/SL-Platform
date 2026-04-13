@@ -5,6 +5,8 @@ type ReportsAccessActor = {
   platform_role_codes?: string[] | null;
   platform_role_name?: string | null;
   platform_role_names?: string[] | null;
+  can_access_recruitment?: boolean;
+  can_access_planner?: boolean;
   reports_access?: boolean;
 };
 
@@ -46,6 +48,16 @@ export function isSuperadmin(actor: ReportsAccessActor | null | undefined): bool
 export function canAccessReports(actor: ReportsAccessActor | null | undefined): boolean {
   if (isSuperadmin(actor)) return true;
   return Boolean(actor?.reports_access);
+}
+
+export function canAccessRecruitment(actor: ReportsAccessActor | null | undefined): boolean {
+  if (isSuperadmin(actor)) return true;
+  return Boolean(actor?.can_access_recruitment);
+}
+
+export function canAccessPlanner(actor: ReportsAccessActor | null | undefined): boolean {
+  if (isSuperadmin(actor)) return true;
+  return Boolean(actor?.can_access_planner);
 }
 
 export type { ReportsAccessActor };

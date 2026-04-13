@@ -4,8 +4,9 @@ set "LOGDIR=%ROOT%\logs"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
 set "SL_ENVIRONMENT=development"
 if not defined ENABLE_IT_MODULE set "ENABLE_IT_MODULE=0"
+if not defined ENABLE_PROJECT_PLANNER set "ENABLE_PROJECT_PLANNER=0"
 
-powershell -NoProfile -Command "& { $ErrorActionPreference = 'Continue'; $ports = 3000,3001,3002,3003,8001,8002; foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { $procId = $_.OwningProcess; if ($procId) { try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {} } } } }"
+powershell -NoProfile -Command "& { $ErrorActionPreference = 'Continue'; $ports = 3000,3001,3002,3003,3004,8001,8002,8003; foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { $procId = $_.OwningProcess; if ($procId) { try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {} } } } }"
 
 set "RUN_ID=%DATE%_%TIME%"
 set "RUN_ID=%RUN_ID: =%"
@@ -28,6 +29,10 @@ set "REC_FRONTEND_OUT=%RUN_LOGDIR%\recruitment-frontend.log"
 set "REC_FRONTEND_ERR=%RUN_LOGDIR%\recruitment-frontend.err.log"
 set "WORKBOOK_OUT=%RUN_LOGDIR%\workbook-frontend.log"
 set "WORKBOOK_ERR=%RUN_LOGDIR%\workbook-frontend.err.log"
+set "PLANNER_BACKEND_OUT=%RUN_LOGDIR%\planner-backend.log"
+set "PLANNER_BACKEND_ERR=%RUN_LOGDIR%\planner-backend.err.log"
+set "PLANNER_FRONTEND_OUT=%RUN_LOGDIR%\planner-frontend.log"
+set "PLANNER_FRONTEND_ERR=%RUN_LOGDIR%\planner-frontend.err.log"
 set "CADDY_OUT=%RUN_LOGDIR%\caddy.log"
 set "CADDY_ERR=%RUN_LOGDIR%\caddy.err.log"
 
@@ -42,6 +47,10 @@ set "CURRENT_LOGS=%LOGDIR%\current-logs.cmd"
   echo set "IT_FRONTEND_LOG=%IT_FRONTEND_OUT%"
   echo set "REC_FRONTEND_LOG=%REC_FRONTEND_OUT%"
   echo set "WORKBOOK_LOG=%WORKBOOK_OUT%"
+  echo set "PLANNER_BACKEND_LOG=%PLANNER_BACKEND_OUT%"
+  echo set "PLANNER_BACKEND_ERR_LOG=%PLANNER_BACKEND_ERR%"
+  echo set "PLANNER_FRONTEND_LOG=%PLANNER_FRONTEND_OUT%"
+  echo set "PLANNER_FRONTEND_ERR_LOG=%PLANNER_FRONTEND_ERR%"
   echo set "CADDY_LOG=%CADDY_OUT%"
   echo set "CADDY_ERR_LOG=%CADDY_ERR%"
 ) > "%CURRENT_LOGS%"
@@ -51,12 +60,16 @@ set "REC_BACKEND_DIR=%ROOT%\SL_Recruitment\backend"
 set "IT_FRONTEND_DIR=%ROOT%\SL_IT\frontend"
 set "REC_FRONTEND_DIR=%ROOT%\SL_Recruitment\frontend"
 set "WORKBOOK_DIR=%ROOT%\SL_Workbook\frontend"
+set "PLANNER_BACKEND_DIR=%ROOT%\SL_Project_Planner\backend"
+set "PLANNER_FRONTEND_DIR=%ROOT%\SL_Project_Planner\frontend"
 
 if not exist "%IT_BACKEND_DIR%" echo Missing: %IT_BACKEND_DIR%
 if not exist "%REC_BACKEND_DIR%" echo Missing: %REC_BACKEND_DIR%
 if not exist "%IT_FRONTEND_DIR%" echo Missing: %IT_FRONTEND_DIR%
 if not exist "%REC_FRONTEND_DIR%" echo Missing: %REC_FRONTEND_DIR%
 if not exist "%WORKBOOK_DIR%" echo Missing: %WORKBOOK_DIR%
+if "%ENABLE_PROJECT_PLANNER%"=="1" if not exist "%PLANNER_BACKEND_DIR%" echo Missing: %PLANNER_BACKEND_DIR%
+if "%ENABLE_PROJECT_PLANNER%"=="1" if not exist "%PLANNER_FRONTEND_DIR%" echo Missing: %PLANNER_FRONTEND_DIR%
 
 if "%ENABLE_IT_MODULE%"=="1" if exist "%IT_BACKEND_DIR%" (
   call :spawn "%IT_BACKEND_DIR%" "python -m uvicorn app.main:app --reload --port 8001" "%IT_BACKEND_OUT%" "%IT_BACKEND_ERR%"
@@ -72,6 +85,12 @@ if exist "%REC_FRONTEND_DIR%" (
 )
 if exist "%WORKBOOK_DIR%" (
   call :spawn "%WORKBOOK_DIR%" "npm run dev" "%WORKBOOK_OUT%" "%WORKBOOK_ERR%" "PORT=3003"
+)
+if "%ENABLE_PROJECT_PLANNER%"=="1" if exist "%PLANNER_BACKEND_DIR%" (
+  call :spawn "%PLANNER_BACKEND_DIR%" "python -m uvicorn app.main:app --reload --port 8003" "%PLANNER_BACKEND_OUT%" "%PLANNER_BACKEND_ERR%"
+)
+if "%ENABLE_PROJECT_PLANNER%"=="1" if exist "%PLANNER_FRONTEND_DIR%" (
+  call :spawn "%PLANNER_FRONTEND_DIR%" "npm run dev" "%PLANNER_FRONTEND_OUT%" "%PLANNER_FRONTEND_ERR%" "PORT=3004"
 )
 
 if exist "%ROOT%\tools\caddy.exe" (

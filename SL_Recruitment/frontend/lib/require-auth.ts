@@ -17,3 +17,11 @@ export async function requireAuth() {
   return me;
 }
 
+export async function requireRecruitmentAccess() {
+  const me = await requireAuth();
+  const authMode = process.env.NEXT_PUBLIC_AUTH_MODE || "dev";
+  if (authMode !== "google" || !me) return me;
+  if (!me.can_access_recruitment) redirect("/employee");
+  return me;
+}
+

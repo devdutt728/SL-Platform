@@ -2,10 +2,10 @@ import { ReactNode } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
 import { LiveActivityDock } from "@/components/live-activity-dock";
-import { requireAuth } from "@/lib/require-auth";
+import { requireRecruitmentAccess } from "@/lib/require-auth";
 
 export default async function RecruitmentLayout({ children }: { children: ReactNode }) {
-  const me = await requireAuth();
+  const me = await requireRecruitmentAccess();
   const hideContextPanel = false;
 
   return (

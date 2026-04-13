@@ -1,0 +1,113 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional
+
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.platform_person import DimPerson, DimPersonRole
+from app.models.platform_role import DimRole
+
+
+@dataclass(frozen=True)
+class PlatformIdentity:
+    person_id: str
+    email: str
+    full_name: str
+    role_id: int | None
+    role_code: str | None
+    role_name: str | None
+    role_ids: list[int]
+    role_codes: list[str]
+    role_names: list[str]
+    status: str | None
+    is_deleted: int | None
+
+
+def _pick_primary_role(role_ids: list[int]) -> int | None:
+    if not role_ids:
+        return None
+    if 2 in role_ids:
+        return 2
+    return sorted(role_ids)[0]
+
+
+def active_status_filter():
+    return or_(DimPerson.status.is_(None), func.lower(DimPerson.status).in_(["working", "active"]))
+
+
+async def resolve_identity_by_email(session: AsyncSession, email: str) -> Optional[PlatformIdentity]:
+    email_norm = email.strip().lower()
+    row = (
+        await session.execute(
+            select(
+                DimPerson.person_id,
+                DimPerson.email,
+                DimPerson.first_name,
+                DimPerson.last_name,
+                DimPerson.display_name,
+                DimPerson.full_name,
+                DimPerson.status,
+                DimPerson.is_deleted,
+                DimPerson.role_id,
+                DimRole.role_code,
+                DimRole.role_name,
+            )
+            .select_from(DimPerson)
+            .outerjoin(DimRole, DimRole.role_id == DimPerson.role_id)
+            .where(DimPerson.email == email_norm, active_status_filter())
+            .limit(1)
+        )
+    ).first()
+    if not row:
+        return None
+
+    role_rows = (
+        await session.execute(
+            select(DimRole.role_id, DimRole.role_code, DimRole.role_name)
+            .select_from(DimPersonRole)
+            .join(DimRole, DimRole.role_id == DimPersonRole.role_id)
+            .where(DimPersonRole.person_id == row.person_id)
+            .order_by(DimRole.role_id.asc())
+        )
+    ).all()
+
+    role_ids: list[int] = []
+    role_codes: list[str] = []
+    role_names: list[str] = []
+    for role_id, role_code, role_name in role_rows:
+        if role_id is not None:
+            role_ids.append(int(role_id))
+        if role_code:
+            role_codes.append(str(role_code))
+        if role_name:
+            role_names.append(str(role_name))
+
+    primary_role_id = _pick_primary_role(role_ids) or row.role_id
+    primary_role_code = None
+    primary_role_name = None
+    if primary_role_id is not None:
+        for role_id, role_code, role_name in role_rows:
+            if role_id == primary_role_id:
+                primary_role_code = role_code
+                primary_role_name = role_name
+                break
+
+    first_name = row.first_name or ""
+    last_name = row.last_name or ""
+    full_name = (row.display_name or row.full_name or f"{first_name} {last_name}").strip() or email_norm
+
+    return PlatformIdentity(
+        person_id=row.person_id,
+        email=row.email,
+        full_name=full_name,
+        role_id=primary_role_id,
+        role_code=primary_role_code,
+        role_name=primary_role_name,
+        role_ids=role_ids,
+        role_codes=role_codes,
+        role_names=role_names,
+        status=row.status,
+        is_deleted=row.is_deleted,
+    )

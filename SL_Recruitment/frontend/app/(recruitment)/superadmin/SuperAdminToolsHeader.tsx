@@ -16,7 +16,7 @@ const TOOL_LINKS: Array<{ key: SuperAdminTool; href: string; label: string }> = 
   { key: "ingest-ops", href: "/superadmin/ingest-ops", label: "Ingest Operations" },
   { key: "candidate-communications", href: "/superadmin/candidate-communications", label: "Candidate Communications" },
   { key: "roles", href: "/superadmin/roles", label: "Role Management" },
-  { key: "reports-access", href: "/superadmin/reports-access", label: "Reports Access" },
+  { key: "reports-access", href: "/superadmin/reports-access", label: "App Access" },
   { key: "people", href: "/superadmin/people", label: "People Management" },
   { key: "sprint-templates", href: "/superadmin/sprint-templates", label: "Sprint Templates" },
 ];

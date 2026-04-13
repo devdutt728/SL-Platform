@@ -3,7 +3,6 @@
 from fastapi import FastAPI
 
 from app.api.router import api_router
-from app.api.routes import reports
 from app.core.config import settings
 from app.db.platform_session import platform_engine
 from app.db.session import engine
@@ -44,7 +43,6 @@ async def health_check():
 
 
 app.include_router(api_router)
-app.include_router(reports.router)
 
 
 @app.on_event("startup")

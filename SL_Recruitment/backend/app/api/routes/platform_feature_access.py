@@ -8,9 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import require_superadmin
 from app.db.platform_session import get_platform_session
 from app.models.platform_person import DimPerson, DimPersonFeatureAccess
-from app.schemas.platform_feature_access import ReportsAccessAssignmentOut, ReportsAccessToggleIn
+from app.schemas.platform_feature_access import (
+    FeatureAccessAssignmentOut,
+    FeatureAccessFeatureOut,
+    FeatureAccessToggleIn,
+    ReportsAccessAssignmentOut,
+    ReportsAccessToggleIn,
+)
 from app.schemas.user import UserContext
-from app.services.platform_feature_access import REPORTS_FEATURE_CODE
+from app.services.platform_feature_access import feature_label, is_supported_feature_code, normalize_feature_code, supported_feature_codes
 
 router = APIRouter(prefix="/platform/feature-access", tags=["platform"])
 
@@ -37,6 +43,38 @@ async def list_reports_access(
     session: AsyncSession = Depends(get_platform_session),
     _user: UserContext = Depends(require_superadmin()),
 ):
+    return await list_feature_access("reports", session=session, _user=_user)
+
+
+@router.patch("/reports/{person_id}", response_model=ReportsAccessAssignmentOut)
+async def set_reports_access(
+    person_id: str,
+    payload: ReportsAccessToggleIn,
+    session: AsyncSession = Depends(get_platform_session),
+    user: UserContext = Depends(require_superadmin()),
+):
+    return await set_feature_access("reports", person_id=person_id, payload=payload, session=session, user=user)
+
+
+def _normalized_feature_code_or_404(feature_code: str) -> str:
+    normalized = normalize_feature_code(feature_code)
+    if not is_supported_feature_code(normalized):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feature code not supported")
+    return normalized
+
+
+@router.get("", response_model=list[FeatureAccessFeatureOut])
+async def list_feature_catalog(_user: UserContext = Depends(require_superadmin())):
+    return [FeatureAccessFeatureOut(feature_code=code, feature_label=feature_label(code)) for code in supported_feature_codes()]
+
+
+@router.get("/{feature_code}", response_model=list[FeatureAccessAssignmentOut])
+async def list_feature_access(
+    feature_code: str,
+    session: AsyncSession = Depends(get_platform_session),
+    _user: UserContext = Depends(require_superadmin()),
+):
+    normalized_feature_code = _normalized_feature_code_or_404(feature_code)
     try:
         rows = (
             await session.execute(
@@ -55,7 +93,7 @@ async def list_reports_access(
                 )
                 .select_from(DimPersonFeatureAccess)
                 .join(DimPerson, DimPerson.person_id == DimPersonFeatureAccess.person_id)
-                .where(DimPersonFeatureAccess.feature_code == REPORTS_FEATURE_CODE)
+                .where(DimPersonFeatureAccess.feature_code == normalized_feature_code)
                 .order_by(
                     func.coalesce(DimPerson.is_deleted, 0).asc(),
                     func.coalesce(DimPerson.display_name, DimPerson.full_name, DimPerson.first_name, DimPerson.email).asc(),
@@ -66,7 +104,9 @@ async def list_reports_access(
         raise _feature_access_schema_unavailable()
 
     return [
-        ReportsAccessAssignmentOut(
+        FeatureAccessAssignmentOut(
+            feature_code=normalized_feature_code,
+            feature_label=feature_label(normalized_feature_code),
             person_id=row.person_id,
             person_code=row.person_code,
             full_name=_person_full_name(row),
@@ -81,13 +121,15 @@ async def list_reports_access(
     ]
 
 
-@router.patch("/reports/{person_id}", response_model=ReportsAccessAssignmentOut)
-async def set_reports_access(
+@router.patch("/{feature_code}/{person_id}", response_model=FeatureAccessAssignmentOut)
+async def set_feature_access(
+    feature_code: str,
     person_id: str,
-    payload: ReportsAccessToggleIn,
+    payload: FeatureAccessToggleIn,
     session: AsyncSession = Depends(get_platform_session),
     user: UserContext = Depends(require_superadmin()),
 ):
+    normalized_feature_code = _normalized_feature_code_or_404(feature_code)
     person = await session.get(DimPerson, person_id)
     if not person:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
@@ -96,7 +138,7 @@ async def set_reports_access(
         await session.execute(
             delete(DimPersonFeatureAccess).where(
                 DimPersonFeatureAccess.person_id == person_id,
-                DimPersonFeatureAccess.feature_code == REPORTS_FEATURE_CODE,
+                DimPersonFeatureAccess.feature_code == normalized_feature_code,
             )
         )
     except (ProgrammingError, OperationalError):
@@ -108,7 +150,7 @@ async def set_reports_access(
         try:
             assignment = DimPersonFeatureAccess(
                 person_id=person_id,
-                feature_code=REPORTS_FEATURE_CODE,
+                feature_code=normalized_feature_code,
                 granted_by_person_id=user.person_id_platform,
             )
             session.add(assignment)
@@ -130,7 +172,9 @@ async def set_reports_access(
         or person.email
     )
 
-    return ReportsAccessAssignmentOut(
+    return FeatureAccessAssignmentOut(
+        feature_code=normalized_feature_code,
+        feature_label=feature_label(normalized_feature_code),
         person_id=person.person_id,
         person_code=person.person_code,
         full_name=full_name,

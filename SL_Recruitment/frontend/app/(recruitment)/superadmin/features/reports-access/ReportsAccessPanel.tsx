@@ -4,9 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Lock, Search, ShieldCheck, UserRoundCheck, UserRoundX } from "lucide-react";
 import type { PlatformPersonSuggestion, ReportsAccessAssignment } from "@/lib/types";
 
+const featureOptions = [
+  { code: "recruitment_app", label: "Recruitment" },
+  { code: "planner_app", label: "Project Planner" },
+  { code: "reports", label: "Reports" },
+];
+
 export function ReportsAccessPanel() {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
   const [assignments, setAssignments] = useState<ReportsAccessAssignment[]>([]);
+  const [selectedFeature, setSelectedFeature] = useState("recruitment_app");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,16 +31,16 @@ export function ReportsAccessPanel() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${basePath}/api/platform/feature-access/reports`, { cache: "no-store" });
+      const res = await fetch(`${basePath}/api/platform/feature-access/${encodeURIComponent(selectedFeature)}`, { cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as ReportsAccessAssignment[];
       setAssignments(data || []);
     } catch (e: any) {
-      setError(e?.message || "Could not load reports access.");
+      setError(e?.message || "Could not load feature access.");
     } finally {
       setLoading(false);
     }
-  }, [basePath]);
+  }, [basePath, selectedFeature]);
 
   useEffect(() => {
     void loadAssignments();
@@ -99,7 +106,7 @@ export function ReportsAccessPanel() {
     setNotice(null);
     try {
       const res = await fetch(
-        `${basePath}/api/platform/feature-access/reports/${encodeURIComponent(target.person_id)}`,
+        `${basePath}/api/platform/feature-access/${encodeURIComponent(selectedFeature)}/${encodeURIComponent(target.person_id)}`,
         {
           method: "PATCH",
           headers: { "content-type": "application/json" },
@@ -110,10 +117,11 @@ export function ReportsAccessPanel() {
 
       await loadAssignments();
       setEnabled(nextEnabled);
-      setNotice(nextEnabled ? "Reports access granted." : "Reports access removed.");
+      const featureLabel = featureOptions.find((option) => option.code === selectedFeature)?.label || "Feature";
+      setNotice(nextEnabled ? `${featureLabel} access granted.` : `${featureLabel} access removed.`);
       window.setTimeout(() => setNotice(null), 2200);
     } catch (e: any) {
-      setError(e?.message || "Could not update reports access.");
+      setError(e?.message || "Could not update feature access.");
     } finally {
       setSaving(false);
     }
@@ -126,9 +134,9 @@ export function ReportsAccessPanel() {
         <div className="absolute -left-8 bottom-6 h-28 w-28 rounded-full bg-cyan-200/35 blur-2xl" aria-hidden="true" />
         <div className="relative space-y-2">
           <p className="text-[10px] uppercase tracking-[0.28em] text-slate-500">Admin</p>
-          <h1 className="text-xl font-semibold text-slate-900">Reports Access</h1>
+          <h1 className="text-xl font-semibold text-slate-900">App Access</h1>
           <p className="max-w-2xl text-xs text-slate-600">
-            Reports is no longer inherited from roles. Superadmin always has access; everyone else needs an explicit grant here.
+            Recruitment, Project Planner, and Reports are grant-driven. Superadmin keeps global access; everyone else needs an explicit assignment here.
           </p>
         </div>
       </section>
@@ -147,6 +155,24 @@ export function ReportsAccessPanel() {
           </div>
 
           <div className="mt-4 space-y-3">
+            <label className="space-y-1 text-xs text-slate-600">
+              Feature
+              <select
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                value={selectedFeature}
+                onChange={(e) => {
+                  setSelectedFeature(e.target.value);
+                  setPersonSelected(null);
+                  setPersonQuery("");
+                }}
+              >
+                {featureOptions.map((feature) => (
+                  <option key={feature.code} value={feature.code}>
+                    {feature.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="space-y-1 text-xs text-slate-600">
               Person
               <div className="relative" ref={personMenuRef}>
@@ -186,7 +212,7 @@ export function ReportsAccessPanel() {
                               {person.full_name} <span className="text-slate-500">({person.email})</span>
                             </span>
                             <span className="block truncate text-xs text-slate-400">
-                              {alreadyEnabled ? "Reports access already enabled" : person.person_id}
+                              {alreadyEnabled ? "Feature access already enabled" : person.person_id}
                             </span>
                           </span>
                           {alreadyEnabled ? <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" /> : null}
@@ -207,15 +233,15 @@ export function ReportsAccessPanel() {
                 disabled={!personSelected || saving}
               />
               <span>
-                <span className="block font-medium text-slate-900">Allow Reports visibility</span>
-                <span className="block text-xs text-slate-500">This controls the Reports menu and Reports APIs for the selected user.</span>
+                <span className="block font-medium text-slate-900">Allow feature visibility</span>
+                <span className="block text-xs text-slate-500">This controls app visibility and protected APIs for the selected user.</span>
               </span>
             </label>
 
             <div className="rounded-2xl border border-amber-200/70 bg-amber-50/80 px-3 py-3 text-xs text-amber-900">
               <div className="flex items-start gap-2">
                 <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>Superadmin does not need an assignment here. This panel is only for non-superadmin users.</span>
+                <span>Superadmin does not need an explicit assignment here. This panel is for non-superadmin users.</span>
               </div>
             </div>
 
@@ -225,7 +251,7 @@ export function ReportsAccessPanel() {
               disabled={!personSelected || saving}
               className="w-full rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {saving ? "Saving..." : "Save reports access"}
+              {saving ? "Saving..." : "Save access"}
             </button>
           </div>
         </section>
@@ -241,9 +267,9 @@ export function ReportsAccessPanel() {
 
           <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
             {loading ? (
-              <div className="px-4 py-4 text-sm text-slate-600">Loading reports access...</div>
+              <div className="px-4 py-4 text-sm text-slate-600">Loading access assignments...</div>
             ) : assignments.length === 0 ? (
-              <div className="px-4 py-4 text-sm text-slate-600">No explicit reports access has been granted yet.</div>
+              <div className="px-4 py-4 text-sm text-slate-600">No explicit access has been granted for this feature yet.</div>
             ) : (
               <div className="divide-y divide-slate-200">
                 {assignments.map((assignment) => (

@@ -25,6 +25,8 @@ type SidebarMe = {
   platform_role_codes?: string[] | null;
   platform_role_name?: string | null;
   platform_role_names?: string[] | null;
+  can_access_recruitment?: boolean;
+  can_access_planner?: boolean;
   reports_access?: boolean;
   roles?: string[] | null;
 };

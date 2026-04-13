@@ -16,6 +16,8 @@ type Me = {
   platform_role_name?: string | null;
   platform_role_codes?: string[] | null;
   platform_role_names?: string[] | null;
+  can_access_recruitment?: boolean;
+  can_access_planner?: boolean;
 };
 
 const roleLabel: Record<string, string> = {
@@ -157,9 +159,16 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
               <a href="/employee" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
                 Workbook
               </a>
-              <a href="/dashboard" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
-                Recruitment
-              </a>
+              {me?.can_access_recruitment ? (
+                <a href="/dashboard" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
+                  Recruitment
+                </a>
+              ) : null}
+              {me?.can_access_planner ? (
+                <a href="/planner" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
+                  Project Planner
+                </a>
+              ) : null}
             </div>
           </details>
           {me ? (

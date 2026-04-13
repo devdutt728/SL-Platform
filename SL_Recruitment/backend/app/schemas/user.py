@@ -17,4 +17,6 @@ class UserContext(BaseModel):
     platform_role_ids: Optional[List[int]] = None
     platform_role_codes: Optional[List[str]] = None
     platform_role_names: Optional[List[str]] = None
+    can_access_recruitment: bool = False
+    can_access_planner: bool = False
     reports_access: bool = False

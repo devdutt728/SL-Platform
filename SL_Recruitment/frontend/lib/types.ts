@@ -511,6 +511,8 @@ export type PlatformRole = {
 };
 
 export type ReportsAccessAssignment = {
+  feature_code: string;
+  feature_label: string;
   person_id: string;
   person_code?: string | null;
   full_name: string;
