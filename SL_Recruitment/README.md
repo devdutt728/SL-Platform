@@ -83,6 +83,38 @@ Apply in order to `sl_recruitment`:
 - `backend/migrations/0030_candidate_source_bifurcation.sql`
 - `backend/migrations/0031_candidate_intake_fields.sql`
 - `backend/migrations/0032_seed_designation_openings_devdutt.sql`
+- `backend/migrations/0033_opening_requests_workflow.sql`
+- `backend/migrations/0034_opening_request_details_columns.sql`
+- `backend/migrations/0034_opening_jd_file_name.sql`
+- `backend/migrations/0035_backfill_opening_headcount_filled.sql`
+- `backend/migrations/0036_offer_principal_approval_and_signature.sql`
+- `backend/migrations/0037_google_sheet_ingest_attempts.sql`
+- `backend/migrations/0038_ingest_ops_observability.sql`
+- `backend/migrations/0039_dim_person_extra.sql`
+- `backend/migrations/0040_dim_person_emp_master_columns_non_duplicate.sql`
+- `backend/migrations/0041_rec_candidate_joining_profile.sql`
+- `backend/migrations/0042_dim_person_recruitment_lineage.sql`
+- `backend/migrations/0043_dim_person_code_governance_columns.sql`
+- `backend/migrations/0044_dim_person_code_reference_tables.sql`
+- `backend/migrations/0045_dim_person_code_functions.sql`
+- `backend/migrations/0046_dim_person_code_procedures.sql`
+- `backend/migrations/0047_dim_person_code_triggers.sql`
+- `backend/migrations/0048_dim_person_code_seed_rules.sql`
+- `backend/migrations/0049_dim_person_code_backfill.sql`
+- `backend/migrations/0050_dim_person_code_unique_keys.sql`
+- `backend/migrations/0051_dim_person_person_id_trigger_collation_fix.sql`
+- `backend/migrations/0052_dim_person_code_canonical_format.sql`
+- `backend/migrations/0053_dim_person_full_person_code_remap_with_audit.sql`
+- `backend/migrations/0054_interview_times_to_ist.sql`
+- `backend/migrations/0055_dim_person_employee_gap_compaction_with_audit.sql`
+- `backend/migrations/0056_candidate_code_allocator_and_reuse.sql`
+- `backend/migrations/0057_candidate_code_db_guards.sql`
+- `backend/migrations/0058_candidate_assessment_joining_and_compensation_fields.sql`
+- `backend/migrations/0059_form_terminology_expand.sql`
+- `backend/migrations/0060_form_terminology_contract.sql`
+- `backend/migrations/0061_dim_person_feature_access.sql`
+- `backend/migrations/0062_candidate_assessment_training_name_length.sql`
+- `backend/migrations/0063_candidate_hr_owner.sql`
 
 ### Drive setup
 Required for candidate creation and public apply uploads:
@@ -141,7 +173,7 @@ Frontend env:
   - Opening code must exist and be active.
   - If `applying_for` is sent along with `job_id`, title mismatch is rejected.
   - Duplicate check uses `opening + email` and returns `status=duplicate` without creating a new candidate.
-  - External document links (portfolio/cv/resume) are downloaded and uploaded into candidate Drive folder, with a `50MB` limit per file.
+  - External document links (portfolio/cv/resume) are downloaded and uploaded into candidate Drive folder, with a `65MB` limit for portfolio files and a `50MB` limit for CV/resume files.
   - Created candidates follow the same backend automation path: `SLR-####` code generation, CAF + assessment link generation, drive folder creation, stage initialization.
   - Source bifurcation is stored in candidate row (`source_origin`: `ui` / `public_apply` / `google_sheet`).
 

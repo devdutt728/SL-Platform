@@ -27,6 +27,13 @@ function cookieOptions(isSecure: boolean) {
 }
 
 export function proxy(request: NextRequest) {
+  const moduleEnabled =
+    process.env.NEXT_PUBLIC_IT_MODULE_ENABLED === "1" ||
+    process.env.IT_MODULE_ENABLED === "1";
+  if (!moduleEnabled) {
+    return new NextResponse("Not Found", { status: 404 });
+  }
+
   const authMode = process.env.NEXT_PUBLIC_AUTH_MODE || "dev";
   if (authMode !== "google") return NextResponse.next();
 

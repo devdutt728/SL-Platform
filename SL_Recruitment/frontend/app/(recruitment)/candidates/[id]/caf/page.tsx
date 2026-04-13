@@ -32,6 +32,17 @@ type MetricItem = {
   value: string | number;
 };
 
+type RatedMetricItem = {
+  label: string;
+  value: number;
+};
+
+type RatingGroup = {
+  name: string;
+  average: number;
+  items: RatedMetricItem[];
+};
+
 async function fetchCandidateFull(id: string): Promise<CandidateFull | null> {
   const url = await internalUrl(`/api/rec/candidates/${encodeURIComponent(id)}/full`);
   const cookieValue = await cookieHeader();
@@ -86,8 +97,100 @@ function metricItems(items: MetricItem[]) {
   return items.filter((item) => isMeaningfulValue(item.value));
 }
 
+function normalizeRating(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(1, Math.min(10, Math.round(value)));
+  }
+  const text = valueOrEmpty(value);
+  if (!text) return null;
+  const parsed = Number(text);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(1, Math.min(10, Math.round(parsed)));
+}
+
+function ratedMetricItems(items: MetricItem[]) {
+  return items
+    .flatMap((item) => {
+      const rating = normalizeRating(item.value);
+      return rating === null ? [] : [{ label: item.label, value: rating }];
+    })
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+}
+
 function narrativeItems(items: MetricItem[]) {
   return items.filter((item) => isMeaningfulValue(item.value));
+}
+
+function averageRating(items: RatedMetricItem[]) {
+  if (!items.length) return null;
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  return total / items.length;
+}
+
+function ratingBand(value: number) {
+  if (value >= 9) {
+    return {
+      label: "Expert",
+      badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-800",
+      fillClass: "bg-emerald-500",
+    };
+  }
+  if (value >= 7) {
+    return {
+      label: "Strong",
+      badgeClass: "border-cyan-200 bg-cyan-50 text-cyan-800",
+      fillClass: "bg-cyan-500",
+    };
+  }
+  if (value >= 5) {
+    return {
+      label: "Working",
+      badgeClass: "border-amber-200 bg-amber-50 text-amber-800",
+      fillClass: "bg-amber-500",
+    };
+  }
+  return {
+    label: "Developing",
+    badgeClass: "border-rose-200 bg-rose-50 text-rose-800",
+    fillClass: "bg-rose-400",
+  };
+}
+
+function countRatingsByBand(items: RatedMetricItem[]) {
+  const counts = {
+    Expert: 0,
+    Strong: 0,
+    Working: 0,
+    Developing: 0,
+  };
+  for (const item of items) {
+    counts[ratingBand(item.value).label as keyof typeof counts] += 1;
+  }
+  return [
+    { label: "Expert", count: counts.Expert, helper: "9-10" },
+    { label: "Strong", count: counts.Strong, helper: "7-8" },
+    { label: "Working", count: counts.Working, helper: "5-6" },
+    { label: "Developing", count: counts.Developing, helper: "1-4" },
+  ];
+}
+
+function buildRatingGroups(items: RatedMetricItem[]): RatingGroup[] {
+  const groups = new Map<string, RatedMetricItem[]>();
+  for (const item of items) {
+    const [groupName, ...rest] = item.label.split(":");
+    const name = rest.length ? groupName.trim() : "General";
+    const label = rest.length ? rest.join(":").trim() : item.label;
+    const list = groups.get(name) || [];
+    list.push({ label, value: item.value });
+    groups.set(name, list);
+  }
+  return Array.from(groups.entries())
+    .map(([name, groupItems]) => ({
+      name,
+      average: averageRating(groupItems) || 0,
+      items: [...groupItems].sort((a, b) => b.value - a.value || a.label.localeCompare(b.label)),
+    }))
+    .sort((a, b) => b.average - a.average || a.name.localeCompare(b.name));
 }
 
 function Chip({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -105,6 +208,113 @@ function MetricCard({ label, value }: MetricItem) {
     <div className="rounded-2xl border border-white/70 bg-white/55 p-3 shadow-sm">
       <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
       <p className="mt-2 text-sm font-semibold leading-6 text-slate-900">{value}</p>
+    </div>
+  );
+}
+
+function RatingBar({
+  value,
+  showMeta = true,
+  compact = false,
+}: {
+  value: number;
+  showMeta?: boolean;
+  compact?: boolean;
+}) {
+  const band = ratingBand(value);
+  return (
+    <div className={compact ? "space-y-1.5" : "space-y-2"}>
+      {showMeta ? (
+        <div className="flex items-center justify-between gap-2">
+          <Chip className={band.badgeClass}>{band.label}</Chip>
+          <span className="text-xs font-semibold text-slate-500">{value}/10</span>
+        </div>
+      ) : null}
+      <div className="grid grid-cols-10 gap-1">
+        {Array.from({ length: 10 }, (_, index) => (
+          <span
+            key={index}
+            className={`${compact ? "h-1.5" : "h-2"} rounded-full ${index < value ? band.fillClass : "bg-slate-200/85"}`.trim()}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RatingOverviewCard({
+  title,
+  value,
+  suffix,
+}: {
+  title: string;
+  value: string;
+  suffix?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2.5 shadow-sm">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{title}</p>
+      <div className="mt-1.5 flex items-end gap-1.5">
+        <span className="text-lg font-semibold tracking-tight text-slate-950">{value}</span>
+        {suffix ? <span className="pb-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{suffix}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function ToolInfographicCard({ label, value }: RatedMetricItem) {
+  const band = ratingBand(value);
+  return (
+    <div className="rounded-2xl border border-white/80 bg-gradient-to-r from-white to-cyan-50/40 p-3 shadow-sm">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-slate-900">{label}</p>
+            <Chip className={`${band.badgeClass} px-2 py-0.5 text-[10px]`}>{band.label}</Chip>
+          </div>
+          <div className="mt-2">
+            <RatingBar value={value} showMeta={false} compact />
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-base font-semibold tracking-tight text-slate-950">{value}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">/10</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProficiencyGroupCard({ group }: { group: RatingGroup }) {
+  return (
+    <div className="rounded-2xl border border-white/80 bg-gradient-to-r from-white to-slate-50/80 p-3.5 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">{group.name}</p>
+          <p className="mt-1 text-xs text-slate-500">{group.items.length} rating signals</p>
+        </div>
+        <Chip className="border-cyan-200 bg-cyan-50 px-2.5 py-1 text-cyan-800">{group.average.toFixed(1)}/10 avg</Chip>
+      </div>
+
+      <div className="mt-3 space-y-2.5">
+        {group.items.map((item) => {
+          const band = ratingBand(item.value);
+          return (
+            <div key={`${group.name}-${item.label}`} className="rounded-xl border border-white/70 bg-white/80 p-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium leading-5 text-slate-800">{item.label}</p>
+                <div className="flex items-center gap-2">
+                  <Chip className={`${band.badgeClass} px-2 py-0.5 text-[10px]`}>{band.label}</Chip>
+                  <span className="text-xs font-semibold text-slate-600">{item.value}/10</span>
+                </div>
+              </div>
+              <div className="mt-2">
+                <RatingBar value={item.value} showMeta={false} compact />
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -271,7 +481,7 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
     { label: "Training 2 institute", value: assessment?.training2_institute ?? "" },
   ]);
 
-  const technicalSkills = metricItems([
+  const technicalSkills = ratedMetricItems([
     { label: "AutoCAD", value: assessment?.skill_auto_cad ?? "" },
     { label: "SketchUp", value: assessment?.skill_sketch_up ?? "" },
     { label: "Revit", value: assessment?.skill_revit ?? "" },
@@ -292,7 +502,7 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
     { label: "Enscape", value: assessment?.skill_enscape ?? "" },
   ]);
 
-  const proficiencySkills = metricItems([
+  const proficiencySkills = ratedMetricItems([
     { label: "Execution: action orientation", value: assessment?.proficiency_execution_action_orientation ?? "" },
     { label: "Execution: self discipline", value: assessment?.proficiency_execution_self_discipline ?? "" },
     { label: "Execution: independent decision", value: assessment?.proficiency_execution_independent_decision ?? "" },
@@ -307,6 +517,13 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
     { label: "People: feedback", value: assessment?.proficiency_people_feedback ?? "" },
     { label: "People: conflict resolution", value: assessment?.proficiency_people_conflict_resolution ?? "" },
   ]);
+
+  const technicalAverage = averageRating(technicalSkills);
+  const technicalTopSkills = technicalSkills.slice(0, 4);
+  const technicalBandCounts = countRatingsByBand(technicalSkills);
+  const proficiencyAverage = averageRating(proficiencySkills);
+  const proficiencyGroups = buildRatingGroups(proficiencySkills);
+  const strongestProficiencyGroup = proficiencyGroups[0]?.name || "-";
 
   const proficiencyNarratives = narrativeItems([
     { label: "Execution orientation", value: assessment?.proficiency_reason_execution ?? "" },
@@ -660,39 +877,99 @@ export default async function CandidateCafPage({ params }: { params: Promise<{ i
             id="skills"
             icon={<NotebookText className="h-4 w-4" />}
             title="Skills & Proficiency"
-            subtitle="Technical tools and work-style proficiencies are separated so the reviewer can scan strengths without reading through blanks."
+            subtitle="Numeric ratings are translated into a lighter, compact summary so software strengths and work-style signals are easier to scan."
           >
-            <div className="grid gap-4 xl:grid-cols-2">
-              <div className="rounded-[28px] border border-white/80 bg-white/45 p-4">
-                <p className="text-sm font-semibold text-slate-900">Technical skills</p>
-                {technicalSkills.length ? (
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {technicalSkills.map((item) => (
-                      <MetricCard key={item.label} {...item} />
-                    ))}
+            <div className="space-y-4">
+              <div className="rounded-[28px] border border-white/80 bg-gradient-to-r from-white via-cyan-50/70 to-emerald-50/50 p-4 shadow-sm">
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+                  <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+                    <RatingOverviewCard
+                      title="Tools average"
+                      value={technicalAverage ? technicalAverage.toFixed(1) : "-"}
+                      suffix="/10"
+                    />
+                    <RatingOverviewCard
+                      title="Work-style average"
+                      value={proficiencyAverage ? proficiencyAverage.toFixed(1) : "-"}
+                      suffix="/10"
+                    />
+                    <RatingOverviewCard title="Strongest work-style area" value={strongestProficiencyGroup} />
                   </div>
-                ) : (
-                  <EmptyBlock
-                    title="No technical skill ratings"
-                    description="Tool proficiency ratings were not filled in for this assessment."
-                  />
-                )}
+
+                  <div className="rounded-[24px] border border-cyan-100 bg-white/75 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">Software snapshot</p>
+                        <p className="mt-1 text-sm text-slate-600">
+                          Banded counts make the tool stack easier to review than a raw number wall.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {technicalTopSkills.map((item) => (
+                          <Chip key={item.label} className={ratingBand(item.value).badgeClass}>
+                            {item.label} {item.value}/10
+                          </Chip>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      {technicalBandCounts.map((band) => (
+                        <div key={band.label} className="rounded-2xl border border-slate-200 bg-slate-50/85 p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{band.label}</p>
+                          <div className="mt-2 flex items-end gap-2">
+                            <span className="text-lg font-semibold text-slate-900">{band.count}</span>
+                            <span className="pb-0.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{band.helper}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div className="rounded-[28px] border border-white/80 bg-white/45 p-4">
-                <p className="text-sm font-semibold text-slate-900">Work-style proficiency</p>
-                {proficiencySkills.length ? (
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {proficiencySkills.map((item) => (
-                      <MetricCard key={item.label} {...item} />
-                    ))}
-                  </div>
-                ) : (
-                  <EmptyBlock
-                    title="No proficiency ratings"
-                    description="Execution, process, strategy, and people ratings were not captured."
-                  />
-                )}
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+                <div className="rounded-[28px] border border-white/80 bg-white/45 p-4">
+                  <p className="text-sm font-semibold text-slate-900">Software / tool infographic</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    Each tool is shown as a score card with a 10-point bar and skill band.
+                  </p>
+                  {technicalSkills.length ? (
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      {technicalSkills.map((item) => (
+                        <ToolInfographicCard key={item.label} {...item} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-4">
+                      <EmptyBlock
+                        title="No technical skill ratings"
+                        description="Tool proficiency ratings were not filled in for this assessment."
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-[28px] border border-white/80 bg-white/45 p-4">
+                  <p className="text-sm font-semibold text-slate-900">Work-style skill map</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    Execution, process, strategic, and people signals are grouped with their average and detailed bars.
+                  </p>
+                  {proficiencyGroups.length ? (
+                    <div className="mt-4 grid gap-3">
+                      {proficiencyGroups.map((group) => (
+                        <ProficiencyGroupCard key={group.name} group={group} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-4">
+                      <EmptyBlock
+                        title="No proficiency ratings"
+                        description="Execution, process, strategy, and people ratings were not captured."
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </SectionShell>

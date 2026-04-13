@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReadonlyURLSearchParams, useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
-import { CandidateListItem, OpeningListItem } from "@/lib/types";
+import { CandidateListItem, OpeningListItem, PlatformPersonSuggestion } from "@/lib/types";
 import { AlertTriangle, CheckCircle2, ChevronDown, Filter, XCircle, Bookmark, Eye, LayoutGrid, Rows3, MoveRight } from "lucide-react";
 import { parseDateUtc } from "@/lib/datetime";
 import { redirectToLogin } from "@/lib/auth-client";
@@ -30,6 +30,7 @@ type Props = {
   openings: OpeningListItem[];
   canNavigate?: boolean;
   canViewBasicDetails?: boolean;
+  canManageAssignments?: boolean;
   showTagFilters?: boolean;
   canUseSuperadminExpiredCafResend?: boolean;
 };
@@ -113,6 +114,8 @@ function chipTone(kind: "neutral" | "green" | "amber" | "red" | "blue") {
 const INTERN_OPENING_CODES = new Set(["INTR-8299B8", "CMIN-8299B0"]);
 const BASIC_DETAILS_LINK_EXPIRY_HOURS = 72;
 const ASSESSMENT_LINK_EXPIRY_HOURS = 72;
+const DEFAULT_HR_OWNER_EMAIL = "nishant.singh@studiolotus.in";
+const DEFAULT_HR_OWNER_NAME = "Nishant Singh";
 
 function isInternCandidate(candidate: CandidateListItem) {
   return INTERN_OPENING_CODES.has(String(candidate.opening_code || "").toUpperCase());
@@ -174,13 +177,38 @@ function isAttentionCandidate(candidate: CandidateListItem) {
   const isHighAge = (candidate.ageing_days || 0) >= 2;
   const isHigh = screening === "red" || screening === "high";
   const isMedium = screening === "amber" || screening === "medium";
-  const isLow = screening === "green" || screening === "low";
   const cafPendingTooLong =
     !isInternCandidate(candidate) &&
     normalizeStage(candidate.current_stage) === "hr_screening" &&
     !(candidate.basic_details_form_submitted_at || candidate.caf_submitted_at) &&
     (candidate.ageing_days || 0) >= 3;
-  return isHighAge || isHigh || isMedium || isLow || cafPendingTooLong || !!candidate.needs_hr_review;
+  return isHighAge || isHigh || isMedium || cafPendingTooLong || !!candidate.needs_hr_review;
+}
+
+const DASHBOARD_FILTER_OPTIONS = [
+  "caf_pending_overdue",
+  "medium_screening",
+  "stuck_stage",
+  "feedback_pending",
+  "sprints_overdue",
+  "new_applications_today",
+] as const;
+
+type DashboardCandidateFilter = (typeof DASHBOARD_FILTER_OPTIONS)[number] | "";
+
+const DEFAULT_DASHBOARD_STUCK_DAYS = 5;
+
+function normalizeDashboardCandidateFilter(value: string | null | undefined): DashboardCandidateFilter {
+  const cleaned = String(value || "").trim().toLowerCase();
+  return DASHBOARD_FILTER_OPTIONS.includes(cleaned as (typeof DASHBOARD_FILTER_OPTIONS)[number])
+    ? (cleaned as DashboardCandidateFilter)
+    : "";
+}
+
+function normalizeDashboardStuckDays(value: string | null | undefined): number {
+  const parsed = Number(String(value || "").trim());
+  if (!Number.isFinite(parsed)) return DEFAULT_DASHBOARD_STUCK_DAYS;
+  return Math.min(60, Math.max(1, Math.trunc(parsed)));
 }
 
 const STAGE_OPTIONS = recruitmentStageOrder.map((item) => item.key);
@@ -375,10 +403,19 @@ async function fetchCandidates(params: {
   stage: string[];
   openingIds: string[];
   statusView: "all" | "active" | "hired" | "rejected";
+  dashboardFilter: DashboardCandidateFilter;
+  dashboardStuckDays: number;
 }) {
   const url = new URL("/api/rec/candidates", window.location.origin);
+  url.searchParams.set("limit", "200");
   for (const st of params.stage) url.searchParams.append("stage", st);
   for (const openingId of params.openingIds) url.searchParams.append("opening_id", openingId);
+  if (params.dashboardFilter) {
+    url.searchParams.append("dashboard_filter", params.dashboardFilter);
+    if (params.dashboardFilter === "stuck_stage") {
+      url.searchParams.set("stuck_days", String(params.dashboardStuckDays || DEFAULT_DASHBOARD_STUCK_DAYS));
+    }
+  }
 
   if (params.statusView === "hired") url.searchParams.append("status", "hired");
   if (params.statusView === "rejected") {
@@ -468,6 +505,77 @@ async function resendExpiredAssessmentLinks(candidateIds: number[]) {
   };
 }
 
+async function fetchPeople(query: string) {
+  const url = new URL("/api/platform/people", window.location.origin);
+  url.searchParams.set("q", query);
+  url.searchParams.set("limit", "10");
+  const res = await fetch(url.toString(), { cache: "no-store" });
+  if (res.status === 401) {
+    redirectToLogin();
+    return [];
+  }
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as PlatformPersonSuggestion[];
+}
+
+async function bulkAssignL2Owner(params: {
+  candidateIds: number[];
+  l2OwnerEmail: string;
+  l2OwnerName?: string;
+}) {
+  const res = await fetch("/api/rec/candidates/bulk-assign/l2", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      candidate_ids: params.candidateIds,
+      l2_owner_email: params.l2OwnerEmail,
+      l2_owner_name: params.l2OwnerName || undefined,
+      note: "candidate_bulk_assign_l2",
+    }),
+  });
+  if (res.status === 401) {
+    redirectToLogin();
+    return null;
+  }
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as {
+    requested_count: number;
+    updated_count: number;
+    unchanged_count: number;
+    l2_owner_email: string;
+    l2_owner_name?: string | null;
+  };
+}
+
+async function bulkAssignHrOwner(params: {
+  candidateIds: number[];
+  hrOwnerEmail: string;
+  hrOwnerName?: string;
+}) {
+  const res = await fetch("/api/rec/candidates/bulk-assign/hr", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      candidate_ids: params.candidateIds,
+      hr_owner_email: params.hrOwnerEmail,
+      hr_owner_name: params.hrOwnerName || undefined,
+      note: "candidate_bulk_assign_hr",
+    }),
+  });
+  if (res.status === 401) {
+    redirectToLogin();
+    return null;
+  }
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as {
+    requested_count: number;
+    updated_count: number;
+    unchanged_count: number;
+    hr_owner_email: string;
+    hr_owner_name?: string | null;
+  };
+}
+
 function canTransitionCandidate(candidate: CandidateListItem, toStage: RecruitmentStageKey) {
   const current = normalizeStage(candidate.current_stage);
   if (!current) return { ok: true as const };
@@ -509,6 +617,7 @@ export function CandidatesClient({
   openings,
   canNavigate = true,
   canViewBasicDetails = false,
+  canManageAssignments = false,
   showTagFilters = false,
   canUseSuperadminExpiredCafResend = false,
 }: Props) {
@@ -530,7 +639,14 @@ export function CandidatesClient({
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkLegacyCafBusy, setBulkLegacyCafBusy] = useState(false);
   const [bulkExpiredCafBusy, setBulkExpiredCafBusy] = useState(false);
+  const [bulkAssignBusy, setBulkAssignBusy] = useState(false);
+  const [assigneeQuery, setAssigneeQuery] = useState("");
+  const [assigneeOptions, setAssigneeOptions] = useState<PlatformPersonSuggestion[]>([]);
+  const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [assigneeLoading, setAssigneeLoading] = useState(false);
+  const [assigneeSelected, setAssigneeSelected] = useState<PlatformPersonSuggestion | null>(null);
   const openingFilterRef = useRef<HTMLDivElement | null>(null);
+  const assigneeRef = useRef<HTMLDivElement | null>(null);
 
   const tableGrid =
     "grid grid-cols-[minmax(200px,2.4fr)_minmax(140px,1.2fr)_minmax(170px,1.5fr)_minmax(200px,1.9fr)_minmax(80px,0.7fr)_minmax(80px,0.7fr)_minmax(95px,0.8fr)]";
@@ -541,19 +657,27 @@ export function CandidatesClient({
   const [statusView, setStatusView] = useState<"all" | "active" | "hired" | "rejected">("active");
   const [needsAttention, setNeedsAttention] = useState(false);
   const [cafToday, setCafToday] = useState(false);
+  const [dashboardFilter, setDashboardFilter] = useState<DashboardCandidateFilter>("");
+  const [dashboardStuckDays, setDashboardStuckDays] = useState(DEFAULT_DASHBOARD_STUCK_DAYS);
 
   const reloadCandidates = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchCandidates({ stage: selectedStages, openingIds, statusView });
+      const data = await fetchCandidates({
+        stage: selectedStages,
+        openingIds,
+        statusView,
+        dashboardFilter,
+        dashboardStuckDays,
+      });
       setCandidates(data);
     } catch (e: any) {
       setError(e?.message || "Failed to load candidates");
     } finally {
       setLoading(false);
     }
-  }, [selectedStages, openingIds, statusView]);
+  }, [selectedStages, openingIds, statusView, dashboardFilter, dashboardStuckDays]);
 
   const openingLabelMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -622,6 +746,8 @@ export function CandidatesClient({
     setStatusView("active");
     setNeedsAttention(false);
     setCafToday(false);
+    setDashboardFilter("");
+    setDashboardStuckDays(DEFAULT_DASHBOARD_STUCK_DAYS);
     setOpeningFilterOpen(false);
   }
 
@@ -687,6 +813,8 @@ export function CandidatesClient({
 
     setNeedsAttention(searchParams.get("needs_attention") === "1");
     setCafToday(searchParams.get("caf_today") === "1");
+    setDashboardFilter(normalizeDashboardCandidateFilter(searchParams.get("dashboard_filter")));
+    setDashboardStuckDays(normalizeDashboardStuckDays(searchParams.get("stuck_days")));
     setInitialized(true);
   }, [initialized, searchParams]);
 
@@ -735,6 +863,47 @@ export function CandidatesClient({
       window.removeEventListener("keydown", handleEscape);
     };
   }, [openingFilterOpen]);
+
+  useEffect(() => {
+    if (!canManageAssignments || !assigneeOpen) return;
+    const query = assigneeQuery.trim();
+    if (query.length < 2) {
+      setAssigneeOptions([]);
+      setAssigneeLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setAssigneeLoading(true);
+    const timer = window.setTimeout(() => {
+      void fetchPeople(query)
+        .then((items) => {
+          if (!cancelled) setAssigneeOptions(items);
+        })
+        .catch(() => {
+          if (!cancelled) setAssigneeOptions([]);
+        })
+        .finally(() => {
+          if (!cancelled) setAssigneeLoading(false);
+        });
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [canManageAssignments, assigneeOpen, assigneeQuery]);
+
+  useEffect(() => {
+    if (!assigneeOpen) return;
+    function handleAssigneePointerDown(event: MouseEvent) {
+      if (assigneeRef.current && !assigneeRef.current.contains(event.target as Node)) {
+        setAssigneeOpen(false);
+      }
+    }
+    window.addEventListener("mousedown", handleAssigneePointerDown);
+    return () => window.removeEventListener("mousedown", handleAssigneePointerDown);
+  }, [assigneeOpen]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -914,6 +1083,16 @@ export function CandidatesClient({
     () => filtered.filter((candidate) => selectedCandidateIds.has(candidate.candidate_id)),
     [filtered, selectedCandidateIds]
   );
+  const filteredHrAssignedCount = useMemo(
+    () => filtered.filter((candidate) => Boolean((candidate.hr_owner_email || "").trim())).length,
+    [filtered]
+  );
+  const filteredHrUnassignedCount = Math.max(0, filtered.length - filteredHrAssignedCount);
+  const filteredL2AssignedCount = useMemo(
+    () => filtered.filter((candidate) => Boolean((candidate.l2_owner_email || "").trim())).length,
+    [filtered]
+  );
+  const filteredL2UnassignedCount = Math.max(0, filtered.length - filteredL2AssignedCount);
   const selectedExpiredCafCandidates = useMemo(
     () =>
       selectedCandidates.filter((candidate) => {
@@ -1048,6 +1227,118 @@ export function CandidatesClient({
       });
     } finally {
       setBulkLegacyCafBusy(false);
+    }
+  }
+
+  async function runBulkAssignL2() {
+    if (!selectedCandidates.length) {
+      pushToast({ tone: "warning", title: "No candidates selected" });
+      return;
+    }
+    const email = (assigneeSelected?.email || assigneeQuery || "").trim().toLowerCase();
+    const name = (assigneeSelected?.full_name || "").trim() || undefined;
+    if (!email || !email.includes("@")) {
+      pushToast({
+        tone: "warning",
+        title: "Select a valid assignee",
+        description: "Choose an L2 owner from suggestions or enter a valid email.",
+      });
+      return;
+    }
+
+    setBulkAssignBusy(true);
+    try {
+      const result = await bulkAssignL2Owner({
+        candidateIds: selectedCandidates.map((candidate) => candidate.candidate_id),
+        l2OwnerEmail: email,
+        l2OwnerName: name,
+      });
+      if (!result) return;
+      await reloadCandidates();
+      setAssigneeOpen(false);
+      setAssigneeOptions([]);
+      setAssigneeQuery("");
+      setAssigneeSelected(null);
+      setSelectedCandidateIds(new Set());
+      pushToast({
+        tone: "success",
+        title: "Bulk assignment complete",
+        description: `${result.updated_count} updated, ${result.unchanged_count} unchanged.`,
+      });
+      trackUxMetric({
+        event_name: "candidate_l2_owner_bulk_assign",
+        entity_type: "candidate_bulk",
+        entity_id: String(Date.now()),
+        metadata: {
+          updated: result.updated_count,
+          unchanged: result.unchanged_count,
+          assignee_email: result.l2_owner_email,
+        },
+      });
+    } catch (e: any) {
+      pushToast({
+        tone: "error",
+        title: "Bulk assignment failed",
+        description: e?.message || "Could not assign the selected candidates.",
+      });
+    } finally {
+      setBulkAssignBusy(false);
+    }
+  }
+
+  async function runBulkAssignHr() {
+    if (!selectedCandidates.length) {
+      pushToast({ tone: "warning", title: "No candidates selected" });
+      return;
+    }
+    const email = (assigneeSelected?.email || assigneeQuery || "").trim().toLowerCase();
+    const name = (assigneeSelected?.full_name || "").trim() || undefined;
+    if (!email || !email.includes("@")) {
+      pushToast({
+        tone: "warning",
+        title: "Select a valid assignee",
+        description: "Choose an HR owner from suggestions or enter a valid email.",
+      });
+      return;
+    }
+
+    setBulkAssignBusy(true);
+    try {
+      const result = await bulkAssignHrOwner({
+        candidateIds: selectedCandidates.map((candidate) => candidate.candidate_id),
+        hrOwnerEmail: email,
+        hrOwnerName: name,
+      });
+      if (!result) return;
+      await reloadCandidates();
+      setAssigneeOpen(false);
+      setAssigneeOptions([]);
+      setAssigneeQuery("");
+      setAssigneeSelected(null);
+      setSelectedCandidateIds(new Set());
+      pushToast({
+        tone: "success",
+        title: "Bulk HR assignment complete",
+        description: `${result.updated_count} updated, ${result.unchanged_count} unchanged.`,
+      });
+      trackUxMetric({
+        event_name: "candidate_hr_owner_bulk_assign",
+        entity_type: "candidate_bulk",
+        entity_id: String(Date.now()),
+        metadata: {
+          updated: result.updated_count,
+          unchanged: result.unchanged_count,
+          assignee_email: result.hr_owner_email,
+        },
+      });
+    } catch (e: any) {
+      pushToast({
+        tone: "error",
+        title: "Bulk HR assignment failed",
+        description: e?.message || "Could not assign the selected candidates.",
+      });
+    } finally {
+      setBulkAssignBusy(false);
     }
   }
 
@@ -1472,6 +1763,86 @@ export function CandidatesClient({
               {allFilteredSelected ? "Clear selection" : "Select filtered"}
             </button>
             <span className="text-[11px] text-amber-800">{selectedCandidateIds.size} selected</span>
+            <span className="text-[11px] text-amber-800">
+              {filteredHrAssignedCount} with HR owner • {filteredHrUnassignedCount} HR unassigned
+            </span>
+            <span className="text-[11px] text-amber-800">
+              {filteredL2AssignedCount} with L2 owner • {filteredL2UnassignedCount} unassigned
+            </span>
+            {canManageAssignments ? (
+              <div ref={assigneeRef} className="relative flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <input
+                    value={
+                      assigneeSelected
+                        ? `${assigneeSelected.full_name} (${assigneeSelected.email})`
+                        : assigneeQuery
+                    }
+                    onChange={(e) => {
+                      setAssigneeSelected(null);
+                      setAssigneeQuery(e.target.value);
+                      setAssigneeOpen(true);
+                    }}
+                    onFocus={() => setAssigneeOpen(true)}
+                    onBlur={() => window.setTimeout(() => setAssigneeOpen(false), 150)}
+                    placeholder="Assign GL/L2 owner..."
+                    className="w-[280px] rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[11px] text-slate-700"
+                  />
+                  {assigneeLoading ? (
+                    <p className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">Loading...</p>
+                  ) : null}
+                  {!assigneeSelected && canManageAssignments && assigneeOpen && assigneeOptions.length > 0 ? (
+                    <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                      {assigneeOptions.map((person) => (
+                        <button
+                          key={`${person.person_id}_${person.email}`}
+                          type="button"
+                          className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setAssigneeSelected(person);
+                            setAssigneeQuery("");
+                            setAssigneeOptions([]);
+                            setAssigneeOpen(false);
+                          }}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-[11px] font-semibold text-slate-900">{person.full_name}</span>
+                            <span className="block truncate text-[10px] text-slate-500">{person.email}</span>
+                          </span>
+                          <span className="ml-2 shrink-0 text-[10px] text-slate-500">{person.role_name || person.role_code || ""}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void runBulkAssignHr();
+                  }}
+                  disabled={bulkBusy || bulkAssignBusy || bulkLegacyCafBusy || bulkExpiredCafBusy || selectedCandidateIds.size === 0}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-semibold text-amber-900 disabled:opacity-60"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {bulkAssignBusy ? "Assigning HR..." : "Bulk assign HR"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void runBulkAssignL2();
+                  }}
+                  disabled={bulkBusy || bulkAssignBusy || bulkLegacyCafBusy || bulkExpiredCafBusy || selectedCandidateIds.size === 0}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-semibold text-amber-900 disabled:opacity-60"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {bulkAssignBusy ? "Assigning L2..." : "Bulk assign L2"}
+                </button>
+                <span className="text-[11px] text-amber-800">
+                  Default HR: {DEFAULT_HR_OWNER_NAME} ({DEFAULT_HR_OWNER_EMAIL})
+                </span>
+              </div>
+            ) : null}
             {canUseSuperadminExpiredCafResend ? (
               <>
                 <button
@@ -1481,6 +1852,7 @@ export function CandidatesClient({
                   }}
                   disabled={
                     bulkBusy ||
+                    bulkAssignBusy ||
                     bulkLegacyCafBusy ||
                     bulkExpiredCafBusy ||
                     selectedCandidateIds.size === 0 ||
@@ -1501,7 +1873,7 @@ export function CandidatesClient({
               onClick={() => {
                 void runLegacyCafBackfill();
               }}
-              disabled={bulkBusy || bulkLegacyCafBusy || bulkExpiredCafBusy || selectedCandidateIds.size === 0}
+              disabled={bulkBusy || bulkAssignBusy || bulkLegacyCafBusy || bulkExpiredCafBusy || selectedCandidateIds.size === 0}
               className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-semibold text-amber-900 disabled:opacity-60"
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -1524,7 +1896,7 @@ export function CandidatesClient({
               onClick={() => {
                 void runBulkTransition();
               }}
-              disabled={bulkBusy || bulkLegacyCafBusy || bulkExpiredCafBusy || !bulkTargetStage || selectedCandidateIds.size === 0}
+              disabled={bulkBusy || bulkAssignBusy || bulkLegacyCafBusy || bulkExpiredCafBusy || !bulkTargetStage || selectedCandidateIds.size === 0}
               className="inline-flex items-center gap-1.5 rounded-full bg-amber-700 px-3 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
             >
             <MoveRight className="h-3.5 w-3.5" />
@@ -1590,6 +1962,12 @@ export function CandidatesClient({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-slate-900">{candidate.name}</p>
                     <p className="text-[11px] text-slate-600">{candidate.candidate_code}</p>
+                    <p className="truncate text-[10px] text-slate-500">
+                      HR: {candidate.hr_owner_name || candidate.hr_owner_email || DEFAULT_HR_OWNER_NAME}
+                    </p>
+                    <p className="truncate text-[10px] text-slate-500">
+                      L2: {candidate.l2_owner_name || candidate.l2_owner_email || "Unassigned"}
+                    </p>
                     {sourceLabel(candidate) ? <p className="text-[10px] text-slate-500">{sourceLabel(candidate)}</p> : null}
                   </div>
                   <div className="min-w-0">

@@ -13,6 +13,10 @@ const pillClass =
 const submitClass =
   "inline-flex items-center justify-center gap-2 rounded-full bg-[var(--accessible-components--dodger-blue)] px-5 py-2.5 text-[13px] font-semibold text-white shadow-[0_16px_30px_-20px_rgba(19,120,209,0.9)] transition hover:-translate-y-0.5 hover:brightness-95 hover:shadow-[0_20px_34px_-18px_rgba(19,120,209,0.95)] disabled:opacity-60";
 
+const CV_DOC_MAX_BYTES = 50 * 1024 * 1024;
+const RESUME_DOC_MAX_BYTES = 50 * 1024 * 1024;
+const PORTFOLIO_DOC_MAX_BYTES = 65 * 1024 * 1024;
+
 const APPLY_STEPS = [
   { id: 0, label: "Basics" },
   { id: 1, label: "Documents" },
@@ -102,16 +106,16 @@ export function ApplyForm({ openingCode, compact = false }: { openingCode: strin
       }
     }
 
-    if (cv && cv.size > 50 * 1024 * 1024) {
+    if (cv && cv.size > CV_DOC_MAX_BYTES) {
       setError("CV file is too large. Max 50MB.");
       return;
     }
-    if (resume && resume.size > 50 * 1024 * 1024) {
+    if (resume && resume.size > RESUME_DOC_MAX_BYTES) {
       setError("Resume file is too large. Max 50MB.");
       return;
     }
-    if (portfolio && portfolio.size > 50 * 1024 * 1024) {
-      setError("Portfolio file is too large. Max 50MB.");
+    if (portfolio && portfolio.size > PORTFOLIO_DOC_MAX_BYTES) {
+      setError("Portfolio file is too large. Max 65MB.");
       return;
     }
 
@@ -253,7 +257,7 @@ export function ApplyForm({ openingCode, compact = false }: { openingCode: strin
           <div className="flex flex-wrap items-center gap-2">
             <span className={pillClass}>CV 50MB</span>
             <span className={pillClass}>Resume 50MB</span>
-            <span className={pillClass}>Portfolio 50MB</span>
+            <span className={pillClass}>Portfolio 65MB</span>
           </div>
         </div>
         <div className="mt-3">

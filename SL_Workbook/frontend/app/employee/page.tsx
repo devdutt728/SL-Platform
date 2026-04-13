@@ -4,15 +4,6 @@ import { backendUrl } from "@/lib/backend";
 
 const apps = [
   {
-    label: "SERVICE OPS",
-    title: "IT Helpdesk",
-    description: "Tickets, assets, SLAs, and support operations.",
-    href: "/it",
-    accent: "from-[#1378D1]/30 to-[#5D5552]/12",
-    tags: ["Live Sync", "Encrypted access", "Audit-ready"],
-    icon: <CircuitIcon />,
-  },
-  {
     label: "TALENT ENGINE",
     title: "Recruitment",
     description: "Candidates, pipelines, interviews, and offers.",
@@ -128,7 +119,6 @@ export default async function EmployeeConsolePage() {
               <a href="/" className="employee-menu__item">Public portal</a>
               <a href="/employee" className="employee-menu__item">Workbook</a>
               <a href="/recruitment/dashboard" className="employee-menu__item">Recruitment</a>
-              <a href="/it" className="employee-menu__item">IT Helpdesk</a>
             </div>
           </details>
           <a href="/" className="public-button public-button--ghost">
@@ -162,7 +152,7 @@ export default async function EmployeeConsolePage() {
           </p>
         </div>
 
-        <div className="mt-10 grid gap-5 lg:grid-cols-2">
+        <div className="mt-10 grid gap-5">
           {apps.map((app) => (
             <a key={app.title} href={app.href} className="section-card workbook-card group min-h-[184px]">
               <div className="flex items-start justify-between gap-4">
@@ -197,27 +187,6 @@ export default async function EmployeeConsolePage() {
         </div>
       </div>
     </div>
-  );
-}
-
-function CircuitIcon() {
-  return (
-    <svg
-      className="h-5 w-5 text-slate-900"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M6 6h5m7 0h-2M6 12h12M6 18h2m6 0h4"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-      <circle cx="16" cy="6" r="2" stroke="currentColor" strokeWidth="1.6" />
-      <circle cx="8" cy="12" r="2" stroke="currentColor" strokeWidth="1.6" />
-      <circle cx="12" cy="18" r="2" stroke="currentColor" strokeWidth="1.6" />
-    </svg>
   );
 }
 

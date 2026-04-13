@@ -61,7 +61,7 @@ Use this exact sheet structure (case-insensitive aliases are supported):
 - `Portfolio`, `CV`, and `Resume` can be public file URLs.
 - Backend downloads each URL, validates type/size, and uploads into candidate Drive folder.
 - Max size:
-  - Portfolio: `50MB`
+  - Portfolio: `65MB`
   - CV: `50MB`
   - Resume: `50MB`
 - Allowed types:

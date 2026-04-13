@@ -82,6 +82,65 @@ function parseDetail(raw: string): string | null {
   return text.length > 320 ? `${text.slice(0, 320)}...` : text;
 }
 
+function formatCompactMetric(value?: number | null) {
+  return typeof value === "number" ? value.toLocaleString("en-IN") : "--";
+}
+
+function AssignmentMiniStat({ label, value }: { label: string; value?: number | null }) {
+  return (
+    <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/80 px-3 py-2 shadow-sm">
+      <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--light-grey)]">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-[var(--dim-grey)]">{formatCompactMetric(value)}</p>
+    </div>
+  );
+}
+
+function AssignmentWorkloadPanel({
+  title,
+  items,
+  emptyLabel,
+  unavailable,
+}: {
+  title: string;
+  items: Array<{ assignee_key: string; assignee_name: string; assignee_email?: string | null; assigned_count: number; active_count: number }>;
+  emptyLabel: string;
+  unavailable: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--accessible-components--dark-grey)] bg-white/70 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--light-grey)]">{title}</p>
+        <span className="rounded-full bg-[var(--surface-card)] px-2 py-0.5 text-[10px] font-semibold text-[var(--dim-grey)]">
+          {unavailable ? "--" : items.length}
+        </span>
+      </div>
+      <div className="mt-2 space-y-1.5">
+        {unavailable ? (
+          <div className="rounded-xl border border-dashed border-[var(--accessible-components--dark-grey)] bg-[var(--surface-card)] px-3 py-3 text-xs text-[var(--light-grey)]">
+            Live assignment data is unavailable right now.
+          </div>
+        ) : items.length ? (
+          items.map((item) => (
+            <div key={item.assignee_key} className="flex items-center justify-between gap-3 rounded-xl bg-white px-2.5 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-[var(--dim-grey)]">{item.assignee_name}</p>
+                <p className="truncate text-[11px] text-[var(--light-grey)]">{item.assignee_email || item.assignee_key}</p>
+              </div>
+              <div className="shrink-0 rounded-full border border-[var(--accessible-components--dark-grey)] bg-[var(--surface-card)] px-2.5 py-1 text-[11px] font-semibold text-[var(--dim-grey)]">
+                {item.assigned_count}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="rounded-xl border border-dashed border-[var(--accessible-components--dark-grey)] bg-[var(--surface-card)] px-3 py-3 text-xs text-[var(--light-grey)]">
+            {emptyLabel}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardClient({
   initialMetrics,
   initialEvents,
@@ -171,6 +230,9 @@ export default function DashboardClient({
       (acc, offer) => {
         const key = offer.offer_status || "unknown";
         acc[key] = (acc[key] || 0) + 1;
+        if (key === "sent" || key === "viewed") {
+          acc.awaiting_response = (acc.awaiting_response || 0) + 1;
+        }
         return acc;
       },
       {} as Record<string, number>
@@ -180,6 +242,11 @@ export default function DashboardClient({
     () => openingRequests.filter((request) => request.status === "pending_hr_approval"),
     [openingRequests]
   );
+  const assignmentSummary = metrics?.assignment_summary || null;
+  const topHrWorkloads = assignmentSummary?.hr_workloads.slice(0, 4) || [];
+  const topL2Workloads = assignmentSummary?.l2_workloads.slice(0, 4) || [];
+  const topInterviewerWorkloads = assignmentSummary?.interviewer_workloads.slice(0, 4) || [];
+  const assignmentDataUnavailable = !metrics || !assignmentSummary;
 
   const perStage = metrics?.candidates_per_stage || [];
   const stageCounts = new Map(perStage.map((row) => [normalizeStage(row.stage), row.count]));
@@ -388,7 +455,7 @@ export default function DashboardClient({
           fetchDeduped("/api/rec/events?limit=10", { cache: "no-store" }),
           offersRequest,
           fetchDeduped("/api/rec/openings", { cache: "no-store" }),
-          fetchDeduped("/api/rec/candidates", { cache: "no-store" }),
+          fetchDeduped("/api/rec/candidates?limit=200", { cache: "no-store" }),
           requestsRequest,
         ]);
         if (!cancelled && metricsRes.ok) setMetrics((await metricsRes.json()) as DashboardMetrics);
@@ -874,7 +941,7 @@ export default function DashboardClient({
             <div className="relative mt-1.5 grid gap-1.5 md:grid-cols-2">
               {[
                 ["pending_approval", "Pending approval"],
-                ["sent", "Sent"],
+                ["awaiting_response", "Sent"],
                 ["accepted", "Accepted"],
                 ["declined", "Declined"],
               ].map(([key, label]) => (
@@ -902,6 +969,64 @@ export default function DashboardClient({
             </div>
           </div>
         ) : null}
+      </section>
+
+      <section className="section-card motion-fade-up motion-delay-4 border border-[var(--border-soft)] bg-white/75 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--light-grey)]">Assignments</p>
+            <p className="text-sm font-semibold text-[var(--dim-grey)]">Coverage and workload</p>
+            <p className="mt-1 text-xs text-[var(--light-grey)]">
+              Default HR: {assignmentSummary?.default_hr_owner.assignee_name || "Nishant Singh"}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={clsx(
+                "rounded-full px-2.5 py-1 text-[10px] font-semibold",
+                assignmentDataUnavailable
+                  ? "border border-amber-200 bg-amber-50 text-amber-800"
+                  : "border border-emerald-200 bg-emerald-50 text-emerald-800"
+              )}
+            >
+              {assignmentDataUnavailable ? "Live data unavailable" : "Live data"}
+            </span>
+            {canNavigate ? (
+              <Link href="/candidates?status_view=all" className="text-xs font-semibold text-[var(--dim-grey)] hover:text-[var(--brand-color)]">
+                Open candidates
+              </Link>
+            ) : null}
+          </div>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+          <AssignmentMiniStat label="HR assigned" value={assignmentSummary?.hr_assigned_count} />
+          <AssignmentMiniStat label="HR unassigned" value={assignmentSummary?.hr_unassigned_count} />
+          <AssignmentMiniStat label="L2 assigned" value={assignmentSummary?.l2_assigned_count} />
+          <AssignmentMiniStat label="L2 unassigned" value={assignmentSummary?.l2_unassigned_count} />
+          <AssignmentMiniStat label="Interviewer assigned" value={assignmentSummary?.interviewer_assigned_count} />
+          <AssignmentMiniStat label="Interviewer unassigned" value={assignmentSummary?.interviewer_unassigned_count} />
+          <AssignmentMiniStat label="No assignment yet" value={assignmentSummary?.fully_unassigned_count} />
+        </div>
+        <div className="mt-3 grid gap-3 xl:grid-cols-3">
+          <AssignmentWorkloadPanel
+            title="HR owners"
+            items={topHrWorkloads}
+            emptyLabel="No HR assignments in the current visible scope."
+            unavailable={assignmentDataUnavailable}
+          />
+          <AssignmentWorkloadPanel
+            title="GL / L2 owners"
+            items={topL2Workloads}
+            emptyLabel="No L2 assignments in the current visible scope."
+            unavailable={assignmentDataUnavailable}
+          />
+          <AssignmentWorkloadPanel
+            title="Interviewers"
+            items={topInterviewerWorkloads}
+            emptyLabel="No interviewer assignments in the current visible scope."
+            unavailable={assignmentDataUnavailable}
+          />
+        </div>
       </section>
 
       <section className="grid gap-3 lg:grid-cols-3">

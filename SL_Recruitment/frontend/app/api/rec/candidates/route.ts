@@ -1,7 +1,9 @@
 import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
-import { proxyTextResponse } from "@/lib/upstream-proxy";
+import { filterVisibleRecords } from "@/lib/recruitment-visibility";
+import { proxyJsonResponse } from "@/lib/upstream-proxy";
+import type { CandidateListItem } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -9,9 +11,9 @@ export async function GET(request: NextRequest) {
   // Preserve multi-value filters like `status` and `stage`.
   url.searchParams.forEach((value, key) => upstream.searchParams.append(key, value));
 
-  return proxyTextResponse(
+  return proxyJsonResponse<CandidateListItem[]>(
     async () => fetch(upstream.toString(), { cache: "no-store", headers: { ...await authHeaderFromCookie() } }),
-    { route: "GET /api/rec/candidates" },
+    { route: "GET /api/rec/candidates", transform: (payload) => filterVisibleRecords(payload || []) },
   );
 }
 

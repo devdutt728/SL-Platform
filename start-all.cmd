@@ -3,6 +3,7 @@ set "ROOT=D:\SL Platform"
 set "LOGDIR=%ROOT%\logs"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
 set "SL_ENVIRONMENT=development"
+if not defined ENABLE_IT_MODULE set "ENABLE_IT_MODULE=0"
 
 powershell -NoProfile -Command "& { $ErrorActionPreference = 'Continue'; $ports = 3000,3001,3002,3003,8001,8002; foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { $procId = $_.OwningProcess; if ($procId) { try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {} } } } }"
 
@@ -57,13 +58,13 @@ if not exist "%IT_FRONTEND_DIR%" echo Missing: %IT_FRONTEND_DIR%
 if not exist "%REC_FRONTEND_DIR%" echo Missing: %REC_FRONTEND_DIR%
 if not exist "%WORKBOOK_DIR%" echo Missing: %WORKBOOK_DIR%
 
-if exist "%IT_BACKEND_DIR%" (
+if "%ENABLE_IT_MODULE%"=="1" if exist "%IT_BACKEND_DIR%" (
   call :spawn "%IT_BACKEND_DIR%" "python -m uvicorn app.main:app --reload --port 8001" "%IT_BACKEND_OUT%" "%IT_BACKEND_ERR%"
 )
 if exist "%REC_BACKEND_DIR%" (
   call :spawn "%REC_BACKEND_DIR%" "python -m uvicorn app.main:app --reload --port 8002" "%REC_BACKEND_OUT%" "%REC_BACKEND_ERR%"
 )
-if exist "%IT_FRONTEND_DIR%" (
+if "%ENABLE_IT_MODULE%"=="1" if exist "%IT_FRONTEND_DIR%" (
   call :spawn "%IT_FRONTEND_DIR%" "npm run dev" "%IT_FRONTEND_OUT%" "%IT_FRONTEND_ERR%" "PORT=3001"
 )
 if exist "%REC_FRONTEND_DIR%" (

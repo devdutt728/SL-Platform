@@ -57,7 +57,7 @@ async function fetchOpenings() {
 }
 
 async function fetchCandidates() {
-  const url = await internalUrl("/api/rec/candidates");
+  const url = await internalUrl("/api/rec/candidates?limit=200");
   const cookieValue = await cookieHeader();
   return fetchJsonOr<CandidateListItem[]>(url, {
     fallback: [],

@@ -108,6 +108,7 @@ logger = logging.getLogger("slr.candidates")
 SOURCE_ORIGIN_UI = "ui"
 SOURCE_ORIGIN_GOOGLE_SHEET = "google_sheet"
 APPLICATION_DOC_MAX_BYTES = 50 * 1024 * 1024
+PORTFOLIO_DOC_MAX_BYTES = 65 * 1024 * 1024
 GOOGLE_SHEET_DUPLICATE_WINDOW = timedelta(hours=24)
 INGEST_STATE_CREATED = "created"
 INGEST_STATE_DUPLICATE = "duplicate"
@@ -138,6 +139,14 @@ COMMUNICATION_LINK_SEGMENTS = (
     "/joining/",
     "/interview/slots/",
 )
+DEFAULT_HR_OWNER_EMAIL = "nishant.singh@studiolotus.in"
+DEFAULT_HR_OWNER_NAME = "Nishant Singh"
+
+
+def _application_doc_max_bytes(kind: str) -> int:
+    if kind == "portfolio":
+        return PORTFOLIO_DOC_MAX_BYTES
+    return APPLICATION_DOC_MAX_BYTES
 
 
 def _strip_optional(value: str | None) -> str | None:
@@ -195,6 +204,39 @@ def _normalize_opening_tags(values: list[str] | None) -> list[str] | None:
                 continue
             seen.add(tag)
             normalized.append(tag)
+
+    return normalized or None
+
+
+def _normalize_dashboard_filters(values: list[str] | None) -> list[str] | None:
+    if not values:
+        return None
+
+    allowed = {
+        "caf_pending_overdue",
+        "medium_screening",
+        "stuck_stage",
+        "feedback_pending",
+        "sprints_overdue",
+        "new_applications_today",
+    }
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        for piece in str(raw or "").split(","):
+            cleaned = _strip_optional(piece)
+            if not cleaned:
+                continue
+            token = cleaned.lower()
+            if token not in allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="dashboard_filter contains an unsupported value.",
+                )
+            if token in seen:
+                continue
+            seen.add(token)
+            normalized.append(token)
 
     return normalized or None
 
@@ -590,7 +632,7 @@ async def _prepare_external_document(*, kind: str, source_url: str) -> _Prepared
     downloaded = await anyio.to_thread.run_sync(
         lambda: download_external_document(
             source_url,
-            max_bytes=APPLICATION_DOC_MAX_BYTES,
+            max_bytes=_application_doc_max_bytes(kind),
             user_agent="SL-Recruitment-Ingest/1.0",
         )
     )
@@ -1058,6 +1100,64 @@ class LegacyCafCompleteIn(BaseModel):
         return _strip_optional(value)
 
 
+class BulkAssignL2OwnerIn(BaseModel):
+    candidate_ids: list[int] = Field(default_factory=list)
+    l2_owner_email: EmailStr
+    l2_owner_name: str | None = None
+    note: str | None = None
+
+    @field_validator("candidate_ids")
+    @classmethod
+    def _validate_candidate_ids(cls, value: list[int]) -> list[int]:
+        cleaned: list[int] = []
+        seen: set[int] = set()
+        for raw in value or []:
+            candidate_id = int(raw)
+            if candidate_id <= 0 or candidate_id in seen:
+                continue
+            cleaned.append(candidate_id)
+            seen.add(candidate_id)
+        if not cleaned:
+            raise ValueError("At least one candidate_id is required.")
+        if len(cleaned) > 500:
+            raise ValueError("Select at most 500 candidates per request.")
+        return cleaned
+
+    @field_validator("l2_owner_name", "note")
+    @classmethod
+    def _strip_optional_text(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+
+class BulkAssignHrOwnerIn(BaseModel):
+    candidate_ids: list[int] = Field(default_factory=list)
+    hr_owner_email: EmailStr
+    hr_owner_name: str | None = None
+    note: str | None = None
+
+    @field_validator("candidate_ids")
+    @classmethod
+    def _validate_candidate_ids(cls, value: list[int]) -> list[int]:
+        cleaned: list[int] = []
+        seen: set[int] = set()
+        for raw in value or []:
+            candidate_id = int(raw)
+            if candidate_id <= 0 or candidate_id in seen:
+                continue
+            cleaned.append(candidate_id)
+            seen.add(candidate_id)
+        if not cleaned:
+            raise ValueError("At least one candidate_id is required.")
+        if len(cleaned) > 500:
+            raise ValueError("Select at most 500 candidates per request.")
+        return cleaned
+
+    @field_validator("hr_owner_name", "note")
+    @classmethod
+    def _strip_optional_text(cls, value: str | None) -> str | None:
+        return _strip_optional(value)
+
+
 def _candidate_code(candidate_id: int) -> str:
     return f"SLR-{candidate_id:04d}"
 
@@ -1103,6 +1203,14 @@ def _legacy_caf_screening_note(note: str | None = None) -> str:
     if not note:
         return base
     return f"{base} {note}"
+
+
+def _default_hr_owner_email() -> str:
+    return DEFAULT_HR_OWNER_EMAIL
+
+
+def _default_hr_owner_name() -> str:
+    return DEFAULT_HR_OWNER_NAME
 
 
 def _csv_items(raw: str | None) -> list[str]:
@@ -1835,6 +1943,8 @@ async def _apply_ui_reapplication(
     years_of_experience: float | None,
     city: str | None,
     terms_consent: bool | None,
+    hr_owner_email: str | None,
+    hr_owner_name: str | None,
     l2_owner_email: str | None,
     l2_owner_name: str | None,
     performed_by_person_id_platform: int | None,
@@ -1859,6 +1969,8 @@ async def _apply_ui_reapplication(
     candidate.current_location = city
     candidate.terms_consent = bool(terms_consent)
     candidate.terms_consent_at = attempted_at if terms_consent else candidate.terms_consent_at
+    candidate.hr_owner_email = (hr_owner_email or _default_hr_owner_email()).lower()
+    candidate.hr_owner_name = hr_owner_name or candidate.hr_owner_name or _default_hr_owner_name()
     candidate.l2_owner_email = l2_owner_email.lower() if l2_owner_email else None
     candidate.l2_owner_name = l2_owner_name
     workflow_policy = await _workflow_policy_for_opening_id(session, opening_id)
@@ -2616,6 +2728,8 @@ async def _create_candidate_with_automation(
     created_at_override: datetime | None = None,
     link_sent_at_override: datetime | None = None,
     ingest_remote_documents: bool = False,
+    hr_owner_email: str | None = None,
+    hr_owner_name: str | None = None,
     l2_owner_email: str | None = None,
     l2_owner_name: str | None = None,
     performed_by_person_id_platform: int | None = None,
@@ -2656,6 +2770,8 @@ async def _create_candidate_with_automation(
         current_location=city,
         terms_consent=bool(terms_consent),
         terms_consent_at=created_at if terms_consent else None,
+        hr_owner_email=(hr_owner_email or _default_hr_owner_email()).lower(),
+        hr_owner_name=hr_owner_name or _default_hr_owner_name(),
         l2_owner_email=l2_owner_email.lower() if l2_owner_email else None,
         l2_owner_name=l2_owner_name,
         status="enquiry",
@@ -2948,6 +3064,8 @@ async def create_candidate(
     email_normalized = str(payload.email).strip().lower()
     source_channel = _normalize_source_channel(payload.source_channel, fallback="ui_manual")
     opening_id = payload.opening_id
+    hr_owner_email = str(payload.hr_owner_email).strip().lower() if payload.hr_owner_email else _default_hr_owner_email()
+    hr_owner_name = payload.hr_owner_name or _default_hr_owner_name()
     l2_owner_email = str(payload.l2_owner_email) if payload.l2_owner_email else None
     performed_by_person_id_platform = _platform_person_id(user)
 
@@ -2965,6 +3083,8 @@ async def create_candidate(
         "years_of_experience": payload.years_of_experience,
         "city": payload.city,
         "terms_consent": payload.terms_consent,
+        "hr_owner_email": hr_owner_email,
+        "hr_owner_name": hr_owner_name,
         "l2_owner_email": l2_owner_email,
         "l2_owner_name": payload.l2_owner_name,
     }
@@ -3017,6 +3137,8 @@ async def create_candidate(
             years_of_experience=payload.years_of_experience,
             city=payload.city,
             terms_consent=payload.terms_consent,
+            hr_owner_email=hr_owner_email,
+            hr_owner_name=hr_owner_name,
             l2_owner_email=l2_owner_email,
             l2_owner_name=payload.l2_owner_name,
             performed_by_person_id_platform=performed_by_person_id_platform,
@@ -3065,6 +3187,8 @@ async def create_candidate(
             years_of_experience=payload.years_of_experience,
             city=payload.city,
             terms_consent=payload.terms_consent,
+            hr_owner_email=hr_owner_email,
+            hr_owner_name=hr_owner_name,
             l2_owner_email=l2_owner_email,
             l2_owner_name=payload.l2_owner_name,
             performed_by_person_id_platform=performed_by_person_id_platform,
@@ -3128,6 +3252,8 @@ async def create_candidate(
             years_of_experience=payload.years_of_experience,
             city=payload.city,
             terms_consent=payload.terms_consent,
+            hr_owner_email=hr_owner_email,
+            hr_owner_name=hr_owner_name,
             l2_owner_email=l2_owner_email,
             l2_owner_name=payload.l2_owner_name,
             performed_by_person_id_platform=performed_by_person_id_platform,
@@ -4821,6 +4947,8 @@ async def list_candidates(
     opening_tag: list[str] | None = Query(default=None),
     status_filter: list[str] | None = Query(default=None, alias="status"),
     stage: list[str] | None = Query(default=None),
+    dashboard_filter: list[str] | None = Query(default=None),
+    stuck_days: int = Query(default=5, ge=1, le=60),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(deps.get_db_session),
@@ -4828,7 +4956,10 @@ async def list_candidates(
 ):
     opening_ids = _normalize_opening_filter_ids(opening_id)
     opening_tags = _normalize_opening_tags(opening_tag)
+    dashboard_filters = _normalize_dashboard_filters(dashboard_filter)
     can_view_basic_details = _can_view_candidate_basic_details(user)
+    today = func.curdate()
+    now = func.now()
     latest_stage_subq = (
         select(RecCandidateStage.candidate_id, func.max(RecCandidateStage.stage_id).label("stage_id"))
         .where(RecCandidateStage.stage_status == "pending")
@@ -4896,6 +5027,8 @@ async def list_candidates(
             RecCandidate.portfolio_url,
             RecCandidate.status,
             RecCandidate.opening_id.label("opening_id"),
+            RecCandidate.hr_owner_email.label("hr_owner_email"),
+            RecCandidate.hr_owner_name.label("hr_owner_name"),
             RecCandidate.l2_owner_email.label("l2_owner_email"),
             RecCandidate.l2_owner_name.label("l2_owner_name"),
             RecCandidate.source_channel.label("source_channel"),
@@ -4956,6 +5089,57 @@ async def list_candidates(
             else:
                 normalized.append(item)
         query = query.where(current_stage_subq.c.stage_name.in_(normalized))
+    if dashboard_filters:
+        if "caf_pending_overdue" in dashboard_filters:
+            query = query.where(
+                current_stage_subq.c.stage_name.in_(["hr_screening", "caf"]),
+                RecCandidate.basic_details_form_submitted_at.is_(None),
+                RecCandidate.basic_details_form_sent_at.is_not(None),
+                RecCandidate.basic_details_form_sent_at
+                <= func.date_sub(now, text(f"INTERVAL {settings.caf_reminder_days} DAY")),
+                or_(
+                    RecOpening.opening_code.is_(None),
+                    ~RecOpening.opening_code.in_(tuple(INTERN_OPENING_CODES)),
+                ),
+            )
+        if "medium_screening" in dashboard_filters:
+            query = query.where(
+                func.lower(func.coalesce(RecCandidateScreening.screening_result, "")).in_(["amber", "medium"])
+            )
+        if "stuck_stage" in dashboard_filters:
+            query = query.where(
+                current_stage_subq.c.started_at.is_not(None),
+                func.datediff(today, current_stage_subq.c.started_at) > stuck_days,
+            )
+        if "feedback_pending" in dashboard_filters:
+            feedback_candidate_ids = (
+                select(RecCandidateInterview.candidate_id)
+                .where(
+                    RecCandidateInterview.feedback_submitted.is_(False),
+                    RecCandidateInterview.scheduled_end_at
+                    <= func.date_sub(now, text(f"INTERVAL {settings.feedback_reminder_hours} HOUR")),
+                )
+                .distinct()
+                .subquery()
+            )
+            query = query.where(RecCandidate.candidate_id.in_(select(feedback_candidate_ids.c.candidate_id)))
+        if "sprints_overdue" in dashboard_filters:
+            overdue_sprint_candidate_ids = (
+                select(RecCandidateSprint.candidate_id)
+                .where(
+                    RecCandidateSprint.status == "assigned",
+                    RecCandidateSprint.due_at.is_not(None),
+                    RecCandidateSprint.due_at
+                    <= func.date_sub(now, text(f"INTERVAL {settings.sprint_overdue_days} DAY")),
+                )
+                .distinct()
+                .subquery()
+            )
+            query = query.where(
+                RecCandidate.candidate_id.in_(select(overdue_sprint_candidate_ids.c.candidate_id))
+            )
+        if "new_applications_today" in dashboard_filters:
+            query = query.where(RecCandidate.created_at >= today)
 
     if _is_interviewer_scope(user):
         interviewer_id = _clean_person_id_platform(user.person_id_platform)
@@ -4987,6 +5171,8 @@ async def list_candidates(
             opening_id=row.opening_id,
             opening_code=row.opening_code,
             opening_title=row.opening_title,
+            hr_owner_email=row.hr_owner_email,
+            hr_owner_name=row.hr_owner_name,
             l2_owner_email=row.l2_owner_email,
             l2_owner_name=row.l2_owner_name,
             source_channel=row.source_channel,
@@ -5182,6 +5368,221 @@ async def mark_legacy_caf_complete(
         "updated_count": updated_count,
         "skipped_count": skipped_count,
         "screening_seeded_count": screening_seeded_count,
+        "items": items,
+    }
+
+
+@router.post("/bulk-assign/l2", status_code=status.HTTP_200_OK)
+async def bulk_assign_l2_owner(
+    payload: BulkAssignL2OwnerIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    if not _can_manage_candidate_360(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Candidate 360 actions are restricted for this account.",
+        )
+
+    candidate_ids = payload.candidate_ids
+    normalized_email = str(payload.l2_owner_email).strip().lower()
+    normalized_name = payload.l2_owner_name
+    performed_by_person_id_platform = _platform_person_id(user)
+    now = now_ist_naive()
+
+    candidates = (
+        await session.execute(
+            select(RecCandidate)
+            .where(RecCandidate.candidate_id.in_(candidate_ids))
+            .order_by(RecCandidate.candidate_id.asc())
+        )
+    ).scalars().all()
+    candidate_map = {candidate.candidate_id: candidate for candidate in candidates}
+    missing_candidate_ids = [candidate_id for candidate_id in candidate_ids if candidate_id not in candidate_map]
+    if missing_candidate_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Candidates not found: {', '.join(str(candidate_id) for candidate_id in missing_candidate_ids[:20])}",
+        )
+
+    updated_count = 0
+    unchanged_count = 0
+    items: list[dict[str, object]] = []
+
+    for candidate_id in candidate_ids:
+        candidate = candidate_map[candidate_id]
+        previous_owner_email = _strip_optional((candidate.l2_owner_email or "").lower())
+        previous_owner_name = _strip_optional(candidate.l2_owner_name)
+        next_owner_name = normalized_name or previous_owner_name
+
+        if previous_owner_email == normalized_email and previous_owner_name == next_owner_name:
+            unchanged_count += 1
+            items.append(
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "candidate_code": candidate.candidate_code,
+                    "candidate_name": candidate.full_name,
+                    "status": "unchanged",
+                    "l2_owner_email": previous_owner_email,
+                    "l2_owner_name": previous_owner_name,
+                }
+            )
+            continue
+
+        candidate.l2_owner_email = normalized_email
+        candidate.l2_owner_name = next_owner_name
+        candidate.updated_at = now
+
+        await log_event(
+            session,
+            candidate_id=candidate.candidate_id,
+            action_type="candidate_l2_owner_bulk_assigned",
+            performed_by_person_id_platform=performed_by_person_id_platform,
+            related_entity_type="candidate",
+            related_entity_id=candidate.candidate_id,
+            meta_json={
+                "bulk": True,
+                "previous_l2_owner_email": previous_owner_email,
+                "previous_l2_owner_name": previous_owner_name,
+                "l2_owner_email": normalized_email,
+                "l2_owner_name": next_owner_name,
+                "performed_by_email": user.email,
+                "performed_by_name": user.full_name,
+                "note": payload.note,
+            },
+        )
+        await notify_l2_owner_assigned(
+            session,
+            candidate=candidate,
+            previous_owner_email=previous_owner_email,
+            assigned_by_email=user.email,
+        )
+
+        updated_count += 1
+        items.append(
+            {
+                "candidate_id": candidate.candidate_id,
+                "candidate_code": candidate.candidate_code,
+                "candidate_name": candidate.full_name,
+                "status": "updated",
+                "previous_l2_owner_email": previous_owner_email,
+                "previous_l2_owner_name": previous_owner_name,
+                "l2_owner_email": candidate.l2_owner_email,
+                "l2_owner_name": candidate.l2_owner_name,
+            }
+        )
+
+    await session.commit()
+    return {
+        "requested_count": len(candidate_ids),
+        "updated_count": updated_count,
+        "unchanged_count": unchanged_count,
+        "l2_owner_email": normalized_email,
+        "l2_owner_name": normalized_name,
+        "items": items,
+    }
+
+
+@router.post("/bulk-assign/hr", status_code=status.HTTP_200_OK)
+async def bulk_assign_hr_owner(
+    payload: BulkAssignHrOwnerIn,
+    session: AsyncSession = Depends(deps.get_db_session),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+):
+    if not _can_manage_candidate_360(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Candidate 360 actions are restricted for this account.",
+        )
+
+    candidate_ids = payload.candidate_ids
+    normalized_email = str(payload.hr_owner_email).strip().lower()
+    normalized_name = payload.hr_owner_name or normalized_email or _default_hr_owner_name()
+    performed_by_person_id_platform = _platform_person_id(user)
+    now = now_ist_naive()
+
+    candidates = (
+        await session.execute(
+            select(RecCandidate)
+            .where(RecCandidate.candidate_id.in_(candidate_ids))
+            .order_by(RecCandidate.candidate_id.asc())
+        )
+    ).scalars().all()
+    candidate_map = {candidate.candidate_id: candidate for candidate in candidates}
+    missing_candidate_ids = [candidate_id for candidate_id in candidate_ids if candidate_id not in candidate_map]
+    if missing_candidate_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Candidates not found: {', '.join(str(candidate_id) for candidate_id in missing_candidate_ids[:20])}",
+        )
+
+    updated_count = 0
+    unchanged_count = 0
+    items: list[dict[str, object]] = []
+
+    for candidate_id in candidate_ids:
+        candidate = candidate_map[candidate_id]
+        previous_owner_email = _strip_optional((candidate.hr_owner_email or "").lower())
+        previous_owner_name = _strip_optional(candidate.hr_owner_name)
+
+        if previous_owner_email == normalized_email and previous_owner_name == normalized_name:
+            unchanged_count += 1
+            items.append(
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "candidate_code": candidate.candidate_code,
+                    "candidate_name": candidate.full_name,
+                    "status": "unchanged",
+                    "hr_owner_email": previous_owner_email,
+                    "hr_owner_name": previous_owner_name,
+                }
+            )
+            continue
+
+        candidate.hr_owner_email = normalized_email
+        candidate.hr_owner_name = normalized_name
+        candidate.updated_at = now
+
+        await log_event(
+            session,
+            candidate_id=candidate.candidate_id,
+            action_type="candidate_hr_owner_bulk_assigned",
+            performed_by_person_id_platform=performed_by_person_id_platform,
+            related_entity_type="candidate",
+            related_entity_id=candidate.candidate_id,
+            meta_json={
+                "bulk": True,
+                "previous_hr_owner_email": previous_owner_email,
+                "previous_hr_owner_name": previous_owner_name,
+                "hr_owner_email": normalized_email,
+                "hr_owner_name": normalized_name,
+                "performed_by_email": user.email,
+                "performed_by_name": user.full_name,
+                "note": payload.note,
+            },
+        )
+
+        updated_count += 1
+        items.append(
+            {
+                "candidate_id": candidate.candidate_id,
+                "candidate_code": candidate.candidate_code,
+                "candidate_name": candidate.full_name,
+                "status": "updated",
+                "previous_hr_owner_email": previous_owner_email,
+                "previous_hr_owner_name": previous_owner_name,
+                "hr_owner_email": candidate.hr_owner_email,
+                "hr_owner_name": candidate.hr_owner_name,
+            }
+        )
+
+    await session.commit()
+    return {
+        "requested_count": len(candidate_ids),
+        "updated_count": updated_count,
+        "unchanged_count": unchanged_count,
+        "hr_owner_email": normalized_email,
+        "hr_owner_name": normalized_name,
         "items": items,
     }
 
@@ -5414,6 +5815,8 @@ async def get_candidate(
         opening_code=opening.opening_code if opening else None,
         opening_title=opening.title if opening else None,
         workflow_variant=workflow_policy.workflow_variant,
+        hr_owner_email=candidate.hr_owner_email,
+        hr_owner_name=candidate.hr_owner_name,
         l2_owner_email=candidate.l2_owner_email,
         l2_owner_name=candidate.l2_owner_name,
         source_channel=candidate.source_channel,
@@ -6165,6 +6568,8 @@ async def update_candidate(
     if first_name_update is not None or last_name_update is not None:
         candidate.full_name = _compose_full_name(candidate.first_name or "", candidate.last_name)
 
+    if "hr_owner_email" in updates:
+        updates["hr_owner_email"] = str(updates["hr_owner_email"]).lower()
     if "l2_owner_email" in updates:
         updates["l2_owner_email"] = str(updates["l2_owner_email"]).lower()
     if "city" in updates:

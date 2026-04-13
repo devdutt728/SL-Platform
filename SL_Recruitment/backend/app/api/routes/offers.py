@@ -376,7 +376,18 @@ async def list_offers(
         .order_by(RecCandidateOffer.updated_at.desc(), RecCandidateOffer.candidate_offer_id.desc())
     )
     if status_filter:
-        query = query.where(RecCandidateOffer.offer_status.in_(status_filter))
+        normalized_statuses: set[str] = set()
+        for raw in status_filter:
+            for piece in str(raw or "").split(","):
+                cleaned = piece.strip().lower()
+                if not cleaned:
+                    continue
+                if cleaned == "awaiting_response":
+                    normalized_statuses.update({"sent", "viewed"})
+                    continue
+                normalized_statuses.add(cleaned)
+        if normalized_statuses:
+            query = query.where(RecCandidateOffer.offer_status.in_(sorted(normalized_statuses)))
     rows = (await session.execute(query)).all()
     out: list[OfferOut] = []
     updated = False

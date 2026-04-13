@@ -64,7 +64,6 @@ import {
   stageOrder,
   stageStateKey,
   statusTone,
-  stripHtml,
   valueOrDash,
   yesNo,
   documentPreviewPath,
@@ -594,6 +593,7 @@ export function Candidate360Client({
     lastSprintNotice,
     setLastSprintNotice,
     templatePreview,
+    templateAttachments,
     templatePreviewBusy,
     templatePreviewError,
     assignOpen,
@@ -1486,6 +1486,7 @@ export function Candidate360Client({
               setDueAt={setDueAt}
               templatePreviewBusy={templatePreviewBusy}
               templatePreview={templatePreview}
+              templateAttachments={templateAttachments}
               sprintEmailPreviewHtml={sprintEmailPreviewHtml}
               templatePreviewError={templatePreviewError}
               onAssignSprint={() => {
@@ -1495,7 +1496,6 @@ export function Candidate360Client({
               decisionTone={decisionTone}
               formatDateTime={formatDateTime}
               formatRelativeDue={formatRelativeDue}
-              stripHtml={stripHtml}
               formatBytes={formatBytes}
             />
           ) : null}

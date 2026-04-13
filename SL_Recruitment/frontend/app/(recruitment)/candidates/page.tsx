@@ -18,7 +18,7 @@ function isHrRoleToken(value: string): boolean {
 }
 
 async function fetchCandidates() {
-  const url = new URL(await internalUrl("/api/rec/candidates"));
+  const url = new URL(await internalUrl("/api/rec/candidates?limit=200"));
   const cookieValue = await cookieHeader();
   return fetchJsonOr<CandidateListItem[]>(url.toString(), {
     fallback: [],
@@ -76,6 +76,7 @@ export default async function CandidatesPage({}: {}) {
       openings={openings}
       canNavigate={canAccessCandidate360}
       canViewBasicDetails={isHr || isRoleFiveOrSix || isInterviewer}
+      canManageAssignments={isHr}
       showTagFilters={isHr}
       canUseSuperadminExpiredCafResend={isSuperadmin}
     />

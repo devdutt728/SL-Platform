@@ -21,6 +21,8 @@ class CandidateCreate(BaseModel):
     years_of_experience: Optional[float] = None
     city: Optional[str] = None
     terms_consent: Optional[bool] = None
+    hr_owner_email: Optional[EmailStr] = None
+    hr_owner_name: Optional[str] = None
     l2_owner_email: Optional[EmailStr] = None
     l2_owner_name: Optional[str] = None
 
@@ -47,6 +49,8 @@ class CandidateUpdate(BaseModel):
     years_of_experience: Optional[float] = None
     city: Optional[str] = None
     terms_consent: Optional[bool] = None
+    hr_owner_email: Optional[EmailStr] = None
+    hr_owner_name: Optional[str] = None
     l2_owner_email: Optional[EmailStr] = None
     l2_owner_name: Optional[str] = None
 
@@ -62,6 +66,8 @@ class CandidateListItem(BaseModel):
     opening_id: Optional[int] = None
     opening_code: Optional[str] = None
     opening_title: Optional[str] = None
+    hr_owner_email: Optional[EmailStr] = None
+    hr_owner_name: Optional[str] = None
     l2_owner_email: Optional[EmailStr] = None
     l2_owner_name: Optional[str] = None
     source_channel: Optional[str] = None
@@ -108,6 +114,8 @@ class CandidateDetailOut(BaseModel):
     opening_code: Optional[str] = None
     opening_title: Optional[str] = None
     workflow_variant: Optional[str] = None
+    hr_owner_email: Optional[EmailStr] = None
+    hr_owner_name: Optional[str] = None
     l2_owner_email: Optional[EmailStr] = None
     l2_owner_name: Optional[str] = None
     source_channel: Optional[str] = None

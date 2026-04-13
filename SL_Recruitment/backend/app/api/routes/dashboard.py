@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import false, func, or_, select, text
+from sqlalchemy import case, false, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 import asyncio
@@ -11,21 +11,28 @@ from app.api import deps
 from app.core.auth import require_roles
 from app.core.config import settings
 from app.core.roles import Role
+from app.db.platform_session import PlatformSessionLocal
 from app.models.candidate import RecCandidate
 from app.models.candidate_offer import RecCandidateOffer
 from app.models.candidate_sprint import RecCandidateSprint
 from app.models.event import RecCandidateEvent
 from app.models.interview import RecCandidateInterview
 from app.models.opening import RecOpening
+from app.models.platform_person import DimPerson
 from app.models.screening import RecCandidateScreening
 from app.models.stage import RecCandidateStage
-from app.schemas.dashboard import DashboardMetricsOut, StageCount
+from app.schemas.dashboard import AssignmentSummaryOut, AssignmentWorkloadOut, DashboardMetricsOut, StageCount
 from app.schemas.event import CandidateEventOut
 from app.schemas.user import UserContext
 from app.services.event_bus import event_bus
+from app.services.platform_identity import active_status_filter
 from app.services.workflow_policy import INTERN_OPENING_CODES
 
 router = APIRouter(prefix="/rec", tags=["dashboard"])
+
+DEFAULT_HR_OWNER_EMAIL = "nishant.singh@studiolotus.in"
+DEFAULT_HR_OWNER_NAME = "Nishant Singh"
+CLOSED_CANDIDATE_STATUSES = ("hired", "rejected", "declined")
 
 
 def _normalize_role_token(value: object) -> str:
@@ -140,6 +147,44 @@ def _can_view_dashboard(user: UserContext) -> bool:
         return True
     roles = set(user.roles or [])
     return bool({Role.HIRING_MANAGER, Role.INTERVIEWER, Role.GROUP_LEAD, Role.VIEWER} & roles)
+
+
+def _active_candidate_case():
+    return case((RecCandidate.status.notin_(CLOSED_CANDIDATE_STATUSES), 1), else_=0)
+
+
+async def _fetch_platform_people(ids: set[str]) -> dict[str, dict[str, str | None]]:
+    person_ids = {str(pid or "").strip() for pid in ids if str(pid or "").strip()}
+    if not person_ids:
+        return {}
+    try:
+        async with PlatformSessionLocal() as platform_session:
+            rows = (
+                await platform_session.execute(
+                    select(
+                        DimPerson.person_id,
+                        DimPerson.display_name,
+                        DimPerson.full_name,
+                        DimPerson.first_name,
+                        DimPerson.last_name,
+                        DimPerson.email,
+                    ).where(DimPerson.person_id.in_(list(person_ids)), active_status_filter())
+                )
+            ).all()
+    except Exception:
+        return {}
+
+    out: dict[str, dict[str, str | None]] = {}
+    for row in rows:
+        first_name = str(row.first_name or "").strip()
+        last_name = str(row.last_name or "").strip()
+        fallback_name = f"{first_name} {last_name}".strip()
+        full_name = (row.display_name or row.full_name or fallback_name or row.email or row.person_id or "").strip()
+        out[str(row.person_id).strip()] = {
+            "name": full_name or str(row.person_id).strip(),
+            "email": (str(row.email).strip().lower() if row.email else None),
+        }
+    return out
 
 
 @router.get("/dashboard", response_model=DashboardMetricsOut)
@@ -350,6 +395,194 @@ async def get_dashboard_metrics(
         )
     ).scalar_one()
 
+    scoped_candidate_ids = _candidate_scope(
+        select(RecCandidate.candidate_id.label("candidate_id")).select_from(RecCandidate)
+    ).subquery()
+    active_candidate_case = _active_candidate_case()
+    trimmed_hr_owner_email = func.trim(func.coalesce(RecCandidate.hr_owner_email, ""))
+    normalized_hr_owner_email = func.lower(
+        func.coalesce(func.nullif(trimmed_hr_owner_email, ""), DEFAULT_HR_OWNER_EMAIL)
+    )
+    normalized_hr_owner_name = func.coalesce(
+        func.nullif(func.trim(RecCandidate.hr_owner_name), ""),
+        DEFAULT_HR_OWNER_NAME,
+    )
+    trimmed_l2_owner_email = func.trim(func.coalesce(RecCandidate.l2_owner_email, ""))
+    normalized_l2_owner_email = func.lower(trimmed_l2_owner_email)
+    normalized_l2_owner_name = func.coalesce(
+        func.nullif(func.trim(RecCandidate.l2_owner_name), ""),
+        normalized_l2_owner_email,
+    )
+
+    hr_assigned_count = (
+        await session.execute(
+            select(func.count())
+            .select_from(RecCandidate)
+            .where(
+                RecCandidate.candidate_id.in_(select(scoped_candidate_ids.c.candidate_id)),
+                normalized_hr_owner_email != "",
+            )
+        )
+    ).scalar_one()
+
+    hr_workload_rows = (
+        await session.execute(
+            select(
+                normalized_hr_owner_email.label("assignee_key"),
+                normalized_hr_owner_name.label("assignee_name"),
+                normalized_hr_owner_email.label("assignee_email"),
+                func.count().label("assigned_count"),
+                func.sum(active_candidate_case).label("active_count"),
+            )
+            .select_from(RecCandidate)
+            .where(
+                RecCandidate.candidate_id.in_(select(scoped_candidate_ids.c.candidate_id)),
+                normalized_hr_owner_email != "",
+            )
+            .group_by(normalized_hr_owner_email, normalized_hr_owner_name)
+            .order_by(func.count().desc(), normalized_hr_owner_name.asc())
+        )
+    ).all()
+    hr_workloads = [
+        AssignmentWorkloadOut(
+            assignee_key=row.assignee_key or row.assignee_email or DEFAULT_HR_OWNER_EMAIL,
+            assignee_name=row.assignee_name or DEFAULT_HR_OWNER_NAME,
+            assignee_email=row.assignee_email or DEFAULT_HR_OWNER_EMAIL,
+            assigned_count=int(row.assigned_count or 0),
+            active_count=int(row.active_count or 0),
+        )
+        for row in hr_workload_rows
+    ]
+
+    l2_assigned_count = (
+        await session.execute(
+            select(func.count())
+            .select_from(RecCandidate)
+            .where(
+                RecCandidate.candidate_id.in_(select(scoped_candidate_ids.c.candidate_id)),
+                trimmed_l2_owner_email != "",
+            )
+        )
+    ).scalar_one()
+
+    l2_workload_rows = (
+        await session.execute(
+            select(
+                normalized_l2_owner_email.label("assignee_key"),
+                normalized_l2_owner_name.label("assignee_name"),
+                normalized_l2_owner_email.label("assignee_email"),
+                func.count().label("assigned_count"),
+                func.sum(active_candidate_case).label("active_count"),
+            )
+            .select_from(RecCandidate)
+            .where(
+                RecCandidate.candidate_id.in_(select(scoped_candidate_ids.c.candidate_id)),
+                trimmed_l2_owner_email != "",
+            )
+            .group_by(normalized_l2_owner_email, normalized_l2_owner_name)
+            .order_by(func.count().desc(), normalized_l2_owner_name.asc())
+        )
+    ).all()
+    l2_workloads = [
+        AssignmentWorkloadOut(
+            assignee_key=row.assignee_key or row.assignee_email or "unassigned",
+            assignee_name=row.assignee_name or row.assignee_email or "Unassigned",
+            assignee_email=row.assignee_email,
+            assigned_count=int(row.assigned_count or 0),
+            active_count=int(row.active_count or 0),
+        )
+        for row in l2_workload_rows
+    ]
+
+    interviewer_pid_trimmed = func.trim(func.coalesce(RecCandidateInterview.interviewer_person_id_platform, ""))
+    interviewer_assignments = (
+        select(
+            RecCandidateInterview.candidate_id.label("candidate_id"),
+            interviewer_pid_trimmed.label("assignee_key"),
+        )
+        .where(
+            RecCandidateInterview.candidate_id.in_(select(scoped_candidate_ids.c.candidate_id)),
+            interviewer_pid_trimmed != "",
+        )
+        .distinct()
+        .subquery()
+    )
+
+    interviewer_assigned_count = (
+        await session.execute(
+            select(func.count())
+            .select_from(
+                select(interviewer_assignments.c.candidate_id)
+                .distinct()
+                .subquery()
+            )
+        )
+    ).scalar_one()
+
+    interviewer_workload_rows = (
+        await session.execute(
+            select(
+                interviewer_assignments.c.assignee_key,
+                func.count().label("assigned_count"),
+                func.sum(active_candidate_case).label("active_count"),
+            )
+            .select_from(interviewer_assignments)
+            .join(RecCandidate, RecCandidate.candidate_id == interviewer_assignments.c.candidate_id)
+            .group_by(
+                interviewer_assignments.c.assignee_key,
+            )
+            .order_by(func.count().desc(), interviewer_assignments.c.assignee_key.asc())
+        )
+    ).all()
+    interviewer_meta = await _fetch_platform_people(
+        {str(row.assignee_key or "").strip() for row in interviewer_workload_rows}
+    )
+    interviewer_workloads = [
+        AssignmentWorkloadOut(
+            assignee_key=str(row.assignee_key or "").strip() or "interviewer",
+            assignee_name=(
+                interviewer_meta.get(str(row.assignee_key or "").strip(), {}).get("name")
+                or f"Interviewer {str(row.assignee_key or '').strip()}"
+            ),
+            assignee_email=interviewer_meta.get(str(row.assignee_key or "").strip(), {}).get("email"),
+            assigned_count=int(row.assigned_count or 0),
+            active_count=int(row.active_count or 0),
+        )
+        for row in interviewer_workload_rows
+    ]
+
+    fully_unassigned_count = (
+        await session.execute(
+            select(func.count())
+            .select_from(RecCandidate)
+            .where(
+                RecCandidate.candidate_id.in_(select(scoped_candidate_ids.c.candidate_id)),
+                trimmed_l2_owner_email == "",
+                ~RecCandidate.candidate_id.in_(select(interviewer_assignments.c.candidate_id)),
+            )
+        )
+    ).scalar_one()
+
+    assignment_summary = AssignmentSummaryOut(
+        default_hr_owner=AssignmentWorkloadOut(
+            assignee_key=DEFAULT_HR_OWNER_EMAIL,
+            assignee_name=DEFAULT_HR_OWNER_NAME,
+            assignee_email=DEFAULT_HR_OWNER_EMAIL,
+            assigned_count=int(total_applications_received or 0),
+            active_count=int(total_active_candidates or 0),
+        ),
+        hr_assigned_count=int(hr_assigned_count or 0),
+        hr_unassigned_count=max(0, int(total_applications_received or 0) - int(hr_assigned_count or 0)),
+        l2_assigned_count=int(l2_assigned_count or 0),
+        l2_unassigned_count=max(0, int(total_applications_received or 0) - int(l2_assigned_count or 0)),
+        interviewer_assigned_count=int(interviewer_assigned_count or 0),
+        interviewer_unassigned_count=max(0, int(total_applications_received or 0) - int(interviewer_assigned_count or 0)),
+        fully_unassigned_count=int(fully_unassigned_count or 0),
+        hr_workloads=hr_workloads,
+        l2_workloads=l2_workloads,
+        interviewer_workloads=interviewer_workloads,
+    )
+
     return DashboardMetricsOut(
         total_applications_received=int(total_applications_received or 0),
         total_active_candidates=int(total_active_candidates or 0),
@@ -364,6 +597,7 @@ async def get_dashboard_metrics(
         sprints_overdue=int(sprints_overdue or 0),
         offers_awaiting_response=int(offers_awaiting_response or 0),
         candidates_per_stage=candidates_per_stage,
+        assignment_summary=assignment_summary,
     )
 
 

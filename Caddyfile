@@ -38,12 +38,7 @@
 	}
 
 	handle /it* {
-		reverse_proxy 127.0.0.1:3001 {
-			header_up X-Original-Host {hostport}
-			header_up X-Original-Proto {scheme}
-			header_up X-Forwarded-Host {hostport}
-			header_up X-Forwarded-Proto {scheme}
-		}
+		respond 404
 	}
 
 	handle /recruitment/interview/slots* {

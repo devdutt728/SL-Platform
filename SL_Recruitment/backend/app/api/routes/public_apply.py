@@ -49,6 +49,7 @@ IDEMPOTENCY_TTL = timedelta(hours=24)
 RATE_LIMIT_WINDOW = timedelta(minutes=1)
 RATE_LIMIT_MAX = 5
 APPLICATION_DOC_MAX_BYTES = 50 * 1024 * 1024
+PORTFOLIO_DOC_MAX_BYTES = 65 * 1024 * 1024
 PUBLIC_APPLY_DUPLICATE_WINDOW = timedelta(hours=24)
 
 
@@ -315,6 +316,12 @@ def _validate_external_document(kind: str, filename: str, content_type: str) -> 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported {kind} content type.")
 
     return sanitize_filename(filename, default=f"{kind}.pdf")
+
+
+def _application_doc_max_bytes(kind: str) -> int:
+    if kind == "portfolio":
+        return PORTFOLIO_DOC_MAX_BYTES
+    return APPLICATION_DOC_MAX_BYTES
 
 
 @router.get("", response_model=list[OpeningPublicListItemOut])
@@ -992,7 +999,7 @@ async def apply_for_opening(
         )
 
     async def _upload_remote(kind: str, source_url: str) -> str:
-        max_bytes = APPLICATION_DOC_MAX_BYTES
+        max_bytes = _application_doc_max_bytes(kind)
         data, filename, content_type = await anyio.to_thread.run_sync(
             lambda: _download_external_file(source_url, max_bytes=max_bytes)
         )
@@ -1011,7 +1018,7 @@ async def apply_for_opening(
         cv_url = await _upload_file(
             "cv",
             cv_file,
-            max_bytes=APPLICATION_DOC_MAX_BYTES,
+            max_bytes=_application_doc_max_bytes("cv"),
             allowed_extensions=DOC_EXTENSIONS,
             allowed_mime_types=DOC_MIME_TYPES,
         )
@@ -1022,7 +1029,7 @@ async def apply_for_opening(
         portfolio_url = await _upload_file(
             "portfolio",
             portfolio_file,
-            max_bytes=APPLICATION_DOC_MAX_BYTES,
+            max_bytes=_application_doc_max_bytes("portfolio"),
             allowed_extensions=SPRINT_EXTENSIONS,
             allowed_mime_types=SPRINT_MIME_TYPES,
         )
@@ -1033,7 +1040,7 @@ async def apply_for_opening(
         resume_url_uploaded = await _upload_file(
             "resume",
             resume_file,
-            max_bytes=APPLICATION_DOC_MAX_BYTES,
+            max_bytes=_application_doc_max_bytes("resume"),
             allowed_extensions=DOC_EXTENSIONS,
             allowed_mime_types=DOC_MIME_TYPES,
         )

@@ -1540,7 +1540,10 @@ function _shouldReevaluateFailedPermanentRow(message) {
     text.indexOf("cv must be a valid public url") >= 0 ||
     text.indexOf("resume must be a valid public url") >= 0 ||
     text.indexOf("contains multiple urls") >= 0 ||
-    text.indexOf("missing required columns: portfolio") >= 0
+    text.indexOf("missing required columns: portfolio") >= 0 ||
+    text.indexOf("portfolio file too large") >= 0 ||
+    text.indexOf("exceeds max allowed size") >= 0 ||
+    text.indexOf("max allowed is") >= 0
   );
 }
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
@@ -20,6 +21,13 @@ logger = logging.getLogger("slp")
 
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name)
+
+    if not settings.it_module_enabled:
+        @app.middleware("http")
+        async def _it_module_disabled(_request, _call_next):
+            return JSONResponse({"detail": "Not found"}, status_code=404)
+
+        return app
 
     if settings.environment == "development":
         # Best-effort auto-create missing tables in local dev.

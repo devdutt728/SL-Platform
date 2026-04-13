@@ -330,6 +330,7 @@ export function useCandidate360Sprints({
     lastSprintNotice,
     setLastSprintNotice,
     templatePreview,
+    templateAttachments,
     templatePreviewBusy,
     templatePreviewError,
     assignOpen,

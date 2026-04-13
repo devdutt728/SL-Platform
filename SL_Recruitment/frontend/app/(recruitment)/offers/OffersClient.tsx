@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { CandidateOffer } from "@/lib/types";
 import { parseDateUtc } from "@/lib/datetime";
@@ -21,6 +21,7 @@ const statusOptions = [
   "all",
   "draft",
   "pending_approval",
+  "awaiting_response",
   "approved",
   "sent",
   "viewed",
@@ -45,7 +46,7 @@ export function OffersClient() {
   const searchParams = useSearchParams();
   const [initialized, setInitialized] = useState(false);
 
-  const loadOffers = async () => {
+  const loadOffers = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -60,11 +61,11 @@ export function OffersClient() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [status]);
 
   useEffect(() => {
     void loadOffers();
-  }, [status]);
+  }, [loadOffers]);
 
   useEffect(() => {
     if (initialized) return;
@@ -106,7 +107,7 @@ export function OffersClient() {
       cancelled = true;
       source.close();
     };
-  }, [status]);
+  }, [loadOffers]);
 
   return (
     <main className="content-pad space-y-4">

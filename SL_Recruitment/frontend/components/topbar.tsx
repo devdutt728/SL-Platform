@@ -160,9 +160,6 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
               <a href="/dashboard" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
                 Recruitment
               </a>
-              <a href="/it" className="block rounded-lg px-2 py-2 hover:bg-[var(--surface-card)]">
-                IT Helpdesk
-              </a>
             </div>
           </details>
           {me ? (

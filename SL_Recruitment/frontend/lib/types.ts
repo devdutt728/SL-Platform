@@ -9,6 +9,8 @@ export type CandidateListItem = {
   opening_id?: number | null;
   opening_code?: string | null;
   opening_title?: string | null;
+  hr_owner_email?: string | null;
+  hr_owner_name?: string | null;
   l2_owner_email?: string | null;
   l2_owner_name?: string | null;
   source_channel?: string | null;
@@ -206,6 +208,8 @@ export type CandidateDetail = {
   opening_code?: string | null;
   opening_title?: string | null;
   workflow_variant?: string | null;
+  hr_owner_email?: string | null;
+  hr_owner_name?: string | null;
   l2_owner_email?: string | null;
   l2_owner_name?: string | null;
   source_channel?: string | null;
@@ -661,6 +665,28 @@ export type CandidateAssessment = {
 
 export type DashboardStageCount = { stage: string; count: number };
 
+export type AssignmentWorkload = {
+  assignee_key: string;
+  assignee_name: string;
+  assignee_email?: string | null;
+  assigned_count: number;
+  active_count: number;
+};
+
+export type AssignmentSummary = {
+  default_hr_owner: AssignmentWorkload;
+  hr_assigned_count: number;
+  hr_unassigned_count: number;
+  l2_assigned_count: number;
+  l2_unassigned_count: number;
+  interviewer_assigned_count: number;
+  interviewer_unassigned_count: number;
+  fully_unassigned_count: number;
+  hr_workloads: AssignmentWorkload[];
+  l2_workloads: AssignmentWorkload[];
+  interviewer_workloads: AssignmentWorkload[];
+};
+
 export type DashboardMetrics = {
   total_applications_received: number;
   total_active_candidates: number;
@@ -675,6 +701,7 @@ export type DashboardMetrics = {
   sprints_overdue: number;
   offers_awaiting_response: number;
   candidates_per_stage: DashboardStageCount[];
+  assignment_summary: AssignmentSummary;
 };
 
 export type SprintTemplate = {

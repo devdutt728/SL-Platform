@@ -1,5 +1,6 @@
 import { backendUrl } from "@/lib/backend";
 import { OpeningApplyPrefill } from "@/lib/types";
+import { visibleRecordOrNull } from "@/lib/recruitment-visibility";
 import { ApplyForm } from "./ui";
 import Image from "next/image";
 import Link from "next/link";
@@ -9,7 +10,8 @@ async function fetchOpening(openingCode: string) {
   const url = backendUrl(`/apply/${openingCode}`);
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) return null;
-  return (await res.json()) as OpeningApplyPrefill;
+  const payload = (await res.json()) as OpeningApplyPrefill;
+  return visibleRecordOrNull(payload);
 }
 
 function BackgroundLayer() {

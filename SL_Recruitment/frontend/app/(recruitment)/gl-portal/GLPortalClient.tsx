@@ -360,10 +360,21 @@ function formatBytes(raw?: number | null) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function stripHtml(raw?: string | null) {
-  return String(raw || "")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
+function decodeHtmlEntities(raw: string) {
+  return raw
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/&amp;/gi, "&");
+}
+
+function sanitizeSprintHtml(raw?: string | null) {
+  if (!raw) return "";
+  return decodeHtmlEntities(raw)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .trim();
 }
 
@@ -1245,7 +1256,10 @@ export function GLPortalClient({
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <p className="text-[13px] font-semibold text-slate-900">{sprint.candidate_name || `Candidate ${sprint.candidate_id}`}</p>
-                      <p className="text-xs text-slate-600">{sprint.opening_title || "Opening"} · {sprint.template_name || "Sprint"}</p>
+                      <p className="text-xs text-slate-600">
+                        {sprint.opening_title || "Opening"} · {sprint.template_name || "Sprint"}
+                        {sprint.template_code ? ` · ${sprint.template_code}` : ""}
+                      </p>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-500/20">
@@ -1624,11 +1638,29 @@ export function GLPortalClient({
                     <p className="font-semibold">{formatDateTime(activeSprint.submitted_at) || "-"}</p>
                   </div>
                 </div>
-                {stripHtml(activeSprint.template_description) ? (
-                  <p className="mt-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700">
-                    {stripHtml(activeSprint.template_description)}
-                  </p>
-                ) : null}
+                <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-tight text-slate-500">
+                    <span>Sprint brief</span>
+                    {activeSprint.template_code ? (
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-slate-600">
+                        {activeSprint.template_code}
+                      </span>
+                    ) : null}
+                    {activeSprint.expected_duration_days ? (
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-slate-600">
+                        {activeSprint.expected_duration_days} day{activeSprint.expected_duration_days === 1 ? "" : "s"}
+                      </span>
+                    ) : null}
+                  </div>
+                  {sanitizeSprintHtml(activeSprint.template_description) ? (
+                    <div
+                      className="prose prose-slate prose-sm mt-3 max-w-none text-slate-700"
+                      dangerouslySetInnerHTML={{ __html: sanitizeSprintHtml(activeSprint.template_description) }}
+                    />
+                  ) : (
+                    <p className="mt-3 text-xs text-slate-600">No sprint brief text provided.</p>
+                  )}
+                </div>
                 <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-700">
                   {activeSprint.instructions_url ? (
                     <a
@@ -1658,7 +1690,11 @@ export function GLPortalClient({
                   )}
                 </div>
                 {(activeSprint.attachments || []).length > 0 ? (
-                  <div className="mt-2 space-y-1">
+                  <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-tight text-slate-500">
+                      Attachments ({(activeSprint.attachments || []).length})
+                    </p>
+                    <div className="mt-2 space-y-1">
                     {(activeSprint.attachments || []).map((attachment) => (
                       <a
                         key={attachment.sprint_attachment_id}
@@ -1671,6 +1707,7 @@ export function GLPortalClient({
                         <span className="text-slate-500">{formatBytes(attachment.file_size)}</span>
                       </a>
                     ))}
+                    </div>
                   </div>
                 ) : null}
               </div>

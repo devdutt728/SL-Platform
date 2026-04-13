@@ -3,12 +3,14 @@ import Link from "next/link";
 import { backendUrl } from "@/lib/backend";
 import { getPublicPortalHref } from "@/lib/public-portal";
 import { OpeningPublicListItem } from "@/lib/types";
+import { filterVisibleRecords } from "@/lib/recruitment-visibility";
 import { PublicOpeningsClient } from "./ui";
 
 async function fetchPublicOpenings() {
   const res = await fetch(backendUrl("/apply"), { cache: "no-store" });
   if (!res.ok) return [] as OpeningPublicListItem[];
-  return (await res.json()) as OpeningPublicListItem[];
+  const payload = (await res.json()) as OpeningPublicListItem[];
+  return filterVisibleRecords(payload);
 }
 
 export default async function PublicApplyIndexPage() {

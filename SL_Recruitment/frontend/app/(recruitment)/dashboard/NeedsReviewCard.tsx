@@ -14,31 +14,31 @@ export default function NeedsReviewCard({ initialMetrics, canViewOffers = false 
       label: "Basic Details pending > SLA",
       note: "Basic Details Form not submitted in time",
       value: metrics?.caf_pending_overdue ?? "--",
-      href: "/candidates?status_view=active&stage=hr_screening&needs_attention=1",
+      href: "/candidates?status_view=active&stage=hr_screening&dashboard_filter=caf_pending_overdue",
     },
     {
       label: "Medium screening cases",
       note: "Screening level = Medium",
       value: metrics?.needs_review_amber ?? "--",
-      href: "/candidates?status_view=active&needs_attention=1",
+      href: "/candidates?status_view=active&dashboard_filter=medium_screening",
     },
     {
       label: "Stuck > 5 days",
       note: "Pending stage ageing",
       value: metrics?.stuck_in_stage_over_days ?? "--",
-      href: "/candidates?status_view=active&needs_attention=1",
+      href: "/candidates?status_view=active&dashboard_filter=stuck_stage&stuck_days=5",
     },
     {
       label: "Feedback pending",
       note: "Interviews missing feedback",
       value: metrics?.feedback_pending ?? "--",
-      href: "/candidates?status_view=active&stage=l2_feedback&stage=l1_feedback",
+      href: "/candidates?status_view=active&dashboard_filter=feedback_pending",
     },
     {
       label: "Sprints overdue",
       note: "Assigned + past due",
       value: metrics?.sprints_overdue ?? "--",
-      href: "/candidates?status_view=active&stage=sprint",
+      href: "/candidates?status_view=active&stage=sprint&dashboard_filter=sprints_overdue",
     },
     {
       label: "Offers awaiting response",
@@ -51,7 +51,7 @@ export default function NeedsReviewCard({ initialMetrics, canViewOffers = false 
       label: "New applications",
       note: "Created today",
       value: metrics?.new_applications_today ?? "--",
-      href: "/candidates?status_view=all",
+      href: "/candidates?status_view=all&dashboard_filter=new_applications_today",
     },
   ].filter((item) => canViewOffers || !item.offerOnly);
   return (

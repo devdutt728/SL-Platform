@@ -44,6 +44,7 @@ def _env_files() -> list[str]:
 class Settings(BaseSettings):
     app_name: str = "Studio Lotus Platform"
     environment: str = "development"
+    it_module_enabled: bool = False
 
     database_url: str
     platform_database_url: str

@@ -1,16 +1,18 @@
-import {NextResponse, type NextRequest} from "next/server";
+import { type NextRequest } from "next/server";
 import { backendUrl } from "@/lib/backend";
 import { authHeaderFromCookie } from "@/lib/auth-server";
+import { proxyJsonResponse } from "@/lib/upstream-proxy";
+import { visibleRecordOrNull } from "@/lib/recruitment-visibility";
+import type { OpeningDetail } from "@/lib/types";
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ opening_code: string }> }) {
   const params = await context.params;
-  const res = await fetch(backendUrl(`/rec/openings/by-code/${encodeURIComponent(params.opening_code)}`), {
-    cache: "no-store",
-    headers: { ...await authHeaderFromCookie() },
-  });
-  const data = await res.text();
-  return new NextResponse(data, {
-    status: res.status,
-    headers: { "content-type": res.headers.get("content-type") || "application/json" },
-  });
+  return proxyJsonResponse<OpeningDetail>(
+    async () =>
+      fetch(backendUrl(`/rec/openings/by-code/${encodeURIComponent(params.opening_code)}`), {
+        cache: "no-store",
+        headers: { ...await authHeaderFromCookie() },
+      }),
+    { route: "GET /api/rec/openings/by-code/[opening_code]", transform: (payload) => visibleRecordOrNull(payload) },
+  );
 }

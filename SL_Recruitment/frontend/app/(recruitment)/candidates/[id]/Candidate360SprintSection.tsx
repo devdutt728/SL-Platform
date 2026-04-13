@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { createPortal } from "react-dom";
-import { CandidateSprint, SprintTemplate } from "@/lib/types";
+import { CandidateSprint, SprintTemplate, SprintTemplateAttachment } from "@/lib/types";
 import { Chip, Metric } from "./Candidate360Primitives";
 
 type LastSprintNotice = {
@@ -43,6 +43,7 @@ type Props = {
   setDueAt: (value: string) => void;
   templatePreviewBusy: boolean;
   templatePreview: SprintTemplate | null;
+  templateAttachments: SprintTemplateAttachment[];
   sprintEmailPreviewHtml: string;
   templatePreviewError: string | null;
   onAssignSprint: () => void;
@@ -50,7 +51,6 @@ type Props = {
   decisionTone: (decision?: string | null) => string;
   formatDateTime: (raw?: string | null) => string;
   formatRelativeDue: (raw?: string | null) => string;
-  stripHtml: (raw?: string | null) => string;
   formatBytes: (raw?: number | null) => string;
 };
 
@@ -81,6 +81,7 @@ export function Candidate360SprintSection({
   setDueAt,
   templatePreviewBusy,
   templatePreview,
+  templateAttachments,
   sprintEmailPreviewHtml,
   templatePreviewError,
   onAssignSprint,
@@ -88,7 +89,6 @@ export function Candidate360SprintSection({
   decisionTone,
   formatDateTime,
   formatRelativeDue,
-  stripHtml,
   formatBytes,
 }: Props) {
   const [mounted, setMounted] = useState(false);
@@ -96,6 +96,36 @@ export function Candidate360SprintSection({
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  function decodeHtmlEntities(raw: string) {
+    return raw
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, "\"")
+      .replace(/&#39;/gi, "'")
+      .replace(/&amp;/gi, "&");
+  }
+
+  function sanitizeSprintHtml(raw?: string | null) {
+    if (!raw) return "";
+    return decodeHtmlEntities(raw)
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .trim();
+  }
+
+  function formatTemplateLabel(template: SprintTemplate) {
+    const code = (template.sprint_template_code || "").trim();
+    const name = (template.name || "").trim() || "Unnamed sprint";
+    const duration =
+      template.expected_duration_days && template.expected_duration_days > 0
+        ? ` · ${template.expected_duration_days} day${template.expected_duration_days === 1 ? "" : "s"}`
+        : "";
+    return code ? `${code} · ${name}${duration}` : `${name}${duration}`;
+  }
+
+  const templateBriefHtml = sanitizeSprintHtml(templatePreview?.description);
 
   return (
     <>
@@ -129,7 +159,7 @@ export function Candidate360SprintSection({
                         <option value="">Select template</option>
                         {sprintTemplates.map((template) => (
                           <option key={template.sprint_template_id} value={String(template.sprint_template_id)}>
-                            {template.name}
+                            {formatTemplateLabel(template)}
                           </option>
                         ))}
                       </select>
@@ -146,21 +176,84 @@ export function Candidate360SprintSection({
                     </label>
 
                     <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 text-sm text-slate-700">
-                      <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Email preview</p>
+                      <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Selected sprint</p>
                       {templatePreviewBusy ? (
                         <p className="mt-2 text-sm text-slate-600">Loading preview...</p>
                       ) : templatePreview ? (
-                        <div className="mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                          <div
-                            className="max-h-[520px] overflow-auto p-4"
-                            dangerouslySetInnerHTML={{ __html: sprintEmailPreviewHtml }}
-                          />
-                          <div className="border-t border-slate-200 px-4 py-2 text-[11px] text-slate-500">
-                            The sprint link activates after assignment.
+                        <div className="mt-2 space-y-3">
+                          <div className="grid gap-2 md:grid-cols-4">
+                            <Metric label="Sprint code" value={templatePreview.sprint_template_code || "-"} />
+                            <Metric label="Sprint name" value={templatePreview.name || "-"} />
+                            <Metric
+                              label="Expected duration"
+                              value={
+                                templatePreview.expected_duration_days
+                                  ? `${templatePreview.expected_duration_days} day${templatePreview.expected_duration_days === 1 ? "" : "s"}`
+                                  : "-"
+                              }
+                            />
+                            <Metric label="Due date" value={dueAt ? formatDateTime(dueAt) : "-"} />
+                          </div>
+
+                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Sprint brief</p>
+                              {templatePreview.instructions_url ? (
+                                <a
+                                  className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
+                                  href={templatePreview.instructions_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                  Open instructions
+                                </a>
+                              ) : null}
+                            </div>
+                            {templateBriefHtml ? (
+                              <div
+                                className="prose prose-slate prose-sm mt-3 max-w-none"
+                                dangerouslySetInnerHTML={{ __html: templateBriefHtml }}
+                              />
+                            ) : (
+                              <p className="mt-3 text-sm text-slate-600">No sprint brief text provided for this template.</p>
+                            )}
+                          </div>
+
+                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                            <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">
+                              Attachments {templateAttachments.length ? `(${templateAttachments.length})` : ""}
+                            </p>
+                            {templateAttachments.length > 0 ? (
+                              <div className="mt-3 space-y-2">
+                                {templateAttachments.map((attachment) => (
+                                  <div
+                                    key={attachment.sprint_template_attachment_id}
+                                    className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-700"
+                                  >
+                                    <span className="truncate font-medium">{attachment.file_name}</span>
+                                    <span className="shrink-0 text-slate-500">{formatBytes(attachment.file_size)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-3 text-sm text-slate-600">No attachments will be sent with this sprint.</p>
+                            )}
+                          </div>
+
+                          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                            <div className="border-b border-slate-200 px-4 py-3">
+                              <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Candidate email preview</p>
+                              <p className="mt-1 text-[11px] text-slate-500">The sprint link activates after assignment.</p>
+                            </div>
+                            <div
+                              className="max-h-[360px] overflow-auto p-4"
+                              dangerouslySetInnerHTML={{ __html: sprintEmailPreviewHtml }}
+                            />
                           </div>
                         </div>
                       ) : (
-                        <p className="mt-2 text-sm text-slate-600">Select a template to preview the brief and attachments.</p>
+                        <p className="mt-2 text-sm text-slate-600">Select a template to preview the sprint brief, due date, and attachments.</p>
                       )}
                       {templatePreviewError ? (
                         <div className="mt-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-700">
@@ -227,8 +320,8 @@ export function Candidate360SprintSection({
                 <div className="rounded-2xl border border-white/60 bg-white/30 p-4 text-sm text-slate-600">Loading sprint data...</div>
               ) : activeSprints.length > 0 ? (
                 activeSprints.map((sprint) => {
-                  const summary = stripHtml(sprint.template_description);
                   const attachments = sprint.attachments || [];
+                  const sprintBriefHtml = sanitizeSprintHtml(sprint.template_description);
                   return (
                     <div key={sprint.candidate_sprint_id} className="rounded-2xl border border-white/60 bg-white/30 p-4">
                       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -240,8 +333,12 @@ export function Candidate360SprintSection({
                                 {sprint.template_code}
                               </span>
                             ) : null}
+                            {sprint.expected_duration_days ? (
+                              <span className="rounded-full border border-slate-200 bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                                {sprint.expected_duration_days} day{sprint.expected_duration_days === 1 ? "" : "s"}
+                              </span>
+                            ) : null}
                           </div>
-                          <p className="mt-1 text-xs text-slate-600">{summary || "No brief text provided."}</p>
                         </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <Chip className={chipTone(sprint.status === "submitted" ? "amber" : sprint.status === "completed" ? "green" : "neutral")}>
@@ -291,6 +388,30 @@ export function Candidate360SprintSection({
                         <Metric label="Due" value={sprint.due_at ? formatDateTime(sprint.due_at) : "-"} />
                         <Metric label="Status" value={formatRelativeDue(sprint.due_at)} />
                         <Metric label="Submitted" value={sprint.submitted_at ? formatDateTime(sprint.submitted_at) : "-"} />
+                      </div>
+                      <div className="mt-3 rounded-xl border border-white/60 bg-white/60 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-tight text-slate-500">Sprint brief</p>
+                          {sprint.instructions_url ? (
+                            <a
+                              className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700 underline decoration-dotted underline-offset-2"
+                              href={sprint.instructions_url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              Open instructions
+                            </a>
+                          ) : null}
+                        </div>
+                        {sprintBriefHtml ? (
+                          <div
+                            className="prose prose-slate prose-sm mt-3 max-w-none"
+                            dangerouslySetInnerHTML={{ __html: sprintBriefHtml }}
+                          />
+                        ) : (
+                          <p className="mt-3 text-sm text-slate-600">No sprint brief text provided.</p>
+                        )}
                       </div>
                       <div className="mt-3 grid gap-2 md:grid-cols-2">
                         <div className="rounded-xl border border-white/60 bg-white/60 p-3">

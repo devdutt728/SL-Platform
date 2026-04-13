@@ -13,6 +13,7 @@ rem Global env for all Node processes
 set "NODE_ENV=production"
 set "HOSTNAME=127.0.0.1"
 set "SL_ENVIRONMENT=production"
+if not defined ENABLE_IT_MODULE set "ENABLE_IT_MODULE=0"
 
 powershell -NoProfile -Command "& { $ErrorActionPreference = 'Continue'; $ports = 3000,3001,3002,3003,8001,8002; foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { $procId = $_.OwningProcess; if ($procId) { try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {} } } } }"
 
@@ -86,7 +87,7 @@ echo [%DATE% %TIME%] dirs ready>> "%TRACE_LOG%"
 
 if "%BUILD_ON_START%"=="1" (
   echo Building frontends - this may take a few minutes...
-  if exist "%IT_FRONTEND_DIR%" (
+  if "%ENABLE_IT_MODULE%"=="1" if exist "%IT_FRONTEND_DIR%" (
     powershell -NoProfile -Command "$ErrorActionPreference='Stop'; Set-Location -LiteralPath '%IT_FRONTEND_DIR%'; npm run build 2>&1 | Tee-Object -FilePath '%IT_FRONTEND_BUILD_OUT%'; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
     if errorlevel 1 goto :fail
   )
@@ -100,7 +101,7 @@ if "%BUILD_ON_START%"=="1" (
   )
 )
 
-if exist "%IT_BACKEND_DIR%" (
+if "%ENABLE_IT_MODULE%"=="1" if exist "%IT_BACKEND_DIR%" (
   echo [%DATE% %TIME%] spawn it-backend>> "%TRACE_LOG%"
   call :spawn "%IT_BACKEND_DIR%" "python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1" "%IT_BACKEND_OUT%" "%IT_BACKEND_ERR%"
 )
@@ -108,7 +109,7 @@ if exist "%REC_BACKEND_DIR%" (
   echo [%DATE% %TIME%] spawn rec-backend>> "%TRACE_LOG%"
   call :spawn "%REC_BACKEND_DIR%" "python -m uvicorn app.main:app --host 127.0.0.1 --port 8002 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1" "%REC_BACKEND_OUT%" "%REC_BACKEND_ERR%"
 )
-if exist "%IT_FRONTEND_DIR%" (
+if "%ENABLE_IT_MODULE%"=="1" if exist "%IT_FRONTEND_DIR%" (
   echo [%DATE% %TIME%] spawn it-frontend>> "%TRACE_LOG%"
   if exist "%IT_FRONTEND_DIR%\\.next\\standalone\\server.js" (
     call :spawn "%IT_FRONTEND_DIR%" "node .next\\standalone\\server.js" "%IT_FRONTEND_OUT%" "%IT_FRONTEND_ERR%" "PORT=3001"

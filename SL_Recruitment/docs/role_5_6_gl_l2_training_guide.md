@@ -4,443 +4,488 @@
 
 **Audience:** Group Leaders / L2 Owners mapped to platform role IDs 5 and 6  
 **System:** Studio Lotus Recruitment OS  
-**Prepared for:** Internal demo and process training session  
-**Document objective:** Help role 5 and role 6 users understand their responsibilities, system access, features, and day-to-day process in a professional and structured way.
+**Prepared for:** Internal training, walkthrough, and communication mail  
+**Document objective:** Provide a current, code-verified guide for role 5 and role 6 users, including scope, features, sprint ownership, opening requests, and mail/notification behavior.
 
-## 1. Executive Summary
+## 1. Current Role Definition
 
-Role 5 and Role 6 users are currently handled in the same way inside the recruitment system. Both roles operate as assignment-scoped `GL / L2` users. Their access is focused on candidates, interviews, sprint reviews, and opening requests relevant to them. They do not manage the full HR pipeline.
+Role 5 and Role 6 are still handled the same way in the current implementation. The system treats both roles as assignment-scoped `GL / L2` users.
 
-This means:
+In practical terms, this means:
 
-- They work on assigned candidates only.
-- They use the GL Portal as the main workspace.
-- They provide interview feedback and sprint decisions.
-- They can raise opening requests against existing openings.
-- They do not control the full recruitment workflow like HR does.
+- both roles operate in the same business flow
+- both roles work on candidates assigned to them
+- both roles use the `GL Portal` as the main day-to-day workspace
+- both roles are involved in interview feedback, sprint review, and opening requests
+- both roles do not run the full HR workflow
 
-## 2. Role Definition
+## 2. What Role 5 / Role 6 Are Expected To Do
 
-### Role 5 / Role 6 in business terms
+Their main responsibility is evaluation ownership on assigned candidates.
 
-Role 5 and Role 6 users act as:
+Their operational work includes:
 
-- Group Leaders
-- L2 Owners
-- Decision contributors for interview and sprint evaluation
+- reviewing assigned L1 or L2 interview items
+- marking interview status as `taken` or `not_taken`
+- saving draft interview feedback
+- submitting final interview feedback
+- reviewing submitted sprint work
+- recording sprint score, comments, and final decision
+- raising opening requests against existing openings
+- monitoring stage handoff and internal mails relevant to L2-owned candidates
 
-### Important clarification
+## 3. What They Can Access
 
-In the current application, role 5 and role 6 do not have separate business flows. The system treats both roles in the same access model and operational scope.
+### A. GL Portal
 
-## 3. Main Responsibility of Role 5 / Role 6
+This remains the primary workspace for role 5 and role 6 users.
 
-The primary responsibility of Role 5 and Role 6 users is to support hiring decisions for candidates assigned to them.
+Main tabs visible in the portal:
 
-Their work mainly includes:
+- `Assessments`
+- `Sprint Reviews`
+- `Opening Requests`
 
-- reviewing interview queue
-- marking interview status
-- filling L1 or L2 assessment forms
-- submitting structured candidate feedback
-- reviewing sprint submissions
-- deciding whether a candidate should advance or be rejected after sprint review
-- raising opening requests for existing openings when additional hiring need arises
+### B. Candidate Access
 
-## 4. What Role 5 / Role 6 Can Access
+They can view candidate records and assigned activity relevant to their work.
 
-### A. Dashboard
+Important system note:
 
-They can access the dashboard, but the view is scoped to their relevant records rather than the complete HR operation.
+- Candidate 360 is visible to role 5 and role 6 users
+- Candidate 360 is currently `view-only` for non-HR users
+- they can review data there, but lifecycle actions remain restricted in that screen
 
-### B. GL Portal
+### C. Interviews
 
-This is the main workspace for role 5 and role 6 users.
+They can access interviews assigned to them in their interviewer/L2 scope and act through the GL Portal assessment flow.
 
-The GL Portal contains three major working areas:
+### D. Sprints
 
-- Assessments
-- Sprint Reviews
-- Opening Requests
+They can review sprint submissions assigned to them.
 
-### C. Candidate visibility
+### E. Opening Requests
 
-They can view assigned candidate details relevant to their evaluation work.
+They can raise requests for existing openings and track their own requests.
 
-### D. Interview records
+## 4. What They Cannot Do
 
-They can access interviews where they are the assigned interviewer or L2 owner.
-
-### E. Sprint records
-
-They can access sprint submissions assigned to them for review.
-
-## 5. What Role 5 / Role 6 Cannot Do
-
-These users are not intended to run the full recruitment operation.
+Role 5 and role 6 users are not full HR operators.
 
 They cannot:
 
-- create brand-new openings
+- create brand-new openings from their normal flow
 - approve or reject opening requests
-- perform full Candidate 360 management like HR
-- control all stage transitions
-- schedule interviews from the HR workflow area
-- manage offers
-- manage joining documents
-- access restricted compensation-sensitive information in assessment flow
+- manage full Candidate 360 lifecycle actions like HR
+- control offer processing
+- control joining document workflow
+- assign or change sprint reviewer through the HR-only reviewer assignment endpoint
+- manage opening request admin overrides
+- perform superadmin-only actions
 
-## 6. GL Portal Overview
+## 5. GL Portal Feature Guide
 
-The GL Portal should be explained as the central operating screen for role 5 and role 6 users.
+## 5.1 Assessments Tab
 
-### Tab 1: Assessments
+This tab is used for interview ownership and interview feedback.
 
-Used for:
+Features currently visible in the assessment workspace include:
 
-- reviewing assigned interviews
-- opening candidate interview records
-- marking interview outcome
-- saving draft feedback
-- submitting final L1 or L2 feedback
-- downloading L2 assessment PDF when required
+- unread counters for L1 and L2 queues
+- pending feedback counts
+- search on candidate/opening/interviewer/round
+- interview status filter
+- queue cards for assigned interviews
+- interview detail panel
+- `Mark interview taken`
+- `Mark not taken`
+- `Save draft`
+- `Submit`
+- PDF download for submitted assessment record
+- preview summary for active form data
 
-### Tab 2: Sprint Reviews
+Operational rules:
 
-Used for:
+- interview status can be marked after the scheduled start time begins
+- feedback unlocks only after interview is marked `taken`
+- if interview is marked `not_taken`, assessment is not available
+- submitted feedback becomes locked
 
-- checking candidate sprint submissions
-- reviewing files and work submitted by the candidate
-- adding reviewer comments
-- adding score
-- choosing final decision: `advance` or `reject`
+## 5.2 Sprint Reviews Tab
 
-### Tab 3: Opening Requests
+This tab is used for decision-making on submitted sprint tasks.
 
-Used for:
+Features currently visible in sprint review flow include:
 
-- raising headcount or hiring requests for existing openings
-- adding GL details and L2 details
-- recording business justification
-- tracking request status
+- queue of submitted sprints waiting for L2 review
+- candidate name, opening, sprint template name, and template code
+- due date and submitted date
+- sprint brief HTML preview
+- instructions link if present
+- submitted file link
+- template and sprint attachments
+- review modal with status details
+- score field
+- internal comments
+- candidate comments
+- final decision
 
-## 7. Feature-by-Feature Explanation
-
-### 7.1 Assessment Queue
-
-This section shows the interviews assigned to the logged-in GL / L2 user.
-
-What the user can see:
-
-- candidate name
-- opening title
-- interview round type
-- scheduled interview date and time
-- interview status
-- pending or submitted feedback indication
-
-What the user should do:
-
-- open the interview
-- verify whether the interview has happened
-- mark the interview status correctly
-- complete the assessment form
-- save draft if needed
-- submit final feedback only after review
-
-### 7.2 Mark Interview Status
-
-There are two important statuses:
-
-- `taken`
-- `not taken`
-
-#### When to use `taken`
-
-Use `taken` when the interview actually happened.
-
-#### When to use `not taken`
-
-Use `not taken` when:
-
-- candidate did not attend
-- interviewer did not attend
-- meeting could not happen
-- interview was missed for operational reasons
-
-#### Best practice
-
-Always mark the correct status before completing final interview feedback.
-
-### 7.3 L1 / L2 Assessment Form
-
-This is the formal evaluation form completed by the interviewer or GL.
-
-Depending on the round, the user may see:
-
-- L1 assessment
-- L2 assessment
-- intern L2 recommendation flow for intern workflow
-
-The form generally includes:
-
-- role clarity
-- functional fit
-- strengths
-- learning needs
-- culture fit
-- leadership indicators
-- hiring recommendation
-
-#### Key controls
-
-- `Save draft` means the feedback is still editable.
-- `Submit` means the feedback becomes final.
-- Once submitted, the form gets locked for normal users.
-
-### 7.4 Submitted Feedback Summary
-
-For completed L2 interviews, the system can display a summary such as:
-
-- good to hire
-- key strengths
-- key learning needs
-- coachability
-- preferred joining date
-- next-round notes
-
-This helps the GL / L2 user and stakeholders review submitted feedback quickly.
-
-### 7.5 L2 Assessment PDF Download
-
-Users can download the L2 assessment PDF for submitted L2 feedback.
-
-Use this when:
-
-- feedback needs to be discussed in review meetings
-- decision support is required
-- a formatted copy is needed for internal sharing
-
-### 7.6 Sprint Review Queue
-
-This section shows candidate sprint tasks that are ready for review.
-
-What the user should do:
-
-- open the sprint record
-- review the candidate submission
-- check attached files and submitted work
-- add score
-- add internal comments
-- add comments for candidate if needed
-- choose final decision
-
-### 7.7 Sprint Decision
-
-Allowed outcomes:
+Allowed review outcomes:
 
 - `advance`
 - `reject`
 
-#### `advance`
+Important effect:
 
-Use when the sprint meets the expected standard and the candidate should move ahead.
+- sprint review can move the candidate forward or to rejected flow depending on decision and current stage
 
-#### `reject`
+## 5.3 Opening Requests Tab
 
-Use when the sprint does not meet expected quality or fitment standards.
+This tab is used for headcount requests against existing openings.
 
-#### Important note
+Role 5 / Role 6 permissions here are:
 
-Sprint decision can impact the candidate stage in the pipeline.
+- can raise requests
+- cannot raise brand-new opening creation requests in their normal role flow
+- cannot approve requests
+- cannot reject requests
+- cannot manage all requests globally
+- can view only their own requests unless they are in an HR approval role
 
-### 7.8 Opening Requests
-
-Role 5 / Role 6 users can raise requests only for existing openings.
-
-They cannot raise a new opening code directly.
-
-Typical fields in opening request:
+Common request details supported by the backend:
 
 - opening code
+- opening title
 - description
-- location
-- headcount needed
-- hiring manager reference
+- location city
+- location country
+- hiring manager person ID
+- hiring manager email
 - GL details
 - L2 details
+- headcount delta
 - request reason
 
-Possible statuses:
+Important request behavior:
 
-- `Pending HR Approval`
-- `Applied`
-- `Rejected`
+- for role 5 and role 6 users, opening must already exist
+- if `headcount_delta > 0`, the request behaves like `increase_headcount`
+- if `headcount_delta = 0` and hiring manager is being changed, the request behaves like `change_hiring_manager`
+- request status starts as `pending_hr_approval`
+- later status can become `applied` or `rejected`
 
-## 8. Step-by-Step Operating Guide
+Important communication note:
 
-### 8.1 Daily start routine
+- current opening request flow logs workflow events
+- based on the current route scan, opening request creation/approval/rejection does not currently send dedicated email notifications
+
+## 6. Sprint Assignment Clarification
+
+This is one of the important changes in the current implementation.
+
+### What the backend now allows
+
+Sprint assignment is now allowed for:
+
+- superadmin
+- HR admin
+- HR exec
+- hiring manager
+- group lead
+- role 5 / role 6 users
+
+But for role 5 / role 6 style usage, all of the following must be true:
+
+- the candidate must exist
+- the user must be the assigned `l2_owner_email`
+- the logged-in email must match the candidate `l2_owner_email`
+- there must not already be another active sprint for that candidate
+
+If an active sprint already exists, the system blocks duplicate assignment.
+
+### Important limitation
+
+Reviewer assignment is still separate from sprint assignment.
+
+Role 5 / Role 6 users:
+
+- can be the reviewing owner
+- can review a sprint submitted to them
+- cannot use the HR-only reviewer assignment endpoint to reassign reviewer ownership
+
+### Current UI note
+
+Backend support for sprint assignment is present.
+
+However:
+
+- Candidate 360 page is still gated as `view-only` for non-HR users
+- so sprint assignment visibility in your live build should be validated before presenting it as a guaranteed self-service UI action for role 5 / role 6
+
+Safe professional wording for your mail or session:
+
+"Sprint assignment ownership is L2-owner scoped. Where the action is enabled in the current UI, the assigned L2 owner can assign the sprint, subject to the one-active-sprint rule. Reviewer reassignment remains with HR."
+
+## 7. Detailed Step-by-Step SOP
+
+## 7.1 Daily Start Routine
 
 1. Log in to the recruitment system.
-2. Open the GL Portal.
-3. Review the `Assessments` tab first.
-4. Check if any interviews are pending feedback.
-5. Check if any sprint reviews are waiting.
-6. Review any opening requests already raised by you.
+2. Open the `GL Portal`.
+3. Review unread counts and pending counts.
+4. Open the `Assessments` tab first.
+5. Check pending interviews and feedback backlog.
+6. Open the `Sprint Reviews` tab next.
+7. Review any submitted sprints waiting for decision.
+8. Check `Opening Requests` for requests already raised by you.
 
-### 8.2 Step-by-step: Completing interview work
+## 7.2 Interview Workflow
 
 1. Open `GL Portal`.
 2. Go to `Assessments`.
 3. Select the relevant interview from the queue.
-4. Check candidate name, opening, round type, and interview schedule.
-5. Confirm whether the interview happened.
-6. Mark interview as `taken` or `not taken`.
-7. If the interview was taken, open the assessment form.
-8. Fill all relevant sections carefully.
-9. Use `Save draft` if you need to return later.
-10. Review all entries once again.
+4. Verify candidate name, opening, interviewer, round, and scheduled time.
+5. Once the interview start time has begun, mark status.
+6. Choose `taken` if the interview happened.
+7. Choose `not_taken` if the interview did not happen.
+8. If marked `taken`, fill the assessment form.
+9. Use `Save draft` if feedback is still in progress.
+10. Review all fields carefully.
 11. Click `Submit` only when the feedback is final.
-12. If needed, download the PDF for submitted L2 feedback.
+12. Download PDF if a formatted copy is needed.
 
-### 8.3 Step-by-step: Reviewing a sprint
+## 7.3 Sprint Review Workflow
 
 1. Open `GL Portal`.
 2. Go to `Sprint Reviews`.
-3. Open the candidate sprint item from the queue.
-4. Review the submitted task and attached files.
-5. Enter score.
-6. Add internal comments.
-7. Add comments for candidate if required.
-8. Select final decision: `advance` or `reject`.
-9. Save the sprint review.
-10. Confirm the candidate status has been updated in the workflow.
+3. Open the sprint item from the queue.
+4. Review sprint name, sprint code, due date, and submitted timestamp.
+5. Review sprint brief and instructions.
+6. Open candidate submission file.
+7. Review attachments if any were included in the sprint.
+8. Enter score.
+9. Add internal comments.
+10. Add candidate comments if required.
+11. Choose final decision as `advance` or `reject`.
+12. Save the sprint review.
+13. Confirm the candidate has moved correctly in the workflow.
 
-### 8.4 Step-by-step: Raising an opening request
+## 7.4 Sprint Assignment Workflow
+
+Use this section only if sprint assignment is enabled for the assigned L2 owner in your current deployed UI.
+
+1. Confirm you are the mapped `L2 owner` for the candidate.
+2. Confirm no other active sprint is already assigned.
+3. Open the sprint assignment flow.
+4. Select sprint template.
+5. Review template code, name, expected duration, and due date.
+6. Review sprint brief preview.
+7. Review template attachments.
+8. Review candidate email preview.
+9. Set due date.
+10. Click `Assign sprint`.
+11. Confirm the sprint assignment mail is sent to the candidate.
+
+If sprint assignment action is not visible in your UI:
+
+- coordinate with HR or Superadmin
+- do not assume reviewer reassignment rights
+
+## 7.5 Opening Request Workflow
 
 1. Open `GL Portal`.
 2. Go to `Opening Requests`.
-3. Choose `Existing Opening`.
-4. Select the opening code.
-5. Enter request description.
-6. Enter location details if relevant.
-7. Enter headcount requirement.
-8. Add GL details.
-9. Add L2 details.
-10. Add clear business justification.
+3. Select an existing opening.
+4. Confirm the opening code is valid.
+5. Enter or verify opening description and location.
+6. Add hiring manager details if needed.
+7. Add `GL details`.
+8. Add `L2 details`.
+9. Enter `headcount_delta`.
+10. Add clear business reason.
 11. Submit the request.
-12. Track whether the request is pending, applied, or rejected.
+12. Track status as `pending_hr_approval`, `applied`, or `rejected`.
 
-## 9. Rules and Best Practices
+## 8. Mail and Notification Guide
+
+This section separates mails into two types:
+
+- candidate-facing mails
+- internal mails relevant to role 5 / role 6 users
+
+## 8.1 Candidate-Facing Mails in the Overall Workflow
+
+These are useful for role 5 / role 6 users to understand, even if HR triggers some of them.
+
+### Application and form mails
+
+- `application_links`
+  Sent when the candidate receives Studio Lotus application links.
+
+- `application_received`
+  Fallback receipt mail when the application is received.
+
+- `basic_details_link`
+  CAF / basic details form mail sent to the candidate.
+
+- `caf_reminder`
+  Reminder to complete the candidate application form.
+
+- `assessment_link`
+  Candidate assessment form link mail.
+
+### Interview mails
+
+- `interview_slot_options`
+  Candidate receives selectable interview slot options.
+
+- `interview_scheduled`
+  Candidate receives final scheduled interview details.
+
+- `interview_rescheduled`
+  Candidate receives revised interview details.
+
+- `interview_cancelled`
+  Candidate receives cancellation notice.
+
+### Sprint mails
+
+- `sprint_assigned`
+  Candidate receives sprint assignment mail with sprint link, due date, and attachment summary.
+
+- `sprint_reminder`
+  Candidate receives reminder before due date.
+
+- `sprint_overdue`
+  Candidate receives overdue follow-up mail.
+
+### Offer / post-offer mails
+
+- `offer_sent`
+  Candidate receives offer letter mail.
+
+- `offer_followup`
+  Candidate receives offer follow-up if no response is recorded.
+
+- `joining_documents_request`
+  Candidate receives joining document request after offer acceptance workflow.
+
+## 8.2 Internal Mails Relevant To Role 5 / Role 6
+
+These are the key internal mails role 5 / role 6 users may receive or should know about.
+
+### Ownership and stage mails
+
+- `l2_owner_assigned`
+  Subject: `Candidate assigned to you for L2 review`
+  Sent to the new L2 owner, with HR in CC.
+
+- `stage_handoff_l2_shortlist`
+  Sent when a candidate moves into `l2_shortlist`.
+  Recipients include HR and the candidate L2 owner.
+
+- `stage_handoff_sprint`
+  Sent when a candidate moves into `sprint`.
+  Recipients include HR and the candidate L2 owner.
+
+- `stage_stale_internal`
+  Sent when a candidate remains too long in an SLA-sensitive stage.
+  For L2-related stages such as `l2_shortlist`, `l2_interview`, `l2_feedback`, and `sprint`, recipients include L2 owner and HR.
+
+### Interview mails
+
+- `interview_slot_options_internal_copy`
+  Subject pattern: `L2 slot options sent - Candidate Name (Candidate Code)`
+  Sent only for `L2` round internal visibility.
+  Goes to the `l2_owner_email` when it differs from the candidate email.
+  Important rule: this mail is for visibility only and does not include booking links.
+
+- `interview_feedback_internal`
+  Subject: `Interview feedback submitted`
+  Sent when interview feedback is submitted.
+  Recipients include HR and the candidate L2 owner.
+
+- `interview_feedback_reminder`
+  Sent to the assigned interviewer if feedback is pending beyond configured reminder time.
+
+- `interview_status_elapsed`
+  Sent to the interviewer if interview status is not marked after the configured time window.
+
+### Sprint mails
+
+- `sprint_submission_internal`
+  Subject: `Sprint submission received`
+  Sent when candidate uploads the sprint submission.
+  Recipients include sprint reviewer, L2 owner, and HR.
+
+- `sprint_review_internal`
+  Subject: `Sprint review completed`
+  Sent after sprint review is recorded.
+  Recipients include HR and the candidate L2 owner.
+
+### Offer response internal mails
+
+- `offer_response_accept`
+  Sent internally when the candidate accepts the offer.
+  Recipients include HR and the candidate L2 owner.
+
+- `offer_response_decline`
+  Sent internally when the candidate declines the offer.
+  Recipients include HR and the candidate L2 owner.
+
+## 9. What To Say During Training About Mails
+
+Use the following professional explanation:
+
+"Please note that the system sends both candidate-facing mails and internal visibility mails. As Role 5 / Role 6 users, the most relevant mails for you are L2 owner assignment, L2 shortlist or sprint handoff, L2 slot visibility mail, sprint submission mail, sprint review completion mail, and internal interview feedback mail. Opening requests currently create workflow records, but they do not have dedicated mail notifications in the current route flow."
+
+## 10. Best Practices
 
 ### Interview feedback best practices
 
-- Do not submit incomplete feedback.
-- Use draft mode if discussion is still pending.
-- Keep comments specific, factual, and role-related.
-- Avoid vague remarks like "good candidate" without evaluation support.
+- mark interview status correctly and only after the scheduled interview begins
+- use draft while feedback is being discussed
+- submit only final, complete feedback
+- keep comments factual, role-related, and decision-oriented
 
 ### Sprint review best practices
 
-- Evaluate based on output quality, thinking, clarity, and role relevance.
-- Record clear comments for internal review.
-- Use `advance` only when the output meets expected standards.
+- review the actual submission file, not only the status
+- read the sprint brief and instructions before scoring
+- use `advance` only if output meets expected quality
+- record clear internal comments for future decision traceability
 
 ### Opening request best practices
 
-- Raise request only when there is a clear business need.
-- Use complete GL and L2 detail fields.
-- Write justification in operational language, not generic wording.
-
-## 10. Common Scenarios and What To Do
-
-### Scenario 1: Interview happened but feedback not submitted
-
-Action:
-
-- mark interview as `taken`
-- complete assessment
-- save draft if discussion is needed
-- submit once finalized
-
-### Scenario 2: Interview did not happen
-
-Action:
-
-- mark interview as `not taken`
-- mention the correct reason if required
-- coordinate with HR if rescheduling is needed
-
-### Scenario 3: Sprint is submitted and waiting
-
-Action:
-
-- open the sprint review queue
-- review the work without delay
-- record decision clearly
-
-### Scenario 4: Need extra hiring under an existing opening
-
-Action:
-
-- raise an opening request from GL Portal
-- mention headcount and reason clearly
-- wait for HR approval
-
-### Scenario 5: Feedback already submitted but correction is needed
-
-Action:
-
-- normal users cannot edit locked submitted feedback
-- escalate to HR / Superadmin if correction is required
+- use the exact existing opening code
+- write clear business justification
+- include GL and L2 details completely
+- do not promise request approval because approval remains with HR / Superadmin
 
 ## 11. Escalation Matrix
 
 Escalate to HR when:
 
-- a candidate requires stage movement outside your scope
-- interview scheduling is needed
-- opening request approval is required
-- offer or joining document action is required
-- submitted feedback needs reopening
+- sprint assignment action is not visible in your current UI
+- reviewer ownership needs to be changed
+- interview scheduling or rescheduling is needed
+- opening request needs approval
+- a submitted assessment needs correction
+- candidate must be moved across stages outside your scope
 
 Escalate to Superadmin when:
 
 - a system override is required
-- records are locked incorrectly
-- a permission issue blocks valid work
+- Candidate 360 permissions appear wrong
+- sprint reassignment is blocked by active sprint rules and needs privileged intervention
+- request status requires admin override
 
-## 12. Professional Demo Talk Track
+## 12. Short Mail Summary For Leadership / Team Communication
 
-Use the following opening during your session:
+If you need a short explanation inside a mail, you can use this:
 
-"This session is for Role 5 and Role 6 users, who operate in the system as GL / L2 owners. Your access is focused on assigned candidate evaluation, interview feedback, sprint review, and opening requests for existing openings. In this walkthrough, I will show your portal, explain your responsibilities, and take you through the exact steps you need to follow during day-to-day hiring operations."
+"Role 5 and Role 6 users in the recruitment system work as GL / L2 owners. Their primary workspace is the GL Portal, where they manage interview feedback, sprint review, and opening requests for existing openings. Candidate 360 remains view-only in the current non-HR access model. Sprint review and internal L2 mails are active; sprint assignment is L2-owner scoped in backend rules and should be used where enabled in the current UI. Opening request approval remains with HR / Superadmin."
 
-### Suggested demo order
+## 13. Final Closing Line For Session
 
-1. Explain role scope and limitations.
-2. Open GL Portal.
-3. Show `Assessments` tab.
-4. Open one interview item.
-5. Show interview status update.
-6. Show draft and submit actions in the assessment form.
-7. Show L2 feedback summary and PDF download.
-8. Show `Sprint Reviews` tab and explain decision flow.
-9. Show `Opening Requests` tab and explain request submission.
-10. Close with best practices and escalation rules.
-
-## 13. Short Summary for Participants
-
-Role 5 and Role 6 users should remember the following:
-
-- Your main screen is the GL Portal.
-- Your job is evaluation, feedback, and review.
-- You work only on assigned candidates and related records.
-- HR manages the broader recruitment flow.
-- Submit only final feedback.
-- Use sprint decisions carefully.
-- Raise opening requests only for existing openings.
-
-## 14. Final Closing Line for Session
-
-"For role 5 and role 6 users, the system is designed to keep your focus on quality evaluation and timely decision-making. If interview feedback, sprint review, and opening requests are handled correctly and on time, the recruitment process becomes faster, cleaner, and more reliable for everyone involved."
+"For role 5 and role 6 users, the system is designed to keep the focus on evaluation quality, timely feedback, sprint decision-making, and structured ownership visibility. If interview feedback, sprint review, and opening requests are handled on time and with complete information, the recruitment process remains faster, cleaner, and easier to track." 

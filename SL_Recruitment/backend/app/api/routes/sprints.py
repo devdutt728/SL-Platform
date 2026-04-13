@@ -116,6 +116,21 @@ def _is_sprint_assigned_to_user(user: UserContext, sprint: RecCandidateSprint, c
     return False
 
 
+def _can_assign_sprint_for_candidate(user: UserContext, candidate: RecCandidate | None) -> bool:
+    if candidate is None:
+        return False
+    if _is_superadmin_actor(user):
+        return True
+    roles = set(user.roles or [])
+    if Role.HR_ADMIN in roles or Role.HR_EXEC in roles:
+        return True
+    if Role.GROUP_LEAD not in roles and Role.HIRING_MANAGER not in roles and not _is_role_5_or_6_actor(user):
+        return False
+    user_email = (user.email or "").strip().lower()
+    owner_email = (candidate.l2_owner_email or "").strip().lower()
+    return bool(user_email and owner_email and user_email == owner_email)
+
+
 async def _resolve_person_id_by_email(email: str | None) -> str | None:
     email_norm = (email or "").strip().lower()
     if not email_norm:
@@ -581,17 +596,35 @@ async def assign_sprint(
     candidate_id: int,
     payload: SprintAssignIn,
     session: AsyncSession = Depends(deps.get_db_session),
-    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC])),
+    user: UserContext = Depends(require_roles([Role.HR_ADMIN, Role.HR_EXEC, Role.HIRING_MANAGER, Role.GROUP_LEAD])),
 ):
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    if not _can_assign_sprint_for_candidate(user, candidate):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
     workflow_policy = await get_candidate_workflow_policy(session, candidate)
     if workflow_policy.workflow_variant == INTERN_L2_ONLY_WORKFLOW:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Sprint assignment is disabled for this intern workflow.",
         )
+    if not _is_superadmin_actor(user):
+        existing_active = (
+            await session.execute(
+                select(RecCandidateSprint.candidate_sprint_id)
+                .where(
+                    RecCandidateSprint.candidate_id == candidate_id,
+                    RecCandidateSprint.status != "deleted",
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing_active is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An active sprint is already assigned to this candidate.",
+            )
 
     template = await session.get(RecSprintTemplate, payload.sprint_template_id)
     if not template or not template.is_active:

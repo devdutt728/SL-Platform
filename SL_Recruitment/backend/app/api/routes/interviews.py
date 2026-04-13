@@ -123,6 +123,11 @@ def _normalize_round(raw: str | None) -> str:
     return (raw or "").strip().lower()
 
 
+def _normalize_email(value: str | None) -> str | None:
+    cleaned = (value or "").strip().lower()
+    return cleaned or None
+
+
 async def _assert_assessment_submitted_for_round(
     session: AsyncSession,
     *,
@@ -890,6 +895,13 @@ async def propose_interview_slots(
         "</tr>"
         for item in slot_links
     )
+    internal_slot_rows = "\n".join(
+        "<tr>"
+        f'<td style="padding:12px 0; color:#0f172a; font-weight:600; font-size:15px;">{item["label"]}</td>'
+        '<td style="padding:12px 0; text-align:right; color:#64748b; font-size:12px; font-weight:600;">Candidate only</td>'
+        "</tr>"
+        for item in slot_links
+    )
 
     candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
     await send_email(
@@ -910,6 +922,34 @@ async def propose_interview_slots(
         related_entity_id=slots[0].candidate_interview_slot_id if slots else None,
         meta_extra={"batch_id": batch_id, "round_type": payload.round_type},
     )
+
+    if _normalize_round(payload.round_type) == "l2":
+        l2_owner_email = _normalize_email(candidate.l2_owner_email)
+        candidate_email = _normalize_email(candidate.email)
+        if l2_owner_email and l2_owner_email != candidate_email:
+            await send_email(
+                session,
+                candidate_id=candidate_id,
+                to_emails=[l2_owner_email],
+                subject=f"L2 slot options sent - {candidate.full_name} ({candidate_code})",
+                template_name="interview_slot_options_internal",
+                context={
+                    "recipient_name": candidate.l2_owner_name or "Team",
+                    "candidate_name": candidate.full_name,
+                    "candidate_code": candidate_code,
+                    "round_type": payload.round_type,
+                    "opening_title": opening.title if opening else "",
+                    "slots_table": internal_slot_rows,
+                },
+                email_type="interview_slot_options_internal_copy",
+                related_entity_type="interview_slot",
+                related_entity_id=slots[0].candidate_interview_slot_id if slots else None,
+                meta_extra={
+                    "batch_id": batch_id,
+                    "round_type": payload.round_type,
+                    "recipient": "l2_owner",
+                },
+            )
 
     await session.commit()
 
