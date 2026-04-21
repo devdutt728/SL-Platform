@@ -1,0 +1,46 @@
+[
+  [
+    "SL_Recruitment\\backend\\app\\templates\\offer_letter_logo.png"
+  ],
+  [
+    "SL_Recruitment\\backend\\requirements.txt",
+    "SL_Recruitment\\backend\\test_report_0032_public_apply.md",
+    "SL_Recruitment\\backend\\app\\JD\\SL Architect.pdf",
+    "SL_Recruitment\\backend\\app\\JD\\SL Associate - Interior Design.pdf",
+    "SL_Recruitment\\backend\\app\\JD\\SL Communications Intern.pdf",
+    "SL_Recruitment\\backend\\app\\JD\\SL Group Leader Architecture.pdf",
+    "SL_Recruitment\\backend\\app\\JD\\SL Interior Designer.pdf",
+    "SL_Recruitment\\backend\\app\\JD\\SL Intern.pdf",
+    "SL_Recruitment\\backend\\app\\JD\\SL Project Designer - Interior Design.pdf",
+    "SL_Recruitment\\backend\\app\\JD\\SL Sr. Designer - Interior Design.pdf",
+    "SL_Recruitment\\backend\\app\\JD\\Sr. Architect.pdf",
+    "SL_Recruitment\\backend\\app\\templates\\offer_letter.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\application_links.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\application_received.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\assessment_completed.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\assessment_link.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\caf_link.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\caf_reminder.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\internal_notification.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\intern_selection_update.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\interview_cancelled.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\interview_cancelled_interviewer.html"
+  ],
+  [
+    "SL_Recruitment\\backend\\app\\templates\\email\\interview_feedback_reminder.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\interview_scheduled.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\interview_scheduled_interviewer.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\interview_slot_options.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\interview_slot_options_internal.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\interview_status_elapsed.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\joining_documents_request.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\offer_approval_decision_hr.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\offer_approval_request_principal.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\offer_decline_revision_hr.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\offer_followup.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\offer_sent.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\sprint_assigned.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\sprint_overdue.html",
+    "SL_Recruitment\\backend\\app\\templates\\email\\sprint_reminder.html"
+  ]
+]

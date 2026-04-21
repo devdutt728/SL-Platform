@@ -1,0 +1,26 @@
+# Dependency and package directories
+**/node_modules/
+**/vendor/
+
+# Frontend/build output
+**/.next/
+**/dist/
+**/build/
+**/coverage/
+
+# Python caches and virtual environments
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+**/venv/
+
+# Graphify and local runtime output
+**/graphify-out/
+logs/
+
+# Generated or temporary files
+**/*.generated.py
+**/*.log
+**/*.tmp

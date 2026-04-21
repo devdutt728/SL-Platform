@@ -153,12 +153,6 @@ async def recalculate_project_schedule(session: AsyncSession, project_code: str)
     ran_at = datetime.utcnow()
 
     for row in rows:
-        preds = sorted(str(edge.predecessor_row_id) for edge in incoming[row.planner_row_id])
-        dependency_codes = ",".join(preds) if preds else None
-        if row.dependency_codes != dependency_codes:
-            row.dependency_codes = dependency_codes
-            updated_dependency_codes += 1
-
         row.scheduled_start_date = _from_ordinal(early_start[row.planner_row_id])
         row.scheduled_end_date = _from_ordinal(early_finish[row.planner_row_id])
         float_value = Decimal(str(max(0, late_start[row.planner_row_id] - early_start[row.planner_row_id])))

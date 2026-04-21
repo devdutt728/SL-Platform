@@ -1,0 +1,331 @@
+{
+  "nodes": [
+    {
+      "id": "frontend_readme_doc",
+      "label": "Frontend README",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "nextjs_project",
+      "label": "Next.js Project",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "create_next_app",
+      "label": "create-next-app Bootstrap",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "local_dev_server",
+      "label": "Development Server Command",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "localhost_preview",
+      "label": "Localhost Preview (http://localhost:3000)",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "app_page_tsx",
+      "label": "app/page.tsx Entry Page",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "auto_update_on_edit",
+      "label": "Automatic Page Update on Edit",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "next_font_module",
+      "label": "next/font Integration",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "geist_font_family",
+      "label": "Geist Font Family",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "vercel_platform",
+      "label": "Vercel Platform",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "deployment_workflow",
+      "label": "Next.js Deployment Workflow",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "font_optimization_rationale",
+      "label": "Automatic Font Optimization Rationale",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "easy_deployment_rationale",
+      "label": "Easiest Deployment Path Rationale",
+      "file_type": "document",
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "frontend_readme_doc",
+      "target": "nextjs_project",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "nextjs_project",
+      "target": "create_next_app",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "local_dev_server",
+      "target": "nextjs_project",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "local_dev_server",
+      "target": "localhost_preview",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "nextjs_project",
+      "target": "app_page_tsx",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "app_page_tsx",
+      "target": "auto_update_on_edit",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "nextjs_project",
+      "target": "next_font_module",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "next_font_module",
+      "target": "geist_font_family",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "font_optimization_rationale",
+      "target": "next_font_module",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "nextjs_project",
+      "target": "vercel_platform",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "vercel_platform",
+      "target": "deployment_workflow",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "easy_deployment_rationale",
+      "target": "vercel_platform",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "create_next_app",
+      "target": "vercel_platform",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.78,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 0.78
+    },
+    {
+      "source": "next_font_module",
+      "target": "vercel_platform",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.67,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 0.67
+    },
+    {
+      "source": "local_dev_server",
+      "target": "deployment_workflow",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.62,
+      "source_file": "SL_Workbook/frontend/README.md",
+      "source_location": null,
+      "weight": 0.62
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "nextjs_local_iteration_loop",
+      "label": "Next.js Local Iteration Loop",
+      "nodes": [
+        "local_dev_server",
+        "localhost_preview",
+        "app_page_tsx",
+        "auto_update_on_edit"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/README.md"
+    },
+    {
+      "id": "vercel_ecosystem_choices",
+      "label": "Vercel Ecosystem Choices",
+      "nodes": [
+        "create_next_app",
+        "next_font_module",
+        "geist_font_family",
+        "vercel_platform"
+      ],
+      "relation": "form",
+      "confidence": "INFERRED",
+      "confidence_score": 0.76,
+      "source_file": "SL_Workbook/frontend/README.md"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

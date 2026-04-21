@@ -5,7 +5,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
@@ -17,6 +17,7 @@ from app.models.planner import (
     PlannerDocument,
     PlannerDocumentVersion,
     PlannerProjectBaseline,
+    SLProjectPlannerRow,
 )
 from app.schemas.planner import (
     PlannerAuditLogOut,
@@ -185,45 +186,11 @@ async def create_change_request(
     platform_session: AsyncSession = Depends(deps.get_platform_db_session),
     user: UserContext = Depends(get_current_user),
 ):
-    actor = await _resolve_actor(platform_session, user)
-    row = await _load_visible_row(planner_row_id, session=session, actor=actor, person_id=user.person_id_platform)
-    if not _can_edit_row(actor, row, user.person_id_platform) and actor.role not in {"architect", "senior_architect"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
-
-    request_row = PlannerChangeRequest(
-        planner_row_id=row.planner_row_id,
-        project_code=row.project_code,
-        request_type=payload.request_type,
-        request_status="pending",
-        requested_by_person_id=user.person_id_platform,
-        requester_role=actor.role,
-        request_reason=payload.request_reason,
-        before_json=dumps_json(planner_row_snapshot(row)),
-        proposed_json=dumps_json(payload.proposed_updates),
+    del planner_row_id, payload, session, platform_session, user
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Approval workflow is temporarily disabled for planner rows.",
     )
-    session.add(request_row)
-    row.approval_status = "pending"
-    row.requested_by_person_id = user.person_id_platform
-    row.approval_requested_at = datetime.utcnow()
-    row.updated_by_person_id = user.person_id_platform
-    await session.flush()
-    await log_audit_event(
-        session,
-        project_code=row.project_code,
-        entity_type="change_request",
-        entity_id=str(request_row.request_id),
-        action_type="created",
-        actor_person_id=user.person_id_platform,
-        actor_role=actor.role,
-        planner_row_id=row.planner_row_id,
-        request_id=request_row.request_id,
-        change_summary="Change request created",
-        before_payload=planner_row_snapshot(row),
-        after_payload={"request_reason": payload.request_reason, "proposed_updates": payload.proposed_updates},
-    )
-    await session.commit()
-    await session.refresh(request_row)
-    return _serialize_request(request_row)
 
 
 @router.get("/audit", response_model=list[PlannerAuditLogOut])
@@ -385,6 +352,45 @@ async def recalculate_schedule_for_project(
         updated_dependency_codes=result.updated_dependency_codes,
         ran_at=result.ran_at,
     )
+
+
+@router.delete("/projects/{project_code}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project(
+    project_code: str,
+    session: AsyncSession = Depends(deps.get_db_session),
+    platform_session: AsyncSession = Depends(deps.get_platform_db_session),
+    user: UserContext = Depends(get_current_user),
+):
+    actor = await _resolve_actor(platform_session, user)
+    await _assert_project_visible(project_code, session, actor, user.person_id_platform)
+    if not actor.can_hard_delete:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only super admin can delete projects")
+
+    row_ids = (
+        await session.execute(
+            select(SLProjectPlannerRow.planner_row_id).where(SLProjectPlannerRow.project_code == project_code)
+        )
+    ).scalars().all()
+
+    if not row_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    doc_ids = (
+        await session.execute(
+            select(PlannerDocument.document_id).where(PlannerDocument.project_code == project_code)
+        )
+    ).scalars().all()
+    if doc_ids:
+        await session.execute(delete(PlannerDocumentVersion).where(PlannerDocumentVersion.document_id.in_(doc_ids)))
+    await session.execute(delete(PlannerDocument).where(PlannerDocument.project_code == project_code))
+    await session.execute(delete(PlannerActivityDependency).where(PlannerActivityDependency.project_code == project_code))
+    await session.execute(delete(PlannerChangeRequest).where(PlannerChangeRequest.project_code == project_code))
+    await session.execute(delete(PlannerProjectBaseline).where(PlannerProjectBaseline.project_code == project_code))
+    await session.execute(delete(PlannerAuditLog).where(PlannerAuditLog.project_code == project_code))
+    await session.execute(delete(SLProjectPlannerRow).where(SLProjectPlannerRow.project_code == project_code))
+
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/projects/{project_code}/baselines", response_model=PlannerBaselineOut, status_code=status.HTTP_201_CREATED)

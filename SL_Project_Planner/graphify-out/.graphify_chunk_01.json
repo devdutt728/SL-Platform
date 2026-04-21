@@ -1,0 +1,1647 @@
+{
+  "nodes": [
+    {
+      "id": "planner_table_dictionary_doc",
+      "label": "Planner Table Dictionary",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "# SL Project Planner Table Dictionary",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_v2_blueprint_doc",
+      "label": "Planner V2 Blueprint",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "# Studio Lotus Planner V2 Blueprint",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "projecttracker_v3_prototype",
+      "label": "projecttracker_v3 Prototype",
+      "file_type": "code",
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "<script> application logic",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "root_readme_doc",
+      "label": "Planner Root README",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/README.md",
+      "source_location": "# SL Project Planner",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "backend_readme_doc",
+      "label": "Planner Backend README",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "# SL Project Planner Backend",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "backend_requirements_doc",
+      "label": "Backend Requirements",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "frontend_readme_doc",
+      "label": "Planner Frontend README",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/frontend/README.md",
+      "source_location": "# SL Project Planner Frontend",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_backend_service",
+      "label": "Planner FastAPI Backend Service",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "## Current scope",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_frontend_workspace",
+      "label": "Planner Next.js Frontend Workspace",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/frontend/README.md",
+      "source_location": "Dedicated Next.js frontend",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_api_service",
+      "label": "Planner API Service",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "## Run",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_mysql_backed_system",
+      "label": "MySQL-Backed Planner System",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Goal",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "legacy_browser_localstorage_model",
+      "label": "Browser LocalStorage Persistence Model",
+      "file_type": "code",
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "loadData/saveData",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_multi_table_schema",
+      "label": "Planner Multi-Table Schema",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "## Current Database Shape",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_activity_table",
+      "label": "sl_project_planner Table",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `sl_project_planner`",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_dependency_table",
+      "label": "planner_activity_dependency Table",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `planner_activity_dependency`",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_change_request_table",
+      "label": "planner_change_request Table",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `planner_change_request`",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_audit_log_table",
+      "label": "planner_audit_log Table",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `planner_audit_log`",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_document_table",
+      "label": "planner_document Table",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `planner_document`",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_document_version_table",
+      "label": "planner_document_version Table",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `planner_document_version`",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_project_baseline_table",
+      "label": "planner_project_baseline Table",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `planner_project_baseline`",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_approval_workflow",
+      "label": "Request-Based Approval Workflow",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Approval Rules",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_scoped_access_model",
+      "label": "Two-Layer Planner Access Model",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Access Model",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "platform_identity_reuse",
+      "label": "Shared sl_platform Identity Reuse",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Reuse From Existing Platform Tables",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_version_based_model",
+      "label": "Version-Based Planning Model",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Planning Model",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_role_model",
+      "label": "Studio Lotus Planner Role Model",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Studio Lotus Role Rules",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_soft_delete_policy",
+      "label": "Scoped Soft Delete Policy",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Delete Policy",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_hard_delete_policy",
+      "label": "Super Admin Hard Delete Policy",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Delete Policy",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "prototype_task_data_model",
+      "label": "Prototype Task Data Model",
+      "file_type": "code",
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "defaultStagesTemplate + task fields",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "prototype_gantt_timeline",
+      "label": "Prototype Linear and Gantt Timeline Views",
+      "file_type": "code",
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "renderTimeline/renderGanttChart",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "prototype_assignee_dashboard",
+      "label": "Prototype Resource Directory Dashboard",
+      "file_type": "code",
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "renderAssigneeDashboard",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "prototype_gemini_assistant",
+      "label": "Prototype Gemini Reporting Assistant",
+      "file_type": "code",
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "callGemini + ai modal",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "frontend_backend_url_config",
+      "label": "Frontend BACKEND_URL Integration",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/frontend/README.md",
+      "source_location": "## Run",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "requirements_fastapi_stack",
+      "label": "FastAPI and Pydantic Stack",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "requirements_sqlalchemy_mysql_stack",
+      "label": "SQLAlchemy plus aiomysql Data Stack",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "requirements_google_auth",
+      "label": "Google Auth Dependency",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "requirements_uvicorn_server",
+      "label": "Uvicorn ASGI Server Dependency",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rationale_multi_table_needed",
+      "label": "Rationale: Multi-table schema needed beyond single table MVP",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "## Why the planner is now more than an MVP",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rationale_reuse_platform_identity",
+      "label": "Rationale: Reuse platform identity instead of planner user table",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Reuse From Existing Platform Tables",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rationale_versioned_planning",
+      "label": "Rationale: Versioned planning required for traceability",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "### Why",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "role_super_admin",
+      "label": "Super Admin Role",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "### Global roles",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "role_principal",
+      "label": "Principal Role",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "### Global roles",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "role_group_leader",
+      "label": "Group Leader Role",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "### Scoped project roles",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "role_project_anchor",
+      "label": "Project Anchor Role",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "### Scoped project roles",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "role_senior_architect",
+      "label": "Senior Architect Role",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "### Scoped project roles",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "role_architect",
+      "label": "Architect Role",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "### Scoped project roles",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_baseline_live_visibility",
+      "label": "Baseline vs Live Plan Visibility",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "plan_layer + baselines",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_schedule_recalculation",
+      "label": "Dependency-Driven Schedule Recalculation",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "scheduled_* and critical path fields",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_document_versioning_feature",
+      "label": "Document Register and Version Storage",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "document tables",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_requests_approvals_workspace",
+      "label": "Requests and Approvals Workspace",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## UI Direction",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planner_env_enable_flag",
+      "label": "ENABLE_PROJECT_PLANNER Launch Flag",
+      "file_type": "document",
+      "source_file": "SL_Project_Planner/README.md",
+      "source_location": "## Startup",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "planner_v2_blueprint_doc",
+      "target": "projecttracker_v3_prototype",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Goal",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_v2_blueprint_doc",
+      "target": "backend_readme_doc",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Goal",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_v2_blueprint_doc",
+      "target": "planner_table_dictionary_doc",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Current database step",
+      "weight": 1.0
+    },
+    {
+      "source": "root_readme_doc",
+      "target": "backend_readme_doc",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/README.md",
+      "source_location": "## Structure",
+      "weight": 1.0
+    },
+    {
+      "source": "root_readme_doc",
+      "target": "frontend_readme_doc",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/README.md",
+      "source_location": "## Structure",
+      "weight": 1.0
+    },
+    {
+      "source": "root_readme_doc",
+      "target": "projecttracker_v3_prototype",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/README.md",
+      "source_location": "## Structure",
+      "weight": 1.0
+    },
+    {
+      "source": "root_readme_doc",
+      "target": "planner_v2_blueprint_doc",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/README.md",
+      "source_location": "## Structure",
+      "weight": 1.0
+    },
+    {
+      "source": "root_readme_doc",
+      "target": "planner_table_dictionary_doc",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/README.md",
+      "source_location": "## Structure",
+      "weight": 1.0
+    },
+    {
+      "source": "root_readme_doc",
+      "target": "planner_env_enable_flag",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/README.md",
+      "source_location": "## Startup",
+      "weight": 1.0
+    },
+    {
+      "source": "backend_readme_doc",
+      "target": "planner_backend_service",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "## Current scope",
+      "weight": 1.0
+    },
+    {
+      "source": "backend_readme_doc",
+      "target": "planner_api_service",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "## Run",
+      "weight": 1.0
+    },
+    {
+      "source": "backend_readme_doc",
+      "target": "platform_identity_reuse",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "It uses: sl_platform",
+      "weight": 1.0
+    },
+    {
+      "source": "backend_readme_doc",
+      "target": "planner_approval_workflow",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "approval and rejection workflow",
+      "weight": 1.0
+    },
+    {
+      "source": "backend_readme_doc",
+      "target": "planner_soft_delete_policy",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "soft delete for Group Leaders",
+      "weight": 1.0
+    },
+    {
+      "source": "backend_readme_doc",
+      "target": "planner_hard_delete_policy",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "hard delete for Super Admin",
+      "weight": 1.0
+    },
+    {
+      "source": "backend_readme_doc",
+      "target": "planner_scoped_access_model",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "scoped planner visibility",
+      "weight": 1.0
+    },
+    {
+      "source": "backend_requirements_doc",
+      "target": "planner_backend_service",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "backend_requirements_doc",
+      "target": "requirements_fastapi_stack",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "backend_requirements_doc",
+      "target": "requirements_sqlalchemy_mysql_stack",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "backend_requirements_doc",
+      "target": "requirements_google_auth",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "backend_requirements_doc",
+      "target": "requirements_uvicorn_server",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "frontend_readme_doc",
+      "target": "planner_frontend_workspace",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/frontend/README.md",
+      "source_location": "# SL Project Planner Frontend",
+      "weight": 1.0
+    },
+    {
+      "source": "frontend_readme_doc",
+      "target": "frontend_backend_url_config",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/frontend/README.md",
+      "source_location": "## Run",
+      "weight": 1.0
+    },
+    {
+      "source": "frontend_readme_doc",
+      "target": "planner_requests_approvals_workspace",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/frontend/README.md",
+      "source_location": "approve or reject actions",
+      "weight": 1.0
+    },
+    {
+      "source": "frontend_readme_doc",
+      "target": "planner_soft_delete_policy",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/frontend/README.md",
+      "source_location": "archive action for allowed roles",
+      "weight": 1.0
+    },
+    {
+      "source": "frontend_backend_url_config",
+      "target": "planner_api_service",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/frontend/README.md",
+      "source_location": "BACKEND_URL",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_backend_service",
+      "target": "planner_api_service",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "uvicorn app.main:app",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_api_service",
+      "target": "planner_approval_workflow",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "approval and rejection workflow",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_api_service",
+      "target": "planner_soft_delete_policy",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "soft delete for Group Leaders",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_api_service",
+      "target": "planner_hard_delete_policy",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/backend/README.md",
+      "source_location": "hard delete for Super Admin",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_table_dictionary_doc",
+      "target": "planner_multi_table_schema",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "## Current Database Shape",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_table_dictionary_doc",
+      "target": "planner_activity_table",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `sl_project_planner`",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_table_dictionary_doc",
+      "target": "planner_dependency_table",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `planner_activity_dependency`",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_table_dictionary_doc",
+      "target": "planner_change_request_table",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `planner_change_request`",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_table_dictionary_doc",
+      "target": "planner_audit_log_table",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `planner_audit_log`",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_table_dictionary_doc",
+      "target": "planner_document_table",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `planner_document`",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_table_dictionary_doc",
+      "target": "planner_document_version_table",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `planner_document_version`",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_table_dictionary_doc",
+      "target": "planner_project_baseline_table",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "### `planner_project_baseline`",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_table_dictionary_doc",
+      "target": "planner_role_model",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "## Role fit in the current table",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_table_dictionary_doc",
+      "target": "planner_schedule_recalculation",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "schedule fields",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_table_dictionary_doc",
+      "target": "planner_document_versioning_feature",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "document tables",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_table_dictionary_doc",
+      "target": "planner_baseline_live_visibility",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "baseline/live",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_dependency_table",
+      "target": "planner_activity_table",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "planner_row_id/predecessor_row_id",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_change_request_table",
+      "target": "planner_activity_table",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "planner_row_id",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_audit_log_table",
+      "target": "planner_activity_table",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "planner_row_id",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_document_table",
+      "target": "planner_activity_table",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "planner_row_id",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_document_version_table",
+      "target": "planner_document_table",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "document_id",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_project_baseline_table",
+      "target": "planner_activity_table",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "snapshot_json stores planner state",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_dependency_table",
+      "target": "planner_schedule_recalculation",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "dependency + lag",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_document_table",
+      "target": "planner_document_versioning_feature",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "register",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_document_version_table",
+      "target": "planner_document_versioning_feature",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "file versions",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_project_baseline_table",
+      "target": "planner_baseline_live_visibility",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "baseline snapshots",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_activity_table",
+      "target": "planner_baseline_live_visibility",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "plan_layer",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_change_request_table",
+      "target": "planner_approval_workflow",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "formal approval-routed request",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_audit_log_table",
+      "target": "planner_approval_workflow",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "immutable events",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_v2_blueprint_doc",
+      "target": "planner_mysql_backed_system",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Goal",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_v2_blueprint_doc",
+      "target": "platform_identity_reuse",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Reuse From Existing Platform Tables",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_v2_blueprint_doc",
+      "target": "planner_scoped_access_model",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Access Model",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_v2_blueprint_doc",
+      "target": "planner_approval_workflow",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Approval Rules",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_v2_blueprint_doc",
+      "target": "planner_version_based_model",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Planning Model",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_v2_blueprint_doc",
+      "target": "planner_role_model",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## Studio Lotus Role Rules",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_v2_blueprint_doc",
+      "target": "planner_requests_approvals_workspace",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "## UI Direction",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_v2_blueprint_doc",
+      "target": "planner_schedule_recalculation",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "Phase 1/2",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_v2_blueprint_doc",
+      "target": "legacy_browser_localstorage_model",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "replace localStorage with API persistence",
+      "weight": 1.0
+    },
+    {
+      "source": "platform_identity_reuse",
+      "target": "planner_scoped_access_model",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "control split",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_scoped_access_model",
+      "target": "planner_role_model",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "global + scoped roles",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_role_model",
+      "target": "role_super_admin",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "Global roles",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_role_model",
+      "target": "role_principal",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "Global roles",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_role_model",
+      "target": "role_group_leader",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "Scoped roles",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_role_model",
+      "target": "role_project_anchor",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "Scoped roles",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_role_model",
+      "target": "role_senior_architect",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "Scoped roles",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_role_model",
+      "target": "role_architect",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "Scoped roles",
+      "weight": 1.0
+    },
+    {
+      "source": "role_group_leader",
+      "target": "planner_soft_delete_policy",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "soft-delete scoped records",
+      "weight": 1.0
+    },
+    {
+      "source": "role_super_admin",
+      "target": "planner_hard_delete_policy",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "hard-delete only",
+      "weight": 1.0
+    },
+    {
+      "source": "role_project_anchor",
+      "target": "role_group_leader",
+      "relation": "semantically_similar_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "same planner authority",
+      "weight": 1.0
+    },
+    {
+      "source": "role_senior_architect",
+      "target": "planner_approval_workflow",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "approval route",
+      "weight": 1.0
+    },
+    {
+      "source": "role_architect",
+      "target": "planner_approval_workflow",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "raises requests",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_version_based_model",
+      "target": "planner_baseline_live_visibility",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "plan versions",
+      "weight": 1.0
+    },
+    {
+      "source": "projecttracker_v3_prototype",
+      "target": "legacy_browser_localstorage_model",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "pm_app_data_v5",
+      "weight": 1.0
+    },
+    {
+      "source": "projecttracker_v3_prototype",
+      "target": "prototype_task_data_model",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "task CRUD",
+      "weight": 1.0
+    },
+    {
+      "source": "projecttracker_v3_prototype",
+      "target": "prototype_gantt_timeline",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "timeline toggle",
+      "weight": 1.0
+    },
+    {
+      "source": "projecttracker_v3_prototype",
+      "target": "prototype_assignee_dashboard",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "Resource Directory",
+      "weight": 1.0
+    },
+    {
+      "source": "projecttracker_v3_prototype",
+      "target": "prototype_gemini_assistant",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "callGemini",
+      "weight": 1.0
+    },
+    {
+      "source": "prototype_task_data_model",
+      "target": "prototype_gantt_timeline",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "duration/dependency/status feed timeline",
+      "weight": 1.0
+    },
+    {
+      "source": "prototype_task_data_model",
+      "target": "prototype_assignee_dashboard",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "assignee fields",
+      "weight": 1.0
+    },
+    {
+      "source": "prototype_gemini_assistant",
+      "target": "legacy_browser_localstorage_model",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/projecttracker_v3.html",
+      "source_location": "gemini_api_key localStorage",
+      "weight": 1.0
+    },
+    {
+      "source": "requirements_fastapi_stack",
+      "target": "planner_api_service",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.9,
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "requirements_sqlalchemy_mysql_stack",
+      "target": "planner_mysql_backed_system",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.87,
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "requirements_google_auth",
+      "target": "platform_identity_reuse",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.86,
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "requirements_uvicorn_server",
+      "target": "planner_api_service",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.88,
+      "source_file": "SL_Project_Planner/backend/requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planner_backend_service",
+      "target": "planner_mysql_backed_system",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.82,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planner_frontend_workspace",
+      "target": "planner_mysql_backed_system",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planner_frontend_workspace",
+      "target": "projecttracker_v3_prototype",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.83,
+      "source_file": "SL_Project_Planner/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planner_activity_table",
+      "target": "prototype_task_data_model",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.82,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planner_dependency_table",
+      "target": "prototype_task_data_model",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.67,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planner_mysql_backed_system",
+      "target": "legacy_browser_localstorage_model",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.44,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planner_requests_approvals_workspace",
+      "target": "planner_approval_workflow",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.88,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "rationale_multi_table_needed",
+      "target": "planner_multi_table_schema",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "## Why the planner is now more than an MVP",
+      "weight": 1.0
+    },
+    {
+      "source": "rationale_multi_table_needed",
+      "target": "planner_baseline_live_visibility",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md",
+      "source_location": "contract vs live visibility",
+      "weight": 1.0
+    },
+    {
+      "source": "rationale_reuse_platform_identity",
+      "target": "platform_identity_reuse",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "Do not create a separate planner user table",
+      "weight": 1.0
+    },
+    {
+      "source": "rationale_versioned_planning",
+      "target": "planner_version_based_model",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "### Why",
+      "weight": 1.0
+    },
+    {
+      "source": "rationale_versioned_planning",
+      "target": "planner_baseline_live_visibility",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md",
+      "source_location": "what changed and impact",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_env_enable_flag",
+      "target": "planner_backend_service",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/README.md",
+      "source_location": "ENABLE_PROJECT_PLANNER=1",
+      "weight": 1.0
+    },
+    {
+      "source": "planner_env_enable_flag",
+      "target": "planner_frontend_workspace",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/README.md",
+      "source_location": "launcher supports planner",
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "planner_core_data_schema",
+      "label": "Planner Core Data Schema",
+      "nodes": [
+        "planner_activity_table",
+        "planner_dependency_table",
+        "planner_change_request_table",
+        "planner_audit_log_table",
+        "planner_document_table",
+        "planner_document_version_table",
+        "planner_project_baseline_table"
+      ],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_TABLE_DICTIONARY.md"
+    },
+    {
+      "id": "approval_and_governance_flow",
+      "label": "Approval and Governance Flow",
+      "nodes": [
+        "planner_change_request_table",
+        "planner_approval_workflow",
+        "planner_audit_log_table",
+        "planner_soft_delete_policy",
+        "planner_hard_delete_policy"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Project_Planner/PLANNER_V2_BLUEPRINT.md"
+    },
+    {
+      "id": "prototype_to_product_transition",
+      "label": "Prototype to Product Transition",
+      "nodes": [
+        "projecttracker_v3_prototype",
+        "legacy_browser_localstorage_model",
+        "planner_mysql_backed_system",
+        "planner_backend_service",
+        "planner_frontend_workspace"
+      ],
+      "relation": "participate_in",
+      "confidence": "INFERRED",
+      "confidence_score": 0.84,
+      "source_file": "SL_Project_Planner/README.md"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

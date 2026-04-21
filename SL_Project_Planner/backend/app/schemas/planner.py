@@ -26,8 +26,10 @@ class PlannerActorOut(BaseModel):
     person_id_platform: str | None = None
     full_name: str | None = None
     planner_role: PlannerRoleCode = "viewer"
+    planner_roles: list[PlannerRoleCode] = Field(default_factory=lambda: ["viewer"])
     can_view_all: bool = False
     can_create: bool = False
+    can_create_project: bool = False
     can_edit_scoped: bool = False
     can_edit_assigned: bool = False
     can_approve_architect: bool = False
@@ -149,6 +151,7 @@ class PlannerRowOut(PlannerRowBase):
     requested_by_name: str | None = None
     approved_by_name: str | None = None
     requester_role: PlannerRoleCode | None = None
+    requester_roles: list[PlannerRoleCode] = Field(default_factory=list)
     can_edit: bool = False
     can_delete: bool = False
     can_approve: bool = False
@@ -160,6 +163,23 @@ class PlannerBoardOut(BaseModel):
     projects: list[PlannerProjectOut] = Field(default_factory=list)
     summary: PlannerSummaryOut = Field(default_factory=PlannerSummaryOut)
     items: list[PlannerRowOut] = Field(default_factory=list)
+
+
+class PlannerAssignableMemberOut(BaseModel):
+    person_id: str
+    person_code: str | None = None
+    full_name: str
+    email: str | None = None
+    assigned_group_id: int | None = None
+    assigned_group_name: str | None = None
+
+
+class PlannerAssignmentWorkspaceOut(BaseModel):
+    project_code: str | None = None
+    can_assign: bool = False
+    assignable_members: list[PlannerAssignableMemberOut] = Field(default_factory=list)
+    my_total_assigned_tasks: int = 0
+    my_open_assigned_tasks: int = 0
 
 
 class PlannerDependencyCreate(BaseModel):

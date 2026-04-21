@@ -1,0 +1,16 @@
+{
+  "folder": "SL_Project_Planner",
+  "total_files": 70,
+  "total_words": 38429,
+  "categories": {
+    "code": 63,
+    "document": 7,
+    "paper": 0,
+    "image": 0,
+    "video": 0
+  },
+  "semantic_uncached": 7,
+  "chunks": 1,
+  "ast_nodes": 347,
+  "ast_edges": 961
+}

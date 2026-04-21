@@ -1,0 +1,118 @@
+{
+  "nodes": [
+    {
+      "id": "studio_lotus_logo_tm_wordmark",
+      "label": "Studio Lotus Wordmark Logo",
+      "file_type": "image",
+      "source_file": "SL_IT/frontend/public/Studio Lotus Logo (TM).png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "studio_lotus_logo_tm_brand_name",
+      "label": "Studio Lotus Brand Name",
+      "file_type": "image",
+      "source_file": "SL_IT/frontend/public/Studio Lotus Logo (TM).png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "studio_lotus_logo_tm_duotone_palette",
+      "label": "Gray and Orange Duotone Palette",
+      "file_type": "image",
+      "source_file": "SL_IT/frontend/public/Studio Lotus Logo (TM).png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "studio_lotus_logo_tm_trademark_symbol",
+      "label": "TM Trademark Symbol",
+      "file_type": "image",
+      "source_file": "SL_IT/frontend/public/Studio Lotus Logo (TM).png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "studio_lotus_logo_tm_wordmark",
+      "target": "studio_lotus_logo_tm_brand_name",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_IT/frontend/public/Studio Lotus Logo (TM).png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "studio_lotus_logo_tm_wordmark",
+      "target": "studio_lotus_logo_tm_duotone_palette",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_IT/frontend/public/Studio Lotus Logo (TM).png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "studio_lotus_logo_tm_wordmark",
+      "target": "studio_lotus_logo_tm_trademark_symbol",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_IT/frontend/public/Studio Lotus Logo (TM).png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "studio_lotus_logo_tm_trademark_symbol",
+      "target": "studio_lotus_logo_tm_brand_name",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "SL_IT/frontend/public/Studio Lotus Logo (TM).png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "studio_lotus_logo_tm_duotone_palette",
+      "target": "studio_lotus_logo_tm_brand_name",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "SL_IT/frontend/public/Studio Lotus Logo (TM).png",
+      "source_location": null,
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "studio_lotus_logo_brand_identity_system",
+      "label": "Studio Lotus Brand Identity System",
+      "nodes": [
+        "studio_lotus_logo_tm_wordmark",
+        "studio_lotus_logo_tm_brand_name",
+        "studio_lotus_logo_tm_duotone_palette",
+        "studio_lotus_logo_tm_trademark_symbol"
+      ],
+      "relation": "form",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "SL_IT/frontend/public/Studio Lotus Logo (TM).png"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

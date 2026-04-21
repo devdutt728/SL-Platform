@@ -54,8 +54,8 @@ async def get_current_user(request: Request) -> UserContext:
                     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not active")
 
                 roles = _map_platform_roles_to_app_roles(identity.role_ids, identity.role_codes)
-                if Role.VIEWER in roles and len(roles) == 1:
-                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
+                # Do not block authentication for viewer-only users here.
+                # App/module authorization is enforced via can_access_* flags and route-level guards.
 
                 await _enforce_single_session(platform_session, request, email)
                 person = await platform_session.get(DimPerson, str(identity.person_id))
@@ -72,7 +72,7 @@ async def get_current_user(request: Request) -> UserContext:
                     person_id=str(identity.person_id),
                     feature_code="recruitment_app",
                 ))
-                can_access_planner = is_planner_profile_eligible(
+                planner_role_eligible = is_planner_profile_eligible(
                     role_ids=identity.role_ids,
                     role_values=[*identity.role_codes, *identity.role_names, identity.role_code, identity.role_name],
                     title_values=[
@@ -81,11 +81,15 @@ async def get_current_user(request: Request) -> UserContext:
                         person.department if person else None,
                         person.sub_department if person else None,
                     ],
-                ) and (is_superadmin or await person_has_feature_access(
+                )
+                planner_feature_granted = is_superadmin or await person_has_feature_access(
                     platform_session,
                     person_id=str(identity.person_id),
                     feature_code="planner_app",
-                ))
+                )
+                # Planner access can come from explicit app grant OR planner-role eligibility.
+                # This prevents recruitment-role checks from blocking planner-only users.
+                can_access_planner = bool(is_superadmin or planner_feature_granted or planner_role_eligible)
                 reports_access = await person_has_feature_access(
                     platform_session,
                     person_id=str(identity.person_id),

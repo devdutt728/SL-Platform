@@ -1,0 +1,16 @@
+{
+  "folder": "SL_Workbook",
+  "total_files": 25,
+  "total_words": 7521,
+  "categories": {
+    "code": 22,
+    "document": 1,
+    "paper": 0,
+    "image": 2,
+    "video": 0
+  },
+  "semantic_uncached": 3,
+  "chunks": 3,
+  "ast_nodes": 64,
+  "ast_edges": 129
+}

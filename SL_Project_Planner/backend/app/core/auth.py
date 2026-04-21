@@ -20,7 +20,8 @@ from app.db.platform_session import PlatformSessionLocal
 from app.schemas.user import UserContext
 from app.services.platform_identity import resolve_identity_by_email
 from app.services.platform_feature_access import PLANNER_APP_FEATURE_CODE, RECRUITMENT_APP_FEATURE_CODE, person_has_feature_access
-from app.services.planner_policy import resolve_planner_role
+from app.services.planner_policy import resolve_planner_roles
+from app.services.planner_role_access import list_explicit_planner_roles
 
 _session_table_ready = False
 _session_table_ready_name = ""
@@ -54,7 +55,8 @@ async def get_current_user(request: Request) -> UserContext:
 
                     await _enforce_single_session(platform_session, request, email)
                     person = await platform_session.get(DimPerson, str(identity.person_id))
-                    planner_role = resolve_planner_role(
+                    explicit_role_map = await list_explicit_planner_roles(platform_session, [str(identity.person_id)])
+                    planner_roles = resolve_planner_roles(
                         UserContext(
                             user_id=email,
                             email=email,
@@ -69,13 +71,16 @@ async def get_current_user(request: Request) -> UserContext:
                             platform_role_names=identity.role_names,
                         ),
                         person,
+                        explicit_role_map.get(str(identity.person_id), []),
                     )
-                    is_superadmin = planner_role == "super_admin"
-                    can_access_planner = planner_role != "viewer" and (is_superadmin or await person_has_feature_access(
+                    is_superadmin = "super_admin" in planner_roles
+                    planner_role_eligible = any(role != "viewer" for role in planner_roles)
+                    planner_feature_granted = is_superadmin or await person_has_feature_access(
                         platform_session,
                         person_id=str(identity.person_id),
                         feature_code=PLANNER_APP_FEATURE_CODE,
-                    ))
+                    )
+                    can_access_planner = bool(is_superadmin or planner_feature_granted or planner_role_eligible)
                     recruitment_tokens = {
                         str(value or "").strip().lower().replace(" ", "_").replace("-", "_")
                         for value in [

@@ -1,0 +1,183 @@
+{
+  "nodes": [
+    {
+      "id": "studio_lotus_logo_asset",
+      "label": "Studio Lotus Logo",
+      "file_type": "image",
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "studio_lotus_brand_identity",
+      "label": "Studio Lotus Brand Identity",
+      "file_type": "image",
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "studio_lotus_wordmark",
+      "label": "Studio Lotus Wordmark",
+      "file_type": "image",
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "studio_lotus_lotus_symbol",
+      "label": "Lotus Blossom Icon",
+      "file_type": "image",
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "studio_lotus_tm_marker",
+      "label": "Trademark Marker (TM)",
+      "file_type": "image",
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "studio_lotus_gray_colorway",
+      "label": "Gray Colorway",
+      "file_type": "image",
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "studio_lotus_orange_colorway",
+      "label": "Orange Colorway",
+      "file_type": "image",
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "studio_lotus_logo_asset",
+      "target": "studio_lotus_wordmark",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "studio_lotus_logo_asset",
+      "target": "studio_lotus_lotus_symbol",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "studio_lotus_logo_asset",
+      "target": "studio_lotus_tm_marker",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "studio_lotus_wordmark",
+      "target": "studio_lotus_brand_identity",
+      "relation": "references",
+      "confidence": "INFERRED",
+      "confidence_score": 0.88,
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "weight": 0.88
+    },
+    {
+      "source": "studio_lotus_lotus_symbol",
+      "target": "studio_lotus_brand_identity",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.84,
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "weight": 0.84
+    },
+    {
+      "source": "studio_lotus_tm_marker",
+      "target": "studio_lotus_brand_identity",
+      "relation": "references",
+      "confidence": "INFERRED",
+      "confidence_score": 0.78,
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "weight": 0.78
+    },
+    {
+      "source": "studio_lotus_gray_colorway",
+      "target": "studio_lotus_brand_identity",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.72,
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "weight": 0.72
+    },
+    {
+      "source": "studio_lotus_orange_colorway",
+      "target": "studio_lotus_brand_identity",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.72,
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png",
+      "source_location": null,
+      "weight": 0.72
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "studio_lotus_logo_composition",
+      "label": "Studio Lotus Logo Composition",
+      "nodes": [
+        "studio_lotus_logo_asset",
+        "studio_lotus_wordmark",
+        "studio_lotus_lotus_symbol",
+        "studio_lotus_tm_marker",
+        "studio_lotus_gray_colorway",
+        "studio_lotus_orange_colorway"
+      ],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "SL_Workbook/frontend/public/studio-lotus-logo.png"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

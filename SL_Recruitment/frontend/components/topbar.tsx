@@ -12,6 +12,8 @@ type Me = {
   email?: string;
   full_name?: string | null;
   roles?: string[] | null;
+  platform_role_id?: number | string | null;
+  platform_role_ids?: Array<number | string> | null;
   platform_role_code?: string | null;
   platform_role_name?: string | null;
   platform_role_codes?: string[] | null;
@@ -20,17 +22,60 @@ type Me = {
   can_access_planner?: boolean;
 };
 
-const roleLabel: Record<string, string> = {
-  hr_admin: "Superadmin",
-  hr_exec: "HR",
-  interviewer: "Interviewer",
-  hiring_manager: "GL",
-  approver: "Approver",
-  viewer: "Viewer",
-};
-
 function normalizeRoleToken(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function parseRoleId(value: unknown): number | null {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function highestRecruitmentRole(me: Me | null): string {
+  if (!me) return "Viewer";
+
+  const roleIds = new Set<number>();
+  const singleRoleId = parseRoleId(me.platform_role_id);
+  if (singleRoleId !== null) roleIds.add(singleRoleId);
+  for (const id of me.platform_role_ids || []) {
+    const parsed = parseRoleId(id);
+    if (parsed !== null) roleIds.add(parsed);
+  }
+
+  const tokens = new Set(
+    [
+      ...(me.roles || []),
+      ...(me.platform_role_codes || []),
+      ...(me.platform_role_names || []),
+      me.platform_role_code || "",
+      me.platform_role_name || "",
+    ]
+      .map((value) => normalizeRoleToken(value))
+      .filter(Boolean),
+  );
+
+  const isSuperadmin =
+    roleIds.has(2) ||
+    Array.from(tokens).some((role) => ["2", "superadmin", "s_admin", "super_admin", "hr_admin"].includes(role));
+  if (isSuperadmin) return "Superadmin";
+
+  const isHr = Array.from(tokens).some(
+    (role) => role === "hr_exec" || role === "hr" || role.startsWith("hr_") || role.replace(/_/g, "").includes("humanresource"),
+  );
+  if (isHr) return "HR";
+
+  const isHiringManager =
+    roleIds.has(5) ||
+    roleIds.has(6) ||
+    Array.from(tokens).some((role) =>
+      ["hiring_manager", "hiringmanager", "gl", "group_lead", "grouplead", "group_leader", "groupleader", "planner_group_leader"].includes(role),
+    );
+  if (isHiringManager) return "Hiring manager";
+
+  if (tokens.has("interviewer")) return "Interviewer";
+  if (tokens.has("approver")) return "Approver";
+  return "Viewer";
 }
 
 function firstName(me: Me) {
@@ -47,17 +92,7 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
   const me = initialMe;
   const [interviewNotifications, setInterviewNotifications] = useState<InterviewNotificationCounts | null>(null);
 
-  const displayRoles = useMemo(() => {
-    if (!me) return [];
-    const names = (me.platform_role_names || []).filter(Boolean);
-    if (names.length) return names;
-    const combined = new Set<string>();
-    (me.roles || []).forEach((role) => combined.add(role));
-    (me.platform_role_codes || []).forEach((role) => combined.add(role));
-    if (me.platform_role_code) combined.add(me.platform_role_code);
-    const labels = Array.from(combined).map((role) => roleLabel[role] || role).filter(Boolean);
-    return labels.length ? labels : [me.platform_role_name || "Viewer"];
-  }, [me]);
+  const highestRole = useMemo(() => highestRecruitmentRole(me), [me]);
 
   const roleTokens = useMemo(() => {
     if (!me) return [] as string[];
@@ -178,7 +213,7 @@ export function Topbar({ initialMe }: { initialMe: Me | null }) {
               </div>
               <div className="leading-tight">
                 <p className="text-xs tracking-tight text-[var(--dim-grey)]">{firstName(me)}</p>
-                <p className="hidden text-sm text-[var(--dim-grey)] xl:block">{displayRoles.join(", ")}</p>
+                <p className="hidden text-sm text-[var(--dim-grey)] xl:block">{highestRole}</p>
               </div>
               <button
                 onClick={signOut}

@@ -1,0 +1,17 @@
+{
+  "folder": "SL_Recruitment/backend",
+  "total_files": 161,
+  "total_words": 95467,
+  "skipped_sensitive": 0,
+  "categories": {
+    "code": 123,
+    "document": 28,
+    "paper": 9,
+    "image": 1,
+    "video": 0
+  },
+  "ast_nodes": 1271,
+  "ast_edges": 4973,
+  "semantic_uncached": 38,
+  "chunks": 3
+}

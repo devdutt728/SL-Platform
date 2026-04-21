@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { cookies } from "next/headers";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 import { backendUrl } from "@/lib/backend";
 
@@ -105,9 +106,40 @@ async function fetchCurrentUser(): Promise<UserSummary | null> {
   }
 }
 
+function plannerBackendUrl(path: string) {
+  const base = process.env.PLANNER_BACKEND_URL || "http://127.0.0.1:8003";
+  return path.startsWith("/") ? `${base}${path}` : `${base}/${path}`;
+}
+
+async function probePlannerAccess(): Promise<boolean> {
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get("slp_token")?.value || "";
+    const sessionId = cookieStore.get("slp_sid")?.value || "";
+    if (!token || !sessionId) return false;
+
+    const response = await fetch(plannerBackendUrl("/auth/me"), {
+      cache: "no-store",
+      headers: {
+        authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}`,
+        "x-spp-session": sessionId,
+        "x-spp-session-init": "1",
+      },
+    });
+    if (!response.ok) return false;
+    const payload = (await response.json()) as Record<string, unknown>;
+    return Boolean(payload?.can_access_planner);
+  } catch {
+    return false;
+  }
+}
+
 export default async function EmployeeConsolePage() {
   const logoSrc = "/studio-lotus-logo.png";
   const user = await fetchCurrentUser();
+  if (user && !user.can_access_planner) {
+    user.can_access_planner = await probePlannerAccess();
+  }
   const displayName =
     asString(user?.display_name) || asString(user?.full_name) || asString(user?.email) || "User";
   const initials = initialsFrom(displayName);

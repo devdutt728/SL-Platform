@@ -1,0 +1,16 @@
+{
+  "folder": "SL_IT",
+  "total_files": 104,
+  "total_words": 30263,
+  "categories": {
+    "code": 99,
+    "document": 3,
+    "paper": 0,
+    "image": 2,
+    "video": 0
+  },
+  "semantic_uncached": 5,
+  "chunks": 3,
+  "ast_nodes": 426,
+  "ast_edges": 1055
+}

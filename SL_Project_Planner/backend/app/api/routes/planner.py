@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import logging
+import re
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.core.auth import get_current_user
-from app.models.planner import PlannerChangeRequest, PlannerDocument, SLProjectPlannerRow
+from app.models.planner import PlannerDocument, SLProjectPlannerRow
+from app.models.platform_group import DimGroup
 from app.models.platform_person import DimPerson
 from app.schemas.planner import (
     PlannerActorOut,
+    PlannerAssignableMemberOut,
+    PlannerAssignmentWorkspaceOut,
     PlannerBoardOut,
     PlannerDecisionIn,
     PlannerProjectOut,
@@ -22,11 +28,13 @@ from app.schemas.planner import (
     PlannerSummaryOut,
 )
 from app.schemas.user import UserContext
-from app.services.planner_audit import dumps_json, log_audit_event, planner_row_snapshot
+from app.services.planner_audit import log_audit_event, planner_row_snapshot
 from app.services.planner_scheduler import recalculate_project_schedule
-from app.services.planner_policy import PlannerActorPolicy, can_approve_requester, policy_for_role, resolve_planner_role
+from app.services.planner_policy import PlannerActorPolicy, policy_for_roles, resolve_planner_roles
+from app.services.planner_role_access import list_explicit_planner_roles
 
 router = APIRouter(prefix="/planner", tags=["planner"])
+logger = logging.getLogger(__name__)
 
 PROTECTED_PLANNING_FIELDS = {
     "project_name",
@@ -54,6 +62,54 @@ ASSIGNED_EDIT_FIELDS = {"activity_description", "activity_status", "actual_start
 SCOPED_EDIT_FIELDS = ASSIGNED_EDIT_FIELDS | PROTECTED_PLANNING_FIELDS | {"priority", "change_reason"}
 
 
+async def _auto_activity_code(session: AsyncSession, project_code: str) -> str:
+    base_code = (project_code or "GEN").strip().upper().replace(" ", "_")
+    prefix = f"ACT-{base_code}-"
+    rows = (
+        await session.execute(
+            select(SLProjectPlannerRow.activity_code).where(
+                SLProjectPlannerRow.project_code == project_code,
+                SLProjectPlannerRow.activity_code.like(f"{prefix}%"),
+            )
+        )
+    ).scalars().all()
+    next_number = 1
+    pattern = re.compile(rf"^ACT-{re.escape(base_code)}-(\d+)$")
+    for code in rows:
+        match = pattern.match(code or "")
+        if not match:
+            continue
+        next_number = max(next_number, int(match.group(1)) + 1)
+    return f"{prefix}{next_number:03d}"
+
+
+def _friendly_db_error(exc: Exception) -> str:
+    message = str(getattr(exc, "orig", exc)).lower()
+    if "uq_sl_project_planner_project_activity_layer" in message:
+        return "Duplicate activity code detected for this project. Please retry."
+    if "foreign key constraint fails" in message:
+        return "Linked person reference is invalid. Please refresh and try again."
+    if "data too long" in message:
+        return "One of the fields is too long. Please shorten the value and retry."
+    return "Database write failed. Please verify planner DB schema is fully migrated."
+
+
+async def _safe_recalculate(session: AsyncSession, project_code: str) -> None:
+    try:
+        async with session.begin_nested():
+            await recalculate_project_schedule(session, project_code)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Planner schedule recalc skipped for %s: %s", project_code, exc)
+
+
+async def _safe_log_audit(session: AsyncSession, **kwargs) -> None:
+    try:
+        async with session.begin_nested():
+            await log_audit_event(session, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Planner audit log skipped: %s", exc)
+
+
 async def _load_platform_person(platform_session: AsyncSession, person_id: str | None) -> DimPerson | None:
     if not person_id:
         return None
@@ -62,7 +118,8 @@ async def _load_platform_person(platform_session: AsyncSession, person_id: str |
 
 async def _resolve_actor(platform_session: AsyncSession, user: UserContext) -> PlannerActorPolicy:
     person = await _load_platform_person(platform_session, user.person_id_platform)
-    return policy_for_role(resolve_planner_role(user, person))
+    explicit_role_map = await list_explicit_planner_roles(platform_session, [user.person_id_platform] if user.person_id_platform else [])
+    return policy_for_roles(resolve_planner_roles(user, person, explicit_role_map.get(user.person_id_platform or "", [])))
 
 
 def _actor_out(user: UserContext, actor: PlannerActorPolicy) -> PlannerActorOut:
@@ -70,8 +127,10 @@ def _actor_out(user: UserContext, actor: PlannerActorPolicy) -> PlannerActorOut:
         person_id_platform=user.person_id_platform,
         full_name=user.full_name,
         planner_role=actor.role,
+        planner_roles=list(actor.roles),
         can_view_all=actor.can_view_all,
         can_create=actor.can_create,
+        can_create_project=_actor_has_any_role(actor, "super_admin", "group_leader", "project_anchor"),
         can_edit_scoped=actor.can_edit_scoped,
         can_edit_assigned=actor.can_edit_assigned,
         can_approve_architect=actor.can_approve_architect,
@@ -105,14 +164,19 @@ async def _visible_project_codes(session: AsyncSession, actor: PlannerActorPolic
     return sorted({code for code in (await session.execute(stmt)).scalars().all() if code})
 
 
-async def _person_name_map(platform_session: AsyncSession, ids: set[str]) -> tuple[dict[str, str], dict[str, PlannerRoleCode]]:
+async def _person_name_map(
+    platform_session: AsyncSession,
+    ids: set[str],
+) -> tuple[dict[str, str], dict[str, PlannerRoleCode], dict[str, list[PlannerRoleCode]]]:
     clean_ids = [value for value in ids if value]
     if not clean_ids:
-        return {}, {}
+        return {}, {}, {}
 
     people = (await platform_session.execute(select(DimPerson).where(DimPerson.person_id.in_(clean_ids)))).scalars().all()
+    explicit_role_map = await list_explicit_planner_roles(platform_session, clean_ids)
     names: dict[str, str] = {}
-    roles: dict[str, PlannerRoleCode] = {}
+    primary_roles: dict[str, PlannerRoleCode] = {}
+    role_lists: dict[str, list[PlannerRoleCode]] = {}
     for person in people:
         names[person.person_id] = (person.display_name or person.full_name or f"{person.first_name} {person.last_name or ''}").strip() or person.person_id
         temp_user = UserContext(
@@ -126,8 +190,10 @@ async def _person_name_map(platform_session: AsyncSession, ids: set[str]) -> tup
             platform_role_codes=[],
             platform_role_names=[],
         )
-        roles[person.person_id] = resolve_planner_role(temp_user, person)
-    return names, roles
+        resolved_roles = resolve_planner_roles(temp_user, person, explicit_role_map.get(person.person_id, []))
+        primary_roles[person.person_id] = resolved_roles[0]
+        role_lists[person.person_id] = resolved_roles
+    return names, primary_roles, role_lists
 
 
 def _can_edit_row(actor: PlannerActorPolicy, row: SLProjectPlannerRow, person_id: str | None) -> bool:
@@ -145,12 +211,117 @@ def _can_edit_row(actor: PlannerActorPolicy, row: SLProjectPlannerRow, person_id
     return False
 
 
-def _can_delete_row(actor: PlannerActorPolicy, row: SLProjectPlannerRow, person_id: str | None) -> bool:
+def _can_delete_row(actor: PlannerActorPolicy, _row: SLProjectPlannerRow, _person_id: str | None) -> bool:
     if actor.can_hard_delete:
         return True
     if actor.can_soft_delete:
-        return row.group_leader_person_id == person_id or row.project_anchor_person_id == person_id
+        return True
     return False
+
+
+def _actor_has_any_role(actor: PlannerActorPolicy, *roles: PlannerRoleCode) -> bool:
+    actor_roles = set(actor.roles)
+    return any(role in actor_roles for role in roles)
+
+
+def _normalize_status(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def _parse_member_ids(raw_value: str | None) -> list[str]:
+    seen: set[str] = set()
+    values: list[str] = []
+    for token in str(raw_value or "").split(","):
+        person_id = token.strip()
+        if not person_id or person_id in seen:
+            continue
+        seen.add(person_id)
+        values.append(person_id)
+    return values
+
+
+def _is_active_platform_person(person: DimPerson | None) -> bool:
+    if person is None:
+        return False
+    if int(person.is_deleted or 0) == 1:
+        return False
+    return _normalize_status(person.status) in {"working", "active", ""}
+
+
+def _person_display_name(person: DimPerson) -> str:
+    fallback = " ".join(
+        part
+        for part in [str(person.first_name or "").strip(), str(person.last_name or "").strip()]
+        if part
+    ).strip()
+    return str(person.display_name or person.full_name or fallback or person.email or person.person_id).strip()
+
+
+async def _managed_group_member_scope(
+    platform_session: AsyncSession,
+    planner_session: AsyncSession,
+    *,
+    actor: PlannerActorPolicy,
+    person_id: str | None,
+    project_code: str | None = None,
+) -> tuple[set[str], dict[str, tuple[int, str]]]:
+    if actor.can_hard_delete:
+        groups = (await platform_session.execute(select(DimGroup))).scalars().all()
+        all_member_ids: set[str] = set()
+        person_to_group: dict[str, tuple[int, str]] = {}
+        for group in groups:
+            member_ids = _parse_member_ids(group.member_person_ids)
+            leader_id = str(group.group_leader_person_id or "").strip()
+            scoped_ids = member_ids[:]
+            if leader_id and leader_id not in scoped_ids:
+                scoped_ids = [leader_id, *scoped_ids]
+            for member_id in scoped_ids:
+                if not member_id:
+                    continue
+                all_member_ids.add(member_id)
+                person_to_group.setdefault(member_id, (int(group.group_id), str(group.group_name or "")))
+        return all_member_ids, person_to_group
+
+    if not person_id:
+        return set(), {}
+
+    managed_leader_ids: set[str] = {person_id}
+    if project_code:
+        managed_rows = (
+            await planner_session.execute(
+                select(SLProjectPlannerRow.group_leader_person_id)
+                .where(
+                    SLProjectPlannerRow.project_code == project_code,
+                    SLProjectPlannerRow.is_deleted == 0,
+                    or_(
+                        SLProjectPlannerRow.group_leader_person_id == person_id,
+                        SLProjectPlannerRow.project_anchor_person_id == person_id,
+                    ),
+                )
+                .distinct()
+            )
+        ).scalars().all()
+        managed_leader_ids.update({str(value).strip() for value in managed_rows if str(value or "").strip()})
+
+    groups = (await platform_session.execute(select(DimGroup))).scalars().all()
+    scoped_member_ids: set[str] = set()
+    person_to_group: dict[str, tuple[int, str]] = {}
+    for group in groups:
+        member_ids = _parse_member_ids(group.member_person_ids)
+        leader_id = str(group.group_leader_person_id or "").strip()
+        actor_is_member = person_id in member_ids or leader_id == person_id
+        manages_group = actor_is_member or (leader_id and leader_id in managed_leader_ids)
+        if not manages_group:
+            continue
+        scoped_ids = member_ids[:]
+        if leader_id and leader_id not in scoped_ids:
+            scoped_ids = [leader_id, *scoped_ids]
+        for member_id in scoped_ids:
+            if not member_id:
+                continue
+            scoped_member_ids.add(member_id)
+            person_to_group.setdefault(member_id, (int(group.group_id), str(group.group_name or "")))
+    return scoped_member_ids, person_to_group
 
 
 def _serialize_row(
@@ -158,10 +329,12 @@ def _serialize_row(
     *,
     names: dict[str, str],
     requester_roles: dict[str, PlannerRoleCode],
+    requester_role_lists: dict[str, list[PlannerRoleCode]],
     actor: PlannerActorPolicy,
     person_id: str | None,
 ) -> PlannerRowOut:
     requester_role = requester_roles.get(row.requested_by_person_id or "")
+    requester_role_list = requester_role_lists.get(row.requested_by_person_id or "", [])
     return PlannerRowOut(
         planner_row_id=row.planner_row_id,
         project_code=row.project_code,
@@ -217,10 +390,11 @@ def _serialize_row(
         requested_by_name=names.get(row.requested_by_person_id or ""),
         approved_by_name=names.get(row.approved_by_person_id or ""),
         requester_role=requester_role,
+        requester_roles=requester_role_list,
         can_edit=_can_edit_row(actor, row, person_id),
         can_delete=_can_delete_row(actor, row, person_id),
-        can_approve=row.approval_status == "pending" and can_approve_requester(actor, requester_role),
-        can_reject=row.approval_status == "pending" and can_approve_requester(actor, requester_role),
+        can_approve=False,
+        can_reject=False,
     )
 
 
@@ -229,7 +403,7 @@ def _summary(rows: list[SLProjectPlannerRow]) -> PlannerSummaryOut:
         total_rows=len(rows),
         pending_rows=sum(1 for row in rows if row.activity_status != "completed"),
         completed_rows=sum(1 for row in rows if row.activity_status == "completed"),
-        pending_approvals=sum(1 for row in rows if row.approval_status == "pending"),
+        pending_approvals=0,
         live_rows=sum(1 for row in rows if row.plan_layer == "live_plan"),
         contract_rows=sum(1 for row in rows if row.plan_layer == "contract_baseline"),
         approved_change_rows=sum(1 for row in rows if row.plan_layer == "approved_change"),
@@ -238,19 +412,16 @@ def _summary(rows: list[SLProjectPlannerRow]) -> PlannerSummaryOut:
 
 
 def _allowed_update_fields(actor: PlannerActorPolicy) -> set[str]:
-    if actor.can_hard_delete or actor.role in {"group_leader", "project_anchor", "senior_architect"}:
+    if actor.can_hard_delete or _actor_has_any_role(actor, "group_leader", "project_anchor", "senior_architect"):
         return SCOPED_EDIT_FIELDS
-    if actor.role == "architect":
+    if _actor_has_any_role(actor, "architect"):
         return ASSIGNED_EDIT_FIELDS | {"change_reason"}
     return set()
 
 
 def _requires_approval(actor: PlannerActorPolicy, changed_fields: set[str], current_change_type: str | None, next_change_type: str | None) -> bool:
-    if actor.role in {"super_admin", "group_leader", "project_anchor"}:
-        return False
-    if PROTECTED_PLANNING_FIELDS & changed_fields:
-        return True
-    return (next_change_type or current_change_type or "none") != "none"
+    del actor, changed_fields, current_change_type, next_change_type
+    return False
 
 
 async def _load_visible_row(
@@ -319,8 +490,18 @@ async def get_planner_board(
     )
     rows = (await session.execute(stmt)).scalars().all()
     related_ids = set().union(*[_related_person_ids(row) for row in rows]) if rows else set()
-    names, requester_roles = await _person_name_map(platform_session, related_ids)
-    items = [_serialize_row(row, names=names, requester_roles=requester_roles, actor=actor, person_id=user.person_id_platform) for row in rows]
+    names, requester_roles, requester_role_lists = await _person_name_map(platform_session, related_ids)
+    items = [
+        _serialize_row(
+            row,
+            names=names,
+            requester_roles=requester_roles,
+            requester_role_lists=requester_role_lists,
+            actor=actor,
+            person_id=user.person_id_platform,
+        )
+        for row in rows
+    ]
 
     seen_projects: dict[str, str] = {}
     for row in rows:
@@ -336,11 +517,92 @@ async def get_planner_board(
             document_count_stmt = document_count_stmt.where(PlannerDocument.document_id == -1)
     document_count = int((await session.execute(document_count_stmt)).scalar() or 0)
 
+    summary_payload = _summary(rows).model_dump()
+    summary_payload["attached_documents"] = document_count
+
     return PlannerBoardOut(
         actor=_actor_out(user, actor),
         projects=[PlannerProjectOut(project_code=code, project_name=name) for code, name in seen_projects.items()],
-        summary=PlannerSummaryOut(**_summary(rows).model_dump(), attached_documents=document_count),
+        summary=PlannerSummaryOut(**summary_payload),
         items=items,
+    )
+
+
+@router.get("/assignments", response_model=PlannerAssignmentWorkspaceOut)
+async def planner_assignment_workspace(
+    project_code: str | None = Query(default=None),
+    session: AsyncSession = Depends(deps.get_db_session),
+    platform_session: AsyncSession = Depends(deps.get_platform_db_session),
+    user: UserContext = Depends(get_current_user),
+):
+    actor = await _resolve_actor(platform_session, user)
+    visible_projects = await _visible_project_codes(session, actor, user.person_id_platform)
+    if project_code and visible_projects is not None and project_code not in visible_projects:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access restricted")
+
+    can_assign = bool(actor.can_edit_scoped or actor.can_hard_delete)
+    scoped_member_ids: set[str] = set()
+    person_to_group: dict[str, tuple[int, str]] = {}
+    if can_assign:
+        scoped_member_ids, person_to_group = await _managed_group_member_scope(
+            platform_session,
+            session,
+            actor=actor,
+            person_id=user.person_id_platform,
+            project_code=project_code,
+        )
+
+    assignable_members: list[PlannerAssignableMemberOut] = []
+    if scoped_member_ids:
+        members = (
+            await platform_session.execute(
+                select(DimPerson).where(DimPerson.person_id.in_(sorted(scoped_member_ids)))
+            )
+        ).scalars().all()
+        for person in members:
+            if not _is_active_platform_person(person):
+                continue
+            group_payload = person_to_group.get(person.person_id)
+            assignable_members.append(
+                PlannerAssignableMemberOut(
+                    person_id=person.person_id,
+                    person_code=person.person_code,
+                    full_name=_person_display_name(person),
+                    email=person.email,
+                    assigned_group_id=group_payload[0] if group_payload else None,
+                    assigned_group_name=group_payload[1] if group_payload else None,
+                )
+            )
+        assignable_members.sort(key=lambda value: value.full_name.lower())
+
+    my_total_assigned_tasks = 0
+    my_open_assigned_tasks = 0
+    if user.person_id_platform:
+        base_filters = [
+            SLProjectPlannerRow.assigned_to_person_id == user.person_id_platform,
+            SLProjectPlannerRow.is_deleted == 0,
+        ]
+        total_stmt = select(func.count(SLProjectPlannerRow.planner_row_id)).where(*base_filters)
+        open_stmt = select(func.count(SLProjectPlannerRow.planner_row_id)).where(
+            *base_filters,
+            SLProjectPlannerRow.activity_status != "completed",
+        )
+        if visible_projects is not None:
+            if visible_projects:
+                total_stmt = total_stmt.where(SLProjectPlannerRow.project_code.in_(visible_projects))
+                open_stmt = open_stmt.where(SLProjectPlannerRow.project_code.in_(visible_projects))
+            else:
+                total_stmt = total_stmt.where(SLProjectPlannerRow.planner_row_id == -1)
+                open_stmt = open_stmt.where(SLProjectPlannerRow.planner_row_id == -1)
+        my_total_assigned_tasks = int((await session.execute(total_stmt)).scalar() or 0)
+        my_open_assigned_tasks = int((await session.execute(open_stmt)).scalar() or 0)
+
+    return PlannerAssignmentWorkspaceOut(
+        project_code=project_code,
+        can_assign=can_assign,
+        assignable_members=assignable_members,
+        my_total_assigned_tasks=my_total_assigned_tasks,
+        my_open_assigned_tasks=my_open_assigned_tasks,
     )
 
 
@@ -354,56 +616,76 @@ async def create_planner_row(
     actor = await _resolve_actor(platform_session, user)
     if not actor.can_create:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+    project_code = str(payload.project_code or "").strip()
+    if not project_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="project_code is required")
+    project_exists = (
+        await session.execute(
+            select(SLProjectPlannerRow.planner_row_id)
+            .where(SLProjectPlannerRow.project_code == project_code)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if project_exists is None and not _actor_has_any_role(actor, "super_admin", "group_leader", "project_anchor"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Group Leaders, Project Anchors, or Super Admin can create new projects",
+        )
 
-    now = datetime.utcnow()
+    payload_data = payload.model_dump()
+    payload_data["project_code"] = project_code
+    if not str(payload_data.get("activity_code") or "").strip():
+        payload_data["activity_code"] = await _auto_activity_code(session, str(payload_data.get("project_code") or "GEN"))
+
     requested_by = payload.requested_by_person_id
-    approval_status = payload.approval_status
-    approval_requested_at = None
 
-    if actor.role == "group_leader" and not payload.group_leader_person_id and user.person_id_platform:
-        payload.group_leader_person_id = user.person_id_platform
-    if actor.role == "project_anchor" and not payload.project_anchor_person_id and user.person_id_platform:
-        payload.project_anchor_person_id = user.person_id_platform
-    if actor.role == "senior_architect" and not payload.senior_architect_person_id and user.person_id_platform:
-        payload.senior_architect_person_id = user.person_id_platform
-    if actor.role == "architect" and not payload.assigned_to_person_id and user.person_id_platform:
-        payload.assigned_to_person_id = user.person_id_platform
+    if _actor_has_any_role(actor, "group_leader") and not payload_data.get("group_leader_person_id") and user.person_id_platform:
+        payload_data["group_leader_person_id"] = user.person_id_platform
+    if _actor_has_any_role(actor, "project_anchor") and not payload_data.get("project_anchor_person_id") and user.person_id_platform:
+        payload_data["project_anchor_person_id"] = user.person_id_platform
+    if _actor_has_any_role(actor, "senior_architect") and not payload_data.get("senior_architect_person_id") and user.person_id_platform:
+        payload_data["senior_architect_person_id"] = user.person_id_platform
+    if _actor_has_any_role(actor, "architect") and not payload_data.get("assigned_to_person_id") and user.person_id_platform:
+        payload_data["assigned_to_person_id"] = user.person_id_platform
+    target_person_id = str(payload_data.get("assigned_to_person_id") or "").strip()
+    if target_person_id and not actor.can_hard_delete and _actor_has_any_role(actor, "group_leader", "project_anchor"):
+        scoped_member_ids, _ = await _managed_group_member_scope(
+            platform_session,
+            session,
+            actor=actor,
+            person_id=user.person_id_platform,
+            project_code=project_code,
+        )
+        if target_person_id not in scoped_member_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can assign tasks only to members of your managed group.",
+            )
 
-    if _requires_approval(actor, set(payload.model_fields_set), payload.change_type, payload.change_type):
-        if not payload.change_reason:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="change_reason is required for approval-routed changes")
-        approval_status = "pending"
-        requested_by = user.person_id_platform
-        approval_requested_at = now
+    payload_data["approval_status"] = "not_required"
+    payload_data["requested_by_person_id"] = requested_by
+    payload_data["approval_requested_at"] = None
+    payload_data["approved_by_person_id"] = None
+    payload_data["approval_action_at"] = None
+    payload_data["approval_note"] = None
+    payload_data["created_by_person_id"] = user.person_id_platform
+    payload_data["updated_by_person_id"] = user.person_id_platform
 
-    row = SLProjectPlannerRow(
-        **payload.model_dump(),
-        approval_status=approval_status,
-        requested_by_person_id=requested_by,
-        approval_requested_at=approval_requested_at,
-        created_by_person_id=user.person_id_platform,
-        updated_by_person_id=user.person_id_platform,
-    )
+    row = SLProjectPlannerRow(**payload_data)
     session.add(row)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_friendly_db_error(exc)) from exc
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=_friendly_db_error(exc)) from exc
 
     request_row = None
-    if approval_status == "pending":
-        request_row = PlannerChangeRequest(
-            planner_row_id=row.planner_row_id,
-            project_code=row.project_code,
-            request_type="scope",
-            request_status="pending",
-            requested_by_person_id=user.person_id_platform,
-            requester_role=actor.role,
-            request_reason=row.change_reason,
-            proposed_json=dumps_json(planner_row_snapshot(row)),
-        )
-        session.add(request_row)
-        await session.flush()
 
-    await recalculate_project_schedule(session, row.project_code)
-    await log_audit_event(
+    await _safe_recalculate(session, row.project_code)
+    await _safe_log_audit(
         session,
         project_code=row.project_code,
         entity_type="planner_row",
@@ -416,10 +698,24 @@ async def create_planner_row(
         change_summary="Planner row created",
         after_payload=planner_row_snapshot(row),
     )
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_friendly_db_error(exc)) from exc
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=_friendly_db_error(exc)) from exc
     await session.refresh(row)
-    names, requester_roles = await _person_name_map(platform_session, _related_person_ids(row))
-    return _serialize_row(row, names=names, requester_roles=requester_roles, actor=actor, person_id=user.person_id_platform)
+    names, requester_roles, requester_role_lists = await _person_name_map(platform_session, _related_person_ids(row))
+    return _serialize_row(
+        row,
+        names=names,
+        requester_roles=requester_roles,
+        requester_role_lists=requester_role_lists,
+        actor=actor,
+        person_id=user.person_id_platform,
+    )
 
 
 @router.patch("/{planner_row_id}", response_model=PlannerRowOut)
@@ -442,69 +738,63 @@ async def update_planner_row(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Fields not editable for your role: {', '.join(sorted(rejected))}")
     if not updates:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to update")
+    if "assigned_to_person_id" in updates:
+        target_person_id = str(updates.get("assigned_to_person_id") or "").strip()
+        if target_person_id and not actor.can_hard_delete:
+            scoped_member_ids, _ = await _managed_group_member_scope(
+                platform_session,
+                session,
+                actor=actor,
+                person_id=user.person_id_platform,
+                project_code=row.project_code,
+            )
+            if target_person_id not in scoped_member_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You can assign tasks only to members of your managed group.",
+                )
 
     before_payload = planner_row_snapshot(row)
-    current_change_type = row.change_type
-    changed_fields = set(updates.keys())
-    if _requires_approval(actor, changed_fields, current_change_type, updates.get("change_type")):
-        if not (updates.get("change_reason") or row.change_reason):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="change_reason is required for approval-routed changes")
-        request_row = PlannerChangeRequest(
-            planner_row_id=row.planner_row_id,
-            project_code=row.project_code,
-            request_type="schedule" if PROTECTED_PLANNING_FIELDS & changed_fields else "status",
-            request_status="pending",
-            requested_by_person_id=user.person_id_platform,
-            requester_role=actor.role,
-            request_reason=updates.get("change_reason") or row.change_reason,
-            before_json=dumps_json(before_payload),
-            proposed_json=dumps_json(updates),
-        )
-        session.add(request_row)
-        row.approval_status = "pending"
-        row.requested_by_person_id = user.person_id_platform
-        row.approval_requested_at = datetime.utcnow()
-        row.approved_by_person_id = None
-        row.approval_action_at = None
-        row.approval_note = None
-        row.updated_by_person_id = user.person_id_platform
-        await session.flush()
-        await log_audit_event(
-            session,
-            project_code=row.project_code,
-            entity_type="change_request",
-            entity_id=str(request_row.request_id),
-            action_type="created",
-            actor_person_id=user.person_id_platform,
-            actor_role=actor.role,
-            planner_row_id=row.planner_row_id,
-            request_id=request_row.request_id,
-            change_summary="Approval-routed update submitted",
-            before_payload=before_payload,
-            after_payload=updates,
-        )
-    else:
-        for field, value in updates.items():
-            setattr(row, field, value)
-        row.updated_by_person_id = user.person_id_platform
-        await recalculate_project_schedule(session, row.project_code)
-        await log_audit_event(
-            session,
-            project_code=row.project_code,
-            entity_type="planner_row",
-            entity_id=str(row.planner_row_id),
-            action_type="updated",
-            actor_person_id=user.person_id_platform,
-            actor_role=actor.role,
-            planner_row_id=row.planner_row_id,
-            change_summary="Planner row updated",
-            before_payload=before_payload,
-            after_payload=updates,
-        )
-    await session.commit()
+    for field, value in updates.items():
+        setattr(row, field, value)
+    row.approval_status = "not_required"
+    row.approval_requested_at = None
+    row.approved_by_person_id = None
+    row.approval_action_at = None
+    row.approval_note = None
+    row.updated_by_person_id = user.person_id_platform
+    await _safe_recalculate(session, row.project_code)
+    await _safe_log_audit(
+        session,
+        project_code=row.project_code,
+        entity_type="planner_row",
+        entity_id=str(row.planner_row_id),
+        action_type="updated",
+        actor_person_id=user.person_id_platform,
+        actor_role=actor.role,
+        planner_row_id=row.planner_row_id,
+        change_summary="Planner row updated",
+        before_payload=before_payload,
+        after_payload=updates,
+    )
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_friendly_db_error(exc)) from exc
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=_friendly_db_error(exc)) from exc
     await session.refresh(row)
-    names, requester_roles = await _person_name_map(platform_session, _related_person_ids(row))
-    return _serialize_row(row, names=names, requester_roles=requester_roles, actor=actor, person_id=user.person_id_platform)
+    names, requester_roles, requester_role_lists = await _person_name_map(platform_session, _related_person_ids(row))
+    return _serialize_row(
+        row,
+        names=names,
+        requester_roles=requester_roles,
+        requester_role_lists=requester_role_lists,
+        actor=actor,
+        person_id=user.person_id_platform,
+    )
 
 
 async def _decide_planner_row(
@@ -516,65 +806,11 @@ async def _decide_planner_row(
     platform_session: AsyncSession,
     user: UserContext,
 ) -> PlannerRowOut:
-    actor = await _resolve_actor(platform_session, user)
-    row = await _load_visible_row(planner_row_id, session=session, actor=actor, person_id=user.person_id_platform)
-    if row.approval_status != "pending":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only pending rows can be reviewed")
-
-    _, requester_roles = await _person_name_map(platform_session, {row.requested_by_person_id} if row.requested_by_person_id else set())
-    requester_role = requester_roles.get(row.requested_by_person_id or "")
-    if not can_approve_requester(actor, requester_role):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
-
-    pending_request = (
-        await session.execute(
-            select(PlannerChangeRequest)
-            .where(
-                PlannerChangeRequest.planner_row_id == row.planner_row_id,
-                PlannerChangeRequest.request_status == "pending",
-            )
-            .order_by(PlannerChangeRequest.created_at.desc(), PlannerChangeRequest.request_id.desc())
-            .limit(1)
-        )
-    ).scalars().first()
-
-    before_payload = planner_row_snapshot(row)
-    if decision == "approved" and pending_request and pending_request.proposed_json:
-        proposed_updates = json.loads(pending_request.proposed_json)
-        for field, value in proposed_updates.items():
-            if hasattr(row, field):
-                setattr(row, field, value)
-        await recalculate_project_schedule(session, row.project_code)
-
-    row.approval_status = decision
-    row.approved_by_person_id = user.person_id_platform
-    row.approval_note = payload.approval_note
-    row.approval_action_at = datetime.utcnow()
-    row.updated_by_person_id = user.person_id_platform
-    if pending_request:
-        pending_request.request_status = "approved" if decision == "approved" else "rejected"
-        pending_request.approver_person_id = user.person_id_platform
-        pending_request.approver_role = actor.role
-        pending_request.approval_note = payload.approval_note
-        pending_request.decided_at = datetime.utcnow()
-    await log_audit_event(
-        session,
-        project_code=row.project_code,
-        entity_type="planner_row" if not pending_request else "change_request",
-        entity_id=str(row.planner_row_id if not pending_request else pending_request.request_id),
-        action_type=decision,
-        actor_person_id=user.person_id_platform,
-        actor_role=actor.role,
-        planner_row_id=row.planner_row_id,
-        request_id=pending_request.request_id if pending_request else None,
-        change_summary=f"Planner row {decision}",
-        before_payload=before_payload,
-        after_payload=planner_row_snapshot(row),
+    del planner_row_id, payload, decision, session, platform_session, user
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Approval workflow is temporarily disabled for planner rows.",
     )
-    await session.commit()
-    await session.refresh(row)
-    names, requester_roles = await _person_name_map(platform_session, _related_person_ids(row))
-    return _serialize_row(row, names=names, requester_roles=requester_roles, actor=actor, person_id=user.person_id_platform)
 
 
 @router.post("/{planner_row_id}/approve", response_model=PlannerRowOut)
@@ -630,7 +866,7 @@ async def delete_planner_row(
     if hard:
         if not actor.can_hard_delete:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only super admin can hard delete")
-        await log_audit_event(
+        await _safe_log_audit(
             session,
             project_code=row.project_code,
             entity_type="planner_row",
@@ -647,7 +883,7 @@ async def delete_planner_row(
         row.is_deleted = 1
         row.deleted_at = datetime.utcnow()
         row.updated_by_person_id = user.person_id_platform
-        await log_audit_event(
+        await _safe_log_audit(
             session,
             project_code=row.project_code,
             entity_type="planner_row",
@@ -660,5 +896,12 @@ async def delete_planner_row(
             before_payload=before_payload,
             after_payload={"is_deleted": 1, "deleted_at": row.deleted_at},
         )
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_friendly_db_error(exc)) from exc
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=_friendly_db_error(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

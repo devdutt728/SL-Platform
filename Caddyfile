@@ -60,22 +60,13 @@
 		}
 	}
 
-	@plannerEnabled {
-		path /planner /planner/*
-		vars {env.ENABLE_PROJECT_PLANNER} 1
-	}
-
-	handle @plannerEnabled {
+	handle /planner* {
 		reverse_proxy 127.0.0.1:3004 {
 			header_up X-Original-Host {hostport}
 			header_up X-Original-Proto {scheme}
 			header_up X-Forwarded-Host {hostport}
 			header_up X-Forwarded-Proto {scheme}
 		}
-	}
-
-	handle /planner* {
-		respond 404
 	}
 
 	handle {

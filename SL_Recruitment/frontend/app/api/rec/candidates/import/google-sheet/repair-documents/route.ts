@@ -3,7 +3,11 @@ import { backendUrl } from "@/lib/backend";
 
 export async function POST(request: NextRequest) {
   const body = await request.text();
-  const ingestToken = request.headers.get("x-sheet-ingest-token") || "";
+  const ingestToken =
+    request.headers.get("x-sheet-ingest-token") ||
+    process.env.SHEET_INGEST_TOKEN ||
+    process.env.SL_SHEET_INGEST_TOKEN ||
+    "";
   const res = await fetch(backendUrl("/rec/candidates/import/google-sheet/repair-documents"), {
     method: "POST",
     headers: {
