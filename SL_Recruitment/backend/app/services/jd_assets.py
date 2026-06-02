@@ -13,7 +13,10 @@ _TITLE_ALIAS_TO_FILE: dict[str, str] = {
     "architect": "SL Architect.pdf",
     "associate": "SL Associate - Interior Design.pdf",
     "associate interior design": "SL Associate - Interior Design.pdf",
+    "comms designer": "SL Communications Designer.pdf",
+    "communications designer": "SL Communications Designer.pdf",
     "communications intern": "SL Communications Intern.pdf",
+    "graphic designer": "SL Graphic Designer.pdf",
     "group leader": "SL Group Leader Architecture.pdf",
     "group leader architecture": "SL Group Leader Architecture.pdf",
     "interior designer": "SL Interior Designer.pdf",
@@ -23,6 +26,10 @@ _TITLE_ALIAS_TO_FILE: dict[str, str] = {
     "sr architect": "Sr. Architect.pdf",
     "sr designer": "SL Sr. Designer - Interior Design.pdf",
     "sr designer interior design": "SL Sr. Designer - Interior Design.pdf",
+}
+_OPENING_CODE_ALIAS_TO_FILE: dict[str, str] = {
+    "CMDS-8299CF": "SL Communications Designer.pdf",
+    "GRDS-8299C7": "SL Graphic Designer.pdf",
 }
 
 
@@ -101,6 +108,12 @@ def resolve_opening_jd_asset(opening: RecOpening | None) -> JdAsset | None:
     explicit = get_jd_asset_by_file_name(opening.jd_file_name)
     if explicit:
         return explicit
+    code_key = (opening.opening_code or "").strip().upper()
+    code_file_name = _OPENING_CODE_ALIAS_TO_FILE.get(code_key)
+    if code_file_name:
+        code_asset = get_jd_asset_by_file_name(code_file_name)
+        if code_asset:
+            return code_asset
     alias_key = " ".join(_tokenize(opening.title))
     aliased_file_name = _TITLE_ALIAS_TO_FILE.get(alias_key)
     if aliased_file_name:

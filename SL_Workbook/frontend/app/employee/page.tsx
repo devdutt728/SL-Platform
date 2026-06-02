@@ -22,6 +22,15 @@ const apps = [
     tags: ["Role scoped", "Change control", "Live schedule"],
     icon: <GridOrbitIcon />,
   },
+  {
+    label: "OPERATING CONSOLE",
+    title: "People & Org",
+    description: "Employee master, org chart, licenses, systems, and peripherals.",
+    href: "/people",
+    accent: "from-[#244C66]/28 to-[#0F172A]/12",
+    tags: ["Group org chart", "Encrypted PII", "Audit-ready"],
+    icon: <PeopleIcon />,
+  },
 ];
 
 type UserSummary = {
@@ -34,6 +43,7 @@ type UserSummary = {
   platform_role_names?: string[];
   can_access_recruitment?: boolean;
   can_access_planner?: boolean;
+  can_access_people?: boolean;
 };
 
 function asString(value: unknown) {
@@ -100,6 +110,7 @@ async function fetchCurrentUser(): Promise<UserSummary | null> {
         : [],
       can_access_recruitment: Boolean(data.can_access_recruitment),
       can_access_planner: Boolean(data.can_access_planner),
+      can_access_people: Boolean(data.can_access_people),
     };
   } catch {
     return null;
@@ -134,11 +145,40 @@ async function probePlannerAccess(): Promise<boolean> {
   }
 }
 
+function peopleBackendUrl(path: string) {
+  const base = process.env.PEOPLE_BACKEND_URL || "http://127.0.0.1:8004";
+  return path.startsWith("/") ? `${base}${path}` : `${base}/${path}`;
+}
+
+async function probePeopleAccess(): Promise<boolean> {
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get("slp_token")?.value || "";
+    if (!token) return false;
+
+    const response = await fetch(peopleBackendUrl("/ppl/auth/me"), {
+      cache: "no-store",
+      headers: {
+        authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}`,
+      },
+    });
+    if (!response.ok) return false;
+    const payload = (await response.json()) as Record<string, unknown>;
+    // Any resolved access_level (view/edit/admin) means the module is reachable.
+    return typeof payload?.access_level === "string" && payload.access_level.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export default async function EmployeeConsolePage() {
   const logoSrc = "/studio-lotus-logo.png";
   const user = await fetchCurrentUser();
   if (user && !user.can_access_planner) {
     user.can_access_planner = await probePlannerAccess();
+  }
+  if (user && !user.can_access_people) {
+    user.can_access_people = await probePeopleAccess();
   }
   const displayName =
     asString(user?.display_name) || asString(user?.full_name) || asString(user?.email) || "User";
@@ -148,6 +188,7 @@ export default async function EmployeeConsolePage() {
   const visibleApps = apps.filter((app) => {
     if (app.href === "/recruitment/dashboard") return Boolean(user?.can_access_recruitment);
     if (app.title === "Project Planner") return Boolean(user?.can_access_planner);
+    if (app.title === "People & Org") return Boolean(user?.can_access_people);
     return true;
   });
 
@@ -170,6 +211,7 @@ export default async function EmployeeConsolePage() {
               <a href="/employee" className="employee-menu__item">Workbook</a>
               {user?.can_access_recruitment ? <a href="/recruitment/dashboard" className="employee-menu__item">Recruitment</a> : null}
               {user?.can_access_planner ? <a href="/employee/planner" className="employee-menu__item">Project Planner</a> : null}
+              {user?.can_access_people ? <a href="/people" className="employee-menu__item">People &amp; Org</a> : null}
             </div>
           </details>
           <a href="/" className="public-button public-button--ghost">
@@ -281,6 +323,17 @@ function GridOrbitIcon() {
       <rect x="14" y="4" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
       <rect x="4" y="14" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
       <path d="M14 17h6m-3-3v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PeopleIcon() {
+  return (
+    <svg className="h-5 w-5 text-slate-900" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M4 19c0-2.8 2.2-5 5-5s5 2.2 5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="17" cy="9.5" r="2.2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M15.5 19c0-2.4 1.4-4.3 3.5-4.3 1.4 0 2.5.8 3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }

@@ -48,8 +48,7 @@ router = APIRouter(prefix="/apply", tags=["apply"])
 IDEMPOTENCY_TTL = timedelta(hours=24)
 RATE_LIMIT_WINDOW = timedelta(minutes=1)
 RATE_LIMIT_MAX = 5
-APPLICATION_DOC_MAX_BYTES = 50 * 1024 * 1024
-PORTFOLIO_DOC_MAX_BYTES = 65 * 1024 * 1024
+APPLICATION_DOC_MAX_BYTES = 100 * 1024 * 1024
 PUBLIC_APPLY_DUPLICATE_WINDOW = timedelta(hours=24)
 
 
@@ -319,8 +318,6 @@ def _validate_external_document(kind: str, filename: str, content_type: str) -> 
 
 
 def _application_doc_max_bytes(kind: str) -> int:
-    if kind == "portfolio":
-        return PORTFOLIO_DOC_MAX_BYTES
     return APPLICATION_DOC_MAX_BYTES
 
 

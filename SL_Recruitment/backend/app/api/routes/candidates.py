@@ -107,8 +107,7 @@ logger = logging.getLogger("slr.candidates")
 
 SOURCE_ORIGIN_UI = "ui"
 SOURCE_ORIGIN_GOOGLE_SHEET = "google_sheet"
-APPLICATION_DOC_MAX_BYTES = 50 * 1024 * 1024
-PORTFOLIO_DOC_MAX_BYTES = 65 * 1024 * 1024
+APPLICATION_DOC_MAX_BYTES = 100 * 1024 * 1024
 GOOGLE_SHEET_DUPLICATE_WINDOW = timedelta(hours=24)
 INGEST_STATE_CREATED = "created"
 INGEST_STATE_DUPLICATE = "duplicate"
@@ -144,8 +143,6 @@ DEFAULT_HR_OWNER_NAME = "Nishant Singh"
 
 
 def _application_doc_max_bytes(kind: str) -> int:
-    if kind == "portfolio":
-        return PORTFOLIO_DOC_MAX_BYTES
     return APPLICATION_DOC_MAX_BYTES
 
 

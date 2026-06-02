@@ -29,7 +29,13 @@ const INGEST_CONFIG = {
   archiveSheetName: "Ingest Archive",
   auditSheetName: "Ingest Audit Log",
   auditMaxRows: 2000,
-  archiveStatuses: ["created"],
+  archiveStatuses: [
+    "created",
+    "reapplied",
+    "duplicate",
+    "duplicate_recent",
+    "duplicate_idempotent"
+  ],
   archiveMinAgeHours: 0,
   defaultSourceChannel: "google_sheet",
   requiredHeaderHints: ["Job ID", "First name", "Last name", "Email", "Terms"],
@@ -80,8 +86,8 @@ const INGEST_CONFIG = {
   duplicateCooldownHours: 24,
   changeTriggerHandler: "handleIngestSheetChange",
   syncTriggerHandler: "runScheduledExternalSync",
-  scheduledTriggerHandler: "runScheduledIngestRetry",
-  legacyScheduledTriggerHandler: "runScheduledIngest",
+  scheduledTriggerHandler: "runScheduledIngest",
+  legacyScheduledTriggerHandler: "runScheduledIngestRetry",
   syncEveryMinutes: 5,
   scheduledEveryMinutes: 5
 };
@@ -108,7 +114,7 @@ const INGEST_AUDIT_HEADERS = [
  * Run once manually to create/refresh installable triggers.
  * Creates:
  * - onChange trigger (row insert in workbook)
- * - time-driven trigger (retry safety net)
+ * - time-driven trigger (external sync, then ingest retry safety net)
  */
 function setupIngestTriggers() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -130,11 +136,6 @@ function setupIngestTriggers() {
   ScriptApp.newTrigger(INGEST_CONFIG.changeTriggerHandler)
     .forSpreadsheet(ss)
     .onChange()
-    .create();
-
-  ScriptApp.newTrigger(INGEST_CONFIG.syncTriggerHandler)
-    .timeBased()
-    .everyMinutes(INGEST_CONFIG.syncEveryMinutes)
     .create();
 
   ScriptApp.newTrigger(INGEST_CONFIG.scheduledTriggerHandler)
@@ -186,25 +187,36 @@ function handleIngestSheetChange(e) {
  * Retries rows missed by onChange or failed due transient errors.
  */
 function runScheduledExternalSync() {
-  try {
-    syncExternalUpdatedToIngestQueue(); // pulls correct columns
-  } catch (err) {
-    Logger.log(`runScheduledExternalSync failed: ${err}`);
-  }
+  runScheduledIngest();
 }
 
 function runScheduledIngestRetry() {
-  try {
-    pushCandidatesToRecruitment({ suppressIdleAudit: true }); // your existing ingest flow
-  } catch (err) {
-    Logger.log(`runScheduledIngestRetry failed: ${err}`);
-  }
+  runScheduledIngest();
 }
 
-// Legacy combined handler kept only so old triggers do not hard-fail before cleanup.
+// Combined scheduled handler: external source sync, then backend ingest.
 function runScheduledIngest() {
-  runScheduledExternalSync();
-  runScheduledIngestRetry();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    Logger.log("Scheduled ingest skipped: could not acquire lock.");
+    return;
+  }
+
+  try {
+    try {
+      syncExternalUpdatedToIngestQueue({ lockAlreadyHeld: true });
+    } catch (err) {
+      Logger.log(`runScheduledExternalSync failed: ${err}`);
+    }
+
+    try {
+      pushCandidatesToRecruitment({ suppressIdleAudit: true, lockAlreadyHeld: true });
+    } catch (err) {
+      Logger.log(`runScheduledIngestRetry failed: ${err}`);
+    }
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function deleteExternalSyncTrigger() {
@@ -806,8 +818,8 @@ function _resetIngestOpsForRows(rowNumbers, options) {
 
 function pushCandidatesToRecruitment(options) {
   const opts = options || {};
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) {
+  const lock = opts.lockAlreadyHeld ? null : LockService.getScriptLock();
+  if (lock && !lock.tryLock(30000)) {
     Logger.log("Skipping run: could not acquire lock.");
     return;
   }
@@ -1096,7 +1108,7 @@ function pushCandidatesToRecruitment(options) {
     } catch (auditErr) {
       Logger.log(`Failed to write audit entries: ${auditErr}`);
     }
-    lock.releaseLock();
+    if (lock) lock.releaseLock();
   }
 }
 
@@ -1541,6 +1553,9 @@ function _shouldReevaluateFailedPermanentRow(message) {
     text.indexOf("resume must be a valid public url") >= 0 ||
     text.indexOf("contains multiple urls") >= 0 ||
     text.indexOf("missing required columns: portfolio") >= 0 ||
+    text.indexOf("opening not found for code") >= 0 ||
+    text.indexOf("opening not found for title") >= 0 ||
+    text.indexOf("opening not found for row") >= 0 ||
     text.indexOf("portfolio file too large") >= 0 ||
     text.indexOf("exceeds max allowed size") >= 0 ||
     text.indexOf("max allowed is") >= 0

@@ -12,3 +12,7 @@ SL_IT/backend/.env.local
 SL_Recruitment/backend/.env.local
 SL_IT/backend/.env.production
 SL_Recruitment/backend/.env.production
+SL_People/secrets/
+SL_People/backend/.env
+SL_People/backend/.env.local
+SL_People/backend/.env.production

@@ -11,7 +11,7 @@ function inferDiscipline(title: string) {
   const lower = title.toLowerCase();
   if (lower.includes("architect")) return "ARCHITECTURE";
   if (lower.includes("interior")) return "INTERIOR DESIGN";
-  if (lower.includes("comms") || lower.includes("media")) return "MEDIA & COMMS";
+  if (lower.includes("comms") || lower.includes("graphic") || lower.includes("media")) return "MEDIA & COMMS";
   return "ARCH. & INTERIORS";
 }
 
@@ -21,6 +21,7 @@ function inferExperience(title: string) {
   if (lower.includes("associate")) return "9+ years";
   if (lower.includes("project designer")) return "6 to 9 years";
   if (lower.includes("sr") || lower.includes("senior")) return "3 to 6 years";
+  if (lower.includes("graphic designer") || lower.includes("comms designer")) return "0 to 2 years";
   if (lower.includes("intern")) return "0 years";
   return "1 to 3 years";
 }

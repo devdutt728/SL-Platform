@@ -150,14 +150,6 @@ class _PendingManagerAssignment:
     was_unchanged: bool
 
 
-@dataclass
-class _PersonCodeCounterState:
-    code_type: str
-    next_seq: int
-    original_next_seq: int
-    max_seq: int | None = None
-
-
 def _external_identity_source_from_payload(payload: dict[str, Any]) -> str:
     source = _normalize_text(payload.get("external_identity_source")) or _normalize_text(payload.get("source_system"))
     return (source or _DEFAULT_EXTERNAL_IDENTITY_SOURCE).strip().lower()
@@ -413,11 +405,9 @@ async def bulk_upload_people(
         by_person_id=by_person_id,
         warnings=result.warnings,
     )
-    person_code_counters = await _lock_person_code_counters(session)
     next_seq: int | None = None
     used_ids = {person.person_id for person in existing_people if (person.person_id or "").strip()}
     used_ids.discard("")
-    preserved_person_code_count = 0
     unresolved_manager_count = 0
     pending_manager_assignments: list[_PendingManagerAssignment] = []
 
@@ -466,11 +456,6 @@ async def bulk_upload_people(
             updates = _apply_status_defaults(_apply_name_defaults(_apply_row_updates(normalized)))
 
             if existing is not None:
-                if _preserve_existing_person_code(
-                    existing=existing,
-                    updates=updates,
-                ):
-                    preserved_person_code_count += 1
                 if incoming_person_id and incoming_person_id != existing.person_id:
                     result.warnings.append(
                         BulkUploadWarning(
@@ -548,15 +533,10 @@ async def bulk_upload_people(
             create_payload.pop("person_id", None)
             create_payload["manager_id"] = None
 
-            resolved_person_code, normalized_employment_type = await _resolve_bulk_person_code(
-                session=session,
-                normalized=normalized,
-                payload=create_payload,
-                by_person_code=by_person_code,
-                counters=person_code_counters,
-            )
-            create_payload["person_code"] = resolved_person_code
-            create_payload["employment_type"] = normalized_employment_type
+            uploaded_person_code = _normalize_text(create_payload.get("person_code")) or person_code
+            if not uploaded_person_code:
+                raise ValueError("Missing person_code")
+            create_payload["person_code"] = uploaded_person_code
 
             if not create_payload.get("source_system"):
                 create_payload["source_system"] = _DEFAULT_EXTERNAL_IDENTITY_SOURCE
@@ -646,15 +626,6 @@ async def bulk_upload_people(
             result.unchanged -= 1
             result.updated += 1
 
-    if preserved_person_code_count:
-        result.warnings.append(
-            BulkUploadWarning(
-                message=(
-                    f"Safe merge kept the existing person_code for {preserved_person_code_count} "
-                    "matched record(s). Use manual edits if you need to rewrite person_code values."
-                )
-            )
-        )
     if unresolved_manager_count:
         result.warnings.append(
             BulkUploadWarning(
@@ -669,7 +640,6 @@ async def bulk_upload_people(
     if dry_run:
         await session.rollback()
     else:
-        await _save_person_code_counters(session, person_code_counters)
         await session.commit()
     return result
 
@@ -681,10 +651,9 @@ async def _replace_all_people(
     result: BulkUploadResult,
     dry_run: bool,
 ) -> BulkUploadResult:
-    existing_people = (await session.execute(select(DimPerson))).scalars().all()
-    legacy_by_code, legacy_by_email = _build_legacy_person_maps(existing_people, result.warnings)
-    used_ids = {person.person_id for person in existing_people if (person.person_id or "").strip()}
-    used_ids.discard("")
+    # Full reload is authoritative: do not preserve legacy person_id mappings from
+    # the table that is about to be replaced.
+    used_ids: set[str] = set()
     next_seq = await _ensure_next_seq(session, None)
     now = datetime.utcnow()
 
@@ -739,8 +708,6 @@ async def _replace_all_people(
                 email=email,
                 first_name=first_name,
                 last_name=last_name,
-                legacy_by_code=legacy_by_code,
-                legacy_by_email=legacy_by_email,
                 used_ids=used_ids,
                 next_seq=next_seq,
                 warnings=result.warnings,
@@ -809,7 +776,16 @@ async def _replace_all_people(
             manager_id = None
         if manager_id == person.person_id:
             manager_id = None
-        if manager_token and not manager_id:
+            result.warnings.append(
+                BulkUploadWarning(
+                    row=staged_row_by_person_id.get(person.person_id),
+                    message="Manager reference points to the same person. manager_id cleared.",
+                    person_id=person.person_id,
+                    person_code=person.person_code,
+                    email=person.email,
+                )
+            )
+        elif manager_token and not manager_id:
             result.warnings.append(
                 BulkUploadWarning(
                     row=staged_row_by_person_id.get(person.person_id),
@@ -837,6 +813,7 @@ async def _replace_all_people(
             detail="replace_all aborted because no valid rows were found in the upload.",
         )
 
+    await session.execute(text("UPDATE dim_person SET manager_id = NULL WHERE manager_id IS NOT NULL"))
     await session.execute(delete(DimPersonRole))
     await session.execute(delete(DimPersonExtra))
     await session.execute(delete(DimPerson))
@@ -851,50 +828,6 @@ async def _replace_all_people(
     return result
 
 
-def _build_legacy_person_maps(
-    people: list[DimPerson],
-    warnings: list[BulkUploadWarning],
-) -> tuple[dict[str, str], dict[str, str]]:
-    code_buckets: dict[str, set[str]] = {}
-    email_buckets: dict[str, set[str]] = {}
-    for person in people:
-        code = _normalize_text(person.person_code).lower()
-        if code:
-            code_buckets.setdefault(code, set()).add(person.person_id)
-        email = _normalize_email(person.email)
-        if email:
-            email_buckets.setdefault(email, set()).add(person.person_id)
-
-    legacy_by_code: dict[str, str] = {}
-    for code, ids in code_buckets.items():
-        if len(ids) == 1:
-            legacy_by_code[code] = next(iter(ids))
-        else:
-            warnings.append(
-                BulkUploadWarning(
-                    message=(
-                        f"Existing table has duplicate person_code '{code}'. "
-                        "Stable person_id preservation for this code is ambiguous."
-                    ),
-                )
-            )
-
-    legacy_by_email: dict[str, str] = {}
-    for email, ids in email_buckets.items():
-        if len(ids) == 1:
-            legacy_by_email[email] = next(iter(ids))
-        else:
-            warnings.append(
-                BulkUploadWarning(
-                    message=(
-                        f"Existing table has duplicate email '{email}'. "
-                        "Stable person_id preservation for this email is ambiguous."
-                    ),
-                )
-            )
-    return legacy_by_code, legacy_by_email
-
-
 def _resolve_replace_person_id(
     *,
     row: _BulkRow,
@@ -903,76 +836,31 @@ def _resolve_replace_person_id(
     email: str,
     first_name: str,
     last_name: str,
-    legacy_by_code: dict[str, str],
-    legacy_by_email: dict[str, str],
     used_ids: set[str],
     next_seq: int,
     warnings: list[BulkUploadWarning],
 ) -> tuple[str, int]:
-    code_key = person_code.lower()
-    preserved_id = legacy_by_code.get(code_key) if code_key else None
-    if not preserved_id and email:
-        preserved_id = legacy_by_email.get(email)
-
-    if preserved_id:
-        if incoming_person_id and incoming_person_id != preserved_id:
-            warnings.append(
-                BulkUploadWarning(
-                    row=row.row_number,
-                    message=(
-                        "Incoming person_id differs from existing mapping. "
-                        "Existing person_id preserved for stability."
-                    ),
-                    person_id=preserved_id,
-                    person_code=person_code,
-                    email=email,
-                )
-            )
-        used_ids.add(preserved_id)
-        return preserved_id, next_seq
-
     if incoming_person_id and not incoming_person_id.isdigit() and incoming_person_id not in used_ids:
         used_ids.add(incoming_person_id)
         return incoming_person_id, next_seq
 
-    stable_from_code = _stable_person_id_from_code(person_code, used_ids)
-    if stable_from_code:
-        return stable_from_code, next_seq
+    code_as_person_id = _person_id_from_uploaded_code(person_code, used_ids)
+    if code_as_person_id:
+        return code_as_person_id, next_seq
 
     seq_value = _consume_next_seq(_build_person_prefix(first_name, last_name), next_seq, used_ids)
     return _format_person_id(first_name, last_name, seq_value), seq_value + 1
 
 
-def _stable_person_id_from_code(person_code: str, used_ids: set[str]) -> str | None:
+def _person_id_from_uploaded_code(person_code: str, used_ids: set[str]) -> str | None:
     raw = _normalize_text(person_code)
     if not raw:
         return None
-    normalized = re.sub(r"[^a-z0-9]+", "_", raw.strip().lower()).strip("_")
-    if not normalized:
+    normalized = re.sub(r"\s+", "_", raw)[:64].strip("_")
+    if not normalized or normalized in used_ids:
         return None
-    base = f"PC_{normalized.upper()}"
-    base = base[:64].rstrip("_")
-    if base and base not in used_ids:
-        used_ids.add(base)
-        return base
-
-    digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:8].upper()
-    suffix = f"_{digest}"
-    max_base_len = 64 - len(suffix)
-    candidate = f"{base[:max_base_len].rstrip('_')}{suffix}"
-    if candidate not in used_ids:
-        used_ids.add(candidate)
-        return candidate
-
-    index = 2
-    while True:
-        extra = f"{suffix}{index}"
-        max_len = 64 - len(extra)
-        candidate = f"{base[:max_len].rstrip('_')}{extra}"
-        if candidate not in used_ids:
-            used_ids.add(candidate)
-            return candidate
-        index += 1
+    used_ids.add(normalized)
+    return normalized
 
 
 def _assert_no_replace_staging_conflicts(
@@ -1449,20 +1337,6 @@ def _build_safe_update_payload(existing: DimPerson, updates: dict[str, Any]) -> 
         if current != value:
             patch[key] = value
     return patch
-
-
-def _preserve_existing_person_code(
-    *,
-    existing: DimPerson,
-    updates: dict[str, Any],
-) -> bool:
-    incoming_code = _normalize_text(updates.get("person_code"))
-    existing_code = _normalize_text(existing.person_code)
-    if not incoming_code or not existing_code or incoming_code == existing_code:
-        return False
-
-    updates["person_code"] = existing_code
-    return True
 
 
 def _assert_no_update_conflicts(
@@ -1975,171 +1849,6 @@ def _second_letter_or(value: str, fallback: str) -> str:
     if len(letters) >= 2:
         return letters[1]
     return fallback
-
-
-async def _lock_person_code_counters(session: AsyncSession) -> dict[str, _PersonCodeCounterState]:
-    rows = (
-        await session.execute(
-            text(
-                """
-                SELECT `code_type`, `next_seq`, `max_seq`
-                FROM `dim_person_code_counter`
-                FOR UPDATE
-                """
-            )
-        )
-    ).all()
-    states: dict[str, _PersonCodeCounterState] = {}
-    for row in rows:
-        code_type = _normalize_text(row.code_type).upper()
-        next_seq = int(row.next_seq or 0)
-        states[code_type] = _PersonCodeCounterState(
-            code_type=code_type,
-            next_seq=next_seq,
-            original_next_seq=next_seq,
-            max_seq=int(row.max_seq) if row.max_seq is not None else None,
-        )
-    return states
-
-
-async def _normalize_bulk_employment_type(
-    *,
-    session: AsyncSession,
-    value: str | None,
-    job_title: str | None,
-    email: str | None,
-) -> str:
-    normalized = (
-        await session.execute(
-            text(
-                """
-                SELECT fn_dim_person_normalize_employment_type(
-                  :employment_type,
-                  :job_title,
-                  :email
-                ) AS normalized_employment_type
-                """
-            ),
-            {
-                "employment_type": _normalize_text(value) or None,
-                "job_title": _normalize_text(job_title) or None,
-                "email": _normalize_email(email) or None,
-            },
-        )
-    ).scalar_one_or_none()
-    return str(normalized or "Permanent").strip() or "Permanent"
-
-
-async def _bulk_person_code_type(
-    *,
-    session: AsyncSession,
-    employment_type: str,
-) -> str:
-    code_type = (
-        await session.execute(
-            text("SELECT fn_dim_person_code_type(:principal_flag, :employment_type) AS code_type"),
-            {"principal_flag": 0, "employment_type": employment_type},
-        )
-    ).scalar_one_or_none()
-    if not code_type:
-        raise ValueError("Could not resolve person_code series for upload row.")
-    return str(code_type).strip().upper()
-
-
-async def _bulk_person_code_is_valid(
-    *,
-    session: AsyncSession,
-    code_type: str,
-    person_code: str | None,
-) -> bool:
-    candidate = _normalize_text(person_code).upper()
-    if not candidate:
-        return False
-    is_valid = (
-        await session.execute(
-            text("SELECT fn_dim_person_code_is_valid(:code_type, :person_code) AS is_valid"),
-            {"code_type": code_type, "person_code": candidate},
-        )
-    ).scalar_one_or_none()
-    return bool(int(is_valid or 0))
-
-
-async def _format_bulk_person_code(
-    *,
-    session: AsyncSession,
-    code_type: str,
-    seq: int,
-) -> str:
-    candidate = (
-        await session.execute(
-            text("SELECT fn_dim_person_format_code(:code_type, :seq) AS candidate_code"),
-            {"code_type": code_type, "seq": seq},
-        )
-    ).scalar_one_or_none()
-    if not candidate:
-        raise ValueError("Could not format person_code for upload row.")
-    return str(candidate).strip().upper()
-
-
-async def _resolve_bulk_person_code(
-    *,
-    session: AsyncSession,
-    normalized: dict[str, Any],
-    payload: dict[str, Any],
-    by_person_code: dict[str, list[DimPerson]],
-    counters: dict[str, _PersonCodeCounterState],
-) -> tuple[str, str]:
-    normalized_employment_type = await _normalize_bulk_employment_type(
-        session=session,
-        value=_normalize_text(payload.get("employment_type")) or None,
-        job_title=_normalize_text(payload.get("job_title")) or None,
-        email=_normalize_email(payload.get("email")) or None,
-    )
-    code_type = await _bulk_person_code_type(session=session, employment_type=normalized_employment_type)
-    explicit_internal_code = _incoming_internal_person_code(normalized)
-    if explicit_internal_code:
-        explicit_internal_code = explicit_internal_code.upper()
-        if await _bulk_person_code_is_valid(
-            session=session,
-            code_type=code_type,
-            person_code=explicit_internal_code,
-        ) and not by_person_code.get(explicit_internal_code.lower()):
-            return explicit_internal_code, normalized_employment_type
-
-    state = counters.get(code_type)
-    if state is None:
-        raise ValueError(f"Person code counter is not configured for code type '{code_type}'.")
-
-    seq = state.next_seq
-    while True:
-        if state.max_seq is not None and seq > state.max_seq:
-            raise ValueError(f"No remaining person_code sequence for code type '{code_type}'.")
-        candidate = await _format_bulk_person_code(session=session, code_type=code_type, seq=seq)
-        seq += 1
-        if by_person_code.get(candidate.lower()):
-            continue
-        state.next_seq = seq
-        return candidate, normalized_employment_type
-
-
-async def _save_person_code_counters(
-    session: AsyncSession,
-    counters: dict[str, _PersonCodeCounterState],
-) -> None:
-    for state in counters.values():
-        if state.next_seq == state.original_next_seq:
-            continue
-        await session.execute(
-            text(
-                """
-                UPDATE `dim_person_code_counter`
-                SET `next_seq` = :next_seq,
-                    `updated_at` = NOW()
-                WHERE `code_type` = :code_type
-                """
-            ),
-            {"code_type": state.code_type, "next_seq": state.next_seq},
-        )
 
 
 async def _generate_person_id(session: AsyncSession, first_name: str | None, last_name: str | None) -> str:

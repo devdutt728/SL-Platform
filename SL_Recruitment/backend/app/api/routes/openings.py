@@ -43,6 +43,9 @@ _FIXED_OPENING_CODES_BY_TITLE: dict[str, str] = {
     "others": "OTHR-8299BF",
     "intern": "INTR-8299B8",
     "communications intern": "CMIN-8299B0",
+    "graphic designer": "GRDS-8299C7",
+    "comms designer": "CMDS-8299CF",
+    "communications designer": "CMDS-8299CF",
     "interior designer": "INDS-8299A4",
     "architect": "ARCH-82999A",
     "sr designer": "SRDS-829990",
@@ -773,7 +776,9 @@ async def list_opening_requests(
         query = query.where(
             or_(
                 RecOpeningRequest.source_portal.is_(None),
-                RecOpeningRequest.source_portal != "migration_0032_seed",
+                RecOpeningRequest.source_portal.notin_(
+                    ["migration_0032_seed", "migration_0065_seed"]
+                ),
             )
         ).where(
             or_(

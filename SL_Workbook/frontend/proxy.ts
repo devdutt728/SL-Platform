@@ -27,6 +27,13 @@ function cookieOptions(isSecure: boolean) {
 }
 
 export function proxy(request: NextRequest) {
+  if (request.headers.has("next-action")) {
+    return NextResponse.json(
+      { error: "stale_server_action", message: "Refresh the page and try again." },
+      { status: 409, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   const authMode = process.env.NEXT_PUBLIC_AUTH_MODE || "dev";
   if (authMode !== "google") return NextResponse.next();
 

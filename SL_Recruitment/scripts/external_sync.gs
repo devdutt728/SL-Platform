@@ -49,9 +49,10 @@ const EXTERNAL_SYNC = {
   CHECK_ARCHIVE_TOO: true
 };
 
-function syncExternalUpdatedToIngestQueue() {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) {
+function syncExternalUpdatedToIngestQueue(options) {
+  const opts = options || {};
+  const lock = opts.lockAlreadyHeld ? null : LockService.getScriptLock();
+  if (lock && !lock.tryLock(30000)) {
     Logger.log("Sync skipped: could not acquire lock.");
     return;
   }
@@ -213,7 +214,7 @@ function syncExternalUpdatedToIngestQueue() {
       `Synced ${toAppendValues.length} new row(s), refreshed ${refreshedCount} existing row(s), skipped ${skippedArchivedCount} archived row(s), and ignored ${skippedSourceDuplicateCount} duplicate source row(s) in "${tgtSheet.getName()}".`
     );
   } finally {
-    lock.releaseLock();
+    if (lock) lock.releaseLock();
   }
 }
 
@@ -455,6 +456,11 @@ function _sync_computeJobIdFromApplyingFor(applyingFor) {
       return "INTR-8299B8";
     case "COMMUNICATIONS INTERN":
       return "CMIN-8299B0";
+    case "GRAPHIC DESIGNER":
+      return "GRDS-8299C7";
+    case "COMMS DESIGNER":
+    case "COMMUNICATIONS DESIGNER":
+      return "CMDS-8299CF";
     case "INTERIOR DESIGNER":
       return "INDS-8299A4";
     case "ARCHITECT":
@@ -497,6 +503,9 @@ function _sync_applyJobIdArrayFormula(sheet, headerIndex) {
     `"OTHERS","OTHR-8299BF",` +
     `"INTERN","INTR-8299B8",` +
     `"COMMUNICATIONS INTERN","CMIN-8299B0",` +
+    `"GRAPHIC DESIGNER","GRDS-8299C7",` +
+    `"COMMS DESIGNER","CMDS-8299CF",` +
+    `"COMMUNICATIONS DESIGNER","CMDS-8299CF",` +
     `"INTERIOR DESIGNER","INDS-8299A4",` +
     `"ARCHITECT","ARCH-82999A",` +
     `"SR. DESIGNER","SRDS-829990",` +

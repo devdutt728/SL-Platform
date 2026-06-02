@@ -6,11 +6,19 @@ import { OpeningPublicListItem } from "@/lib/types";
 import { filterVisibleRecords } from "@/lib/recruitment-visibility";
 import { PublicOpeningsClient } from "./ui";
 
+export const dynamic = "force-dynamic";
+
 async function fetchPublicOpenings() {
-  const res = await fetch(backendUrl("/apply"), { cache: "no-store" });
-  if (!res.ok) return [] as OpeningPublicListItem[];
-  const payload = (await res.json()) as OpeningPublicListItem[];
-  return filterVisibleRecords(payload);
+  try {
+    const res = await fetch(backendUrl("/apply"), { cache: "no-store" });
+    if (!res.ok) return [] as OpeningPublicListItem[];
+    const payload = (await res.json()) as OpeningPublicListItem[];
+    return filterVisibleRecords(payload);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`Public openings fetch failed: ${message}`);
+    return [] as OpeningPublicListItem[];
+  }
 }
 
 export default async function PublicApplyIndexPage() {

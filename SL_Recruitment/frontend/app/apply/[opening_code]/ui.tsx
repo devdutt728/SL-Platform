@@ -13,9 +13,8 @@ const pillClass =
 const submitClass =
   "inline-flex items-center justify-center gap-2 rounded-full bg-[var(--accessible-components--dodger-blue)] px-5 py-2.5 text-[13px] font-semibold text-white shadow-[0_16px_30px_-20px_rgba(19,120,209,0.9)] transition hover:-translate-y-0.5 hover:brightness-95 hover:shadow-[0_20px_34px_-18px_rgba(19,120,209,0.95)] disabled:opacity-60";
 
-const CV_DOC_MAX_BYTES = 50 * 1024 * 1024;
-const RESUME_DOC_MAX_BYTES = 50 * 1024 * 1024;
-const PORTFOLIO_DOC_MAX_BYTES = 65 * 1024 * 1024;
+const APPLICATION_DOC_MAX_MB = 100;
+const APPLICATION_DOC_MAX_BYTES = APPLICATION_DOC_MAX_MB * 1024 * 1024;
 
 const APPLY_STEPS = [
   { id: 0, label: "Basics" },
@@ -106,16 +105,16 @@ export function ApplyForm({ openingCode, compact = false }: { openingCode: strin
       }
     }
 
-    if (cv && cv.size > CV_DOC_MAX_BYTES) {
-      setError("CV file is too large. Max 50MB.");
+    if (cv && cv.size > APPLICATION_DOC_MAX_BYTES) {
+      setError(`CV file is too large. Max ${APPLICATION_DOC_MAX_MB}MB.`);
       return;
     }
-    if (resume && resume.size > RESUME_DOC_MAX_BYTES) {
-      setError("Resume file is too large. Max 50MB.");
+    if (resume && resume.size > APPLICATION_DOC_MAX_BYTES) {
+      setError(`Resume file is too large. Max ${APPLICATION_DOC_MAX_MB}MB.`);
       return;
     }
-    if (portfolio && portfolio.size > PORTFOLIO_DOC_MAX_BYTES) {
-      setError("Portfolio file is too large. Max 65MB.");
+    if (portfolio && portfolio.size > APPLICATION_DOC_MAX_BYTES) {
+      setError(`Portfolio file is too large. Max ${APPLICATION_DOC_MAX_MB}MB.`);
       return;
     }
 
@@ -255,9 +254,9 @@ export function ApplyForm({ openingCode, compact = false }: { openingCode: strin
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className={pillClass}>CV 50MB</span>
-            <span className={pillClass}>Resume 50MB</span>
-            <span className={pillClass}>Portfolio 65MB</span>
+            <span className={pillClass}>CV {APPLICATION_DOC_MAX_MB}MB</span>
+            <span className={pillClass}>Resume {APPLICATION_DOC_MAX_MB}MB</span>
+            <span className={pillClass}>Portfolio {APPLICATION_DOC_MAX_MB}MB</span>
           </div>
         </div>
         <div className="mt-3">

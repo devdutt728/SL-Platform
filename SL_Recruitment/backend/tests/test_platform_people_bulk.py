@@ -6,48 +6,48 @@ from app.api.routes.platform_people import (
     _BulkRow,
     _external_identity_key,
     _normalize_row,
-    _preserve_existing_person_code,
     _resolve_existing_person,
     _resolve_manager_id,
     _resolve_manager_reference,
+    _resolve_replace_person_id,
 )
 from app.models.platform_person import DimPerson
 
 
 class PlatformPeopleBulkTests(unittest.TestCase):
-    def test_safe_merge_keeps_existing_person_code_for_resolved_record(self) -> None:
-        existing = DimPerson(
-            person_id="AA_015",
-            person_code="SLI013",
-            email="arya98arun@gmail.com",
-            first_name="Arya",
-        )
-        updates = {"person_code": "22", "status": "Relieved"}
-
-        changed = _preserve_existing_person_code(
-            existing=existing,
-            updates=updates,
-        )
-
-        self.assertTrue(changed)
-        self.assertEqual(updates["person_code"], "SLI013")
-
-    def test_safe_merge_allows_unchanged_person_code(self) -> None:
-        existing = DimPerson(
-            person_id="AM_050",
-            person_code="SLI022",
-            email="anoushka@example.com",
-            first_name="Anoushka",
-        )
-        updates = {"person_code": "SLI022", "status": "Relieved"}
-
-        changed = _preserve_existing_person_code(
-            existing=existing,
-            updates=updates,
+    def test_replace_all_uses_uploaded_employee_number_as_person_id(self) -> None:
+        person_id, next_seq = _resolve_replace_person_id(
+            row=_BulkRow(row_number=2, normalized={"person_code": "SL0001"}),
+            incoming_person_id="",
+            person_code="SL0001",
+            email="ambrish@studiolotus.in",
+            first_name="Ambrish",
+            last_name="Arora",
+            used_ids=set(),
+            next_seq=1,
+            warnings=[],
         )
 
-        self.assertFalse(changed)
-        self.assertEqual(updates["person_code"], "SLI022")
+        self.assertEqual(person_id, "SL0001")
+        self.assertEqual(next_seq, 1)
+
+    def test_replace_all_ignores_legacy_email_mapping_when_disabled(self) -> None:
+        warnings = []
+        person_id, next_seq = _resolve_replace_person_id(
+            row=_BulkRow(row_number=8, normalized={"person_code": "SL0360"}),
+            incoming_person_id="",
+            person_code="SL0360",
+            email="existing.person@studiolotus.in",
+            first_name="New",
+            last_name="Person",
+            used_ids=set(),
+            next_seq=1,
+            warnings=warnings,
+        )
+
+        self.assertEqual(person_id, "SL0360")
+        self.assertEqual(next_seq, 1)
+        self.assertEqual(warnings, [])
 
     def test_manager_resolution_prefers_existing_person_id(self) -> None:
         manager = DimPerson(

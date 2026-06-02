@@ -6,12 +6,20 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, ShieldCheck } from "lucide-react";
 
+export const dynamic = "force-dynamic";
+
 async function fetchOpening(openingCode: string) {
   const url = backendUrl(`/apply/${openingCode}`);
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) return null;
-  const payload = (await res.json()) as OpeningApplyPrefill;
-  return visibleRecordOrNull(payload);
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return null;
+    const payload = (await res.json()) as OpeningApplyPrefill;
+    return visibleRecordOrNull(payload);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`Public opening fetch failed for ${openingCode}: ${message}`);
+    return null;
+  }
 }
 
 function BackgroundLayer() {

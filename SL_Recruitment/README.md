@@ -173,7 +173,7 @@ Frontend env:
   - Opening code must exist and be active.
   - If `applying_for` is sent along with `job_id`, title mismatch is rejected.
   - Duplicate check uses `opening + email` and returns `status=duplicate` without creating a new candidate.
-  - External document links (portfolio/cv/resume) are downloaded and uploaded into candidate Drive folder, with a `65MB` limit for portfolio files and a `50MB` limit for CV/resume files.
+  - External document links (portfolio/cv/resume) are downloaded and uploaded into candidate Drive folder, with a `100MB` limit for each file.
   - Created candidates follow the same backend automation path: `SLR-####` code generation, CAF + assessment link generation, drive folder creation, stage initialization.
   - Source bifurcation is stored in candidate row (`source_origin`: `ui` / `public_apply` / `google_sheet`).
 
