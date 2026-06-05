@@ -45,6 +45,11 @@ class EmployeeExt(Base):
     employment_status: Mapped[str] = mapped_column(String(20), nullable=False, default="working")
     worker_type: Mapped[str] = mapped_column(String(20), nullable=False, default="permanent")
     time_type: Mapped[str] = mapped_column(String(20), nullable=False, default="fulltime")
+    exit_status: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    termination_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    termination_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    resignation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exit_comments: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
@@ -154,21 +159,6 @@ class EmployeeCompliance(Base):
     uan_number_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by_person_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-
-
-# ── Table 7 — employee_exit ───────────────────────────────────────────────────
-class EmployeeExit(Base):
-    __tablename__ = "employee_exit"
-
-    employee_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("employee_ext.id", ondelete="CASCADE"), primary_key=True
-    )
-    exit_status: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    termination_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    termination_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    resignation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    comments: Mapped[str | None] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 # ── Table 8 — employee_audit_log (immutable) ──────────────────────────────────
@@ -336,8 +326,17 @@ class SystemInventory(Base):
     os: Mapped[str | None] = mapped_column(String(100), nullable=True)
     autocad_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
     sketchup_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    threedmax_version: Mapped[str | None] = mapped_column("3dsmax_version", String(100), nullable=True)
+    rhino_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    enscape_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    d5_render: Mapped[str | None] = mapped_column(String(100), nullable=True)
     adobe_versions: Mapped[str | None] = mapped_column(Text, nullable=True)
     office_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    antivirus: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    purchase_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    vendor: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    service_tag: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    serial_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
     composite_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     capability_tier: Mapped[str | None] = mapped_column(String(30), nullable=True)
     upgrade_suggestion: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -387,7 +386,7 @@ class PeopleAccessGrant(Base):
     __tablename__ = "people_access_grant"
 
     person_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    access_level: Mapped[str] = mapped_column(String(20), nullable=False)  # view | edit | admin
+    access_level: Mapped[str] = mapped_column(String(20), nullable=False)  # view | edit | publisher | admin
     granted_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     granted_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

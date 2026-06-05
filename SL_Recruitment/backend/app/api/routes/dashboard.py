@@ -429,7 +429,7 @@ async def get_dashboard_metrics(
         await session.execute(
             select(
                 normalized_hr_owner_email.label("assignee_key"),
-                normalized_hr_owner_name.label("assignee_name"),
+                func.min(normalized_hr_owner_name).label("assignee_name"),
                 normalized_hr_owner_email.label("assignee_email"),
                 func.count().label("assigned_count"),
                 func.sum(active_candidate_case).label("active_count"),
@@ -439,8 +439,8 @@ async def get_dashboard_metrics(
                 RecCandidate.candidate_id.in_(select(scoped_candidate_ids.c.candidate_id)),
                 normalized_hr_owner_email != "",
             )
-            .group_by(normalized_hr_owner_email, normalized_hr_owner_name)
-            .order_by(func.count().desc(), normalized_hr_owner_name.asc())
+            .group_by(normalized_hr_owner_email)
+            .order_by(func.count().desc(), func.min(normalized_hr_owner_name).asc())
         )
     ).all()
     hr_workloads = [
@@ -469,7 +469,7 @@ async def get_dashboard_metrics(
         await session.execute(
             select(
                 normalized_l2_owner_email.label("assignee_key"),
-                normalized_l2_owner_name.label("assignee_name"),
+                func.min(normalized_l2_owner_name).label("assignee_name"),
                 normalized_l2_owner_email.label("assignee_email"),
                 func.count().label("assigned_count"),
                 func.sum(active_candidate_case).label("active_count"),
@@ -479,8 +479,8 @@ async def get_dashboard_metrics(
                 RecCandidate.candidate_id.in_(select(scoped_candidate_ids.c.candidate_id)),
                 trimmed_l2_owner_email != "",
             )
-            .group_by(normalized_l2_owner_email, normalized_l2_owner_name)
-            .order_by(func.count().desc(), normalized_l2_owner_name.asc())
+            .group_by(normalized_l2_owner_email)
+            .order_by(func.count().desc(), func.min(normalized_l2_owner_name).asc())
         )
     ).all()
     l2_workloads = [

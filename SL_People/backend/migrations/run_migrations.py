@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import settings
@@ -34,11 +35,12 @@ def _server_url(database_url: str) -> str:
 
 
 def _split_statements(sql: str) -> list[str]:
+    sql_without_line_comments = "\n".join(
+        line for line in sql.splitlines() if not line.strip().startswith("--")
+    )
     statements: list[str] = []
-    for chunk in sql.split(";"):
-        stripped = "\n".join(
-            line for line in chunk.splitlines() if not line.strip().startswith("--")
-        ).strip()
+    for chunk in sql_without_line_comments.split(";"):
+        stripped = chunk.strip()
         if stripped:
             statements.append(stripped)
     return statements
@@ -50,10 +52,16 @@ async def run() -> None:
     try:
         async with engine.begin() as conn:
             for path in files:
-                print(f"→ applying {path.name}")
+                print(f"applying {path.name}")
                 for stmt in _split_statements(path.read_text(encoding="utf-8")):
-                    await conn.exec_driver_sql(stmt)
-        print(f"✓ applied {len(files)} migration file(s)")
+                    try:
+                        await conn.exec_driver_sql(stmt)
+                    except DBAPIError as exc:
+                        code = getattr(exc.orig, "args", [None])[0]
+                        if code == 1060:  # duplicate column
+                            continue
+                        raise
+        print(f"OK applied {len(files)} migration file(s)")
     finally:
         await engine.dispose()
 

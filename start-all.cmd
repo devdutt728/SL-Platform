@@ -2,12 +2,13 @@
 set "ROOT=D:\SL Platform"
 set "LOGDIR=%ROOT%\logs"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
+if exist "%LOGDIR%\stop-live-logs.signal" del /f /q "%LOGDIR%\stop-live-logs.signal" >nul 2>nul
 set "SL_ENVIRONMENT=development"
 if not defined ENABLE_IT_MODULE set "ENABLE_IT_MODULE=0"
 if not defined ENABLE_PROJECT_PLANNER set "ENABLE_PROJECT_PLANNER=0"
-if not defined ENABLE_PEOPLE_MODULE set "ENABLE_PEOPLE_MODULE=0"
+if not defined ENABLE_PEOPLE_MODULE set "ENABLE_PEOPLE_MODULE=1"
 
-powershell -NoProfile -Command "& { $ErrorActionPreference = 'Continue'; $ports = 3000,3001,3002,3003,3004,8001,8002,8003,8004; foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { $procId = $_.OwningProcess; if ($procId) { try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {} } } } }"
+powershell -NoProfile -Command "& { $ErrorActionPreference = 'Continue'; $ports = 3000,3001,3002,3003,3004,8001,8002,8003,8004,8005; foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { $procId = $_.OwningProcess; if ($procId) { try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {} } } } }"
 
 set "RUN_ID=%DATE%_%TIME%"
 set "RUN_ID=%RUN_ID: =%"
@@ -101,7 +102,7 @@ if "%ENABLE_PROJECT_PLANNER%"=="1" if exist "%PLANNER_FRONTEND_DIR%" (
   call :spawn "%PLANNER_FRONTEND_DIR%" "npm run dev" "%PLANNER_FRONTEND_OUT%" "%PLANNER_FRONTEND_ERR%" "PORT=3004"
 )
 if "%ENABLE_PEOPLE_MODULE%"=="1" if exist "%PEOPLE_BACKEND_DIR%" (
-  call :spawn "%PEOPLE_BACKEND_DIR%" "python -m uvicorn app.main:app --reload --port 8004" "%PEOPLE_BACKEND_OUT%" "%PEOPLE_BACKEND_ERR%"
+  call :spawn "%PEOPLE_BACKEND_DIR%" "python -m uvicorn app.main:app --reload --port 8005" "%PEOPLE_BACKEND_OUT%" "%PEOPLE_BACKEND_ERR%"
 )
 
 if exist "%ROOT%\tools\caddy.exe" (

@@ -876,6 +876,13 @@ def _clean_optional_text(value: Any) -> str | None:
     return text or None
 
 
+def _clean_personal_id(value: Any) -> str | None:
+    text = _clean_optional_text(value)
+    if not text:
+        return None
+    return "".join(text.split()).upper()
+
+
 def _coerce_optional_int(value: Any, *, field_label: str) -> int | None:
     if value is None:
         return None
@@ -1213,7 +1220,7 @@ async def convert_candidate_to_employee(
     email_domain = email.split("@")[-1] if "@" in email else ""
 
     last_name = _clean_optional_text(profile.get("last_name")) or candidate.last_name
-    personal_id = _clean_optional_text(profile.get("personal_id")) or _clean_optional_text(joining_profile.personal_id)
+    personal_id = _clean_personal_id(profile.get("personal_id")) or _clean_personal_id(joining_profile.personal_id)
     mobile_number = (
         _clean_optional_text(profile.get("mobile_number"))
         or _clean_optional_text(joining_profile.mobile_number)
@@ -1275,6 +1282,20 @@ async def convert_candidate_to_employee(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Email is already assigned to another active employee.",
             )
+        if personal_id:
+            personal_id_conflict = (
+                await platform_session.execute(
+                    select(DimPerson.person_id).where(
+                        func.upper(func.replace(DimPerson.personal_id, " ", "")) == personal_id,
+                        DimPerson.person_id != person_id,
+                    )
+                )
+            ).scalars().first()
+            if personal_id_conflict:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Personal ID is already assigned to another person.",
+                )
 
         existing = await platform_session.get(DimPerson, person_id)
         existing_person_code = (existing.person_code or "").strip().upper() if existing else ""

@@ -88,6 +88,36 @@ function roleFromUser(user: UserSummary | null) {
   return "Member";
 }
 
+function hasPeopleRole(user: UserSummary | null) {
+  if (!user) return false;
+  const values = [
+    user.platform_role_code,
+    user.platform_role_name,
+    ...(user.platform_role_names || []),
+    ...(user.roles || []),
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).trim().toLowerCase());
+
+  return values.some((value) =>
+    [
+      "superadmin",
+      "super admin",
+      "admin",
+      "hr_admin",
+      "hr admin",
+      "it_lead",
+      "it lead",
+      "hr_exec",
+      "hr exec",
+      "it_agent",
+      "it agent",
+      "hiring_manager",
+      "hiring manager",
+    ].includes(value),
+  );
+}
+
 async function fetchCurrentUser(): Promise<UserSummary | null> {
   try {
     const res = await fetch(backendUrl("/auth/me"), {
@@ -146,7 +176,7 @@ async function probePlannerAccess(): Promise<boolean> {
 }
 
 function peopleBackendUrl(path: string) {
-  const base = process.env.PEOPLE_BACKEND_URL || "http://127.0.0.1:8004";
+  const base = process.env.PEOPLE_BACKEND_URL || "http://127.0.0.1:8005";
   return path.startsWith("/") ? `${base}${path}` : `${base}/${path}`;
 }
 
@@ -179,6 +209,9 @@ export default async function EmployeeConsolePage() {
   }
   if (user && !user.can_access_people) {
     user.can_access_people = await probePeopleAccess();
+  }
+  if (user && !user.can_access_people && hasPeopleRole(user)) {
+    user.can_access_people = true;
   }
   const displayName =
     asString(user?.display_name) || asString(user?.full_name) || asString(user?.email) || "User";
@@ -277,7 +310,7 @@ export default async function EmployeeConsolePage() {
               <div className="flex h-full flex-col justify-center">
                 <p className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-steel">No App Access</p>
                 <h2 className="mt-1 text-xl font-semibold text-slate-900">No modules are enabled for your account yet.</h2>
-                <p className="mt-4 text-sm text-steel">Ask a superadmin to grant Recruitment or Project Planner access in the platform directory.</p>
+                <p className="mt-4 text-sm text-steel">Ask a superadmin to grant Recruitment, Project Planner, or People access in the platform directory.</p>
               </div>
             </div>
           ) : null}

@@ -39,4 +39,14 @@ def require_access(required: AccessLevel):
 
 require_view = require_access(AccessLevel.VIEW)
 require_edit = require_access(AccessLevel.EDIT)
+require_publish = require_access(AccessLevel.PUBLISHER)
 require_admin = require_access(AccessLevel.ADMIN)
+
+
+async def require_platform_superadmin(user: UserContext = Depends(get_current_user)) -> UserContext:
+    if not user.is_platform_superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Requires platform superadmin access",
+        )
+    return user

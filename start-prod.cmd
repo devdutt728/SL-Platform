@@ -2,6 +2,7 @@
 set "ROOT=D:\SL Platform"
 set "LOGDIR=%ROOT%\logs"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
+if exist "%LOGDIR%\stop-live-logs.signal" del /f /q "%LOGDIR%\stop-live-logs.signal" >nul 2>nul
 
 rem Build on each start (set to 0 to skip builds)
 if not defined BUILD_ON_START set "BUILD_ON_START=1"
@@ -17,9 +18,9 @@ set "SPP_ENVIRONMENT=production"
 set "SPL_ENVIRONMENT=production"
 if not defined ENABLE_IT_MODULE set "ENABLE_IT_MODULE=0"
 if not defined ENABLE_PROJECT_PLANNER set "ENABLE_PROJECT_PLANNER=1"
-if not defined ENABLE_PEOPLE_MODULE set "ENABLE_PEOPLE_MODULE=0"
+if not defined ENABLE_PEOPLE_MODULE set "ENABLE_PEOPLE_MODULE=1"
 
-powershell -NoProfile -Command "& { $ErrorActionPreference = 'Continue'; $ports = 3000,3001,3002,3003,3004,8001,8002,8003,8004; foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { $procId = $_.OwningProcess; if ($procId) { try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {} } } } }"
+powershell -NoProfile -Command "& { $ErrorActionPreference = 'Continue'; $ports = 3000,3001,3002,3003,3004,8001,8002,8003,8004,8005; foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { $procId = $_.OwningProcess; if ($procId) { try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {} } } } }"
 
 set "RUN_ID=%DATE%_%TIME%"
 set "RUN_ID=%RUN_ID: =%"
@@ -166,7 +167,7 @@ if "%ENABLE_PROJECT_PLANNER%"=="1" if exist "%PLANNER_FRONTEND_DIR%" (
 )
 if "%ENABLE_PEOPLE_MODULE%"=="1" if exist "%PEOPLE_BACKEND_DIR%" (
   echo [%DATE% %TIME%] spawn people-backend>> "%TRACE_LOG%"
-  call :spawn "%PEOPLE_BACKEND_DIR%" "python -m uvicorn app.main:app --host 127.0.0.1 --port 8004 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1" "%PEOPLE_BACKEND_OUT%" "%PEOPLE_BACKEND_ERR%"
+  call :spawn "%PEOPLE_BACKEND_DIR%" "python -m uvicorn app.main:app --host 127.0.0.1 --port 8005 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1" "%PEOPLE_BACKEND_OUT%" "%PEOPLE_BACKEND_ERR%"
 )
 
 if exist "%ROOT%\tools\caddy.exe" (
@@ -183,7 +184,7 @@ if "%START_MONITOR%"=="1" (
   )
 )
 
-if "%KEEP_WINDOW_OPEN%"=="1" pause
+if "%KEEP_WINDOW_OPEN%"=="1" if not exist "%LOGDIR%\stop-live-logs.signal" pause
 exit /b
 
 :fail

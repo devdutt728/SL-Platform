@@ -4,6 +4,7 @@ import unittest
 
 from app.api.routes.platform_people import (
     _BulkRow,
+    _clear_duplicate_uploaded_personal_ids,
     _external_identity_key,
     _normalize_row,
     _resolve_existing_person,
@@ -132,6 +133,22 @@ class PlatformPeopleBulkTests(unittest.TestCase):
 
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved.person_id, "AA_015")
+
+    def test_duplicate_uploaded_personal_ids_are_cleared_after_first_row(self) -> None:
+        rows = [
+            _BulkRow(row_number=2, normalized={"person_code": "SL001", "personal_id": " ABCDF0001 "}),
+            _BulkRow(row_number=3, normalized={"person_code": "SL002", "personal_id": "abcdf0001"}),
+            _BulkRow(row_number=4, normalized={"person_code": "SL003", "personal_id": "ABCDE0002"}),
+        ]
+        warnings = []
+
+        _clear_duplicate_uploaded_personal_ids(rows, warnings)
+
+        self.assertEqual(rows[0].normalized["personal_id"], " ABCDF0001 ")
+        self.assertNotIn("personal_id", rows[1].normalized)
+        self.assertEqual(rows[2].normalized["personal_id"], "ABCDE0002")
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0].row, 3)
 
     def test_manager_resolution_uses_external_employee_code_mapping(self) -> None:
         manager = DimPerson(

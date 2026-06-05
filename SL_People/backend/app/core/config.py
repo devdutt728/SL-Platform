@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     sheet_ingest_token: str = ""
     sheet_ingest_max_rows: int = 0
 
+    # Reconcile active dim_person employees into employee_ext/org_employee.
+    # 0 disables the background worker; request-time org sync still runs.
+    org_dim_person_sync_interval_seconds: int = 60
+
     model_config = SettingsConfigDict(env_prefix="SPL_", env_file=_env_files(), extra="ignore")
 
 

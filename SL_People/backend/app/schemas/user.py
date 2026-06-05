@@ -10,10 +10,16 @@ class AccessLevel(str, Enum):
 
     VIEW = "view"
     EDIT = "edit"
+    PUBLISHER = "publisher"  # edit + publish/revert, but not group/grant admin
     ADMIN = "admin"
 
 
-_LEVEL_RANK = {AccessLevel.VIEW: 0, AccessLevel.EDIT: 1, AccessLevel.ADMIN: 2}
+_LEVEL_RANK = {
+    AccessLevel.VIEW: 0,
+    AccessLevel.EDIT: 1,
+    AccessLevel.PUBLISHER: 2,
+    AccessLevel.ADMIN: 3,
+}
 
 
 def at_least(level: AccessLevel, required: AccessLevel) -> bool:
@@ -38,6 +44,26 @@ class UserContext(BaseModel):
     @property
     def is_admin(self) -> bool:
         return self.access_level == AccessLevel.ADMIN
+
+    @property
+    def is_platform_superadmin(self) -> bool:
+        values = [
+            self.platform_role_code,
+            self.platform_role_name,
+            *(self.platform_role_codes or []),
+            *(self.platform_role_names or []),
+            *self.roles,
+        ]
+        tokens = {
+            str(value or "").strip().lower().replace(" ", "_").replace("-", "_")
+            for value in values
+            if str(value or "").strip()
+        }
+        return (
+            bool(tokens & {"superadmin", "super_admin", "s_admin"})
+            or self.platform_role_id == 2
+            or 2 in (self.platform_role_ids or [])
+        )
 
     @property
     def can_edit(self) -> bool:

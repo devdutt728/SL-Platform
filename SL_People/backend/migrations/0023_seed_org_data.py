@@ -1,41 +1,22 @@
 """Seed org + license + systems tables from `Org Data.xlsx`.
 
-Phase 0 status: STRUCTURE ONLY.
-
-Documents the seed order from SL_PEOPLE_PLAN.md §6 "0023" and wires the ported
-Code.gs logic. Full sheet ingestion lands in Phase 3/4/5 against the confirmed
-workbook layout; this stub fixes the contract and seeds the one thing that is
-fully known today — the 4 fixed principals.
-
-Seed order (plan §6):
-  1. org_principal     <- ORG_PRINCIPALS (4 rows, from Code.gs ORG_CONFIG)
-  2. org_group         <- Groups sheet
-  3. org_employee      <- Master_Employees; compute designation_level/color/order
-                          via level_for(); compute sl/o exp via compute_experience()
-  4. license_assignment<- Licenses sheet (short_name via short_name_for())
-  5. license_contract  <- License_Inventory sheet (+ renewal status)
-  6. system_inventory  <- Systems sheet; run grade_pc() for composite_score + tier
-  7. peripheral_inventory <- Peripherals sheet
-  8. org_change_log    <- first row, action='initial_import', snapshot_after=full org
-
-Usage (once implemented + Org Data.xlsx is in place):
+Usage:
     python -m migrations.0023_seed_org_data --file "../../Org Data (1).xlsx"
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+from pathlib import Path
 
 from sqlalchemy import select
 
-from app.db.session import SessionLocal
+from app.db.platform_session import PlatformSessionLocal, platform_engine
+from app.db.session import SessionLocal, engine
 from app.models.people import OrgPrincipal
+from app.services.workbook_import import import_org_workbook
 from app.services.console_logic import ORG_PRINCIPALS
-
-# Other helpers the full implementation uses:
-# from app.services.console_logic import level_for, compute_experience, grade_pc, short_name_for
-# from app.models.people import OrgGroup, OrgEmployee, LicenseAssignment, ...
-
 
 async def seed_principals() -> int:
     """Idempotently seed the 4 fixed principals. Safe to run on its own today."""
@@ -55,14 +36,41 @@ async def seed_principals() -> int:
     return inserted
 
 
+def _default_workbook() -> Path:
+    return Path(__file__).resolve().parents[2].parent / "Org Data (1).xlsx"
+
+
 async def main() -> None:
-    count = await seed_principals()
-    print(f"✓ org_principal: seeded {count} new principal(s)")
-    print(
-        "ℹ groups / employees / licenses / systems / peripherals ingestion is "
-        "implemented in the org & inventory phases."
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--file", default=str(_default_workbook()))
+    args = parser.parse_args()
+    workbook = Path(args.file).resolve()
+    if not workbook.exists():
+        raise FileNotFoundError(f"Workbook not found: {workbook}")
+
+    async with SessionLocal() as session, PlatformSessionLocal() as platform_session:
+        result = await import_org_workbook(session, platform_session, workbook, performed_by="migration:0023")
+
+    print(f"OK org workbook imported from {workbook}")
+    print(f"  employees: {result.employees}")
+    print(f"  groups: {result.groups}")
+    print(f"  org employees: {result.org_employees}")
+    print(f"  license assignments: {result.license_assignments}")
+    print(f"  license contracts: {result.license_contracts}")
+    print(f"  systems: {result.systems}")
+    print(f"  peripherals: {result.peripherals}")
+    if result.warnings:
+        print("  warnings:")
+        for warning in result.warnings[:20]:
+            print(f"    - {warning}")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    async def _run() -> None:
+        try:
+            await main()
+        finally:
+            await engine.dispose()
+            await platform_engine.dispose()
+
+    asyncio.run(_run())

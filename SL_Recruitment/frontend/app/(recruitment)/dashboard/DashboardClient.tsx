@@ -120,8 +120,8 @@ function AssignmentWorkloadPanel({
             Live assignment data is unavailable right now.
           </div>
         ) : items.length ? (
-          items.map((item) => (
-            <div key={item.assignee_key} className="flex items-center justify-between gap-3 rounded-xl bg-white px-2.5 py-2">
+          items.map((item, index) => (
+            <div key={`${item.assignee_key || item.assignee_email || item.assignee_name}-${index}`} className="flex items-center justify-between gap-3 rounded-xl bg-white px-2.5 py-2">
               <div className="min-w-0">
                 <p className="truncate text-xs font-semibold text-[var(--dim-grey)]">{item.assignee_name}</p>
                 <p className="truncate text-[11px] text-[var(--light-grey)]">{item.assignee_email || item.assignee_key}</p>

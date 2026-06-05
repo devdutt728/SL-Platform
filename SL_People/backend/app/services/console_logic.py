@@ -149,10 +149,18 @@ def compute_experience(doj, prior_exp_years, today: Optional[date] = None) -> Ex
 def score_cpu(proc: Optional[str]) -> int:
     if not proc:
         return 30
-    p = str(proc).upper()
-    if "ULTRA" in p:
-        return 95
-    m = re.search(r"I([579])[\s-]*(\d{3,5})", p)
+    p = re.sub(r"\s+", " ", str(proc).upper().replace("®", "").replace("™", " ")).strip()
+
+    ultra = re.search(r"(?:CORE\s*)?ULTRA\s*([579])\s*(\d{3})?", p)
+    if ultra:
+        tier = int(ultra.group(1))
+        model = int(ultra.group(2) or 100)
+        score = 86 + (tier - 5) * 4
+        if model >= 200:
+            score += 5
+        return max(0, min(100, score))
+
+    m = re.search(r"(?:CORE\s*)?I([3579])[\s-]*(\d{3,5})", p)
     if m:
         tier = int(m.group(1))
         model = m.group(2)
@@ -181,12 +189,51 @@ def score_cpu(proc: Optional[str]) -> int:
             score = 28
         else:
             score = 22
-        if tier == 5:
+        if tier == 3:
+            score -= 16
+        elif tier == 5:
             score -= 8
         elif tier == 9:
             score += 5
         return max(0, min(100, score))
+
+    ryzen = re.search(r"RYZEN\s*(?:THREADRIPPER\s*)?([3579])\s*(\d{3,5})?", p)
+    if ryzen:
+        tier = int(ryzen.group(1))
+        model = ryzen.group(2) or ""
+        gen = int(model[:1]) if model else 4
+        if gen >= 9:
+            score = 92
+        elif gen >= 7:
+            score = 86
+        elif gen >= 5:
+            score = 74
+        elif gen >= 3:
+            score = 58
+        else:
+            score = 40
+        if tier == 3:
+            score -= 12
+        elif tier == 7:
+            score += 4
+        elif tier == 9:
+            score += 8
+        if "THREADRIPPER" in p:
+            score = max(score, 92)
+        return max(0, min(100, score))
+
+    if "M4" in p:
+        return 92 if "MAX" in p or "PRO" in p else 84
+    if "M3" in p:
+        return 88 if "MAX" in p or "PRO" in p else 78
+    if "M2" in p:
+        return 80 if "MAX" in p or "PRO" in p else 70
+    if "M1" in p:
+        return 72 if "MAX" in p or "PRO" in p else 62
+
     if "XEON" in p:
+        if re.search(r"\b(W-[23]\d{3}|SILVER|GOLD|PLATINUM)\b", p):
+            return 58
         return 35
     return 30
 
@@ -194,14 +241,24 @@ def score_cpu(proc: Optional[str]) -> int:
 def score_gpu(gpu: Optional[str]) -> int:
     if not gpu:
         return 10
-    g = str(gpu).upper().replace(" ", "").strip()
-    if "NO GRAPHIC" in g or g == "" or "NO GPU" in g:
+    g = re.sub(r"\s+", " ", str(gpu).upper().replace(" ", " ").replace("®", "").replace("™", " ")).strip()
+    if "NO GRAPHIC" in g or g == "" or "NO GPU" in g or "INTEGRATED" in g or "UHD" in g:
         return 5
     table = [
-        ("RTX 5090", 100), ("RTX 5080", 97), ("RTX 5070", 90), ("RTX 5060", 80),
-        ("RTX 4090", 98), ("RTX 4080", 93), ("RTX 4070", 85), ("RTX 4060", 75),
+        ("RTX 5090", 100), ("RTX 5080", 97), ("RTX 5070", 90), ("RTX 5060", 82),
+        ("RTX 4090", 98), ("RTX 4080", 93), ("RTX 4070", 87), ("RTX 4060", 76),
     ]
     for token, value in table:
+        if token in g:
+            if "TI" in g or "SUPER" in g:
+                return min(100, value + 4)
+            return value
+    quadro_table = [
+        ("RTX A6000", 95), ("RTX A5000", 88), ("RTX A4500", 84), ("RTX A4000", 78),
+        ("RTX A3000", 68), ("RTX A2000", 58), ("QUADRO RTX 6000", 88),
+        ("QUADRO RTX 5000", 80), ("QUADRO RTX 4000", 70), ("T1000", 38), ("T600", 28),
+    ]
+    for token, value in quadro_table:
         if token in g:
             return value
     if "RTX 3090" in g or "RTX 3080" in g:
@@ -232,6 +289,27 @@ def score_gpu(gpu: Optional[str]) -> int:
         return 20
     if "QUADRO" in g:
         return 45
+    radeon = re.search(r"(?:RX|RADEON)\s*(\d{4})", g)
+    if radeon:
+        model = int(radeon.group(1))
+        if model >= 7900:
+            return 90
+        if model >= 7800:
+            return 82
+        if model >= 7700:
+            return 74
+        if model >= 6800:
+            return 78
+        if model >= 6700:
+            return 68
+        if model >= 6600:
+            return 58
+        if model >= 580:
+            return 34
+    if "IRIS XE" in g:
+        return 18
+    if "VEGA" in g:
+        return 16
     return 25
 
 

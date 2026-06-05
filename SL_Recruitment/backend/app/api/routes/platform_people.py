@@ -384,6 +384,7 @@ async def bulk_upload_people(
         errors=[],
         warnings=[],
     )
+    _clear_duplicate_uploaded_personal_ids(rows, result.warnings)
     if not rows:
         return result
 
@@ -399,7 +400,7 @@ async def bulk_upload_people(
         )
 
     existing_people = await _load_existing_people(session, rows)
-    by_person_id, by_person_code, by_email = _build_people_maps(existing_people)
+    by_person_id, by_person_code, by_email, by_personal_id = _build_people_maps(existing_people)
     by_external_employee_code = await _load_external_employee_identity_map(
         session=session,
         by_person_id=by_person_id,
@@ -410,6 +411,7 @@ async def bulk_upload_people(
     used_ids.discard("")
     unresolved_manager_count = 0
     pending_manager_assignments: list[_PendingManagerAssignment] = []
+    pending_personal_ids: dict[str, int] = {}
 
     for row in rows:
         normalized = row.normalized
@@ -471,7 +473,16 @@ async def bulk_upload_people(
                 updates.pop("person_id", None)
                 patch = _build_safe_update_payload(existing, updates)
                 patch.pop("manager_id", None)
-                _assert_no_update_conflicts(existing, patch, by_person_code, by_email)
+                _guard_pending_personal_id(
+                    patch,
+                    pending_personal_ids=pending_personal_ids,
+                    row_number=row_number,
+                    warnings=result.warnings,
+                    person_id=existing.person_id,
+                    person_code=person_code,
+                    email=email,
+                )
+                _assert_no_update_conflicts(existing, patch, by_person_code, by_email, by_personal_id)
                 if not patch:
                     _refresh_external_employee_identity_map(
                         person=existing,
@@ -505,6 +516,7 @@ async def bulk_upload_people(
                     by_person_id=by_person_id,
                     by_person_code=by_person_code,
                     by_email=by_email,
+                    by_personal_id=by_personal_id,
                 )
                 _refresh_external_employee_identity_map(
                     person=existing,
@@ -552,7 +564,16 @@ async def bulk_upload_people(
                 raise ValueError(f"person_id '{person_id}' already exists")
             create_payload["person_id"] = person_id
 
-            _assert_no_create_conflicts(create_payload, by_person_code, by_email)
+            _guard_pending_personal_id(
+                create_payload,
+                pending_personal_ids=pending_personal_ids,
+                row_number=row_number,
+                warnings=result.warnings,
+                person_id=person_id,
+                person_code=uploaded_person_code,
+                email=email,
+            )
+            _assert_no_create_conflicts(create_payload, by_person_code, by_email, by_personal_id)
             person = DimPerson(**create_payload)
             if person.created_at is None:
                 person.created_at = datetime.utcnow()
@@ -565,6 +586,7 @@ async def bulk_upload_people(
                 by_person_id=by_person_id,
                 by_person_code=by_person_code,
                 by_email=by_email,
+                by_personal_id=by_personal_id,
             )
             _refresh_external_employee_identity_map(
                 person=person,
@@ -662,6 +684,7 @@ async def _replace_all_people(
     staged_by_person_id: dict[str, DimPerson] = {}
     staged_by_person_code: dict[str, DimPerson] = {}
     staged_by_email: dict[str, DimPerson] = {}
+    staged_by_personal_id: dict[str, DimPerson] = {}
     staged_manager_tokens: dict[str, str] = {}
     staged_row_by_person_id: dict[str, int] = {}
 
@@ -731,6 +754,7 @@ async def _replace_all_people(
                 by_person_id=staged_by_person_id,
                 by_person_code=staged_by_person_code,
                 by_email=staged_by_email,
+                by_personal_id=staged_by_personal_id,
             )
             person = DimPerson(**create_payload)
             staged_people.append(person)
@@ -749,6 +773,9 @@ async def _replace_all_people(
             email_key = _normalize_email(person.email)
             if email_key:
                 staged_by_email[email_key] = person
+            personal_id_key = _normalize_personal_id(person.personal_id)
+            if personal_id_key:
+                staged_by_personal_id[personal_id_key] = person
             staged_row_by_person_id[person.person_id] = row_number
         except Exception as exc:
             result.conflicts += 1
@@ -869,16 +896,20 @@ def _assert_no_replace_staging_conflicts(
     by_person_id: dict[str, DimPerson],
     by_person_code: dict[str, DimPerson],
     by_email: dict[str, DimPerson],
+    by_personal_id: dict[str, DimPerson],
 ) -> None:
     person_id = _normalize_text(payload.get("person_id"))
     person_code = _normalize_text(payload.get("person_code")).lower()
     email = _normalize_email(payload.get("email"))
+    personal_id = _normalize_personal_id(payload.get("personal_id"))
     if person_id and person_id in by_person_id:
         raise ValueError(f"person_id '{person_id}' is duplicated in upload.")
     if person_code and person_code in by_person_code:
         raise ValueError(f"person_code '{person_code}' is duplicated in upload.")
     if email and email in by_email:
         raise ValueError(f"email '{email}' is duplicated in upload.")
+    if personal_id and personal_id in by_personal_id:
+        raise ValueError(f"personal_id '{personal_id}' is duplicated in upload.")
 
 
 def _derive_is_deleted_from_status(status_value: Any) -> int:
@@ -1166,10 +1197,16 @@ async def _load_existing_people(session: AsyncSession, rows: list[_BulkRow]) -> 
 
 def _build_people_maps(
     people: list[DimPerson],
-) -> tuple[dict[str, list[DimPerson]], dict[str, list[DimPerson]], dict[str, list[DimPerson]]]:
+) -> tuple[
+    dict[str, list[DimPerson]],
+    dict[str, list[DimPerson]],
+    dict[str, list[DimPerson]],
+    dict[str, list[DimPerson]],
+]:
     by_person_id: dict[str, list[DimPerson]] = {}
     by_person_code: dict[str, list[DimPerson]] = {}
     by_email: dict[str, list[DimPerson]] = {}
+    by_personal_id: dict[str, list[DimPerson]] = {}
     for person in people:
         by_person_id.setdefault((person.person_id or "").strip(), []).append(person)
         code = (person.person_code or "").strip()
@@ -1178,7 +1215,10 @@ def _build_people_maps(
         email = _normalize_email(person.email)
         if email:
             by_email.setdefault(email, []).append(person)
-    return by_person_id, by_person_code, by_email
+        personal_id = _normalize_personal_id(person.personal_id)
+        if personal_id:
+            by_personal_id.setdefault(personal_id, []).append(person)
+    return by_person_id, by_person_code, by_email, by_personal_id
 
 
 async def _load_external_employee_identity_map(
@@ -1344,6 +1384,7 @@ def _assert_no_update_conflicts(
     patch: dict[str, Any],
     by_person_code: dict[str, list[DimPerson]],
     by_email: dict[str, list[DimPerson]],
+    by_personal_id: dict[str, list[DimPerson]],
 ) -> None:
     new_code = _normalize_text(patch.get("person_code"))
     if new_code:
@@ -1355,19 +1396,82 @@ def _assert_no_update_conflicts(
         for person in by_email.get(new_email, []):
             if person.person_id != existing.person_id:
                 raise ValueError(f"email '{new_email}' is already used by another person.")
+    new_personal_id = _normalize_personal_id(patch.get("personal_id"))
+    if new_personal_id:
+        for person in by_personal_id.get(new_personal_id, []):
+            if person.person_id != existing.person_id:
+                raise ValueError(f"personal_id '{new_personal_id}' is already used by another person.")
 
 
 def _assert_no_create_conflicts(
     payload: dict[str, Any],
     by_person_code: dict[str, list[DimPerson]],
     by_email: dict[str, list[DimPerson]],
+    by_personal_id: dict[str, list[DimPerson]],
 ) -> None:
     person_code = _normalize_text(payload.get("person_code"))
     email = _normalize_email(payload.get("email"))
+    personal_id = _normalize_personal_id(payload.get("personal_id"))
     if person_code and by_person_code.get(person_code.lower()):
         raise ValueError(f"person_code '{person_code}' already exists.")
     if email and by_email.get(email):
         raise ValueError(f"email '{email}' already exists.")
+    if personal_id and by_personal_id.get(personal_id):
+        raise ValueError(f"personal_id '{personal_id}' already exists.")
+
+
+def _clear_duplicate_uploaded_personal_ids(rows: list[_BulkRow], warnings: list[BulkUploadWarning]) -> None:
+    seen: dict[str, int] = {}
+    for row in rows:
+        personal_id = _normalize_personal_id(row.normalized.get("personal_id"))
+        if not personal_id:
+            continue
+        first_row = seen.get(personal_id)
+        if first_row is not None:
+            row.normalized.pop("personal_id", None)
+            warnings.append(
+                BulkUploadWarning(
+                    row=row.row_number,
+                    message=(
+                        f"Duplicate personal_id '{personal_id}' also appears on row {first_row}. "
+                        "This row's personal_id was ignored to keep dim_person unique."
+                    ),
+                )
+            )
+            continue
+        seen[personal_id] = row.row_number
+
+
+def _guard_pending_personal_id(
+    payload: dict[str, Any],
+    *,
+    pending_personal_ids: dict[str, int],
+    row_number: int,
+    warnings: list[BulkUploadWarning],
+    person_id: str | None,
+    person_code: str | None,
+    email: str | None,
+) -> None:
+    personal_id = _normalize_personal_id(payload.get("personal_id"))
+    if not personal_id:
+        return
+    first_row = pending_personal_ids.get(personal_id)
+    if first_row is not None:
+        payload.pop("personal_id", None)
+        warnings.append(
+            BulkUploadWarning(
+                row=row_number,
+                message=(
+                    f"Duplicate pending personal_id '{personal_id}' also appears on row {first_row}. "
+                    "This row's personal_id was ignored to avoid a database unique-key failure."
+                ),
+                person_id=person_id,
+                person_code=person_code,
+                email=email,
+            )
+        )
+        return
+    pending_personal_ids[personal_id] = row_number
 
 
 def _refresh_person_maps(
@@ -1376,8 +1480,9 @@ def _refresh_person_maps(
     by_person_id: dict[str, list[DimPerson]],
     by_person_code: dict[str, list[DimPerson]],
     by_email: dict[str, list[DimPerson]],
+    by_personal_id: dict[str, list[DimPerson]],
 ) -> None:
-    for mapping in (by_person_code, by_email):
+    for mapping in (by_person_code, by_email, by_personal_id):
         for key in list(mapping.keys()):
             mapping[key] = [item for item in mapping[key] if item.person_id != person.person_id]
             if not mapping[key]:
@@ -1389,6 +1494,9 @@ def _refresh_person_maps(
     email = _normalize_email(person.email)
     if email:
         by_email.setdefault(email, []).append(person)
+    personal_id = _normalize_personal_id(person.personal_id)
+    if personal_id:
+        by_personal_id.setdefault(personal_id, []).append(person)
 
 
 def _refresh_external_employee_identity_map(
@@ -1480,6 +1588,11 @@ async def create_person(
     session: AsyncSession = Depends(get_platform_session),
     _user: UserContext = Depends(require_superadmin()),
 ):
+    create_payload = _coerce_payload(payload.model_dump(exclude={"person_id"}))
+    personal_id = _normalize_personal_id(create_payload.get("personal_id"))
+    if personal_id:
+        await _assert_personal_id_available(session, personal_id)
+
     person_id = (payload.person_id or "").strip() or None
     if person_id and person_id.isdigit():
         person_id = None
@@ -1488,7 +1601,7 @@ async def create_person(
     existing = await session.get(DimPerson, person_id)
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="person_id already exists")
-    person = DimPerson(**payload.model_dump(exclude={"person_id"}), person_id=person_id)
+    person = DimPerson(**create_payload, person_id=person_id)
     if person.created_at is None:
         person.created_at = datetime.utcnow()
     if person.updated_at is None:
@@ -1511,6 +1624,9 @@ async def update_person(
     if not person:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
     updates = _clean_update_payload(payload)
+    personal_id = _normalize_personal_id(updates.get("personal_id"))
+    if personal_id:
+        await _assert_personal_id_available(session, personal_id, exclude_person_id=person_id)
     for key, value in updates.items():
         setattr(person, key, value)
     if "updated_at" not in updates:
@@ -1547,6 +1663,26 @@ async def _role_meta(session: AsyncSession, role_id: int | None) -> tuple[str | 
     if not row:
         return None, None
     return row[0], row[1]
+
+
+async def _assert_personal_id_available(
+    session: AsyncSession,
+    personal_id: str,
+    *,
+    exclude_person_id: str | None = None,
+) -> None:
+    normalized = _normalize_personal_id(personal_id)
+    if not normalized:
+        return
+    filters = [func.upper(func.replace(DimPerson.personal_id, " ", "")) == normalized]
+    if exclude_person_id:
+        filters.append(DimPerson.person_id != exclude_person_id)
+    existing = (await session.execute(select(DimPerson.person_id).where(*filters).limit(1))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"personal_id '{normalized}' is already used by another person.",
+        )
 
 
 def _person_out(person: DimPerson, role_code: str | None, role_name: str | None) -> PlatformPersonOut:
@@ -1593,6 +1729,13 @@ def _normalize_text(value: object) -> str:
 def _normalize_email(value: object) -> str:
     text = _normalize_text(value)
     return text.lower() if text else ""
+
+
+def _normalize_personal_id(value: object) -> str:
+    text = _normalize_text(value)
+    if not text or _is_nullish_text(text):
+        return ""
+    return re.sub(r"\s+", "", text).upper()
 
 
 def _is_nullish_text(value: str) -> bool:
@@ -1692,6 +1835,8 @@ def _coerce_payload(payload: dict) -> dict:
             out[key] = _parse_date(value, key)
         elif key in {"created_at", "updated_at"}:
             out[key] = _parse_datetime(value, key)
+        elif key == "personal_id":
+            out[key] = _normalize_personal_id(value) or None
         else:
             if value is None:
                 out[key] = None

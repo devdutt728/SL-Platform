@@ -29,4 +29,58 @@ if not defined WORKBOOK_BUILD_ERR_LOG set "WORKBOOK_BUILD_ERR_LOG=%LOGDIR%\workb
 
 title SLP Live Logs
 
-powershell -NoExit -Command "& { $streams = @(@{Name='IT-BACKEND';File='%IT_BACKEND_LOG%';Color='Cyan'},@{Name='IT-BACKEND-ERR';File='%IT_BACKEND_ERR_LOG%';Color='Red'},@{Name='REC-BACKEND';File='%REC_BACKEND_LOG%';Color='Magenta'},@{Name='REC-BACKEND-ERR';File='%REC_BACKEND_ERR_LOG%';Color='Red'},@{Name='IT-FRONTEND';File='%IT_FRONTEND_LOG%';Color='Green'},@{Name='IT-FRONTEND-ERR';File='%IT_FRONTEND_ERR_LOG%';Color='Red'},@{Name='REC-FRONTEND';File='%REC_FRONTEND_LOG%';Color='Green'},@{Name='REC-FRONTEND-ERR';File='%REC_FRONTEND_ERR_LOG%';Color='Red'},@{Name='WORKBOOK';File='%WORKBOOK_LOG%';Color='Yellow'},@{Name='WORKBOOK-ERR';File='%WORKBOOK_ERR_LOG%';Color='Red'},@{Name='BUILD-IT';File='%IT_FRONTEND_BUILD_LOG%';Color='Gray'},@{Name='BUILD-IT-ERR';File='%IT_FRONTEND_BUILD_ERR_LOG%';Color='Red'},@{Name='BUILD-REC';File='%REC_FRONTEND_BUILD_LOG%';Color='Gray'},@{Name='BUILD-REC-ERR';File='%REC_FRONTEND_BUILD_ERR_LOG%';Color='Red'},@{Name='BUILD-WB';File='%WORKBOOK_BUILD_LOG%';Color='Gray'},@{Name='BUILD-WB-ERR';File='%WORKBOOK_BUILD_ERR_LOG%';Color='Red'},@{Name='CADDY';File='%CADDY_LOG%';Color='Blue'},@{Name='CADDY-ERR';File='%CADDY_ERR_LOG%';Color='Red'}); foreach ($s in $streams) { if (-not (Test-Path $s.File)) { New-Item -ItemType File -Force -Path $s.File | Out-Null } }; Write-Host 'Studio Lotus Platform - Live Logs' -ForegroundColor White; Write-Host 'Press Ctrl+C to close.' -ForegroundColor DarkGray; $readers = @(); foreach ($s in $streams) { $fs = [System.IO.File]::Open($s.File, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite); $sr = New-Object System.IO.StreamReader($fs); $sr.BaseStream.Seek(0, [System.IO.SeekOrigin]::End) | Out-Null; $readers += @{ Stream = $s; Reader = $sr } }; while ($true) { foreach ($entry in $readers) { $stream = $entry.Stream; $reader = $entry.Reader; while (-not $reader.EndOfStream) { $line = $reader.ReadLine(); if ($null -ne $line) { $ts = (Get-Date).ToString('HH:mm:ss'); Write-Host \"[$ts][$($stream.Name)] $line\" -ForegroundColor $stream.Color } } }; Start-Sleep -Milliseconds 250 } }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$stopSignal = '%LOGDIR%\stop-live-logs.signal';" ^
+  "if (Test-Path -LiteralPath $stopSignal) { Remove-Item -LiteralPath $stopSignal -Force };" ^
+  "$streams = @(" ^
+  "  @{Name='IT-BACKEND';File='%IT_BACKEND_LOG%';Color='Cyan'}," ^
+  "  @{Name='IT-BACKEND-ERR';File='%IT_BACKEND_ERR_LOG%';Color='Red'}," ^
+  "  @{Name='REC-BACKEND';File='%REC_BACKEND_LOG%';Color='Magenta'}," ^
+  "  @{Name='REC-BACKEND-ERR';File='%REC_BACKEND_ERR_LOG%';Color='Red'}," ^
+  "  @{Name='IT-FRONTEND';File='%IT_FRONTEND_LOG%';Color='Green'}," ^
+  "  @{Name='IT-FRONTEND-ERR';File='%IT_FRONTEND_ERR_LOG%';Color='Red'}," ^
+  "  @{Name='REC-FRONTEND';File='%REC_FRONTEND_LOG%';Color='Green'}," ^
+  "  @{Name='REC-FRONTEND-ERR';File='%REC_FRONTEND_ERR_LOG%';Color='Red'}," ^
+  "  @{Name='WORKBOOK';File='%WORKBOOK_LOG%';Color='Yellow'}," ^
+  "  @{Name='WORKBOOK-ERR';File='%WORKBOOK_ERR_LOG%';Color='Red'}," ^
+  "  @{Name='BUILD-IT';File='%IT_FRONTEND_BUILD_LOG%';Color='Gray'}," ^
+  "  @{Name='BUILD-IT-ERR';File='%IT_FRONTEND_BUILD_ERR_LOG%';Color='Red'}," ^
+  "  @{Name='BUILD-REC';File='%REC_FRONTEND_BUILD_LOG%';Color='Gray'}," ^
+  "  @{Name='BUILD-REC-ERR';File='%REC_FRONTEND_BUILD_ERR_LOG%';Color='Red'}," ^
+  "  @{Name='BUILD-WB';File='%WORKBOOK_BUILD_LOG%';Color='Gray'}," ^
+  "  @{Name='BUILD-WB-ERR';File='%WORKBOOK_BUILD_ERR_LOG%';Color='Red'}," ^
+  "  @{Name='CADDY';File='%CADDY_LOG%';Color='Blue'}," ^
+  "  @{Name='CADDY-ERR';File='%CADDY_ERR_LOG%';Color='Red'}" ^
+  ");" ^
+  "foreach ($s in $streams) { if (-not (Test-Path -LiteralPath $s.File)) { New-Item -ItemType File -Force -Path $s.File | Out-Null } };" ^
+  "Write-Host 'Studio Lotus Platform - Live Logs' -ForegroundColor White;" ^
+  "Write-Host 'Press Ctrl+C to close. This window auto-closes when stop.bat or stop-all.cmd runs.' -ForegroundColor DarkGray;" ^
+  "$readers = @();" ^
+  "try {" ^
+  "  foreach ($s in $streams) {" ^
+  "    $fs = [System.IO.File]::Open($s.File, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite);" ^
+  "    $sr = New-Object System.IO.StreamReader($fs);" ^
+  "    $sr.BaseStream.Seek(0, [System.IO.SeekOrigin]::End) | Out-Null;" ^
+  "    $readers += @{ Stream = $s; Reader = $sr; FileStream = $fs }" ^
+  "  };" ^
+  "  while (-not (Test-Path -LiteralPath $stopSignal)) {" ^
+  "    foreach ($entry in $readers) {" ^
+  "      $stream = $entry.Stream;" ^
+  "      $reader = $entry.Reader;" ^
+  "      while (-not $reader.EndOfStream) {" ^
+  "        $line = $reader.ReadLine();" ^
+  "        if ($null -ne $line) {" ^
+  "          $ts = (Get-Date).ToString('HH:mm:ss');" ^
+  "          Write-Host \"[$ts][$($stream.Name)] $line\" -ForegroundColor $stream.Color" ^
+  "        }" ^
+  "      }" ^
+  "    };" ^
+  "    Start-Sleep -Milliseconds 250" ^
+  "  };" ^
+  "  Write-Host 'Stop signal received. Closing live logs...' -ForegroundColor DarkGray" ^
+  "} finally {" ^
+  "  foreach ($entry in $readers) {" ^
+  "    try { $entry.Reader.Close() } catch {};" ^
+  "    try { $entry.FileStream.Close() } catch {}" ^
+  "  }" ^
+  "}"
