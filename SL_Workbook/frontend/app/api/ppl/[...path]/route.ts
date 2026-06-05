@@ -33,13 +33,51 @@ function stringHeader(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+type CachedPeopleHeaders = {
+  expiresAt: number;
+  headers: Record<string, string>;
+};
+
+const PEOPLE_HEADER_CACHE_TTL_MS = 60_000;
+const peopleHeaderCache = new Map<string, CachedPeopleHeaders>();
+
+function authCacheKey(auth: Record<string, string>) {
+  return auth.authorization || auth["x-slp-session"] || "";
+}
+
+function timeoutSignal(ms: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ms);
+  return {
+    signal: controller.signal,
+    clear: () => clearTimeout(timeout),
+  };
+}
+
 async function verifiedPeopleHeaders(auth: Record<string, string>): Promise<Record<string, string> | NextResponse> {
   if (!auth.authorization) return {};
 
-  const res = await fetch(backendUrl("/auth/me"), {
-    headers: auth,
-    cache: "no-store",
-  });
+  const cacheKey = authCacheKey(auth);
+  const cached = cacheKey ? peopleHeaderCache.get(cacheKey) : undefined;
+  if (cached && cached.expiresAt > Date.now()) return cached.headers;
+
+  const timeout = timeoutSignal(5_000);
+  let res: Response;
+  try {
+    res = await fetch(backendUrl("/auth/me"), {
+      headers: auth,
+      cache: "no-store",
+      signal: timeout.signal,
+    });
+  } catch (error) {
+    const detail = error instanceof Error && error.name === "AbortError"
+      ? "Authentication check timed out"
+      : "Authentication check failed";
+    return NextResponse.json({ detail }, { status: 504 });
+  } finally {
+    timeout.clear();
+  }
+
   if (!res.ok) {
     const body = await res.arrayBuffer();
     const contentType = res.headers.get("content-type") || "application/json";
@@ -59,6 +97,12 @@ async function verifiedPeopleHeaders(auth: Record<string, string>): Promise<Reco
   if (name) headers["x-user-name"] = name;
   if (personId) headers["x-user-person-id"] = personId;
   if (isSuperadminPayload(payload)) headers["x-platform-superadmin"] = "1";
+  if (cacheKey) {
+    peopleHeaderCache.set(cacheKey, {
+      expiresAt: Date.now() + PEOPLE_HEADER_CACHE_TTL_MS,
+      headers,
+    });
+  }
   return headers;
 }
 
@@ -81,12 +125,24 @@ async function forward(request: Request, path: string[]) {
   const hasBody = method !== "GET" && method !== "HEAD" && method !== "DELETE";
   const body = hasBody ? await request.arrayBuffer() : undefined;
 
-  const res = await fetch(target, {
-    method,
-    headers,
-    body: body && body.byteLength ? body : undefined,
-    cache: "no-store",
-  });
+  const timeout = timeoutSignal(20_000);
+  let res: Response;
+  try {
+    res = await fetch(target, {
+      method,
+      headers,
+      body: body && body.byteLength ? body : undefined,
+      cache: "no-store",
+      signal: timeout.signal,
+    });
+  } catch (error) {
+    const detail = error instanceof Error && error.name === "AbortError"
+      ? "People backend request timed out"
+      : "People backend request failed";
+    return NextResponse.json({ detail }, { status: 504 });
+  } finally {
+    timeout.clear();
+  }
 
   // Pass through binary (Excel export) and JSON alike.
   const buf = await res.arrayBuffer();

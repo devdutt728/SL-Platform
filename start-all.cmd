@@ -102,7 +102,7 @@ if "%ENABLE_PROJECT_PLANNER%"=="1" if exist "%PLANNER_FRONTEND_DIR%" (
   call :spawn "%PLANNER_FRONTEND_DIR%" "npm run dev" "%PLANNER_FRONTEND_OUT%" "%PLANNER_FRONTEND_ERR%" "PORT=3004"
 )
 if "%ENABLE_PEOPLE_MODULE%"=="1" if exist "%PEOPLE_BACKEND_DIR%" (
-  call :spawn "%PEOPLE_BACKEND_DIR%" "python -m uvicorn app.main:app --reload --port 8005" "%PEOPLE_BACKEND_OUT%" "%PEOPLE_BACKEND_ERR%"
+  call :spawn "%PEOPLE_BACKEND_DIR%" "python -m uvicorn app.main:app --reload --port 8004" "%PEOPLE_BACKEND_OUT%" "%PEOPLE_BACKEND_ERR%"
 )
 
 if exist "%ROOT%\tools\caddy.exe" (

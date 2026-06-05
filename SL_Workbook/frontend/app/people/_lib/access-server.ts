@@ -1,5 +1,6 @@
 import { authHeaderFromCookie } from "@/lib/auth-server";
 import { backendUrl } from "@/lib/backend";
+import { cache } from "react";
 
 type UserSummary = {
   display_name?: string;
@@ -29,7 +30,7 @@ function normaliseRole(value: unknown) {
   return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
-async function fetchCurrentUser(): Promise<UserSummary | null> {
+const fetchCurrentUser = cache(async (): Promise<UserSummary | null> => {
   try {
     const res = await fetch(backendUrl("/auth/me"), {
       headers: await authHeaderFromCookie(),
@@ -58,7 +59,7 @@ async function fetchCurrentUser(): Promise<UserSummary | null> {
   } catch {
     return null;
   }
-}
+});
 
 export async function isPeopleSuperadmin() {
   const user = await fetchCurrentUser();

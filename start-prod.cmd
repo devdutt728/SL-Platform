@@ -167,7 +167,7 @@ if "%ENABLE_PROJECT_PLANNER%"=="1" if exist "%PLANNER_FRONTEND_DIR%" (
 )
 if "%ENABLE_PEOPLE_MODULE%"=="1" if exist "%PEOPLE_BACKEND_DIR%" (
   echo [%DATE% %TIME%] spawn people-backend>> "%TRACE_LOG%"
-  call :spawn "%PEOPLE_BACKEND_DIR%" "python -m uvicorn app.main:app --host 127.0.0.1 --port 8005 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1" "%PEOPLE_BACKEND_OUT%" "%PEOPLE_BACKEND_ERR%"
+  call :spawn "%PEOPLE_BACKEND_DIR%" "python -m uvicorn app.main:app --host 127.0.0.1 --port 8004 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1" "%PEOPLE_BACKEND_OUT%" "%PEOPLE_BACKEND_ERR%"
 )
 
 if exist "%ROOT%\tools\caddy.exe" (
