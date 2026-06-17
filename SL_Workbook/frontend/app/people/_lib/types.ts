@@ -87,7 +87,8 @@ export interface MeResponse {
   person_code: string | null;
   email: string;
   name: string | null;
-  access_level: "view" | "edit" | "admin";
+  access_level: "none" | "view" | "edit" | "publisher" | "admin";
+  is_platform_superadmin: boolean;
 }
 
 export type LicenseHolderKind = "person" | "shared" | "unassigned";
@@ -319,4 +320,34 @@ export interface GroupOverviewResponse {
   items: GroupOverviewItem[];
   tools: string[];
   tiers: string[];
+}
+
+export interface ReconciliationIssue {
+  severity: "critical" | "warning" | "info" | string;
+  module: string;
+  entity_type: string;
+  entity_key: string;
+  person_id: string | null;
+  employee_no: string | null;
+  email: string | null;
+  name: string | null;
+  issue: string;
+  detail: string;
+  correction_point?: string | null;
+  recommended_action: string;
+}
+
+export interface ReconciliationResponse {
+  summary: {
+    total_people: number;
+    org_people: number;
+    systems: number;
+    active_license_assignments: number;
+    peripherals: number;
+    issue_count: number;
+    critical_count: number;
+    warning_count: number;
+    info_count: number;
+  };
+  issues: ReconciliationIssue[];
 }

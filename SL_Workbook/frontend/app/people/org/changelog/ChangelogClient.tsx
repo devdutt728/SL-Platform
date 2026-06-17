@@ -20,7 +20,7 @@ export function ChangelogClient() {
     pplGet<Me>("/auth/me").then(setMe).catch(() => {});
   }, []);
 
-  const isAdmin = me?.access_level === "admin";
+  const isAdmin = me?.access_level === "publisher" || me?.access_level === "admin";
 
   async function toggle(id: string) {
     if (expanded === id) { setExpanded(null); return; }

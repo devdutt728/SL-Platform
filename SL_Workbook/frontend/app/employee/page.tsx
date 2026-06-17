@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { cookies } from "next/headers";
 import { authHeaderFromCookie } from "@/lib/auth-server";
 import { backendUrl } from "@/lib/backend";
@@ -176,7 +177,7 @@ async function probePlannerAccess(): Promise<boolean> {
 }
 
 function peopleBackendUrl(path: string) {
-  const base = process.env.PEOPLE_BACKEND_URL || "http://127.0.0.1:8005";
+  const base = process.env.PEOPLE_BACKEND_URL || "http://127.0.0.1:8004";
   return path.startsWith("/") ? `${base}${path}` : `${base}/${path}`;
 }
 
@@ -194,8 +195,7 @@ async function probePeopleAccess(): Promise<boolean> {
     });
     if (!response.ok) return false;
     const payload = (await response.json()) as Record<string, unknown>;
-    // Any resolved access_level (view/edit/admin) means the module is reachable.
-    return typeof payload?.access_level === "string" && payload.access_level.length > 0;
+    return ["view", "edit", "publisher", "admin"].includes(String(payload?.access_level || ""));
   } catch {
     return false;
   }
@@ -240,16 +240,16 @@ export default async function EmployeeConsolePage() {
           <details className="employee-menu">
             <summary className="public-button public-button--ghost">Apps</summary>
             <div className="employee-menu__panel">
-              <a href="/" className="employee-menu__item">Public portal</a>
-              <a href="/employee" className="employee-menu__item">Workbook</a>
+              <Link href="/" className="employee-menu__item">Public portal</Link>
+              <Link href="/employee" className="employee-menu__item">Workbook</Link>
               {user?.can_access_recruitment ? <a href="/recruitment/dashboard" className="employee-menu__item">Recruitment</a> : null}
-              {user?.can_access_planner ? <a href="/employee/planner" className="employee-menu__item">Project Planner</a> : null}
-              {user?.can_access_people ? <a href="/people" className="employee-menu__item">People &amp; Org</a> : null}
+              {user?.can_access_planner ? <Link href="/employee/planner" className="employee-menu__item">Project Planner</Link> : null}
+              {user?.can_access_people ? <Link href="/people" className="employee-menu__item">People &amp; Org</Link> : null}
             </div>
           </details>
-          <a href="/" className="public-button public-button--ghost">
+          <Link href="/" className="public-button public-button--ghost">
             Public portal
-          </a>
+          </Link>
           <details className="employee-menu">
             <summary className="employee-user">
               <div className="employee-avatar">{initials}</div>

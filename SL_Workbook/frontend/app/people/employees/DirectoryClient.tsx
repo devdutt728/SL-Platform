@@ -11,7 +11,7 @@ import {
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { pplGet, exportUrl } from "../_lib/client";
-import type { EmployeeListItem, EmployeeListResponse } from "../_lib/types";
+import type { EmployeeListItem, EmployeeListResponse, MeResponse } from "../_lib/types";
 import { STATUS_STYLES, formatDate, initialsFrom } from "../_lib/format";
 
 const STATUS_FILTERS = ["working", "relieved", "all"] as const;
@@ -41,6 +41,7 @@ export function DirectoryClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [me, setMe] = useState<MeResponse | null>(null);
 
   // Restore column prefs.
   useEffect(() => {
@@ -58,6 +59,10 @@ export function DirectoryClient() {
       /* ignore */
     }
   }, [columnVisibility]);
+
+  useEffect(() => {
+    pplGet<MeResponse>("/auth/me").then(setMe).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -137,6 +142,7 @@ export function DirectoryClient() {
     [],
   );
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Table intentionally returns table callbacks.
   const table = useReactTable({
     data: rows,
     columns,
@@ -200,9 +206,11 @@ export function DirectoryClient() {
 
         <ColumnToggle table={table} />
 
-        <a href={exportHref} className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">
-          Export Excel
-        </a>
+        {me?.is_platform_superadmin ? (
+          <a href={exportHref} className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">
+            Export Excel
+          </a>
+        ) : null}
       </div>
 
       <div className="flex items-center justify-between text-xs text-slate-500">

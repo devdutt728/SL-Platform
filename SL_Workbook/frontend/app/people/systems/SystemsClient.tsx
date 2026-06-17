@@ -13,7 +13,7 @@ import {
 } from "@tanstack/react-table";
 import { pplDelete, pplGet, pplPatch, pplPost } from "../_lib/client";
 import { DirectoryWarning, PersonCombobox } from "../_components/PersonCombobox";
-import type { SystemGradePreviewResponse, SystemInventoryItem, SystemInventoryListResponse } from "../_lib/types";
+import type { MeResponse, SystemGradePreviewResponse, SystemInventoryItem, SystemInventoryListResponse } from "../_lib/types";
 
 const TIERS = ["Workstation", "Performance", "Standard", "Basic", "Entry"];
 const STATUS_OPTIONS = ["Active", "In Repair", "Faulty", "Retired"];
@@ -76,6 +76,7 @@ export function SystemsClient() {
   const [minRam, setMinRam] = useState("");
   const [minScore, setMinScore] = useState("");
   const [form, setForm] = useState<FormState>(emptySystem);
+  const [me, setMe] = useState<MeResponse | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<SystemInventoryItem | null>(null);
   const [loading, setLoading] = useState(true);
@@ -133,6 +134,10 @@ export function SystemsClient() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
+
+  useEffect(() => {
+    pplGet<MeResponse>("/auth/me").then(setMe).catch(() => {});
+  }, []);
 
   useEffect(() => {
     load();
@@ -372,7 +377,9 @@ export function SystemsClient() {
             />
           </div>
           <ColumnToggle table={table} />
-          <button onClick={() => exportCsv(table)} className="ppl-btn ppl-btn--ghost">Export</button>
+          {me?.is_platform_superadmin ? (
+            <button onClick={() => exportCsv(table)} className="ppl-btn ppl-btn--ghost">Export</button>
+          ) : null}
           <button onClick={() => setShowAdd((v) => !v)} className={`ppl-btn ${showAdd ? "ppl-btn--active" : "ppl-btn--primary"}`}>
             {showAdd ? "Close" : "Add system"}
           </button>
@@ -663,9 +670,9 @@ function EditDrawer({
     <AnimatePresence>
       {system ? (
         <>
-          <motion.div className="fixed inset-0 z-40 bg-black/20" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
+          <motion.div className="fixed inset-0 z-50 bg-black/20" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
           <motion.aside
-            className="fixed right-0 top-0 z-50 flex h-full w-full max-w-xl flex-col bg-white shadow-2xl"
+            className="fixed right-0 top-0 z-[60] flex h-full w-full max-w-xl flex-col bg-white shadow-2xl"
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}

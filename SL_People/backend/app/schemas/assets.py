@@ -240,3 +240,35 @@ class GroupOverviewResponse(BaseModel):
     items: list[GroupOverviewItem]
     tools: list[str]
     tiers: list[str]
+
+
+class ReconciliationIssue(BaseModel):
+    severity: str
+    module: str
+    entity_type: str
+    entity_key: str
+    person_id: Optional[str] = None
+    employee_no: Optional[str] = None
+    email: Optional[str] = None
+    name: Optional[str] = None
+    issue: str
+    detail: str
+    correction_point: Optional[str] = None
+    recommended_action: str
+
+
+class ReconciliationSummary(BaseModel):
+    total_people: int = 0
+    org_people: int = 0
+    systems: int = 0
+    active_license_assignments: int = 0
+    peripherals: int = 0
+    issue_count: int = 0
+    critical_count: int = 0
+    warning_count: int = 0
+    info_count: int = 0
+
+
+class ReconciliationResponse(BaseModel):
+    summary: ReconciliationSummary
+    issues: list[ReconciliationIssue]

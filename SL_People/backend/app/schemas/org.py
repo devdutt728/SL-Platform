@@ -20,14 +20,20 @@ class OrgPerson(BaseModel):
     name: str
     email: Optional[str] = None
     title: Optional[str] = None
+    mobile_number: Optional[str] = None
+    department: Optional[str] = None
+    sub_department: Optional[str] = None
+    business_unit: Optional[str] = None
     group_key: str
     group_name: str
     principal: str
+    org_level: Optional[str] = None
     designation_level: Optional[str] = None
     designation_color: Optional[str] = None
     designation_order: Optional[int] = None
     sl_exp_years: Optional[float] = None
     o_exp_years: Optional[float] = None
+    prior_exp_years: Optional[float] = None
     sl_exp_display: str = "—"
     o_exp_display: str = "—"
     license_count: int = 0
@@ -130,6 +136,28 @@ class IncludeRequest(BaseModel):
 class OverrideRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     manager_override_emp: Optional[str] = None
+
+
+class OrgPersonPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    mobile_number: Optional[str] = None
+    title: Optional[str] = None
+    department: Optional[str] = None
+    sub_department: Optional[str] = None
+    business_unit: Optional[str] = None
+    group_key: Optional[str] = None
+    org_level: Optional[str] = None
+    include_in_org: Optional[bool] = None
+    source_manager_emp: Optional[str] = None
+    manager_override_emp: Optional[str] = None
+    designation_level: Optional[str] = None
+    designation_color: Optional[str] = None
+    prior_exp_years: Optional[float] = None
+    image_url: Optional[str] = None
+    notes: Optional[str] = None
 
 
 # ── Drafts ────────────────────────────────────────────────────────────────────

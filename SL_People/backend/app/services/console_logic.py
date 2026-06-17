@@ -427,8 +427,8 @@ def short_name_for(raw: Optional[str]) -> str:
         return "Adobe InDesign"
     if "ACROBAT" in n:
         return "Adobe Acrobat"
-    if "OFFICE 365" in n and "STANDARD" in n:
-        return "MS Office 365 Standard"
-    if "OFFICE 365" in n or "365APP" in n:
+    if ("OFFICE 365" in n or "MICROSOFT 365" in n or "M365" in n) and "STANDARD" in n:
+        return "MS Office 365 Business Standard"
+    if "OFFICE 365" in n or "MICROSOFT 365" in n or "365APP" in n or "M365" in n:
         return "MS Office 365 Apps"
     return str(raw or "").strip()

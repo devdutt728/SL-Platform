@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -13,7 +13,8 @@ from app.api.deps import (
     get_platform_db_session,
     require_platform_superadmin,
 )
-from app.models.people import EmployeeCompliance, EmployeeExt
+from app.models.people import EmployeeCompliance, EmployeeExt, LicenseAssignment, SystemInventory
+from app.models.platform_person import DimPerson
 from app.schemas.employee import (
     AddressPatch,
     AuditLogItem,
@@ -24,6 +25,7 @@ from app.schemas.employee import (
     EmployeeListResponse,
     EmployeeProfile,
     ExitPatch,
+    IdentityPatch,
     PersonalPatch,
     PolicyPatch,
     StatusPatch,
@@ -47,6 +49,13 @@ def _client_ip(request: Request) -> Optional[str]:
     if fwd:
         return fwd.split(",")[0].strip()
     return request.client.host if request.client else None
+
+
+def _split_name(full_name: str) -> tuple[str, str | None]:
+    parts = [p for p in full_name.strip().split() if p]
+    if not parts:
+        return "", None
+    return parts[0], " ".join(parts[1:]) or None
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -256,6 +265,75 @@ async def _load_ext(db: AsyncSession, employee_id: str) -> EmployeeExt:
 
 
 # ── PATCH sections ────────────────────────────────────────────────────────────
+@router.patch("/{employee_id}/identity")
+async def patch_identity(
+    employee_id: str, body: IdentityPatch, request: Request,
+    user: UserContext = Depends(require_platform_superadmin),
+    db: AsyncSession = Depends(get_db_session),
+    platform: AsyncSession = Depends(get_platform_db_session),
+) -> dict:
+    ext = await _load_ext(db, employee_id)
+    if not ext.person_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee is not linked to platform identity")
+    person = await platform.get(DimPerson, ext.person_id)
+    if not person:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Platform person not found")
+
+    changes = body.model_dump(exclude_unset=True)
+    if "full_name" in changes and changes["full_name"]:
+        first, last = _split_name(str(changes["full_name"]))
+        changes.setdefault("first_name", first)
+        changes.setdefault("last_name", last)
+        changes.setdefault("display_name", changes["full_name"])
+    if "email" in changes and changes["email"] is not None:
+        changes["email"] = str(changes["email"]).strip().lower()
+        if changes["email"]:
+            existing = (
+                await platform.execute(
+                    select(DimPerson.person_id).where(
+                        func.lower(DimPerson.email) == changes["email"],
+                        DimPerson.person_id != person.person_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already belongs to another person")
+
+    current = {field: getattr(person, field, None) for field in changes}
+    diffs = audit_service.diff_fields(current, changes)
+    if not diffs:
+        return {"updated_fields": 0}
+
+    old_email = (person.email or "").strip().lower()
+    for field, value in changes.items():
+        setattr(person, field, value)
+
+    new_email = str(changes.get("email") or "").strip().lower()
+    if new_email and new_email != old_email:
+        await db.execute(
+            LicenseAssignment.__table__.update()
+            .where(func.lower(LicenseAssignment.work_email) == old_email)
+            .values(work_email=new_email)
+        )
+        await db.execute(
+            SystemInventory.__table__.update()
+            .where(func.lower(SystemInventory.assigned_email) == old_email)
+            .values(assigned_email=new_email)
+        )
+
+    count = audit_service.record_changes(
+        db,
+        employee_id=employee_id,
+        section="identity",
+        diffs=diffs,
+        performed_by_person_id=user.person_id_platform or user.email,
+        ip_address=_client_ip(request),
+    )
+    await platform.commit()
+    await db.commit()
+    return {"updated_fields": count}
+
+
 @router.patch("/{employee_id}/profile")
 async def patch_profile(
     employee_id: str, body: PersonalPatch, request: Request,

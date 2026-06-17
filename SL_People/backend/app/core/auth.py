@@ -74,6 +74,7 @@ async def get_current_user(request: Request) -> UserContext:
             primary_role_id = primary_role_id or 2
             primary_role_code = primary_role_code or "superadmin"
             primary_role_name = primary_role_name or "Superadmin"
+            access_level = AccessLevel.ADMIN
 
         return UserContext(
             user_id=email,
@@ -112,11 +113,11 @@ async def get_current_user(request: Request) -> UserContext:
 def _user_from_trusted_proxy_headers(request: Request, proxy_verified_superadmin: bool) -> UserContext:
     email = request.headers.get("x-user-email") or "demo@example.com"
     full_name = request.headers.get("x-user-name") or email
-    level_header = (request.headers.get("x-people-access") or "admin").strip().lower()
+    level_header = (request.headers.get("x-people-access") or "none").strip().lower()
     try:
         access_level = AccessLevel(level_header)
     except ValueError:
-        access_level = AccessLevel.ADMIN
+        access_level = AccessLevel.NONE
 
     return _user_from_headers(
         email=email,
@@ -134,6 +135,8 @@ def _user_from_headers(
     access_level: AccessLevel,
     proxy_verified_superadmin: bool,
 ) -> UserContext:
+    if proxy_verified_superadmin:
+        access_level = AccessLevel.ADMIN
     role_ids = [2] if proxy_verified_superadmin else None
     role_codes = ["superadmin"] if proxy_verified_superadmin else None
     role_names = ["Superadmin"] if proxy_verified_superadmin else None

@@ -6,7 +6,7 @@ USE sl_people;
 
 CREATE TABLE IF NOT EXISTS people_access_grant (
   person_id    VARCHAR(64) NOT NULL,
-  access_level VARCHAR(20) NOT NULL,  -- view | edit | publisher | admin
+  access_level VARCHAR(20) NOT NULL,  -- none | view | edit | publisher | admin
   granted_by   VARCHAR(64) NULL,
   granted_at   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   notes        TEXT        NULL,

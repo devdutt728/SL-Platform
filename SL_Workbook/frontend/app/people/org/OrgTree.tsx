@@ -97,7 +97,8 @@ export function OrgTree({
     setExpanded((prev) => {
       const next = new Set(prev);
       const wasOpen = next.has(id);
-      wasOpen ? next.delete(id) : next.add(id);
+      if (wasOpen) next.delete(id);
+      else next.add(id);
       // On expand, centre the node so its newly-revealed children land in view.
       if (!wasOpen) centerNode(id);
       return next;

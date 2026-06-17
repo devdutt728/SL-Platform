@@ -9,7 +9,7 @@ import { STATUS_STYLES, initialsFrom } from "../../_lib/format";
 import { Field, type FieldDef } from "../../_components/Field";
 import { AuditSidebar } from "../../_components/AuditSidebar";
 import {
-  ADDRESS_FIELDS, COMPLIANCE_FIELDS, EXIT_FIELDS, PERSONAL_FIELDS, POLICY_FIELDS, WORK_FIELDS,
+  ADDRESS_FIELDS, COMPLIANCE_FIELDS, EXIT_FIELDS, IDENTITY_FIELDS, PERSONAL_FIELDS, POLICY_FIELDS, WORK_FIELDS,
 } from "../../_lib/fields";
 
 type TabKey = "personal" | "work" | "address" | "policy" | "compliance" | "exit";
@@ -55,8 +55,8 @@ export function ProfileClient({ employeeId }: { employeeId: string }) {
     load();
   }, [load]);
 
-  const canEdit = me?.access_level === "edit" || me?.access_level === "admin";
-  const isAdmin = me?.access_level === "admin";
+  const canEdit = me?.is_platform_superadmin || me?.access_level === "edit" || me?.access_level === "publisher" || me?.access_level === "admin";
+  const isAdmin = me?.is_platform_superadmin || me?.access_level === "admin";
 
   if (loading) return <div className="rounded-2xl border border-slate-200 bg-white p-10 text-sm text-slate-400">Loading profile…</div>;
   if (error) return <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">{error}</div>;
@@ -109,6 +109,19 @@ export function ProfileClient({ employeeId }: { employeeId: string }) {
             ) : null}
           </div>
         </div>
+
+        {isAdmin ? (
+          <div className="mt-5">
+            <SectionEditor
+              title="Identity"
+              fields={IDENTITY_FIELDS}
+              data={profile.identity as Record<string, string | boolean | null>}
+              editable={isAdmin}
+              onSave={(changes) => pplPatch(`/employees/${employeeId}/identity`, changes)}
+              onSaved={load}
+            />
+          </div>
+        ) : null}
 
         {/* Tabs */}
         <div className="mt-5 flex flex-wrap gap-1 border-b border-slate-200">
@@ -203,6 +216,7 @@ function SectionEditor({
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
+      <h2 className="mb-4 text-sm font-semibold text-slate-900">{title}</h2>
       {extra}
       <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
         {fields.map((f) => (

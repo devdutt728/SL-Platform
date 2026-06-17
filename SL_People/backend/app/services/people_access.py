@@ -33,7 +33,7 @@ def default_access_for_identity(identity: PlatformIdentity) -> AccessLevel:
         return AccessLevel.ADMIN
     if tokens & EDIT_ROLE_CODES:
         return AccessLevel.EDIT
-    return AccessLevel.VIEW
+    return AccessLevel.NONE
 
 
 async def get_access_grant(session: AsyncSession, person_id: str) -> AccessLevel | None:
@@ -57,8 +57,12 @@ async def resolve_access_level(
     people_session: AsyncSession,
     identity: PlatformIdentity,
 ) -> AccessLevel:
-    """Grant override wins; otherwise fall back to the role-derived default."""
+    """Resolve People access while keeping platform superadmin authoritative."""
+    default = default_access_for_identity(identity)
+    if default == AccessLevel.ADMIN:
+        return default
+
     override = await get_access_grant(people_session, identity.person_id)
     if override is not None:
         return override
-    return default_access_for_identity(identity)
+    return default

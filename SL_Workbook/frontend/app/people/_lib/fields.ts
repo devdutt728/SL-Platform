@@ -1,5 +1,14 @@
 import type { FieldDef } from "../_components/Field";
 
+export const IDENTITY_FIELDS: FieldDef[] = [
+  { key: "full_name", label: "Full Name" },
+  { key: "display_name", label: "Display Name" },
+  { key: "first_name", label: "First Name" },
+  { key: "last_name", label: "Last Name" },
+  { key: "email", label: "Email" },
+  { key: "mobile_number", label: "Mobile" },
+];
+
 export const PERSONAL_FIELDS: FieldDef[] = [
   { key: "middle_name", label: "Middle Name" },
   { key: "personal_email", label: "Personal Email" },

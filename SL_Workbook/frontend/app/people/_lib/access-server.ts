@@ -1,5 +1,6 @@
 import { authHeaderFromCookie } from "@/lib/auth-server";
 import { backendUrl } from "@/lib/backend";
+import { peopleBackendUrl } from "@/lib/people-backend";
 import { cache } from "react";
 
 type UserSummary = {
@@ -13,6 +14,11 @@ type UserSummary = {
   platform_role_names?: string[];
   platform_role_codes?: string[];
   platform_role_ids?: number[];
+};
+
+type PeopleAuthSummary = {
+  access_level?: string;
+  is_platform_superadmin?: boolean;
 };
 
 export type PeopleUser = {
@@ -60,6 +66,28 @@ const fetchCurrentUser = cache(async (): Promise<UserSummary | null> => {
     return null;
   }
 });
+
+const fetchPeopleAuth = cache(async (): Promise<PeopleAuthSummary | null> => {
+  try {
+    const res = await fetch(peopleBackendUrl("/ppl/auth/me"), {
+      headers: await authHeaderFromCookie(),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Record<string, unknown>;
+    return {
+      access_level: asString(data.access_level),
+      is_platform_superadmin: data.is_platform_superadmin === true,
+    };
+  } catch {
+    return null;
+  }
+});
+
+export async function hasPeopleAccess() {
+  const user = await fetchPeopleAuth();
+  return user?.is_platform_superadmin === true || ["view", "edit", "publisher", "admin"].includes(user?.access_level || "");
+}
 
 export async function isPeopleSuperadmin() {
   const user = await fetchCurrentUser();

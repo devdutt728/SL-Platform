@@ -12,16 +12,22 @@ from app.api.deps import (
     get_platform_db_session,
     require_admin,
     require_edit,
+    require_platform_superadmin,
     require_publish,
     require_view,
 )
 from app.models.people import (
+    EmployeeExt,
+    EmployeeWorkInfo,
+    LicenseAssignment,
     OrgChangeLog,
     OrgDraft,
     OrgEmployee,
     OrgGroup,
     OrgPrincipal,
+    SystemInventory,
 )
+from app.models.platform_person import DimPerson
 from app.schemas.org import (
     ChangeLogDetail,
     ChangeLogItem,
@@ -36,6 +42,7 @@ from app.schemas.org import (
     MoveRequest,
     MoveResult,
     OrgLive,
+    OrgPersonPatch,
     OverrideRequest,
     PrincipalInfo,
     PublishRequest,
@@ -44,6 +51,13 @@ from app.schemas.user import UserContext
 from app.services import org as org_service
 
 router = APIRouter(prefix="/ppl/org", tags=["org"])
+
+
+def _split_name(full_name: str) -> tuple[str, str | None]:
+    parts = [p for p in full_name.strip().split() if p]
+    if not parts:
+        return "", None
+    return parts[0], " ".join(parts[1:]) or None
 
 
 def _group_info(g: OrgGroup) -> GroupInfo:
@@ -291,6 +305,135 @@ async def set_override(
     row.updated_by_person_id = user.person_id_platform
     await db.commit()
     return {"employee_no": emp_no, "manager_override_emp": row.manager_override_emp}
+
+
+@router.patch("/employees/{emp_no}/details")
+async def patch_person_details(
+    emp_no: str,
+    body: OrgPersonPatch,
+    user: UserContext = Depends(require_platform_superadmin),
+    db: AsyncSession = Depends(get_db_session),
+    platform: AsyncSession = Depends(get_platform_db_session),
+) -> dict:
+    data = body.model_dump(exclude_unset=True)
+    org_row = (
+        await db.execute(select(OrgEmployee).where(OrgEmployee.employee_no == emp_no))
+    ).scalar_one_or_none()
+    if not org_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not in org")
+
+    person = (
+        await platform.execute(select(DimPerson).where(DimPerson.person_code == emp_no))
+    ).scalar_one_or_none()
+    if not person:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Platform person not found")
+
+    ext = (
+        await db.execute(select(EmployeeExt).where(EmployeeExt.employee_number == emp_no))
+    ).scalar_one_or_none()
+    if not ext:
+        ext = EmployeeExt(
+            employee_number=emp_no,
+            person_id=person.person_id,
+            worker_type=(person.employment_type or "permanent").strip().lower().replace(" ", "_"),
+            employment_status=(person.status or "working").strip().lower().replace(" ", "_"),
+            time_type=(person.time_type or "fulltime").strip().lower().replace(" ", "_"),
+            created_by_person_id=user.person_id_platform or user.email,
+            updated_by_person_id=user.person_id_platform or user.email,
+        )
+        db.add(ext)
+        await db.flush()
+    elif not ext.person_id:
+        ext.person_id = person.person_id
+
+    work = await db.get(EmployeeWorkInfo, ext.id)
+    if not work:
+        work = EmployeeWorkInfo(employee_id=ext.id)
+        db.add(work)
+
+    old_email = (person.email or "").strip().lower()
+
+    if "email" in data and data["email"] is not None:
+        new_email = str(data["email"]).strip().lower()
+        if new_email and new_email != old_email:
+            existing = (
+                await platform.execute(
+                    select(DimPerson.person_id).where(
+                        func.lower(DimPerson.email) == new_email,
+                        DimPerson.person_id != person.person_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already belongs to another person")
+            person.email = new_email
+            await db.execute(
+                LicenseAssignment.__table__.update()
+                .where(func.lower(LicenseAssignment.work_email) == old_email)
+                .values(work_email=new_email)
+            )
+            await db.execute(
+                SystemInventory.__table__.update()
+                .where(func.lower(SystemInventory.assigned_email) == old_email)
+                .values(assigned_email=new_email)
+            )
+
+    if "full_name" in data and data["full_name"] is not None:
+        full_name = str(data["full_name"]).strip()
+        if full_name:
+            first, last = _split_name(full_name)
+            person.full_name = full_name
+            person.display_name = full_name
+            person.first_name = first
+            person.last_name = last
+
+    if "mobile_number" in data:
+        person.mobile_number = data["mobile_number"]
+    if "title" in data:
+        person.job_title = data["title"]
+        if work:
+            work.job_title = data["title"]
+    if "department" in data:
+        person.department = data["department"]
+        if work:
+            work.department = data["department"]
+    if "sub_department" in data:
+        person.sub_department = data["sub_department"]
+        if work:
+            work.sub_department = data["sub_department"]
+    if "business_unit" in data:
+        person.business_unit = data["business_unit"]
+        if work:
+            work.business_unit = data["business_unit"]
+
+    if "group_key" in data and data["group_key"]:
+        group = (
+            await db.execute(select(OrgGroup).where(OrgGroup.group_key == data["group_key"]))
+        ).scalar_one_or_none()
+        if not group:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown group_key")
+        org_row.group_key = group.group_key
+        org_row.principal_name = group.principal_name
+    for key in (
+        "org_level",
+        "include_in_org",
+        "source_manager_emp",
+        "manager_override_emp",
+        "designation_level",
+        "designation_color",
+        "prior_exp_years",
+        "image_url",
+        "notes",
+    ):
+        if key in data:
+            setattr(org_row, key, data[key])
+
+    org_row.updated_at = datetime.utcnow()
+    org_row.updated_by_person_id = user.person_id_platform or user.email
+
+    await platform.commit()
+    await db.commit()
+    return {"updated": True, "employee_no": emp_no}
 
 
 # ── Drafts ────────────────────────────────────────────────────────────────────

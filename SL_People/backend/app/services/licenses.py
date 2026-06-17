@@ -311,11 +311,13 @@ async def list_contracts(
     return [contract_item(row) for row in rows], total
 
 
-def stamp_assignment_defaults(data: dict) -> dict:
+def stamp_assignment_defaults(data: dict, *, default_assigned_on: bool = False) -> dict:
     if data.get("tool_name") and not data.get("tool_short_name"):
         data["tool_short_name"] = short_name_for(data["tool_name"])
     if data.get("work_email"):
         data["work_email"] = _norm_email(data["work_email"])
+    if default_assigned_on and not data.get("assigned_on"):
+        data["assigned_on"] = date.today()
     data["updated_at"] = datetime.utcnow()
     return data
 

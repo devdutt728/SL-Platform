@@ -26,6 +26,7 @@ export async function PeopleHeader({
   const more: NavItem[] = [
     { label: "Peripherals", href: "/people/peripherals" },
     { label: "Groups", href: "/people/groups" },
+    ...(canSeeEmployees ? [{ label: "Bulk", href: "/people/bulk" }] : []),
   ];
 
   return (
@@ -65,8 +66,8 @@ export async function PeopleHeader({
             </svg>
           </summary>
           <div className="employee-menu__panel">
-            <a href="/employee" className="employee-menu__item">Workbook</a>
-            <a href="/" className="employee-menu__item">Public portal</a>
+            <Link href="/employee" className="employee-menu__item">Workbook</Link>
+            <Link href="/" className="employee-menu__item">Public portal</Link>
           </div>
         </details>
 
@@ -86,8 +87,8 @@ export async function PeopleHeader({
               <p className="text-[0.68rem] text-[rgb(var(--steel))]">{user.role}</p>
             </div>
             <div className="my-1 h-px bg-[var(--border-soft)]" aria-hidden />
-            <a href="/people" className="employee-menu__item">People home</a>
-            <a href="/employee" className="employee-menu__item">Workbook</a>
+            <Link href="/people" className="employee-menu__item">People home</Link>
+            <Link href="/employee" className="employee-menu__item">Workbook</Link>
             <a href="/api/auth/logout" className="employee-menu__item text-[var(--brand-color)]">Sign out</a>
           </div>
         </details>

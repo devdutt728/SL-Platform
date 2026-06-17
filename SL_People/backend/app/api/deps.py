@@ -27,6 +27,8 @@ def require_access(required: AccessLevel):
     """Dependency factory enforcing a minimum People access level."""
 
     async def dependency(user: UserContext = Depends(get_current_user)) -> UserContext:
+        if user.is_platform_superadmin:
+            return user
         if not at_least(user.access_level, required):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

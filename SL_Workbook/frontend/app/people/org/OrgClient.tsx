@@ -35,8 +35,9 @@ export function OrgClient() {
     pplGet<MeResponse>("/auth/me").then(setMe).catch(() => {});
   }, []);
 
-  const canEdit = me?.access_level === "edit" || me?.access_level === "admin";
-  const isAdmin = me?.access_level === "admin";
+  const canEdit = me?.is_platform_superadmin || me?.access_level === "edit" || me?.access_level === "publisher" || me?.access_level === "admin";
+  const canPublish = me?.is_platform_superadmin || me?.access_level === "publisher" || me?.access_level === "admin";
+  const isAdmin = me?.is_platform_superadmin || me?.access_level === "admin";
   const principalNames = useMemo(() => store.tree.map((p) => p.name), [store.tree]);
 
   const loadGroups = () => {
@@ -46,6 +47,10 @@ export function OrgClient() {
   useEffect(() => {
     if (store.editMode && isAdmin) loadGroups();
   }, [store.editMode, isAdmin]);
+
+  useEffect(() => {
+    if (isAdmin) loadGroups();
+  }, [isAdmin]);
 
   async function createGroup() {
     if (!groupForm.group_key.trim() || !groupForm.name.trim() || !groupForm.principal_name.trim()) return;
@@ -193,7 +198,7 @@ export function OrgClient() {
         {store.editMode ? (
           <DraftPanel
             pendingMoves={store.pendingMoves}
-            isAdmin={isAdmin}
+            isAdmin={canPublish}
             previewing={previewing}
             onPreview={() => setPreviewing((v) => !v)}
             onSaveDraft={store.saveDraft}
@@ -202,7 +207,17 @@ export function OrgClient() {
         ) : null}
       </AnimatePresence>
 
-      <PersonDrawer person={viewing} onClose={() => setViewing(null)} />
+      <PersonDrawer
+        person={viewing}
+        groups={groups}
+        canEdit={Boolean(isAdmin)}
+        onClose={() => setViewing(null)}
+        onSaved={() => {
+          setViewing(null);
+          store.reload();
+          loadGroups();
+        }}
+      />
       <PublishModal
         slot={publishSlot}
         moves={publishMoves}

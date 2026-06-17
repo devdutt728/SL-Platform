@@ -63,7 +63,10 @@ async def create_assignment(
     user: UserContext = Depends(require_edit),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    data = license_service.stamp_assignment_defaults(body.model_dump(exclude_unset=True))
+    data = license_service.stamp_assignment_defaults(
+        body.model_dump(exclude_unset=True),
+        default_assigned_on=True,
+    )
     row = LicenseAssignment(**data)
     db.add(row)
     await db.commit()

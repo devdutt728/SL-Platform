@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 
 export function EmployeeLoginPanel({ clientId, errorCode, detail }: { clientId: string; errorCode?: string; detail?: string }) {
   const logoSrc = "/studio-lotus-logo.png";
@@ -35,9 +36,9 @@ export function EmployeeLoginPanel({ clientId, errorCode, detail }: { clientId: 
             <a href="/api/auth/google/start" className="public-button public-button--primary">
               Retry sign in
             </a>
-            <a href="/" className="public-button public-button--ghost">
+            <Link href="/" className="public-button public-button--ghost">
               Back to public portal
-            </a>
+            </Link>
           </div>
         </div>
       )}
@@ -49,9 +50,9 @@ export function EmployeeLoginPanel({ clientId, errorCode, detail }: { clientId: 
         >
           Sign in with Google
         </a>
-        <a href="/" className="public-button public-button--ghost">
+        <Link href="/" className="public-button public-button--ghost">
           Back to public portal
-        </a>
+        </Link>
       </div>
 
       {!clientId && (

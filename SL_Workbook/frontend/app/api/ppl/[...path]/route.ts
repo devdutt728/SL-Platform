@@ -116,6 +116,7 @@ async function forward(request: Request, path: string[]) {
 
   const headers: Record<string, string> = {
     ...peopleHeaders,
+    ...(auth.authorization ? { authorization: auth.authorization } : {}),
     ...(auth["x-slp-session"] ? { "x-slp-session": auth["x-slp-session"] } : {}),
   };
   const contentType = request.headers.get("content-type");

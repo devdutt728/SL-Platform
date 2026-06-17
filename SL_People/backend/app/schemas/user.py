@@ -8,6 +8,7 @@ from pydantic import BaseModel, EmailStr
 class AccessLevel(str, Enum):
     """Resolved People-module access level for the current user."""
 
+    NONE = "none"
     VIEW = "view"
     EDIT = "edit"
     PUBLISHER = "publisher"  # edit + publish/revert, but not group/grant admin
@@ -15,10 +16,11 @@ class AccessLevel(str, Enum):
 
 
 _LEVEL_RANK = {
-    AccessLevel.VIEW: 0,
-    AccessLevel.EDIT: 1,
-    AccessLevel.PUBLISHER: 2,
-    AccessLevel.ADMIN: 3,
+    AccessLevel.NONE: 0,
+    AccessLevel.VIEW: 1,
+    AccessLevel.EDIT: 2,
+    AccessLevel.PUBLISHER: 3,
+    AccessLevel.ADMIN: 4,
 }
 
 
@@ -39,11 +41,11 @@ class UserContext(BaseModel):
     platform_role_ids: list[int] | None = None
     platform_role_codes: list[str] | None = None
     platform_role_names: list[str] | None = None
-    access_level: AccessLevel = AccessLevel.VIEW
+    access_level: AccessLevel = AccessLevel.NONE
 
     @property
     def is_admin(self) -> bool:
-        return self.access_level == AccessLevel.ADMIN
+        return self.is_platform_superadmin or self.access_level == AccessLevel.ADMIN
 
     @property
     def is_platform_superadmin(self) -> bool:
@@ -67,4 +69,4 @@ class UserContext(BaseModel):
 
     @property
     def can_edit(self) -> bool:
-        return at_least(self.access_level, AccessLevel.EDIT)
+        return self.is_platform_superadmin or at_least(self.access_level, AccessLevel.EDIT)

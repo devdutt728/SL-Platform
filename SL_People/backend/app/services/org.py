@@ -284,7 +284,19 @@ async def build_live_tree(
         dp = identities.get(r.employee_no)
         wi = work_by_emp.get(r.employee_no)
         title = (wi.job_title if wi and wi.job_title else None) or (dp.job_title if dp else None)
+        department = (wi.department if wi and wi.department else None) or (dp.department if dp else None)
+        sub_department = (
+            (wi.sub_department if wi and wi.sub_department else None)
+            or (dp.sub_department if dp else None)
+        )
+        business_unit = (
+            (wi.business_unit if wi and wi.business_unit else None)
+            or (dp.business_unit if dp else None)
+        )
         lvl = level_for(title)
+        designation_level = r.designation_level or lvl.label
+        designation_color = r.designation_color or lvl.color
+        designation_order = r.designation_order if r.designation_order is not None else lvl.order
         exp = compute_experience(
             (wi.date_joined if wi and wi.date_joined else None) or (dp.join_date if dp else None),
             float(r.prior_exp_years) if r.prior_exp_years is not None else None,
@@ -297,14 +309,20 @@ async def build_live_tree(
             "name": name or r.employee_no,
             "email": email or None,
             "title": title,
+            "mobile_number": dp.mobile_number if dp else None,
+            "department": department,
+            "sub_department": sub_department,
+            "business_unit": business_unit,
             "group_key": r.group_key,
             "group_name": group.name,
             "principal": group.principal_name,
-            "designation_level": lvl.label,
-            "designation_color": lvl.color,
-            "designation_order": lvl.order,
+            "org_level": r.org_level,
+            "designation_level": designation_level,
+            "designation_color": designation_color,
+            "designation_order": designation_order,
             "sl_exp_years": exp.sl_exp_years,
             "o_exp_years": exp.o_exp_years,
+            "prior_exp_years": float(r.prior_exp_years) if r.prior_exp_years is not None else None,
             "sl_exp_display": exp.sl_exp_display,
             "o_exp_display": exp.o_exp_display,
             "license_count": lic_counts.get(email.lower(), 0) if email else 0,
@@ -394,14 +412,20 @@ async def _build_platform_directory_tree(platform_session: AsyncSession) -> dict
             "name": name,
             "email": dp.email,
             "title": dp.job_title,
+            "mobile_number": dp.mobile_number,
+            "department": dp.department,
+            "sub_department": dp.sub_department,
+            "business_unit": dp.business_unit,
             "group_key": group_key,
             "group_name": group_name,
             "principal": "Studio Lotus",
+            "org_level": None,
             "designation_level": lvl.label,
             "designation_color": lvl.color,
             "designation_order": lvl.order,
             "sl_exp_years": exp.sl_exp_years,
             "o_exp_years": exp.o_exp_years,
+            "prior_exp_years": None,
             "sl_exp_display": exp.sl_exp_display,
             "o_exp_display": exp.o_exp_display,
             "license_count": 0,

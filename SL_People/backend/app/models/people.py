@@ -386,7 +386,7 @@ class PeopleAccessGrant(Base):
     __tablename__ = "people_access_grant"
 
     person_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    access_level: Mapped[str] = mapped_column(String(20), nullable=False)  # view | edit | publisher | admin
+    access_level: Mapped[str] = mapped_column(String(20), nullable=False)  # none | view | edit | publisher | admin
     granted_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     granted_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

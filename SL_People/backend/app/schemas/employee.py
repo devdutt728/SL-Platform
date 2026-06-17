@@ -179,6 +179,17 @@ class PersonalPatch(BaseModel):
     children_names: Optional[str] = None
 
 
+class IdentityPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    full_name: Optional[str] = None
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    mobile_number: Optional[str] = None
+
+
 class WorkInfoPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     location: Optional[str] = None
