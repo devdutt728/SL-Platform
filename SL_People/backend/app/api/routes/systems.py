@@ -40,13 +40,21 @@ async def list_systems(
     tier: Optional[str] = None,
     team: Optional[str] = None,
     status_filter: Optional[str] = Query(None, alias="status"),
+    visibility: str = Query("current", pattern="^(current|fixed|stock|all|non_current|non-current)$"),
     page: int = Query(1, ge=1),
     limit: int = Query(200, ge=1, le=500),
     user: UserContext = Depends(require_view),
     db: AsyncSession = Depends(get_db_session),
 ) -> SystemInventoryListResponse:
     items, total, tier_counts = await assets.list_systems(
-        db, search=search, tier=tier, team=team, status=status_filter, page=page, limit=limit
+        db,
+        search=search,
+        tier=tier,
+        team=team,
+        status=status_filter,
+        visibility=visibility,
+        page=page,
+        limit=limit,
     )
     return SystemInventoryListResponse(items=items, total=total, tier_counts=tier_counts, page=page, limit=limit)
 

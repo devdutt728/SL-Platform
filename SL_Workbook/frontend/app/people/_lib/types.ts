@@ -351,3 +351,41 @@ export interface ReconciliationResponse {
   };
   issues: ReconciliationIssue[];
 }
+
+export interface PeopleMasterUploadIssue {
+  severity: "critical" | "warning" | "info" | string;
+  row: number;
+  column: string | null;
+  employee_no: string | null;
+  name: string | null;
+  code: string;
+  message: string;
+  correction: string;
+  can_ignore: boolean;
+}
+
+export interface PeopleMasterUploadResponse {
+  applied: boolean;
+  requires_override: boolean;
+  job_id?: string;
+  filename: string;
+  sheet_name: string;
+  header_row: number;
+  total_rows: number;
+  valid_rows: number;
+  employee_updates: number;
+  personal_updates: number;
+  address_updates: number;
+  policy_updates: number;
+  work_info_updates: number;
+  org_updates: number;
+  org_created: number;
+  skipped_rows: number;
+  critical_count: number;
+  warning_count: number;
+  ignorable_count: number;
+  blocking_count: number;
+  changes_count?: number;
+  audit_events?: number;
+  issues: PeopleMasterUploadIssue[];
+}

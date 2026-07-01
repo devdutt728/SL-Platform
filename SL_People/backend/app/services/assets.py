@@ -32,6 +32,7 @@ from app.schemas.assets import (
 from app.services.console_logic import grade_pc, level_for, short_name_for
 
 SYSTEM_TIERS = ["Workstation", "Performance", "Standard", "Basic", "Entry"]
+NON_CURRENT_SYSTEM_STATUSES = {"fixed", "in stock", "stock", "spare", "available"}
 
 
 def _norm_email(value: Optional[str]) -> str:
@@ -47,7 +48,7 @@ def _num(value) -> Optional[float]:
 
 
 def _active_assignment(status: Optional[str]) -> bool:
-    return str(status or "").strip().lower() not in {"revoked", "available", "unassigned", "inactive", "disabled"}
+    return str(status or "").strip().lower() not in {"revoked", "removed", "available", "unassigned", "inactive", "disabled"}
 
 
 def _active_person_status(status: Optional[str]) -> bool:
@@ -59,6 +60,11 @@ def _contains_tool(value: Optional[str], tool: str) -> bool:
     return tool.lower() in text
 
 
+def _present_software(value: Optional[str]) -> bool:
+    text = str(value or "").strip().lower()
+    return text not in {"", "no", "none", "0", "n/a", "na", "nil", "-"}
+
+
 def _matches_any(value: Optional[str], needles: list[str]) -> bool:
     text = str(value or "").lower()
     return any(needle.lower() in text for needle in needles)
@@ -66,6 +72,21 @@ def _matches_any(value: Optional[str], needles: list[str]) -> bool:
 
 def _has_covered_license(held: set[str], acceptable_tools: set[str]) -> bool:
     return bool(held.intersection(acceptable_tools))
+
+
+def _license_tool_names(row: LicenseAssignment) -> set[str]:
+    values = {short_name_for(row.tool_short_name or row.tool_name)}
+    raw = str(row.tool_name or "")
+    lowered = raw.lower()
+    if "photoshop" in lowered:
+        values.add("Adobe Photoshop")
+    if "illustrator" in lowered:
+        values.add("Adobe Illustrator")
+    if "indesign" in lowered or "in design" in lowered:
+        values.add("Adobe InDesign")
+    if "acrobat" in lowered:
+        values.add("Adobe Acrobat")
+    return {value for value in values if value}
 
 
 def system_item(row: SystemInventory) -> SystemInventoryItem:
@@ -151,6 +172,7 @@ async def list_systems(
     tier: Optional[str] = None,
     team: Optional[str] = None,
     status: Optional[str] = None,
+    visibility: str = "current",
     page: int = 1,
     limit: int = 200,
 ) -> tuple[list[SystemInventoryItem], int, dict[str, int]]:
@@ -177,8 +199,19 @@ async def list_systems(
         base = base.where(SystemInventory.team == team)
     if status:
         base = base.where(SystemInventory.status == status)
+    normalized_visibility = str(visibility or "current").strip().lower()
+    if normalized_visibility in {"fixed", "stock", "non_current", "non-current"}:
+        base = base.where(func.lower(SystemInventory.status).in_(NON_CURRENT_SYSTEM_STATUSES))
+    elif normalized_visibility != "all":
+        base = base.where(
+            or_(
+                SystemInventory.status.is_(None),
+                ~func.lower(SystemInventory.status).in_(NON_CURRENT_SYSTEM_STATUSES),
+            )
+        )
 
-    total = (await session.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    filtered = base.subquery()
+    total = (await session.execute(select(func.count()).select_from(filtered))).scalar_one()
     rows = (
         await session.execute(
             base.order_by(SystemInventory.system_id.asc()).offset((page - 1) * limit).limit(limit)
@@ -186,7 +219,7 @@ async def list_systems(
     ).scalars().all()
     tier_rows = (
         await session.execute(
-            select(SystemInventory.capability_tier, func.count()).group_by(SystemInventory.capability_tier)
+            select(filtered.c.capability_tier, func.count()).group_by(filtered.c.capability_tier)
         )
     ).all()
     counts = {tier_name: 0 for tier_name in SYSTEM_TIERS}
@@ -575,7 +608,10 @@ async def reconciliation_report(
             continue
 
         lics = licenses_by_email.get(email, [])
-        held = {short_name_for(lic.tool_short_name or lic.tool_name) for lic in lics if lic.tool_name or lic.tool_short_name}
+        held = set()
+        for lic in lics:
+            if lic.tool_name or lic.tool_short_name:
+                held.update(_license_tool_names(lic))
         installed_checks: list[tuple[str, str, Optional[str], set[str], str]] = [
             ("AutoCAD LT", "autocad_version", row.autocad_version, {"AutoCAD LT"}, "AutoCAD LT"),
             ("SketchUp Pro", "sketchup_version", row.sketchup_version, {"SketchUp Pro"}, "SketchUp Pro"),
@@ -602,7 +638,7 @@ async def reconciliation_report(
 
         held_labels = sorted(held)
         for tool, field_name, installed, acceptable_tools, suggested_tool in installed_checks:
-            if installed and not _has_covered_license(held, acceptable_tools):
+            if _present_software(installed) and not _has_covered_license(held, acceptable_tools):
                 add(
                     severity="warning",
                     module="Licenses",

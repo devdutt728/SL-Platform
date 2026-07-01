@@ -4,6 +4,7 @@
 // the proxy attaches the auth cookie and forwards to the People backend (8004).
 
 const REQUEST_TIMEOUT_MS = 20_000;
+const UPLOAD_TIMEOUT_MS = 120_000;
 
 let redirectingToLogin = false;
 
@@ -55,6 +56,42 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function uploadRequest<T>(path: string, formData: FormData): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`/api/ppl${path}`, {
+      method: "POST",
+      body: formData,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Upload timed out. Please try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (res.status === 401) {
+    redirectToLogin();
+    throw new Error("Your session has expired. Redirecting to sign in…");
+  }
+  if (!res.ok) {
+    let detail = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      /* non-JSON error */
+    }
+    throw new Error(detail);
+  }
+  return (await res.json()) as T;
+}
+
 export const pplGet = <T>(path: string) => request<T>(path);
 export const pplPatch = <T>(path: string, body: unknown) =>
   request<T>(path, { method: "PATCH", body: JSON.stringify(body) });
@@ -63,6 +100,11 @@ export const pplPost = <T>(path: string, body: unknown) =>
 export const pplPut = <T>(path: string, body: unknown) =>
   request<T>(path, { method: "PUT", body: JSON.stringify(body) });
 export const pplDelete = <T>(path: string) => request<T>(path, { method: "DELETE" });
+export const pplUpload = <T>(path: string, file: File) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  return uploadRequest<T>(path, formData);
+};
 
 export function exportUrl(params: Record<string, string | undefined>): string {
   const qs = new URLSearchParams();

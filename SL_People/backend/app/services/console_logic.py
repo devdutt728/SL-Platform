@@ -150,6 +150,8 @@ def score_cpu(proc: Optional[str]) -> int:
     if not proc:
         return 30
     p = re.sub(r"\s+", " ", str(proc).upper().replace("®", "").replace("™", " ")).strip()
+    p = re.sub(r"\bINTELI([3579])\b", r"INTEL I\1", p)
+    p = re.sub(r"\bI([3579])\s+(\d{3,5})\b", r"I\1-\2", p)
 
     ultra = re.search(r"(?:CORE\s*)?ULTRA\s*([579])\s*(\d{3})?", p)
     if ultra:
@@ -193,8 +195,12 @@ def score_cpu(proc: Optional[str]) -> int:
             score -= 16
         elif tier == 5:
             score -= 8
+        elif tier == 7 and re.search(r"\b[UP]\b", p):
+            score -= 5
         elif tier == 9:
             score += 5
+        if re.search(r"\b[HFK]\b", p):
+            score += 3
         return max(0, min(100, score))
 
     ryzen = re.search(r"RYZEN\s*(?:THREADRIPPER\s*)?([3579])\s*(\d{3,5})?", p)
@@ -244,6 +250,8 @@ def score_gpu(gpu: Optional[str]) -> int:
     g = re.sub(r"\s+", " ", str(gpu).upper().replace(" ", " ").replace("®", "").replace("™", " ")).strip()
     if "NO GRAPHIC" in g or g == "" or "NO GPU" in g or "INTEGRATED" in g or "UHD" in g:
         return 5
+    g = g.replace("GEFORCE", "").replace("NVIDIA", "")
+    g = re.sub(r"\bRTX\s+1050", "GTX 1050", g)
     table = [
         ("RTX 5090", 100), ("RTX 5080", 97), ("RTX 5070", 90), ("RTX 5060", 82),
         ("RTX 4090", 98), ("RTX 4080", 93), ("RTX 4070", 87), ("RTX 4060", 76),
@@ -278,7 +286,7 @@ def score_gpu(gpu: Optional[str]) -> int:
         ("1060", 38), ("1050", 28),
     ]:
         if token in g:
-            return value
+            return min(100, value + 4) if "TI" in g or "SUPER" in g else value
     if "GTX 980" in g:
         return 32
     if "GTX 970" in g:

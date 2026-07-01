@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,7 @@ from app.models.platform_person import DimPerson
 from app.schemas.assets import ReconciliationResponse
 from app.schemas.user import UserContext
 from app.services import assets
+from app.services.people_master_import import apply_people_master_import, build_people_master_plan
 
 router = APIRouter(prefix="/ppl/bulk", tags=["bulk"])
 
@@ -33,6 +34,37 @@ async def reconciliation(
     platform: AsyncSession = Depends(get_platform_db_session),
 ) -> ReconciliationResponse:
     return await assets.reconciliation_report(db, platform)
+
+
+@router.post("/org-upload/preview")
+async def preview_people_master_org_upload(
+    file: UploadFile = File(...),
+    user: UserContext = Depends(require_platform_superadmin),
+    db: AsyncSession = Depends(get_db_session),
+    platform: AsyncSession = Depends(get_platform_db_session),
+) -> dict:
+    contents = await file.read()
+    plan, _rows = await build_people_master_plan(db, platform, contents, file.filename or "people-master.xlsx")
+    return {"applied": False, "requires_override": bool(plan.issues and not plan.blocking_count), **plan.as_dict()}
+
+
+@router.post("/org-upload/apply")
+async def apply_people_master_org_upload(
+    force: bool = Query(False),
+    file: UploadFile = File(...),
+    user: UserContext = Depends(require_platform_superadmin),
+    db: AsyncSession = Depends(get_db_session),
+    platform: AsyncSession = Depends(get_platform_db_session),
+) -> dict:
+    contents = await file.read()
+    return await apply_people_master_import(
+        db,
+        platform,
+        contents,
+        file.filename or "people-master.xlsx",
+        performed_by=user.person_id_platform or user.email,
+        force=force,
+    )
 
 
 @router.get("/export/current")

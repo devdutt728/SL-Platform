@@ -16,7 +16,13 @@ import { DirectoryWarning, PersonCombobox } from "../_components/PersonCombobox"
 import type { MeResponse, SystemGradePreviewResponse, SystemInventoryItem, SystemInventoryListResponse } from "../_lib/types";
 
 const TIERS = ["Workstation", "Performance", "Standard", "Basic", "Entry"];
-const STATUS_OPTIONS = ["Active", "In Repair", "Faulty", "Retired"];
+const STATUS_OPTIONS = ["Active", "In Repair", "Faulty", "Retired", "In Stock", "Fixed"];
+const VISIBILITY_OPTIONS = ["current", "fixed", "all"];
+const VISIBILITY_LABELS: Record<string, string> = {
+  current: "Current systems",
+  fixed: "Fixed / stock PCs",
+  all: "All systems",
+};
 const PAGE_LIMIT = 500;
 const COLUMN_PREF_KEY = "ppl.systems.columns";
 
@@ -73,6 +79,7 @@ export function SystemsClient() {
   const [vendor, setVendor] = useState("");
   const [os, setOs] = useState("");
   const [assignment, setAssignment] = useState("");
+  const [visibility, setVisibility] = useState("current");
   const [minRam, setMinRam] = useState("");
   const [minScore, setMinScore] = useState("");
   const [form, setForm] = useState<FormState>(emptySystem);
@@ -125,6 +132,8 @@ export function SystemsClient() {
     const qs = new URLSearchParams({ page: "1", limit: String(PAGE_LIMIT) });
     if (search.trim()) qs.set("search", search.trim());
     if (tier) qs.set("tier", tier);
+    if (status) qs.set("status", status);
+    qs.set("visibility", visibility);
     pplGet<SystemInventoryListResponse>(`/systems?${qs.toString()}`)
       .then((data) => {
         setRows(data.items);
@@ -142,7 +151,7 @@ export function SystemsClient() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, tier]);
+  }, [search, tier, status, visibility]);
 
   const optionSets = useMemo(
     () => ({
@@ -159,7 +168,6 @@ export function SystemsClient() {
     const ramFloor = Number(minRam);
     const scoreFloor = Number(minScore);
     return rows.filter((row) => {
-      if (status && row.status !== status) return false;
       if (selectedTeams.length && (!row.team || !selectedTeams.includes(row.team))) return false;
       if (systemType && row.system_type !== systemType) return false;
       if (vendor && row.vendor !== vendor) return false;
@@ -170,7 +178,7 @@ export function SystemsClient() {
       if (minScore && ((row.composite_score ?? 0) < scoreFloor || Number.isNaN(scoreFloor))) return false;
       return true;
     });
-  }, [rows, status, selectedTeams, systemType, vendor, os, assignment, minRam, minScore]);
+  }, [rows, selectedTeams, systemType, vendor, os, assignment, minRam, minScore]);
 
   async function createSystem() {
     if (!form.system_id.trim()) return;
@@ -331,7 +339,7 @@ export function SystemsClient() {
   });
 
   const visibleCount = table.getRowModel().rows.length;
-  const hasFilters = Boolean(searchInput || tier || status || selectedTeams.length || systemType || vendor || os || assignment || minRam || minScore);
+  const hasFilters = Boolean(searchInput || tier || status || visibility !== "current" || selectedTeams.length || systemType || vendor || os || assignment || minRam || minScore);
 
   const totalMachines = useMemo(() => Object.values(tierCounts).reduce((a, b) => a + b, 0) || total, [tierCounts, total]);
 
@@ -339,6 +347,7 @@ export function SystemsClient() {
     setSearchInput("");
     setTier("");
     setStatus("");
+    setVisibility("current");
     setSelectedTeams([]);
     setSystemType("");
     setVendor("");
@@ -360,7 +369,7 @@ export function SystemsClient() {
             </span>
           </div>
           <p className="mt-1 truncate text-xs text-[rgb(var(--steel))]">
-            {loading ? "Loading inventory…" : `${visibleCount} shown · ${optionSets.teams.length} teams · workload grading & upgrade guidance`}
+            {loading ? "Loading inventory…" : `${visibleCount} shown · ${VISIBILITY_LABELS[visibility]} · ${optionSets.teams.length} teams`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -416,6 +425,7 @@ export function SystemsClient() {
         {/* Slim inline filter row */}
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <FilterSelect value={status} onChange={setStatus} label="All statuses" options={optionSets.statuses.length ? optionSets.statuses : STATUS_OPTIONS} />
+          <FilterSelect value={visibility} onChange={setVisibility} label="Visibility" options={VISIBILITY_OPTIONS} labels={VISIBILITY_LABELS} />
           <MultiTeamFilter selected={selectedTeams} onChange={setSelectedTeams} options={optionSets.teams} />
           <FilterSelect value={assignment} onChange={setAssignment} label="Any assignment" options={["assigned", "unassigned"]} labels={{ assigned: "Assigned only", unassigned: "Unassigned only" }} />
           <FilterSelect value={systemType} onChange={setSystemType} label="All types" options={optionSets.types} />
