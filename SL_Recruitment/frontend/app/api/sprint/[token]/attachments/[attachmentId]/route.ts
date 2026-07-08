@@ -1,10 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { backendUrl } from "@/lib/backend";
 
-export async function GET(_request: NextRequest, context: { params: Promise<{ token: string; attachmentId: string }> }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ token: string; attachmentId: string }> }) {
   const params = await context.params;
+  const url = new URL(request.url);
   const res = await fetch(
-    backendUrl(`/sprint/${encodeURIComponent(params.token)}/attachments/${encodeURIComponent(params.attachmentId)}`)
+    backendUrl(`/sprint/${encodeURIComponent(params.token)}/attachments/${encodeURIComponent(params.attachmentId)}${url.search}`)
   );
   const data = await res.arrayBuffer();
   const headers = new Headers();

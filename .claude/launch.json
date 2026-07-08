@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "people-backend",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--reload", "--port", "8004"],
+      "cwd": "SL_People/backend",
+      "port": 8004
+    },
+    {
+      "name": "workbook-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "3003"],
+      "cwd": "SL_Workbook/frontend",
+      "port": 3003
+    }
+  ]
+}

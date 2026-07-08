@@ -4,13 +4,28 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { DirectoryWarning, PersonCombobox } from "../_components/PersonCombobox";
 import { pplDelete, pplGet, pplPatch, pplPost } from "../_lib/client";
 import { formatDate } from "../_lib/format";
+import {
+  CollapsibleGroup,
+  FilterSelect,
+  GroupMetaStat,
+  ResetFiltersButton,
+  SavedViewsMenu,
+  SearchInput,
+  SegmentedControl,
+  StatBand,
+  exportRowsCsv,
+  groupBy,
+  type StatItem,
+} from "../_components/data";
 import type {
   LicenseAssignmentItem,
   LicenseAssignmentListResponse,
   LicenseContractItem,
   LicenseContractListResponse,
   LicenseHolderKind,
+  LicenseSoftwareSummary,
   LicenseSummaryResponse,
+  MeResponse,
   ReconciliationIssue,
   ReconciliationResponse,
 } from "../_lib/types";
@@ -22,6 +37,7 @@ type Tab = "assignments" | "contracts" | "warnings";
 type SortDir = "asc" | "desc";
 type AssignmentSortKey = "holder" | "tool" | "status" | "assigned_on" | "renewal_date" | "kind";
 type ContractSortKey = "software" | "vendor" | "seats" | "cost" | "end_date" | "renewal";
+type PortfolioSortKey = "software" | "category" | "contracts" | "purchased" | "assigned" | "shared" | "utilization";
 
 const emptyAssignment = {
   work_email: "",
@@ -53,7 +69,20 @@ interface ToolOption {
   renewal_date: string;
 }
 
+type LicensesFilterSnapshot = {
+  search: string;
+  tool: string;
+  statusFilter: string;
+  kindFilter: string;
+  categoryFilter?: string;
+  capacityFilter?: "" | "at_capacity" | "unlicensed";
+  renewalRiskOnly?: boolean;
+  tab: Tab;
+  assignmentView: string;
+};
+
 export function LicensesClient() {
+  const [me, setMe] = useState<MeResponse | null>(null);
   const [summary, setSummary] = useState<LicenseSummaryResponse | null>(null);
   const [assignments, setAssignments] = useState<LicenseAssignmentItem[]>([]);
   const [contracts, setContracts] = useState<LicenseContractItem[]>([]);
@@ -62,14 +91,25 @@ export function LicensesClient() {
   const [tool, setTool] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [kindFilter, setKindFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [capacityFilter, setCapacityFilter] = useState<"" | "at_capacity" | "unlicensed">("");
+  const [renewalRiskOnly, setRenewalRiskOnly] = useState(false);
   const [tab, setTab] = useState<Tab>("assignments");
+  const [assignmentView, setAssignmentView] = useState<string>("grouped");
   const [assignmentSort, setAssignmentSort] = useState<{ key: AssignmentSortKey; dir: SortDir }>({ key: "renewal_date", dir: "asc" });
   const [contractSort, setContractSort] = useState<{ key: ContractSortKey; dir: SortDir }>({ key: "end_date", dir: "asc" });
+  const [portfolioSort, setPortfolioSort] = useState<{ key: PortfolioSortKey; dir: SortDir }>({ key: "utilization", dir: "desc" });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assignmentForm, setAssignmentForm] = useState(emptyAssignment);
   const [contractForm, setContractForm] = useState(emptyContract);
+
+  const canEdit = Boolean(me?.is_platform_superadmin || me?.access_level === "edit" || me?.access_level === "publisher" || me?.access_level === "admin");
+
+  useEffect(() => {
+    pplGet<MeResponse>("/auth/me").then(setMe).catch(() => {});
+  }, []);
 
   const load = () => {
     setLoading(true);
@@ -119,12 +159,34 @@ export function LicensesClient() {
     [assignments],
   );
 
+  const categoryByLabel = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of summary?.software_summaries || []) {
+      const label = item.short_name || item.software;
+      if (label) map.set(label, item.category || "Uncategorised");
+    }
+    return map;
+  }, [summary]);
+
+  const categoryCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of summary?.software_summaries || []) {
+      const cat = item.category || "Uncategorised";
+      map.set(cat, (map.get(cat) || 0) + 1);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [summary]);
+
   const filteredAssignments = useMemo(() => {
     const q = search.trim().toLowerCase();
     const rows = assignments.filter((row) => {
       if (tool && (row.tool_short_name || row.tool_name) !== tool) return false;
       if (statusFilter && row.status !== statusFilter) return false;
       if (kindFilter && row.holder_kind !== kindFilter) return false;
+      if (categoryFilter) {
+        const label = row.tool_short_name || row.tool_name;
+        if ((categoryByLabel.get(label) || "Uncategorised") !== categoryFilter) return false;
+      }
       if (!q) return true;
       return [
         row.holder_name,
@@ -137,12 +199,14 @@ export function LicensesClient() {
       ].some((value) => String(value || "").toLowerCase().includes(q));
     });
     return sortRows(rows, assignmentSort, assignmentSortValue);
-  }, [assignments, assignmentSort, kindFilter, search, statusFilter, tool]);
+  }, [assignments, assignmentSort, categoryByLabel, categoryFilter, kindFilter, search, statusFilter, tool]);
 
   const filteredContracts = useMemo(() => {
     const q = search.trim().toLowerCase();
     const rows = contracts.filter((row) => {
       if (tool && (row.short_name || row.software) !== tool) return false;
+      if (categoryFilter && (row.category || "Uncategorised") !== categoryFilter) return false;
+      if (renewalRiskOnly && !(row.days_to_expiry != null && row.days_to_expiry <= 60)) return false;
       if (!q) return true;
       return [
         row.contract_key,
@@ -155,7 +219,7 @@ export function LicensesClient() {
       ].some((value) => String(value || "").toLowerCase().includes(q));
     });
     return sortRows(rows, contractSort, contractSortValue);
-  }, [contracts, contractSort, search, tool]);
+  }, [contracts, contractSort, categoryFilter, renewalRiskOnly, search, tool]);
 
   const filteredWarnings = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -174,6 +238,35 @@ export function LicensesClient() {
       ].some((value) => String(value || "").toLowerCase().includes(q));
     });
   }, [licenseWarnings, search, tool]);
+
+  const filteredSummariesBase = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (summary?.software_summaries || []).filter((item) => {
+      if (tool && (item.short_name || item.software) !== tool) return false;
+      if (categoryFilter && (item.category || "Uncategorised") !== categoryFilter) return false;
+      if (!q) return true;
+      return [item.software, item.short_name, item.category].some((value) => String(value || "").toLowerCase().includes(q));
+    });
+  }, [summary, search, tool, categoryFilter]);
+
+  const capacityCounts = useMemo(() => {
+    let atCapacity = 0;
+    let unlicensed = 0;
+    for (const item of filteredSummariesBase) {
+      if (item.purchased && item.total_assigned / item.purchased > 0.95) atCapacity += 1;
+      if (!item.purchased && item.total_assigned > 0) unlicensed += 1;
+    }
+    return { atCapacity, unlicensed };
+  }, [filteredSummariesBase]);
+
+  const filteredSummaries = useMemo(() => {
+    const rows = filteredSummariesBase.filter((item) => {
+      if (capacityFilter === "at_capacity") return Boolean(item.purchased) && item.total_assigned / item.purchased > 0.95;
+      if (capacityFilter === "unlicensed") return !item.purchased && item.total_assigned > 0;
+      return true;
+    });
+    return sortRows(rows, portfolioSort, portfolioSortValue);
+  }, [filteredSummariesBase, capacityFilter, portfolioSort]);
 
   async function createAssignment() {
     if (!assignmentForm.work_email.trim() || !assignmentForm.tool_name.trim()) return;
@@ -221,11 +314,168 @@ export function LicensesClient() {
     load();
   }
 
+  const hasFilters = Boolean(
+    search || tool || statusFilter || kindFilter || categoryFilter || capacityFilter || renewalRiskOnly,
+  );
+
+  function resetFilters() {
+    setSearch("");
+    setTool("");
+    setStatusFilter("");
+    setKindFilter("");
+    setCategoryFilter("");
+    setCapacityFilter("");
+    setRenewalRiskOnly(false);
+  }
+
+  const filterSnapshot: LicensesFilterSnapshot = {
+    search,
+    tool,
+    statusFilter,
+    kindFilter,
+    categoryFilter,
+    capacityFilter,
+    renewalRiskOnly,
+    tab,
+    assignmentView,
+  };
+
+  function applyFilterSnapshot(v: LicensesFilterSnapshot) {
+    setSearch(v.search ?? "");
+    setTool(v.tool ?? "");
+    setStatusFilter(v.statusFilter ?? "");
+    setKindFilter(v.kindFilter ?? "");
+    setCategoryFilter(v.categoryFilter ?? "");
+    setCapacityFilter(v.capacityFilter ?? "");
+    setRenewalRiskOnly(v.renewalRiskOnly ?? false);
+    setTab(v.tab ?? "assignments");
+    setAssignmentView(v.assignmentView ?? "table");
+  }
+
+  function exportCurrentTab() {
+    if (tab === "contracts") {
+      exportRowsCsv(
+        filteredContracts,
+        [
+          { header: "Contract", get: (r) => r.contract_key },
+          { header: "Software", get: (r) => r.short_name || r.software },
+          { header: "Vendor", get: (r) => r.vendor },
+          { header: "Seats", get: (r) => r.seats },
+          { header: "Cost", get: (r) => r.cost },
+          { header: "Currency", get: (r) => r.currency },
+          { header: "End Date", get: (r) => r.end_date },
+          { header: "Renewal Status", get: (r) => r.renewal_status },
+        ],
+        "license-contracts",
+      );
+      return;
+    }
+    exportRowsCsv(
+      filteredAssignments,
+      [
+        { header: "Holder", get: (r) => r.holder_name || r.work_email },
+        { header: "Email", get: (r) => r.work_email },
+        { header: "Tool", get: (r) => r.tool_short_name || r.tool_name },
+        { header: "Plan", get: (r) => r.plan },
+        { header: "Status", get: (r) => r.status },
+        { header: "Assigned", get: (r) => r.assigned_on },
+        { header: "Renewal", get: (r) => r.renewal_date },
+        { header: "Kind", get: (r) => r.holder_kind },
+      ],
+      "license-assignments",
+    );
+  }
+
   return (
     <div className="space-y-5">
       {error ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 
-      <ExecutiveBand summary={summary} assignments={assignments} contracts={contracts} warningCount={licenseWarnings.filter((issue) => issue.severity === "warning").length} loading={loading} />
+      <ExecutiveBand
+        summary={summary}
+        assignments={assignments}
+        contracts={contracts}
+        warningCount={licenseWarnings.filter((issue) => issue.severity === "warning").length}
+        loading={loading}
+        activeTab={tab}
+        kindFilter={kindFilter}
+        renewalRiskOnly={renewalRiskOnly}
+        onRenewalRiskClick={() => {
+          setRenewalRiskOnly((v) => {
+            const next = !v;
+            if (next) setTab("contracts");
+            return next;
+          });
+        }}
+        onUnassignedClick={() => {
+          setTab("assignments");
+          setKindFilter((v) => (v === "unassigned" ? "" : "unassigned"));
+        }}
+        onWarningsClick={() => setTab((v) => (v === "warnings" ? "assignments" : "warnings"))}
+      />
+
+      <section className="public-panel">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Portfolio Health</h2>
+            <p className="mt-1 text-xs text-steel">Every software title at a glance — purchased seats versus actual assignments, sorted by utilisation so at-risk titles surface first.</p>
+          </div>
+          <SegmentedControl
+            value={`${portfolioSort.key}:${portfolioSort.dir}`}
+            onChange={(v) => {
+              const [key, dir] = v.split(":") as [PortfolioSortKey, SortDir];
+              setPortfolioSort({ key, dir });
+            }}
+            options={[
+              { value: "utilization:desc", label: "Most used" },
+              { value: "utilization:asc", label: "Least used" },
+              { value: "software:asc", label: "A–Z" },
+            ]}
+          />
+        </div>
+
+        <div className="mb-3 flex flex-wrap items-stretch gap-2">
+          <button
+            type="button"
+            onClick={() => setCategoryFilter("")}
+            className={`flex min-w-[100px] flex-col rounded-xl border px-3 py-2 text-left transition ${
+              categoryFilter === "" ? "border-[var(--brand-color)] bg-[var(--brand-color)] text-white" : "border-slate-200 bg-white text-slate-900 hover:border-slate-300"
+            }`}
+          >
+            <span className={`text-[10px] font-semibold uppercase tracking-wide ${categoryFilter === "" ? "text-white/75" : "text-steel"}`}>All groups</span>
+            <span className="text-lg font-semibold leading-tight">{summary?.software_summaries?.length ?? 0}</span>
+          </button>
+          {categoryCounts.map(([cat, count]) => {
+            const active = categoryFilter === cat;
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setCategoryFilter(active ? "" : cat)}
+                className={`flex min-w-[120px] flex-1 flex-col rounded-xl border px-3 py-2 text-left transition ${
+                  active ? "border-[var(--brand-color)] bg-[var(--brand-color)] text-white" : "border-slate-200 bg-white text-slate-900 hover:border-slate-300"
+                }`}
+              >
+                <span className={`truncate text-[10px] font-semibold uppercase tracking-wide ${active ? "text-white/75" : "text-steel"}`}>{cat}</span>
+                <span className="text-lg font-semibold leading-tight">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <PortfolioHealthPanel
+          rows={filteredSummaries}
+          sort={portfolioSort}
+          setSort={setPortfolioSort}
+          loading={loading}
+          capacityFilter={capacityFilter}
+          onCapacityFilterChange={setCapacityFilter}
+          capacityCounts={capacityCounts}
+          onFocusSoftware={(label) => {
+            setTool(label);
+            setTab("contracts");
+          }}
+        />
+      </section>
 
       <section className="public-panel">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -233,25 +483,36 @@ export function LicensesClient() {
             <h2 className="text-xl font-semibold text-slate-900">License Control</h2>
             <p className="mt-1 text-xs text-steel">Search, filter, assign, revoke, and review contracts from one working table.</p>
           </div>
-          <div className="flex rounded-xl border border-slate-200 bg-white p-0.5">
-            {(["assignments", "contracts", "warnings"] as Tab[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition ${tab === t ? "bg-[var(--brand-color)] text-white" : "text-slate-600 hover:bg-slate-100"}`}
-              >
-                {t}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            {tab === "assignments" ? (
+              <SegmentedControl
+                value={assignmentView}
+                onChange={setAssignmentView}
+                options={[{ value: "table", label: "Table" }, { value: "grouped", label: "By tool" }]}
+              />
+            ) : null}
+            <SegmentedControl
+              value={tab}
+              onChange={(v) => setTab(v as Tab)}
+              options={[
+                { value: "assignments", label: "Assignments" },
+                { value: "contracts", label: "Contracts" },
+                { value: "warnings", label: "Warnings" },
+              ]}
+            />
+            <SavedViewsMenu storageKey="ppl.licenses.views" currentValues={filterSnapshot} onApply={applyFilterSnapshot} />
+            {tab !== "warnings" ? (
+              <button onClick={exportCurrentTab} className="ppl-btn ppl-btn--ghost">Export</button>
+            ) : null}
           </div>
         </div>
 
         <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(260px,1fr)_180px_160px_150px_auto]">
-          <input
+          <SearchInput
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={tab === "warnings" ? "Search warning, person, email, system, correction point" : "Search holder, email, tool, vendor"}
-            className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 placeholder:text-slate-400"
+            onChange={setSearch}
+            placeholder={tab === "warnings" ? "Search warning, person, email, system…" : "Search holder, email, tool, vendor"}
+            className="min-w-0"
           />
           <FilterSelect value={tool} onChange={setTool} label="All tools" options={toolOptions.map((option) => option.label)} />
           {tab === "assignments" ? (
@@ -272,29 +533,17 @@ export function LicensesClient() {
               <div />
             </>
           )}
-          {search || tool || statusFilter || kindFilter ? (
-            <button
-              onClick={() => {
-                setSearch("");
-                setTool("");
-                setStatusFilter("");
-                setKindFilter("");
-              }}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              Clear
-            </button>
-          ) : (
-            <div />
-          )}
+          <ResetFiltersButton show={hasFilters} onReset={resetFilters} />
         </div>
 
         {tab === "assignments" ? (
           <AssignmentsPanel
             rows={filteredAssignments}
+            grouped={assignmentView === "grouped"}
             form={assignmentForm}
             setForm={setAssignmentForm}
             saving={saving}
+            canEdit={canEdit}
             onCreate={createAssignment}
             onPatch={patchAssignment}
             onDelete={async (id) => {
@@ -313,6 +562,7 @@ export function LicensesClient() {
             form={contractForm}
             setForm={setContractForm}
             saving={saving}
+            canEdit={canEdit}
             onCreate={createContract}
             onPatch={patchContract}
             onDelete={async (id) => {
@@ -325,48 +575,70 @@ export function LicensesClient() {
           />
         )}
       </section>
-
-      <section className="public-panel">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">Portfolio Health</h2>
-            <p className="mt-1 text-xs text-steel">Purchased seats versus actual assignments, grouped by software.</p>
-          </div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {(summary?.software_summaries || []).map((item) => <SoftwareCard key={item.short_name} item={item} />)}
-          {!loading && !summary?.software_summaries.length ? <EmptyState label="No license contracts yet." /> : null}
-        </div>
-      </section>
     </div>
   );
 }
 
-function ExecutiveBand({ summary, assignments, contracts, warningCount, loading }: { summary: LicenseSummaryResponse | null; assignments: LicenseAssignmentItem[]; contracts: LicenseContractItem[]; warningCount: number; loading: boolean }) {
+function ExecutiveBand({
+  summary,
+  assignments,
+  contracts,
+  warningCount,
+  loading,
+  activeTab,
+  kindFilter,
+  renewalRiskOnly,
+  onRenewalRiskClick,
+  onUnassignedClick,
+  onWarningsClick,
+}: {
+  summary: LicenseSummaryResponse | null;
+  assignments: LicenseAssignmentItem[];
+  contracts: LicenseContractItem[];
+  warningCount: number;
+  loading: boolean;
+  activeTab: Tab;
+  kindFilter: string;
+  renewalRiskOnly: boolean;
+  onRenewalRiskClick: () => void;
+  onUnassignedClick: () => void;
+  onWarningsClick: () => void;
+}) {
   const totals = summary?.totals;
   const utilisation = totals?.purchased ? Math.round((totals.total_assigned / totals.purchased) * 100) : 0;
-  const activeAssignments = assignments.filter((row) => isActive(row.status)).length;
+  const activeUse = totals?.total_assigned ?? assignments.filter((row) => isActive(row.status)).length;
   const renewalRisk = contracts.filter((row) => row.days_to_expiry != null && row.days_to_expiry <= 60).length;
   const unassigned = assignments.filter((row) => row.holder_kind === "unassigned" || !row.work_email).length;
-  const items = [
-    { label: "Purchased Seats", value: totals?.purchased ?? "—", detail: `${summary?.software_summaries.length || 0} software titles` },
-    { label: "Active Use", value: loading ? "—" : activeAssignments, detail: `${totals?.shared_assigned || 0} shared / room accounts` },
+  const items: StatItem[] = [
+    { label: "Active Seats", value: totals?.purchased ?? "—", detail: `${totals?.expired_purchased || 0} expired seats excluded` },
+    { label: "Active Use", value: loading ? "—" : activeUse, detail: `${totals?.shared_assigned || 0} shared / room accounts` },
     { label: "Utilisation", value: loading ? "—" : `${utilisation}%`, detail: utilisation > 95 ? "At capacity" : utilisation < 65 ? "Under-used capacity" : "Healthy range" },
-    { label: "Renewal Risk", value: loading ? "—" : renewalRisk, detail: "Due or expired within 60 days", tone: renewalRisk ? "risk" : "ok" },
-    { label: "Unassigned", value: loading ? "—" : unassigned, detail: "Rows without a real holder", tone: unassigned ? "warn" : "ok" },
-    { label: "Warnings", value: loading ? "—" : warningCount, detail: "Installed software without assignment", tone: warningCount ? "warn" : "ok" },
+    {
+      label: "Renewal Risk",
+      value: loading ? "—" : renewalRisk,
+      detail: "Due or expired within 60 days · click to view in Contracts",
+      tone: renewalRisk ? "risk" : "neutral",
+      onClick: onRenewalRiskClick,
+      active: renewalRiskOnly,
+    },
+    {
+      label: "Unassigned",
+      value: loading ? "—" : unassigned,
+      detail: "Rows without a real holder · click to filter Assignments",
+      tone: unassigned ? "warn" : "neutral",
+      onClick: onUnassignedClick,
+      active: kindFilter === "unassigned" && activeTab === "assignments",
+    },
+    {
+      label: "Warnings",
+      value: loading ? "—" : warningCount,
+      detail: "Installed software without assignment · click to view",
+      tone: warningCount ? "warn" : "neutral",
+      onClick: onWarningsClick,
+      active: activeTab === "warnings",
+    },
   ];
-  return (
-    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-      {items.map((item) => (
-        <div key={item.label} className={`rounded-2xl border bg-white p-4 ${item.tone === "risk" ? "border-red-200" : item.tone === "warn" ? "border-amber-200" : "border-slate-200"}`}>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-steel">{item.label}</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{item.value}</p>
-          <p className="mt-1 text-xs text-steel">{item.detail}</p>
-        </div>
-      ))}
-    </section>
-  );
+  return <StatBand items={items} cols={6} />;
 }
 
 function WarningsPanel({ rows }: { rows: ReconciliationIssue[] }) {
@@ -415,11 +687,24 @@ function SeverityBadge({ severity }: { severity: string }) {
   return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize ${cls}`}>{severity}</span>;
 }
 
+const emptyAssignmentEdit = {
+  work_email: "",
+  tool_name: "",
+  plan: "",
+  status: "Assigned",
+  assigned_on: "",
+  renewal_date: "",
+  cost_centre: "",
+  notes: "",
+};
+
 function AssignmentsPanel(props: {
   rows: LicenseAssignmentItem[];
+  grouped: boolean;
   form: typeof emptyAssignment;
   setForm: (form: typeof emptyAssignment) => void;
   saving: boolean;
+  canEdit: boolean;
   onCreate: () => void;
   onPatch: (id: string, body: Record<string, unknown>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -427,7 +712,10 @@ function AssignmentsPanel(props: {
   setSort: (sort: { key: AssignmentSortKey; dir: SortDir }) => void;
   toolOptions: ToolOption[];
 }) {
-  const { rows, form, setForm, saving, onCreate, onPatch, onDelete, sort, setSort, toolOptions } = props;
+  const { rows, grouped, form, setForm, saving, canEdit, onCreate, onPatch, onDelete, sort, setSort, toolOptions } = props;
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState(emptyAssignmentEdit);
+
   const setTool = (value: string) => {
     const match = findToolOption(toolOptions, value);
     setForm({
@@ -438,66 +726,163 @@ function AssignmentsPanel(props: {
     });
   };
 
+  const beginEdit = (row: LicenseAssignmentItem) => {
+    setEditingId(row.id);
+    setEditForm({
+      work_email: row.work_email || "",
+      tool_name: row.tool_name || "",
+      plan: row.plan || "",
+      status: row.status || "Assigned",
+      assigned_on: row.assigned_on || "",
+      renewal_date: row.renewal_date || "",
+      cost_centre: row.cost_centre || "",
+      notes: row.notes || "",
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editingId) return;
+    await onPatch(editingId, cleanPayload({ ...editForm }));
+    setEditingId(null);
+    setEditForm(emptyAssignmentEdit);
+  };
+
+  const header = (
+    <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+      <tr>
+        <SortTh label="Holder" active={sort.key === "holder"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "holder"))} className="px-4 py-3" />
+        <SortTh label="Tool" active={sort.key === "tool"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "tool"))} />
+        <th>Plan</th>
+        <SortTh label="Status" active={sort.key === "status"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "status"))} />
+        <SortTh label="Assigned" active={sort.key === "assigned_on"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "assigned_on"))} />
+        <SortTh label="Renewal" active={sort.key === "renewal_date"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "renewal_date"))} />
+        <SortTh label="Kind" active={sort.key === "kind"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "kind"))} />
+        <th className="text-right pr-4">Actions</th>
+      </tr>
+    </thead>
+  );
+
+  const renderRow = (r: LicenseAssignmentItem) => (
+    <Fragment key={r.id}>
+      <tr className="border-t border-slate-100">
+        <td className="px-4 py-3"><div className="font-medium text-slate-900">{r.holder_name || r.work_email || "Unassigned"}</div><div className="text-xs text-steel">{r.work_email || "No email"}</div></td>
+        <td className="font-medium text-slate-800">{r.tool_short_name || r.tool_name}</td>
+        <td>{r.plan || "—"}</td>
+        <td>
+          {canEdit ? (
+            <StatusSelect value={r.status} onChange={(status) => onPatch(r.id, { status })} />
+          ) : (
+            <StatusBadge status={r.status} />
+          )}
+        </td>
+        <td>{formatDate(r.assigned_on)}</td>
+        <td><RenewalCell value={r.renewal_date} /></td>
+        <td><HolderKind kind={r.holder_kind} /></td>
+        <td className="pr-4 text-right">
+          {canEdit ? (
+            <>
+              <button onClick={() => beginEdit(r)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">Edit</button>
+              <button onClick={() => onPatch(r.id, { status: r.status === "Revoked" ? "Assigned" : "Revoked" })} className="ml-2 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                {r.status === "Revoked" ? "Restore" : "Revoke"}
+              </button>
+              <button onClick={() => onDelete(r.id)} className="ml-2 rounded-lg border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50">Delete</button>
+            </>
+          ) : (
+            <span className="text-xs text-slate-400">View only</span>
+          )}
+        </td>
+      </tr>
+      {editingId === r.id ? (
+        <tr className="border-t border-slate-100 bg-slate-50/80">
+          <td colSpan={8} className="px-4 py-4">
+            <div className="grid gap-2 lg:grid-cols-[minmax(220px,1.3fr)_minmax(180px,1fr)_140px_130px]">
+              <div>
+                <PersonCombobox
+                  value={editForm.work_email}
+                  onChange={(v) => setEditForm({ ...editForm, work_email: v })}
+                  onPick={(p) => setEditForm({ ...editForm, work_email: p.email })}
+                  placeholder="person or shared email"
+                  inputClassName="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 placeholder:text-slate-400"
+                />
+                <DirectoryWarning email={editForm.work_email} />
+              </div>
+              <Input list="license-tool-options" value={editForm.tool_name} placeholder="license / tool" onChange={(v) => setEditForm({ ...editForm, tool_name: v })} />
+              <Input value={editForm.plan} placeholder="plan" onChange={(v) => setEditForm({ ...editForm, plan: v })} />
+              <StatusSelect value={editForm.status} onChange={(status) => setEditForm({ ...editForm, status })} />
+            </div>
+            <div className="mt-2 grid gap-2 lg:grid-cols-[140px_140px_1fr_1fr_auto_auto]">
+              <Input type="date" value={editForm.assigned_on} placeholder="assigned on" onChange={(v) => setEditForm({ ...editForm, assigned_on: v })} />
+              <Input type="date" value={editForm.renewal_date} placeholder="renewal" onChange={(v) => setEditForm({ ...editForm, renewal_date: v })} />
+              <Input value={editForm.cost_centre} placeholder="cost centre" onChange={(v) => setEditForm({ ...editForm, cost_centre: v })} />
+              <Input value={editForm.notes} placeholder="notes" onChange={(v) => setEditForm({ ...editForm, notes: v })} />
+              <button onClick={saveEdit} className="rounded-xl bg-[var(--brand-color)] px-3 py-2 text-xs font-semibold text-white">Save</button>
+              <button onClick={() => setEditingId(null)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+            </div>
+          </td>
+        </tr>
+      ) : null}
+    </Fragment>
+  );
+
+  const toolGroups = grouped ? groupBy(rows, (r) => r.tool_short_name || r.tool_name, "Untitled tool") : [];
+
   return (
     <div className="mt-4 space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-        <div className="grid gap-2 lg:grid-cols-[minmax(260px,1.4fr)_minmax(220px,1.1fr)_150px_150px_120px]">
-          <div>
-            <PersonCombobox
-              value={form.work_email}
-              onChange={(v) => setForm({ ...form, work_email: v })}
-              onPick={(p) => setForm({ ...form, work_email: p.email })}
-              placeholder="person or shared email"
-              inputClassName="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 placeholder:text-slate-400"
-            />
-            <DirectoryWarning email={form.work_email} />
+      {canEdit ? (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          <div className="grid gap-2 lg:grid-cols-[minmax(260px,1.4fr)_minmax(220px,1.1fr)_150px_150px_120px]">
+            <div>
+              <PersonCombobox
+                value={form.work_email}
+                onChange={(v) => setForm({ ...form, work_email: v })}
+                onPick={(p) => setForm({ ...form, work_email: p.email })}
+                placeholder="person or shared email"
+                inputClassName="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 placeholder:text-slate-400"
+              />
+              <DirectoryWarning email={form.work_email} />
+            </div>
+            <Input list="license-tool-options" value={form.tool_name} placeholder="license / tool" onChange={setTool} />
+            <Input value={form.plan} placeholder="plan optional" onChange={(v) => setForm({ ...form, plan: v })} />
+            <Input type="date" value={form.renewal_date} placeholder="renewal" onChange={(v) => setForm({ ...form, renewal_date: v })} />
+            <button disabled={saving || !form.work_email.trim() || !form.tool_name.trim()} onClick={onCreate} className="rounded-xl bg-[var(--brand-color)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Assign</button>
           </div>
-          <Input list="license-tool-options" value={form.tool_name} placeholder="license / tool" onChange={setTool} />
-          <Input value={form.plan} placeholder="plan optional" onChange={(v) => setForm({ ...form, plan: v })} />
-          <Input type="date" value={form.renewal_date} placeholder="renewal" onChange={(v) => setForm({ ...form, renewal_date: v })} />
-          <button disabled={saving || !form.work_email.trim() || !form.tool_name.trim()} onClick={onCreate} className="rounded-xl bg-[var(--brand-color)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Assign</button>
+          <datalist id="license-tool-options">
+            {toolOptions.map((option) => <option key={option.label} value={option.label} />)}
+          </datalist>
         </div>
-        <datalist id="license-tool-options">
-          {toolOptions.map((option) => <option key={option.label} value={option.label} />)}
-        </datalist>
-      </div>
+      ) : null}
 
-      <div className="overflow-auto rounded-2xl border border-slate-200 bg-white">
-        <table className="w-full min-w-[1040px] border-collapse text-sm">
-          <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            <tr>
-              <SortTh label="Holder" active={sort.key === "holder"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "holder"))} className="px-4 py-3" />
-              <SortTh label="Tool" active={sort.key === "tool"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "tool"))} />
-              <th>Plan</th>
-              <SortTh label="Status" active={sort.key === "status"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "status"))} />
-              <SortTh label="Assigned" active={sort.key === "assigned_on"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "assigned_on"))} />
-              <SortTh label="Renewal" active={sort.key === "renewal_date"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "renewal_date"))} />
-              <SortTh label="Kind" active={sort.key === "kind"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "kind"))} />
-              <th className="text-right pr-4">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-t border-slate-100">
-                <td className="px-4 py-3"><div className="font-medium text-slate-900">{r.holder_name || r.work_email || "Unassigned"}</div><div className="text-xs text-steel">{r.work_email || "No email"}</div></td>
-                <td className="font-medium text-slate-800">{r.tool_short_name || r.tool_name}</td>
-                <td>{r.plan || "—"}</td>
-                <td><StatusSelect value={r.status} onChange={(status) => onPatch(r.id, { status })} /></td>
-                <td>{formatDate(r.assigned_on)}</td>
-                <td><RenewalCell value={r.renewal_date} /></td>
-                <td><HolderKind kind={r.holder_kind} /></td>
-                <td className="pr-4 text-right">
-                  <button onClick={() => onPatch(r.id, { status: r.status === "Revoked" ? "Assigned" : "Revoked" })} className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-                    {r.status === "Revoked" ? "Restore" : "Revoke"}
-                  </button>
-                  <button onClick={() => onDelete(r.id)} className="ml-2 rounded-lg border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50">Delete</button>
-                </td>
-              </tr>
-            ))}
-            {!rows.length ? <tr><td colSpan={8}><EmptyState label="No assignments match the current filters." /></td></tr> : null}
-          </tbody>
-        </table>
-      </div>
+      {grouped ? (
+        <div className="space-y-3">
+          {toolGroups.map(([toolName, toolRows]) => (
+            <CollapsibleGroup
+              key={toolName}
+              title={toolName}
+              count={toolRows.length}
+              countNoun="seat"
+              meta={<GroupMetaStat label="active" value={toolRows.filter((r) => isActive(r.status)).length} />}
+            >
+              <div className="overflow-auto">
+                <table className="w-full min-w-[1040px] border-collapse text-sm">
+                  {header}
+                  <tbody>{toolRows.map(renderRow)}</tbody>
+                </table>
+              </div>
+            </CollapsibleGroup>
+          ))}
+          {!rows.length ? <EmptyState label="No assignments match the current filters." /> : null}
+        </div>
+      ) : (
+        <div className="overflow-auto rounded-2xl border border-slate-200 bg-white">
+          <table className="w-full min-w-[1040px] border-collapse text-sm">
+            {header}
+            <tbody>
+              {rows.map(renderRow)}
+              {!rows.length ? <tr><td colSpan={8}><EmptyState label="No assignments match the current filters." /></td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -507,6 +892,7 @@ function ContractsPanel(props: {
   form: typeof emptyContract;
   setForm: (form: typeof emptyContract) => void;
   saving: boolean;
+  canEdit: boolean;
   onCreate: () => void;
   onPatch: (id: string, body: Record<string, unknown>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -514,7 +900,7 @@ function ContractsPanel(props: {
   setSort: (sort: { key: ContractSortKey; dir: SortDir }) => void;
   toolOptions: ToolOption[];
 }) {
-  const { rows, form, setForm, saving, onCreate, onPatch, onDelete, sort, setSort, toolOptions } = props;
+  const { rows, form, setForm, saving, canEdit, onCreate, onPatch, onDelete, sort, setSort, toolOptions } = props;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState(emptyContract);
 
@@ -549,19 +935,21 @@ function ContractsPanel(props: {
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-        <div className="grid gap-2 lg:grid-cols-[minmax(220px,1.2fr)_110px_minmax(180px,1fr)_150px_120px_130px]">
-          <Input list="license-tool-options-contracts" value={form.software} placeholder="software" onChange={(v) => setForm({ ...form, software: v })} />
-          <Input value={form.seats} placeholder="seats" onChange={(v) => setForm({ ...form, seats: v })} />
-          <Input value={form.vendor} placeholder="vendor optional" onChange={(v) => setForm({ ...form, vendor: v })} />
-          <Input type="date" value={form.end_date} placeholder="renewal" onChange={(v) => setForm({ ...form, end_date: v })} />
-          <Input value={form.cost} placeholder="cost" onChange={(v) => setForm({ ...form, cost: v })} />
-          <button disabled={saving || !form.software.trim()} onClick={onCreate} className="rounded-xl bg-[var(--brand-color)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Add Contract</button>
+      {canEdit ? (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          <div className="grid gap-2 lg:grid-cols-[minmax(220px,1.2fr)_110px_minmax(180px,1fr)_150px_120px_130px]">
+            <Input list="license-tool-options-contracts" value={form.software} placeholder="software" onChange={(v) => setForm({ ...form, software: v })} />
+            <Input value={form.seats} placeholder="seats" onChange={(v) => setForm({ ...form, seats: v })} />
+            <Input value={form.vendor} placeholder="vendor optional" onChange={(v) => setForm({ ...form, vendor: v })} />
+            <Input type="date" value={form.end_date} placeholder="renewal" onChange={(v) => setForm({ ...form, end_date: v })} />
+            <Input value={form.cost} placeholder="cost" onChange={(v) => setForm({ ...form, cost: v })} />
+            <button disabled={saving || !form.software.trim()} onClick={onCreate} className="rounded-xl bg-[var(--brand-color)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Add Contract</button>
+          </div>
+          <datalist id="license-tool-options-contracts">
+            {toolOptions.map((option) => <option key={option.label} value={option.label} />)}
+          </datalist>
         </div>
-        <datalist id="license-tool-options-contracts">
-          {toolOptions.map((option) => <option key={option.label} value={option.label} />)}
-        </datalist>
-      </div>
+      ) : null}
       <div className="overflow-auto rounded-2xl border border-slate-200 bg-white">
         <table className="w-full min-w-[1060px] border-collapse text-sm">
           <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -583,13 +971,19 @@ function ContractsPanel(props: {
                   <td className="px-4 py-3"><div className="font-medium text-slate-900">{r.contract_key}</div><div className="text-xs text-steel">{r.entity || "Entity not set"}</div></td>
                   <td>{r.short_name || r.software}</td>
                   <td>{r.vendor || "—"}</td>
-                  <td><InlineNumber value={r.seats} onSave={(seats) => onPatch(r.id, { seats })} /></td>
+                  <td>{canEdit ? <InlineNumber value={r.seats} onSave={(seats) => onPatch(r.id, { seats })} /> : r.seats}</td>
                   <td>{r.cost != null ? `${r.currency} ${Math.round(r.cost).toLocaleString("en-IN")}` : "—"}</td>
                   <td>{formatDate(r.end_date)}</td>
                   <td><RenewalBadge status={r.renewal_status} days={r.days_to_expiry} /></td>
                   <td className="pr-4 text-right">
-                    <button onClick={() => beginEdit(r)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">Edit</button>
-                    <button onClick={() => onDelete(r.id)} className="ml-2 rounded-lg border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50">Delete</button>
+                    {canEdit ? (
+                      <>
+                        <button onClick={() => beginEdit(r)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">Edit</button>
+                        <button onClick={() => onDelete(r.id)} className="ml-2 rounded-lg border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50">Delete</button>
+                      </>
+                    ) : (
+                      <span className="text-xs text-slate-400">View only</span>
+                    )}
                   </td>
                 </tr>
                 {editingId === r.id ? (
@@ -624,24 +1018,142 @@ function ContractsPanel(props: {
   );
 }
 
-function SoftwareCard({ item }: { item: LicenseSummaryResponse["software_summaries"][number] }) {
-  const pct = item.purchased ? Math.min(100, Math.round((item.total_assigned / item.purchased) * 100)) : 0;
+function PortfolioHealthPanel({
+  rows,
+  sort,
+  setSort,
+  loading,
+  capacityFilter,
+  onCapacityFilterChange,
+  capacityCounts,
+  onFocusSoftware,
+}: {
+  rows: LicenseSoftwareSummary[];
+  sort: { key: PortfolioSortKey; dir: SortDir };
+  setSort: (sort: { key: PortfolioSortKey; dir: SortDir }) => void;
+  loading: boolean;
+  capacityFilter: "" | "at_capacity" | "unlicensed";
+  onCapacityFilterChange: (value: "" | "at_capacity" | "unlicensed") => void;
+  capacityCounts: { atCapacity: number; unlicensed: number };
+  onFocusSoftware: (label: string) => void;
+}) {
+  const groups = groupBy(rows, (r) => r.category, "Uncategorised");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const allCollapsed = groups.length > 0 && groups.every(([category]) => collapsed.has(category));
+
+  const totalPurchased = rows.reduce((sum, r) => sum + (r.purchased || 0), 0);
+  const totalExpiredPurchased = rows.reduce((sum, r) => sum + (r.expired_purchased || 0), 0);
+  const totalAssigned = rows.reduce((sum, r) => sum + (r.total_assigned || 0), 0);
+
+  const table = (groupRows: LicenseSoftwareSummary[]) => (
+    <table className="w-full min-w-[840px] border-collapse text-sm">
+      <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        <tr>
+          <SortTh label="Software" active={sort.key === "software"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "software"))} className="px-4 py-2" />
+          <SortTh label="Contracts" active={sort.key === "contracts"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "contracts"))} />
+          <SortTh label="Active Seats" active={sort.key === "purchased"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "purchased"))} />
+          <th>Expired Seats</th>
+          <SortTh label="People" active={sort.key === "assigned"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "assigned"))} />
+          <SortTh label="Shared" active={sort.key === "shared"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "shared"))} />
+          <SortTh label="Utilisation" active={sort.key === "utilization"} dir={sort.dir} onClick={() => setSort(nextSort(sort, "utilization"))} className="min-w-[180px]" />
+          <th className="pr-4 text-right">Manage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {groupRows.map((item) => {
+          const pct = item.purchased ? Math.min(100, Math.round((item.total_assigned / item.purchased) * 100)) : item.total_assigned ? 100 : 0;
+          const barColor = pct > 95 ? "bg-red-500" : pct < 65 ? "bg-amber-500" : "bg-[var(--brand-color)]";
+          return (
+            <tr key={item.short_name || item.software} className="border-t border-slate-100">
+              <td className="px-4 py-2.5">
+                <div className="font-medium text-slate-900">{item.short_name || item.software}</div>
+              </td>
+              <td>{item.contracts}</td>
+              <td>{item.purchased}</td>
+              <td>{item.expired_purchased || 0}</td>
+              <td>{item.assigned}</td>
+              <td>{item.shared_assigned}</td>
+              <td>
+                <div className="flex items-center gap-2">
+                  <div className="h-2 w-24 shrink-0 overflow-hidden rounded-full bg-slate-100">
+                    <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="whitespace-nowrap text-xs font-semibold text-slate-700">{item.total_assigned}/{item.purchased} · {pct}%</span>
+                </div>
+              </td>
+              <td className="pr-4 text-right">
+                <button onClick={() => onFocusSoftware(item.short_name || item.software)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  View contracts
+                </button>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="truncate text-sm font-semibold text-slate-900">{item.short_name}</h3>
-          <p className="text-xs text-steel">{item.category || "Uncategorised"} · {item.contracts} contract{item.contracts === 1 ? "" : "s"}</p>
+    <div className="mt-3 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-steel">
+          <div className="px-2 py-1"><GroupMetaStat label="titles" value={rows.length} /></div>
+          <div className="px-2 py-1"><GroupMetaStat label="active seats" value={totalPurchased} /></div>
+          <div className="px-2 py-1"><GroupMetaStat label="expired seats" value={totalExpiredPurchased} tone={totalExpiredPurchased ? "warn" : "neutral"} /></div>
+          <div className="px-2 py-1"><GroupMetaStat label="in use" value={totalAssigned} /></div>
+          <button
+            type="button"
+            onClick={() => onCapacityFilterChange(capacityFilter === "at_capacity" ? "" : "at_capacity")}
+            className={`rounded-lg px-2 py-1 transition hover:bg-white ${capacityFilter === "at_capacity" ? "bg-white ring-1 ring-[var(--brand-color)]" : ""}`}
+          >
+            <GroupMetaStat label="at capacity" value={capacityCounts.atCapacity} tone={capacityCounts.atCapacity ? "risk" : "neutral"} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onCapacityFilterChange(capacityFilter === "unlicensed" ? "" : "unlicensed")}
+            className={`rounded-lg px-2 py-1 transition hover:bg-white ${capacityFilter === "unlicensed" ? "bg-white ring-1 ring-[var(--brand-color)]" : ""}`}
+          >
+            <GroupMetaStat label="unlicensed" value={capacityCounts.unlicensed} tone={capacityCounts.unlicensed ? "warn" : "neutral"} />
+          </button>
         </div>
-        <span className="workbook-chip text-[11px]">{item.total_assigned}/{item.purchased}</span>
+        <button
+          type="button"
+          onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(groups.map(([category]) => category)))}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+        >
+          {allCollapsed ? "Expand all" : "Collapse all"}
+        </button>
       </div>
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
-        <div className={`h-full ${pct > 95 ? "bg-red-500" : pct < 65 ? "bg-amber-500" : "bg-[var(--brand-color)]"}`} style={{ width: `${pct}%` }} />
-      </div>
-      <div className="mt-3 flex justify-between text-xs text-steel">
-        <span>People {item.assigned}</span>
-        <span>Shared {item.shared_assigned}</span>
-      </div>
+      {groups.map(([category, groupRows]) => {
+        const atRisk = groupRows.filter((r) => r.purchased && r.total_assigned / r.purchased > 0.95).length;
+        const isOpen = !collapsed.has(category);
+        return (
+          <CollapsibleGroup
+            key={category}
+            title={category}
+            count={groupRows.length}
+            countNoun="title"
+            open={isOpen}
+            onOpenChange={(open) =>
+              setCollapsed((prev) => {
+                const next = new Set(prev);
+                if (open) next.delete(category);
+                else next.add(category);
+                return next;
+              })
+            }
+            meta={
+              <>
+                <GroupMetaStat label="seats" value={`${groupRows.reduce((s, r) => s + r.total_assigned, 0)}/${groupRows.reduce((s, r) => s + r.purchased, 0)}`} />
+                <GroupMetaStat label="at capacity" value={atRisk} tone={atRisk ? "risk" : "neutral"} />
+              </>
+            }
+          >
+            <div className="overflow-auto">{table(groupRows)}</div>
+          </CollapsibleGroup>
+        );
+      })}
+      {!loading && !rows.length ? <EmptyState label="No license contracts yet." /> : null}
     </div>
   );
 }
@@ -657,15 +1169,6 @@ function SortTh({ label, active, dir, onClick, className = "" }: { label: string
   );
 }
 
-function FilterSelect({ value, onChange, label, options, labels }: { value: string; onChange: (value: string) => void; label: string; options: string[]; labels?: Record<string, string> }) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700">
-      <option value="">{label}</option>
-      {options.map((option) => <option key={option} value={option}>{labels?.[option] || option}</option>)}
-    </select>
-  );
-}
-
 function Input({ value, onChange, placeholder, type = "text", list }: { value: string; onChange: (value: string) => void; placeholder: string; type?: string; list?: string }) {
   return <input list={list} type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 placeholder:text-slate-400" />;
 }
@@ -678,6 +1181,11 @@ function StatusSelect({ value, onChange }: { value: string; onChange: (value: st
       <option>Available</option>
     </select>
   );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const cls = status === "Revoked" ? "border-slate-200 bg-slate-50 text-slate-600" : status === "Available" ? "border-blue-200 bg-blue-50 text-blue-700" : "border-emerald-200 bg-emerald-50 text-emerald-700";
+  return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${cls}`}>{status}</span>;
 }
 
 function InlineNumber({ value, onSave }: { value: number; onSave: (value: number) => void }) {
@@ -745,6 +1253,14 @@ function contractSortValue(row: LicenseContractItem, key: ContractSortKey) {
   if (key === "software") return row.short_name || row.software;
   if (key === "renewal") return row.days_to_expiry;
   return row[key] || null;
+}
+
+function portfolioSortValue(row: LicenseSoftwareSummary, key: PortfolioSortKey) {
+  if (key === "software") return row.short_name || row.software;
+  if (key === "category") return row.category || "";
+  if (key === "shared") return row.shared_assigned;
+  if (key === "utilization") return row.purchased ? row.total_assigned / row.purchased : row.total_assigned > 0 ? Number.POSITIVE_INFINITY : -1;
+  return row[key] ?? 0;
 }
 
 function compareValues(left: string | number | null, right: string | number | null) {

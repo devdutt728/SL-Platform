@@ -1,7 +1,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { PeopleAccessRequired } from "./_components/PeopleAccessRequired";
 import { PeopleHeader } from "./_components/PeopleHeader";
-import { isPeopleSuperadmin } from "./_lib/access-server";
+import { hasPeopleAccess, isPeopleSuperadmin } from "./_lib/access-server";
 
 // People / Operating Console hub. Mirrors the Workbook landing idiom: each
 // module is a workbook-card with a gradient icon tile, eyebrow label, and
@@ -76,6 +77,15 @@ const modules: Module[] = [
 ];
 
 export default async function PeopleHubPage() {
+  if (!(await hasPeopleAccess())) {
+    return (
+      <PeopleAccessRequired
+        title="People access required"
+        message="This People console is restricted to authorized Studio Lotus staff. Sign in with an account that has People access, or ask an administrator to grant it."
+      />
+    );
+  }
+
   const canSeeEmployees = await isPeopleSuperadmin();
   const visibleModules = modules.filter((m) => m.title !== "Employees" || canSeeEmployees);
 

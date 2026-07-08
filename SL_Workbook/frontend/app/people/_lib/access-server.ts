@@ -36,6 +36,31 @@ function normaliseRole(value: unknown) {
   return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
+function isSuperadminUser(user: UserSummary | null) {
+  if (!user) return false;
+
+  const roleTokens = [
+    user.platform_role_code,
+    user.platform_role_name,
+    ...(user.platform_role_codes || []),
+    ...(user.platform_role_names || []),
+    ...(user.roles || []),
+  ].map(normaliseRole);
+
+  return roleTokens.some((role) => ["superadmin", "super_admin", "s_admin"].includes(role)) ||
+    user.platform_role_id === 2 ||
+    (user.platform_role_ids || []).includes(2);
+}
+
+function platformHeadersForPeople(user: UserSummary | null): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (!user) return headers;
+  if (user.email) headers["x-user-email"] = user.email;
+  if (user.display_name || user.full_name) headers["x-user-name"] = user.display_name || user.full_name || "";
+  if (isSuperadminUser(user)) headers["x-platform-superadmin"] = "1";
+  return headers;
+}
+
 const fetchCurrentUser = cache(async (): Promise<UserSummary | null> => {
   try {
     const res = await fetch(backendUrl("/auth/me"), {
@@ -69,8 +94,13 @@ const fetchCurrentUser = cache(async (): Promise<UserSummary | null> => {
 
 const fetchPeopleAuth = cache(async (): Promise<PeopleAuthSummary | null> => {
   try {
+    const auth = await authHeaderFromCookie();
+    const platformUser = await fetchCurrentUser();
     const res = await fetch(peopleBackendUrl("/ppl/auth/me"), {
-      headers: await authHeaderFromCookie(),
+      headers: {
+        ...auth,
+        ...platformHeadersForPeople(platformUser),
+      },
       cache: "no-store",
     });
     if (!res.ok) return null;
@@ -91,19 +121,7 @@ export async function hasPeopleAccess() {
 
 export async function isPeopleSuperadmin() {
   const user = await fetchCurrentUser();
-  if (!user) return false;
-
-  const roleTokens = [
-    user.platform_role_code,
-    user.platform_role_name,
-    ...(user.platform_role_codes || []),
-    ...(user.platform_role_names || []),
-    ...(user.roles || []),
-  ].map(normaliseRole);
-
-  return roleTokens.some((role) => ["superadmin", "super_admin", "s_admin"].includes(role)) ||
-    user.platform_role_id === 2 ||
-    (user.platform_role_ids || []).includes(2);
+  return isSuperadminUser(user);
 }
 
 function initialsOf(name: string) {

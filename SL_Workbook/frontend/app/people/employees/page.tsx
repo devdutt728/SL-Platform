@@ -1,12 +1,14 @@
+import { PeopleAccessRequired } from "../_components/PeopleAccessRequired";
 import { PeopleHeader } from "../_components/PeopleHeader";
 import { isPeopleSuperadmin } from "../_lib/access-server";
 import { DirectoryClient } from "./DirectoryClient";
-import { notFound } from "next/navigation";
 
 export const metadata = { title: "Employee Directory · People" };
 
 export default async function EmployeeDirectoryPage() {
-  if (!(await isPeopleSuperadmin())) notFound();
+  if (!(await isPeopleSuperadmin())) {
+    return <PeopleAccessRequired title="Employee directory needs superadmin access" />;
+  }
 
   return (
     <div className="page-shell min-h-screen pb-12 pt-24">

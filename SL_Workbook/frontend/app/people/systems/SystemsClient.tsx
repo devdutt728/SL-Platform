@@ -5,14 +5,29 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   type ColumnDef,
   type SortingState,
-  type VisibilityState,
-  flexRender,
   getCoreRowModel,
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
 import { pplDelete, pplGet, pplPatch, pplPost } from "../_lib/client";
 import { DirectoryWarning, PersonCombobox } from "../_components/PersonCombobox";
+import {
+  ColumnToggle,
+  DataTable,
+  FilterBar,
+  FilterSelect,
+  GroupedTable,
+  GroupMetaStat,
+  MultiSelectFilter,
+  ResetFiltersButton,
+  SavedViewsMenu,
+  SearchInput,
+  SegmentedControl,
+  VIEW_OPTIONS,
+  exportTableCsv,
+  useDebounced,
+  usePersistentColumns,
+} from "../_components/data";
 import type { MeResponse, SystemGradePreviewResponse, SystemInventoryItem, SystemInventoryListResponse } from "../_lib/types";
 
 const TIERS = ["Workstation", "Performance", "Standard", "Basic", "Entry"];
@@ -55,16 +70,21 @@ const emptySystem = {
 };
 
 type FormState = typeof emptySystem;
-type TableInstance = ReturnType<typeof useReactTable<SystemInventoryItem>>;
 
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
+type SystemsFilterSnapshot = {
+  search: string;
+  tier: string;
+  status: string;
+  selectedTeams: string[];
+  systemType: string;
+  vendor: string;
+  os: string;
+  assignment: string;
+  visibility: string;
+  minRam: string;
+  minScore: string;
+  view: string;
+};
 
 export function SystemsClient() {
   const [rows, setRows] = useState<SystemInventoryItem[]>([]);
@@ -80,6 +100,7 @@ export function SystemsClient() {
   const [os, setOs] = useState("");
   const [assignment, setAssignment] = useState("");
   const [visibility, setVisibility] = useState("current");
+  const [view, setView] = useState<string>("table");
   const [minRam, setMinRam] = useState("");
   const [minScore, setMinScore] = useState("");
   const [form, setForm] = useState<FormState>(emptySystem);
@@ -90,7 +111,7 @@ export function SystemsClient() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([{ id: "score", desc: true }]);
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
+  const [columnVisibility, setColumnVisibility] = usePersistentColumns(COLUMN_PREF_KEY, {
     service_tag: false,
     serial_no: false,
     motherboard: false,
@@ -108,23 +129,6 @@ export function SystemsClient() {
     notes: false,
     updated_at: false,
   });
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(COLUMN_PREF_KEY);
-      if (raw) setColumnVisibility(JSON.parse(raw));
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(COLUMN_PREF_KEY, JSON.stringify(columnVisibility));
-    } catch {
-      /* ignore */
-    }
-  }, [columnVisibility]);
 
   const load = () => {
     setLoading(true);
@@ -357,6 +361,36 @@ export function SystemsClient() {
     setMinScore("");
   }
 
+  const filterSnapshot: SystemsFilterSnapshot = {
+    search: searchInput,
+    tier,
+    status,
+    selectedTeams,
+    systemType,
+    vendor,
+    os,
+    assignment,
+    visibility,
+    minRam,
+    minScore,
+    view,
+  };
+
+  function applyFilterSnapshot(v: SystemsFilterSnapshot) {
+    setSearchInput(v.search ?? "");
+    setTier(v.tier ?? "");
+    setStatus(v.status ?? "");
+    setSelectedTeams(v.selectedTeams ?? []);
+    setSystemType(v.systemType ?? "");
+    setVendor(v.vendor ?? "");
+    setOs(v.os ?? "");
+    setAssignment(v.assignment ?? "");
+    setVisibility(v.visibility ?? "current");
+    setMinRam(v.minRam ?? "");
+    setMinScore(v.minScore ?? "");
+    setView(v.view ?? "table");
+  }
+
   return (
     <div className="space-y-4">
       {/* Compact sticky toolbar — matches Org/Groups header pattern */}
@@ -372,22 +406,13 @@ export function SystemsClient() {
             {loading ? "Loading inventory…" : `${visibleCount} shown · ${VISIBILITY_LABELS[visibility]} · ${optionSets.teams.length} teams`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[rgb(var(--steel))]">
-              <circle cx="11" cy="11" r="7" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search ID, email, CPU, GPU…"
-              className="w-60 rounded-lg border border-[var(--border-soft)] bg-white py-2 pl-8 pr-3 text-xs text-[rgb(var(--ink))] placeholder:text-[rgb(var(--steel))]/70 focus:border-[var(--brand-color)] focus:outline-none"
-            />
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <SearchInput value={searchInput} onChange={setSearchInput} placeholder="Search ID, email, CPU, GPU…" />
+          <SegmentedControl value={view} onChange={setView} options={VIEW_OPTIONS} />
           <ColumnToggle table={table} />
+          <SavedViewsMenu storageKey="ppl.systems.views" currentValues={filterSnapshot} onApply={applyFilterSnapshot} />
           {me?.is_platform_superadmin ? (
-            <button onClick={() => exportCsv(table)} className="ppl-btn ppl-btn--ghost">Export</button>
+            <button onClick={() => exportTableCsv(table, "systems-inventory")} className="ppl-btn ppl-btn--ghost">Export</button>
           ) : null}
           <button onClick={() => setShowAdd((v) => !v)} className={`ppl-btn ${showAdd ? "ppl-btn--active" : "ppl-btn--primary"}`}>
             {showAdd ? "Close" : "Add system"}
@@ -423,22 +448,26 @@ export function SystemsClient() {
 
       <section className="public-panel">
         {/* Slim inline filter row */}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+        <FilterBar className="mb-3">
           <FilterSelect value={status} onChange={setStatus} label="All statuses" options={optionSets.statuses.length ? optionSets.statuses : STATUS_OPTIONS} />
-          <FilterSelect value={visibility} onChange={setVisibility} label="Visibility" options={VISIBILITY_OPTIONS} labels={VISIBILITY_LABELS} />
-          <MultiTeamFilter selected={selectedTeams} onChange={setSelectedTeams} options={optionSets.teams} />
+          <select
+            value={visibility}
+            onChange={(e) => setVisibility(e.target.value)}
+            className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-[var(--brand-color)] focus:outline-none"
+          >
+            {VISIBILITY_OPTIONS.map((v) => (
+              <option key={v} value={v}>{VISIBILITY_LABELS[v]}</option>
+            ))}
+          </select>
+          <MultiSelectFilter selected={selectedTeams} onChange={setSelectedTeams} options={optionSets.teams} noun="team" />
           <FilterSelect value={assignment} onChange={setAssignment} label="Any assignment" options={["assigned", "unassigned"]} labels={{ assigned: "Assigned only", unassigned: "Unassigned only" }} />
           <FilterSelect value={systemType} onChange={setSystemType} label="All types" options={optionSets.types} />
           <FilterSelect value={vendor} onChange={setVendor} label="All vendors" options={optionSets.vendors} />
           <FilterSelect value={os} onChange={setOs} label="All OS" options={optionSets.oses} />
           <input value={minRam} onChange={(e) => setMinRam(e.target.value)} inputMode="numeric" placeholder="Min RAM" className="w-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 placeholder:text-slate-400" />
           <input value={minScore} onChange={(e) => setMinScore(e.target.value)} inputMode="numeric" placeholder="Min score" className="w-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 placeholder:text-slate-400" />
-          {hasFilters ? (
-            <button onClick={resetFilters} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100">
-              Reset filters
-            </button>
-          ) : null}
-        </div>
+          <ResetFiltersButton show={hasFilters} onReset={resetFilters} />
+        </FilterBar>
 
         {showAdd ? (
           <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3">
@@ -482,70 +511,40 @@ export function SystemsClient() {
           </div>
         ) : null}
 
-        <div className="max-h-[76vh] overflow-auto rounded-2xl border border-slate-200 bg-white">
-          <table className="w-full min-w-[1900px] border-collapse text-sm">
-            <thead className="sticky top-0 z-10 bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              {table.getHeaderGroups().map((hg) => (
-                <tr key={hg.id}>
-                  {hg.headers.map((h) => (
-                    <th key={h.id} className={`whitespace-nowrap px-4 py-3 ${pinClass(h.column.id, true)} ${h.id === "actions" ? "text-right" : ""}`}>
-                      {h.isPlaceholder ? null : (
-                        <button
-                          disabled={!h.column.getCanSort()}
-                          onClick={h.column.getToggleSortingHandler()}
-                          className={`inline-flex items-center gap-1 text-left ${h.column.getCanSort() ? "hover:text-slate-900" : "cursor-default"}`}
-                        >
-                          {flexRender(h.column.columnDef.header, h.getContext())}
-                          <span className="min-w-3 text-slate-400">{h.column.getIsSorted() === "asc" ? "▲" : h.column.getIsSorted() === "desc" ? "▼" : ""}</span>
-                        </button>
-                      )}
-                    </th>
-                  ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody>
-              {table.getRowModel().rows.map((row) => (
-                <tr key={row.id} className="group border-t border-slate-100 hover:bg-slate-50">
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className={`px-4 py-3 align-top text-slate-700 ${pinClass(cell.column.id, false)} ${cell.column.id === "actions" ? "text-right" : ""}`}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-              {!loading && visibleCount === 0 ? (
-                <tr>
-                  <td colSpan={table.getVisibleLeafColumns().length} className="px-4 py-10 text-center text-sm text-slate-400">
-                    No systems match these filters.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+        {view === "grouped" ? (
+          <GroupedTable
+            table={table}
+            groupKey={(row) => row.team}
+            emptyGroupLabel="No team"
+            countNoun="machine"
+            minWidth={1900}
+            loading={loading}
+            metaFor={(groupRows) => {
+              const assigned = groupRows.filter((r) => hasAssignment(r.original)).length;
+              return <GroupMetaStat label="assigned" value={`${assigned}/${groupRows.length}`} />;
+            }}
+          />
+        ) : (
+          <DataTable
+            table={table}
+            minWidth={1900}
+            maxHeight="76vh"
+            pinnedLeft={["system_id"]}
+            pinnedRight={["actions"]}
+            emptyLabel="No systems match these filters."
+            loading={loading}
+          />
+        )}
         <p className="mt-2 text-[11px] text-steel">
-          Tip: the <span className="font-semibold">System</span> and <span className="font-semibold">Actions</span> columns stay pinned while you scroll sideways. Click <span className="font-semibold">Edit</span> on any row to change all of its details.
+          {view === "grouped"
+            ? "Grouped by team. Collapse a team to focus, or switch back to Table for the full pinned view."
+            : "Tip: the System and Actions columns stay pinned while you scroll sideways. Click Edit on any row to change all of its details."}
         </p>
       </section>
 
       <EditDrawer system={editing} onClose={() => setEditing(null)} onSave={saveEdit} onDelete={deleteSystem} />
     </div>
   );
-}
-
-const PINNED_LEFT = new Set(["system_id"]);
-const PINNED_RIGHT = new Set(["actions"]);
-
-function pinClass(columnId: string, isHeader: boolean): string {
-  const bg = isHeader ? "bg-slate-50" : "bg-white group-hover:bg-slate-50";
-  if (PINNED_LEFT.has(columnId)) {
-    return `sticky left-0 z-10 ${bg} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]`;
-  }
-  if (PINNED_RIGHT.has(columnId)) {
-    return `sticky right-0 z-10 ${bg} shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.12)]`;
-  }
-  return "";
 }
 
 const EDIT_FIELDS: Array<{ section: string; kind?: "assignment"; fields: Array<{ key: keyof SystemInventoryItem; label: string; type?: "select" | "number"; options?: string[] }> }> = [
@@ -806,91 +805,6 @@ function MetricPill({ label, value }: { label: string; value: number }) {
   );
 }
 
-function FilterSelect({ value, onChange, label, options, labels }: { value: string; onChange: (value: string) => void; label: string; options: string[]; labels?: Record<string, string> }) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
-      <option value="">{label}</option>
-      {options.map((option) => (
-        <option key={option} value={option}>{labels?.[option] || option}</option>
-      ))}
-    </select>
-  );
-}
-
-function MultiTeamFilter({ selected, onChange, options }: { selected: string[]; onChange: (value: string[]) => void; options: string[] }) {
-  const selectedSet = useMemo(() => new Set(selected), [selected]);
-  const label = selected.length ? `${selected.length} team${selected.length === 1 ? "" : "s"}` : "All teams";
-
-  function toggle(team: string) {
-    if (selectedSet.has(team)) {
-      onChange(selected.filter((item) => item !== team));
-      return;
-    }
-    onChange([...selected, team]);
-  }
-
-  return (
-    <details className="relative">
-      <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
-        <span>{label}</span>
-      </summary>
-      <div className="absolute left-0 z-30 mt-1 w-72 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
-        <div className="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
-          <button onClick={() => onChange(options)} className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-            Select all
-          </button>
-          <button onClick={() => onChange([])} className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-            Clear
-          </button>
-        </div>
-        {selected.length ? (
-          <div className="mb-2 flex max-h-20 flex-wrap gap-1 overflow-auto">
-            {selected.map((team) => (
-              <button
-                key={team}
-                onClick={() => toggle(team)}
-                className="rounded-full border border-[var(--brand-color)]/20 bg-[var(--brand-color)]/10 px-2 py-0.5 text-[11px] font-semibold text-[var(--brand-color)]"
-              >
-                {team} x
-              </button>
-            ))}
-          </div>
-        ) : null}
-        <div className="max-h-72 overflow-auto">
-          {options.map((team) => (
-            <label key={team} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-50">
-              <input type="checkbox" checked={selectedSet.has(team)} onChange={() => toggle(team)} />
-              <span className="min-w-0 truncate">{team}</span>
-            </label>
-          ))}
-          {!options.length ? <div className="px-2 py-4 text-center text-xs text-slate-400">No teams available.</div> : null}
-        </div>
-      </div>
-    </details>
-  );
-}
-
-function ColumnToggle({ table }: { table: TableInstance }) {
-  return (
-    <details className="relative">
-      <summary className="ppl-btn ppl-btn--ghost cursor-pointer list-none">
-        Columns
-      </summary>
-      <div className="absolute right-0 z-30 mt-1 grid max-h-[420px] w-64 gap-1 overflow-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
-        <button onClick={() => table.resetColumnVisibility()} className="rounded-lg px-2 py-1 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">
-          Reset visibility
-        </button>
-        {table.getAllLeafColumns().map((col) => (
-          <label key={col.id} className="flex items-center gap-2 rounded-lg px-2 py-1 text-xs text-slate-700 hover:bg-slate-50">
-            <input type="checkbox" checked={col.getIsVisible()} onChange={col.getToggleVisibilityHandler()} />
-            {typeof col.columnDef.header === "string" ? col.columnDef.header : col.id}
-          </label>
-        ))}
-      </div>
-    </details>
-  );
-}
-
 function InlineSelect({ value, options, onChange }: { value: string; options: string[]; onChange: (value: string) => void }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700">
@@ -938,29 +852,4 @@ function toNullableNumber(value: string | undefined) {
   if (value == null || value.trim() === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
-}
-
-function exportCsv(table: TableInstance) {
-  const columns = table.getVisibleLeafColumns().filter((col) => col.id !== "actions");
-  const headers = columns.map((col) => (typeof col.columnDef.header === "string" ? col.columnDef.header : col.id));
-  const rows = table.getRowModel().rows.map((row) =>
-    columns.map((col) => {
-      const value = row.getValue(col.id);
-      return csvEscape(value == null || value === "" ? "-" : String(value));
-    }).join(","),
-  );
-  const csv = [headers.map(csvEscape).join(","), ...rows].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `systems-inventory-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-function csvEscape(value: string) {
-  return `"${value.replaceAll('"', '""')}"`;
 }

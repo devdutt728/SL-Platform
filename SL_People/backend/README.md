@@ -2,7 +2,7 @@
 
 FastAPI service for the People / Org / Licenses / Systems / Peripherals / Groups
 console. Runs on **port 8004**. Owns its own MySQL database **`sl_people`** and
-reads the shared **`sl_platform`** database for identity (`dim_person`, read-only).
+uses the shared **`sl_platform`** database for identity (`dim_person`).
 
 This is **Phase 0 (infrastructure)**. Only `/health` and `/ppl/auth/me` are live;
 feature routers land in later phases. See `../../SL_PEOPLE_PLAN.md`.
@@ -14,7 +14,7 @@ app/
   main.py                  FastAPI app (module gate + /health)
   core/        config.py · auth.py · paths.py
   db/          base.py · session.py (sl_people) · platform_session.py (sl_platform)
-  models/      people.py (19 tables) · platform_person.py (dim_person, RO)
+  models/      people.py (19 tables) · platform_person.py (dim_person)
   services/    console_logic.py (Code.gs port) · encryption.py (Fernet)
                people_access.py · platform_identity.py
   api/         router.py · deps.py · routes/auth.py

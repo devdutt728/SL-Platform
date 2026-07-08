@@ -342,6 +342,17 @@ async def get_profile(
     mgr_number, mgr_name = await _manager_lookup(
         people_session, platform_session, work.reporting_manager_id if work else None
     )
+    platform_mgr_number = None
+    platform_mgr_name = None
+    if dp and dp.manager_id:
+        platform_mgr = (
+            await platform_session.execute(
+                select(DimPerson).where(DimPerson.person_id == dp.manager_id)
+            )
+        ).scalar_one_or_none()
+        if platform_mgr:
+            platform_mgr_number = platform_mgr.person_code
+            platform_mgr_name = _platform_name(platform_mgr)
 
     def addr_block(kind: str) -> AddressBlock:
         a = addr_by_type.get(kind)
@@ -409,8 +420,8 @@ async def get_profile(
                 work.secondary_job_title if work else None, dp.secondary_job_title if dp else None
             ),
             reporting_manager_id=work.reporting_manager_id if work else None,
-            reporting_manager_name=_value(mgr_name, dp.reporting_to if dp else None),
-            reporting_manager_number=_value(mgr_number, dp.manager_id if dp else None),
+            reporting_manager_name=_value(mgr_name, platform_mgr_name, dp.reporting_to if dp else None),
+            reporting_manager_number=_value(mgr_number, platform_mgr_number),
             dotted_line_manager_id=work.dotted_line_manager_id if work else None,
             date_joined=_value(work.date_joined if work else None, dp.join_date if dp else None),
             exit_date=_value(work.exit_date if work else None, dp.exit_date if dp else None),
@@ -471,14 +482,16 @@ async def _get_platform_profile(
         return None
 
     manager_name = None
-    manager_number = dp.manager_id
-    if manager_number:
+    manager_number = None
+    if dp.manager_id:
         manager = (
             await platform_session.execute(
-                select(DimPerson).where(DimPerson.person_code == manager_number)
+                select(DimPerson).where(DimPerson.person_id == dp.manager_id)
             )
         ).scalar_one_or_none()
-        manager_name = _platform_name(manager) if manager else None
+        if manager:
+            manager_number = manager.person_code
+            manager_name = _platform_name(manager)
 
     return (
         EmployeeProfile(

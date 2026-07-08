@@ -1,10 +1,17 @@
-import { notFound } from "next/navigation";
+import { PeopleAccessRequired } from "../_components/PeopleAccessRequired";
 import { PeopleHeader } from "../_components/PeopleHeader";
 import { isPeopleSuperadmin } from "../_lib/access-server";
 import { BulkClient } from "./BulkClient";
 
 export default async function PeopleBulkPage() {
-  if (!(await isPeopleSuperadmin())) notFound();
+  if (!(await isPeopleSuperadmin())) {
+    return (
+      <PeopleAccessRequired
+        title="Bulk upload needs superadmin access"
+        message="People master uploads can update employee, work, manager, and org visibility data in one go. Sign in with a platform superadmin account before using this console."
+      />
+    );
+  }
 
   return (
     <div className="page-shell min-h-screen pb-10 pt-24">

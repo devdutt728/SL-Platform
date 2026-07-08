@@ -4,7 +4,7 @@ from datetime import datetime
 
 from app.models.candidate import RecCandidate
 from app.models.candidate_assessment import RecCandidateAssessment
-from app.services.public_links import build_public_link, build_public_path
+from app.services.public_links import build_public_link, build_public_path, sign_public_token
 
 LEGACY_BASIC_DETAILS_FORM_LINK_GENERATED = "caf_link_generated"
 LEGACY_BASIC_DETAILS_FORM_SUBMITTED = "caf_submitted"
@@ -97,7 +97,14 @@ def build_basic_details_form_path(token: str) -> str:
 
 
 def build_basic_details_form_link(token: str) -> str:
-    return build_public_link(f"/basic-details/{token}")
+    # This is the link actually emailed to candidates, so it carries a signature.
+    # build_basic_details_form_path (below) is deliberately left unsigned: it's also
+    # returned as an informational field in API responses that may be read by
+    # integrations outside this app, and the CAF endpoints treat exp/sig as optional
+    # (validated only if present) so those callers keep working unchanged.
+    exp, sig = sign_public_token("caf", token)
+    base = build_public_link(f"/basic-details/{token}")
+    return f"{base}?exp={exp}&sig={sig}"
 
 
 def build_candidate_assessment_form_path(token: str) -> str:

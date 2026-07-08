@@ -316,6 +316,7 @@ class SystemInventory(Base):
     assigned_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     user_display: Mapped[str | None] = mapped_column(String(100), nullable=True)
     team: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    group_key: Mapped[str | None] = mapped_column(String(50), nullable=True)
     processor: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ram_gb: Mapped[float | None] = mapped_column(Numeric(6, 1), nullable=True)
     ram_slots_free: Mapped[str | None] = mapped_column(String(30), nullable=True)

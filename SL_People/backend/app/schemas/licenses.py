@@ -139,14 +139,17 @@ class LicenseSoftwareSummary(BaseModel):
     short_name: str
     category: Optional[str] = None
     purchased: int
+    expired_purchased: int = 0
     assigned: int
     shared_assigned: int
     total_assigned: int
     contracts: int
+    expired_contracts: int = 0
 
 
 class LicenseTotals(BaseModel):
     purchased: int
+    expired_purchased: int = 0
     assigned: int
     shared_assigned: int
     total_assigned: int

@@ -25,8 +25,8 @@ type SprintAttachment = {
   download_url: string;
 };
 
-async function fetchSprint(token: string) {
-  const res = await fetch(await internalUrl(`/api/sprint/${encodeURIComponent(token)}`), { cache: "no-store" });
+async function fetchSprint(token: string, linkQuery: string) {
+  const res = await fetch(await internalUrl(`/api/sprint/${encodeURIComponent(token)}${linkQuery}`), { cache: "no-store" });
   if (!res.ok) return null;
   return (await res.json()) as SprintPublic;
 }
@@ -85,9 +85,24 @@ function sanitizeSprintHtml(raw?: string | null) {
   return cleaned;
 }
 
-export default async function SprintPage({ params }: { params: Promise<{ token: string }> }) {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+export default async function SprintPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ token: string }>;
+  searchParams: Promise<SearchParams>;
+}) {
   const { token } = await params;
-  const sprint = await fetchSprint(token);
+  const resolvedSearchParams = await searchParams;
+  const exp = resolvedSearchParams.exp;
+  const sig = resolvedSearchParams.sig;
+  const linkQuery =
+    typeof exp === "string" && typeof sig === "string"
+      ? `?exp=${encodeURIComponent(exp)}&sig=${encodeURIComponent(sig)}`
+      : "";
+  const sprint = await fetchSprint(token, linkQuery);
   const attachmentBase = sprint ? await internalUrl(`/api/sprint/${encodeURIComponent(token)}/attachments`) : "";
 
   if (!sprint) {
@@ -157,7 +172,7 @@ export default async function SprintPage({ params }: { params: Promise<{ token: 
                 <a
                   key={attachment.sprint_attachment_id}
                   className="flex items-center justify-between rounded-xl border border-white/60 bg-white/30 px-3 py-2 text-sm text-slate-800"
-                  href={`${attachmentBase}/${encodeURIComponent(String(attachment.sprint_attachment_id))}`}
+                  href={`${attachmentBase}/${encodeURIComponent(String(attachment.sprint_attachment_id))}${linkQuery}`}
                 >
                   <span className="truncate">{attachment.file_name}</span>
                   <span className="text-xs text-slate-500">{formatFileSize(attachment.file_size)}</span>
@@ -176,6 +191,7 @@ export default async function SprintPage({ params }: { params: Promise<{ token: 
         token={token}
         initialStatus={sprint.status}
         dueAt={sprint.due_at}
+        linkQuery={linkQuery}
       />
     </main>
   );

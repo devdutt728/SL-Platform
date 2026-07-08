@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from app.services.events import log_event
 from app.core.config import settings
 from app.services.opening_config import get_opening_config
 from app.services.internal_notifications import notify_candidate_ready_for_review
+from app.services.public_links import verify_public_token
 from app.services.recruitment_forms import (
     BASIC_DETAILS_FORM_SUBMITTED,
     LEGACY_BASIC_DETAILS_FORM_SUBMITTED,
@@ -54,12 +55,26 @@ def _caf_expired(candidate: RecCandidate) -> bool:
     return datetime.utcnow() > (sent_at + window)
 
 
+def _check_optional_caf_signature(request: Request, token: str) -> None:
+    # The emailed CAF link carries exp/sig (see build_basic_details_form_link), but the
+    # bare token path is also exposed in API response fields that may be read by
+    # integrations outside this app. So the signature is validated only when present —
+    # unlike offer/sprint links, an absent signature falls back to the existing
+    # unguessable-token + _caf_expired() time-window protection rather than being rejected.
+    exp = request.query_params.get("exp")
+    sig = request.query_params.get("sig")
+    if (exp or sig) and not verify_public_token("caf", token, exp, sig):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired link")
+
+
 @legacy_router.get("/{token}", response_model=CafPrefillOut)
 @router.get("/{token}", response_model=CafPrefillOut)
 async def get_caf_prefill(
     token: str,
+    request: Request,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    _check_optional_caf_signature(request, token)
     candidate = (
         await session.execute(select(RecCandidate).where(basic_details_form_token_filter(token)))
     ).scalars().first()
@@ -107,8 +122,10 @@ async def get_caf_prefill(
 @router.get("/{token}/screening", response_model=ScreeningOut)
 async def get_caf_screening(
     token: str,
+    request: Request,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    _check_optional_caf_signature(request, token)
     candidate = (
         await session.execute(select(RecCandidate).where(basic_details_form_token_filter(token)))
     ).scalars().first()
@@ -132,8 +149,10 @@ async def get_caf_screening(
 async def submit_caf(
     token: str,
     payload: ScreeningUpsertIn,
+    request: Request,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    _check_optional_caf_signature(request, token)
     candidate = (
         await session.execute(select(RecCandidate).where(basic_details_form_token_filter(token)))
     ).scalars().first()

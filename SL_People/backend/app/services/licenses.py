@@ -21,6 +21,14 @@ from app.schemas.licenses import (
 from app.services.console_logic import short_name_for
 
 
+ADOBE_TOOL_ALIASES = (
+    ("Adobe Photoshop", ("photoshop",)),
+    ("Adobe Illustrator", ("illustrator",)),
+    ("Adobe InDesign", ("indesign", "in design")),
+    ("Adobe Acrobat", ("acrobat",)),
+)
+
+
 def _norm_email(value: Optional[str]) -> str:
     return str(value or "").strip().lower()
 
@@ -44,6 +52,13 @@ def _renewal(end_date: Optional[date]) -> tuple[Optional[int], str]:
     if diff <= 90:
         return diff, "Watch"
     return diff, "Active"
+
+
+def _is_expired_contract(row: LicenseContractItem) -> bool:
+    status = str(row.status or "").strip().lower()
+    if status == "expired" or row.renewal_status == "Expired":
+        return True
+    return row.days_to_expiry is not None and row.days_to_expiry < 0
 
 
 async def _platform_people_by_email(
@@ -84,7 +99,29 @@ def classify_license_holder(
 
 def _is_active_assignment(status: Optional[str]) -> bool:
     value = str(status or "").strip().lower()
-    return value not in {"revoked", "available", "unassigned", "inactive", "disabled"}
+    return value not in {"revoked", "removed", "available", "unassigned", "inactive", "disabled"}
+
+
+def _assignment_tool_names(row: LicenseAssignment) -> set[str]:
+    """Return every canonical software title represented by an assignment row."""
+    raw_tool = str(row.tool_name or "")
+    lowered = raw_tool.lower()
+    adobe_tools = {
+        tool
+        for tool, aliases in ADOBE_TOOL_ALIASES
+        if any(alias in lowered for alias in aliases)
+    }
+    if adobe_tools:
+        return adobe_tools
+    short = short_name_for(raw_tool or row.tool_short_name)
+    return {short} if short else set()
+
+
+def _assignment_display_short_name(row: LicenseAssignment) -> Optional[str]:
+    tools = sorted(_assignment_tool_names(row))
+    if tools:
+        return ", ".join(tools)
+    return row.tool_short_name or short_name_for(row.tool_name)
 
 
 def contract_item(row: LicenseContract) -> LicenseContractItem:
@@ -127,7 +164,7 @@ async def assignment_item(
         id=row.id,
         work_email=row.work_email,
         tool_name=row.tool_name,
-        tool_short_name=row.tool_short_name or short_name_for(row.tool_name),
+        tool_short_name=_assignment_display_short_name(row),
         plan=row.plan,
         status=row.status,
         assigned_on=row.assigned_on,
@@ -155,20 +192,26 @@ async def license_summary(
     contract_items = [contract_item(row) for row in contracts]
     summary_by_tool: dict[str, dict] = {}
     for contract in contract_items:
-        key = contract.short_name or short_name_for(contract.software)
+        key = short_name_for(contract.software) or contract.short_name
         if key not in summary_by_tool:
             summary_by_tool[key] = {
                 "software": contract.software,
                 "short_name": key,
                 "category": contract.category,
                 "purchased": 0,
+                "expired_purchased": 0,
                 "assigned": 0,
                 "shared_assigned": 0,
                 "total_assigned": 0,
                 "contracts": 0,
+                "expired_contracts": 0,
             }
-        summary_by_tool[key]["purchased"] += contract.seats or 0
-        summary_by_tool[key]["contracts"] += 1
+        if _is_expired_contract(contract):
+            summary_by_tool[key]["expired_purchased"] += contract.seats or 0
+            summary_by_tool[key]["expired_contracts"] += 1
+        else:
+            summary_by_tool[key]["purchased"] += contract.seats or 0
+            summary_by_tool[key]["contracts"] += 1
 
     assign_counts: defaultdict[str, int] = defaultdict(int)
     shared_counts: defaultdict[str, int] = defaultdict(int)
@@ -184,14 +227,37 @@ async def license_summary(
         kind = classify_license_holder(email, master_emails)
         if kind == "unassigned":
             continue
-        short = row.tool_short_name or short_name_for(tool)
+        shorts = _assignment_tool_names(row)
+        if not shorts:
+            continue
         if kind == "person":
-            total_person += 1
-            assign_counts[short] += 1
+            total_person += len(shorts)
+            for short in shorts:
+                assign_counts[short] += 1
         else:
-            total_shared += 1
-            shared_counts[short] += 1
-            unknown_by_email[email].append(tool)
+            total_shared += len(shorts)
+            for short in shorts:
+                shared_counts[short] += 1
+            unknown_by_email[email].extend(sorted(shorts))
+
+    # Some assigned tools have no backing contract yet (installed/assigned but never purchased) —
+    # surface them in the portfolio anyway, with purchased=0, so they aren't invisible.
+    for key in set(assign_counts) | set(shared_counts):
+        summary_by_tool.setdefault(
+            key,
+            {
+                "software": key,
+                "short_name": key,
+                "category": None,
+                "purchased": 0,
+                "expired_purchased": 0,
+                "assigned": 0,
+                "shared_assigned": 0,
+                "total_assigned": 0,
+                "contracts": 0,
+                "expired_contracts": 0,
+            },
+        )
 
     for key, item in summary_by_tool.items():
         item["assigned"] = assign_counts[key]
@@ -215,7 +281,8 @@ async def license_summary(
     ]
     return LicenseSummaryResponse(
         totals=LicenseTotals(
-            purchased=sum(c.seats for c in contract_items),
+            purchased=sum(c.seats for c in contract_items if not _is_expired_contract(c)),
+            expired_purchased=sum(c.seats for c in contract_items if _is_expired_contract(c)),
             assigned=total_person,
             shared_assigned=total_shared,
             total_assigned=total_person + total_shared,

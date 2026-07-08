@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime
+import logging
 import re
 from typing import Optional
 
@@ -29,6 +30,9 @@ from app.models.people import (
 )
 from app.models.platform_person import DimPerson
 from app.services.console_logic import compute_experience, level_for
+
+
+logger = logging.getLogger(__name__)
 
 
 def _norm_key(value: Optional[str]) -> str:
@@ -52,20 +56,83 @@ async def _license_counts(people_session: AsyncSession) -> dict[str, int]:
     return {str(email).strip().lower(): int(n) for email, n in rows if email}
 
 
+def _is_active_dim_person(dp: Optional[DimPerson]) -> bool:
+    if dp is None:
+        return True
+    if (dp.status or "").strip() != "Working":
+        return False
+    return dp.is_deleted in (None, 0, False)
+
+
+async def _deactivate_exited_org_employees(
+    people_session: AsyncSession,
+    platform_session: AsyncSession,
+    *,
+    existing_org: dict[str, OrgEmployee],
+    performed_by: Optional[str],
+    now: datetime,
+) -> int:
+    """Flip include_in_org off for org rows whose linked person has exited.
+
+    include_in_org is a manual placement flag that nothing else clears
+    automatically when a person is marked Relieved/deleted in dim_person, so
+    stale rows accumulate over time. This makes the org data self-heal on
+    every sync pass instead of relying solely on the live-read filter.
+    """
+    active_only_rows = [row for row in existing_org.values() if row.include_in_org]
+    emp_nos = [row.employee_no for row in active_only_rows]
+    if not emp_nos:
+        return 0
+    identities = {
+        dp.person_code: dp
+        for dp in (
+            await platform_session.execute(
+                select(DimPerson).where(DimPerson.person_code.in_(emp_nos))
+            )
+        ).scalars().all()
+        if dp.person_code
+    }
+    deactivated = 0
+    for row in active_only_rows:
+        if not _is_active_dim_person(identities.get(row.employee_no)):
+            row.include_in_org = False
+            row.updated_at = now
+            row.updated_by_person_id = performed_by
+            deactivated += 1
+    return deactivated
+
+
 async def sync_missing_dim_people_to_org(
     people_session: AsyncSession,
     platform_session: AsyncSession,
     *,
     performed_by: Optional[str] = None,
 ) -> int:
-    """Create missing People/org rows from active sl_platform.dim_person records.
+    """Reconcile People/org rows against active sl_platform.dim_person records.
 
     Existing org placements are treated as manual structure and are not moved.
     New people are placed by manager's current group first, then by matching
     department/sub-department/business-unit to an existing group. If nothing
     matches, a single Unassigned group is used so the employee is still visible
-    for later cleanup.
+    for later cleanup. Org rows for people who have since exited dim_person are
+    marked include_in_org=False so they stop showing on the live chart.
     """
+    now = datetime.utcnow()
+    existing_org = {
+        row.employee_no: row
+        for row in (await people_session.execute(select(OrgEmployee))).scalars().all()
+    }
+    deactivated = await _deactivate_exited_org_employees(
+        people_session,
+        platform_session,
+        existing_org=existing_org,
+        performed_by=performed_by,
+        now=now,
+    )
+    if deactivated:
+        await people_session.flush()
+        logger.info("Deactivated %s exited employee(s) from org chart", deactivated)
+
     people = (
         await platform_session.execute(
             select(DimPerson)
@@ -89,9 +156,10 @@ async def sync_missing_dim_people_to_org(
     if not groups:
         return 0
 
-    existing_org = {
-        row.employee_no: row
-        for row in (await people_session.execute(select(OrgEmployee))).scalars().all()
+    person_code_by_id = {
+        dp.person_id: dp.person_code.strip()
+        for dp in people
+        if dp.person_id and (dp.person_code or "").strip()
     }
     existing_ext = {
         row.employee_number: row
@@ -138,7 +206,7 @@ async def sync_missing_dim_people_to_org(
         return group
 
     def group_for(dp: DimPerson) -> OrgGroup:
-        manager_emp = (dp.manager_id or "").strip()
+        manager_emp = person_code_by_id.get((dp.manager_id or "").strip(), (dp.manager_id or "").strip())
         manager_org = existing_org.get(manager_emp)
         if manager_org and manager_org.group_key in group_by_key:
             return group_by_key[manager_org.group_key]
@@ -149,8 +217,12 @@ async def sync_missing_dim_people_to_org(
                 return group
         return fallback_group()
 
+    def manager_emp_for(dp: DimPerson) -> Optional[str]:
+        raw = (dp.manager_id or "").strip()
+        return person_code_by_id.get(raw, raw) or None
+
     created = 0
-    now = datetime.utcnow()
+    regrouped = 0
     for dp in people:
         emp_no = dp.person_code.strip()
 
@@ -188,6 +260,29 @@ async def sync_missing_dim_people_to_org(
             work.date_joined = dp.join_date
 
         if emp_no in existing_org:
+            # Existing placements are manual structure and are not otherwise moved,
+            # but a reporting-manager change in dim_person should follow automatically:
+            # when the person's current manager is placed in a different (active) group,
+            # re-home the person under that manager so the chart self-heals every sync
+            # pass instead of waiting for a manual Excel re-import.
+            org_row = existing_org[emp_no]
+            manager_emp = manager_emp_for(dp)
+            if manager_emp and manager_emp != (org_row.source_manager_emp or None):
+                manager_org = existing_org.get(manager_emp)
+                if (
+                    manager_org
+                    and manager_org.group_key in group_by_key
+                    and manager_org.group_key != org_row.group_key
+                ):
+                    new_group = group_by_key[manager_org.group_key]
+                    org_row.group_key = new_group.group_key
+                    org_row.principal_name = new_group.principal_name
+                    org_row.updated_at = now
+                    org_row.updated_by_person_id = performed_by
+                    regrouped += 1
+                # Track the current manager either way so we don't re-evaluate an
+                # unplaced/same-group manager on every pass.
+                org_row.source_manager_emp = manager_emp
             continue
 
         group = group_for(dp)
@@ -199,7 +294,7 @@ async def sync_missing_dim_people_to_org(
             principal_name=group.principal_name,
             org_level="Member",
             include_in_org=True,
-            source_manager_emp=dp.manager_id,
+            source_manager_emp=person_code_by_id.get((dp.manager_id or "").strip(), dp.manager_id),
             designation_level=level.label,
             designation_color=level.color,
             designation_order=level.order,
@@ -212,8 +307,10 @@ async def sync_missing_dim_people_to_org(
         existing_org[emp_no] = org_row
         created += 1
 
-    if created:
+    if created or regrouped:
         await people_session.flush()
+    if regrouped:
+        logger.info("Auto-followed manager change for %s employee(s) on org chart", regrouped)
     return created
 
 
@@ -264,6 +361,19 @@ async def build_live_tree(
         work_by_emp = {emp_no: wi for emp_no, wi in wrows}
 
     lic_counts = await _license_counts(people_session)
+
+    # include_in_org is a manual placement flag and is not flipped automatically
+    # when a person exits in dim_person, so a departed employee's row can be
+    # stale here. Drop anyone whose linked identity is no longer "Working" so
+    # the live tree always reflects current employment status.
+    def _is_active_identity(dp: Optional[DimPerson]) -> bool:
+        if dp is None:
+            return True
+        if (dp.status or "").strip() != "Working":
+            return False
+        return dp.is_deleted in (None, 0, False)
+
+    org_rows = [r for r in org_rows if _is_active_identity(identities.get(r.employee_no))]
 
     # Principal scaffolding.
     principal_nodes: dict[str, dict] = {}
@@ -401,6 +511,11 @@ async def _build_platform_directory_tree(platform_session: AsyncSession) -> dict
     ).scalars().all()
 
     people = [dp for dp in rows if dp.person_code and (dp.full_name or "").strip().lower() != "dummy employee"]
+    person_code_by_id = {
+        dp.person_id: dp.person_code.strip()
+        for dp in people
+        if dp.person_id and (dp.person_code or "").strip()
+    }
     today = date.today()
 
     def person_dict(dp: DimPerson, group_key: str, group_name: str) -> dict:
@@ -430,7 +545,7 @@ async def _build_platform_directory_tree(platform_session: AsyncSession) -> dict
             "o_exp_display": exp.o_exp_display,
             "license_count": 0,
             "image_url": None,
-            "source_manager_emp": dp.manager_id,
+            "source_manager_emp": person_code_by_id.get((dp.manager_id or "").strip(), dp.manager_id),
             "manager_override_emp": None,
             "include_in_org": True,
         }

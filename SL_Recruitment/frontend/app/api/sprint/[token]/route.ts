@@ -1,9 +1,10 @@
 import {NextResponse, type NextRequest} from "next/server";
 import { backendUrl } from "@/lib/backend";
 
-export async function GET(_request: NextRequest, context: { params: Promise<{ token: string }> }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ token: string }> }) {
   const params = await context.params;
-  const res = await fetch(backendUrl(`/sprint/${encodeURIComponent(params.token)}`), { cache: "no-store" });
+  const url = new URL(request.url);
+  const res = await fetch(backendUrl(`/sprint/${encodeURIComponent(params.token)}${url.search}`), { cache: "no-store" });
   const data = await res.text();
   return new NextResponse(data, {
     status: res.status,
@@ -13,8 +14,9 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ to
 
 export async function POST(request: NextRequest, context: { params: Promise<{ token: string }> }) {
   const params = await context.params;
+  const url = new URL(request.url);
   const formData = await request.formData();
-  const res = await fetch(backendUrl(`/sprint/${encodeURIComponent(params.token)}`), {
+  const res = await fetch(backendUrl(`/sprint/${encodeURIComponent(params.token)}${url.search}`), {
     method: "POST",
     body: formData,
   });

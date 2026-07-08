@@ -5,14 +5,14 @@ import { internalUrl } from "@/lib/internal";
 import { CafPrefill, Screening } from "@/lib/types";
 import { CafForm } from "./ui";
 
-async function fetchPrefill(token: string) {
-  const res = await fetch(await internalUrl(`/api/basic-details/${token}`), { cache: "no-store" });
+async function fetchPrefill(token: string, linkQuery: string) {
+  const res = await fetch(await internalUrl(`/api/basic-details/${token}${linkQuery}`), { cache: "no-store" });
   if (!res.ok) return null;
   return (await res.json()) as CafPrefill;
 }
 
-async function fetchScreening(token: string) {
-  const res = await fetch(await internalUrl(`/api/basic-details/${token}/screening`), { cache: "no-store" });
+async function fetchScreening(token: string, linkQuery: string) {
+  const res = await fetch(await internalUrl(`/api/basic-details/${token}/screening${linkQuery}`), { cache: "no-store" });
   if (!res.ok) return null;
   return (await res.json()) as Screening;
 }
@@ -73,12 +73,27 @@ function TopBar({
   );
 }
 
-export default async function CafPage({ params }: { params: Promise<{ token: string }> }) {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+export default async function CafPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ token: string }>;
+  searchParams: Promise<SearchParams>;
+}) {
   const { token } = await params;
+  const resolvedSearchParams = await searchParams;
+  const exp = resolvedSearchParams.exp;
+  const sig = resolvedSearchParams.sig;
+  const linkQuery =
+    typeof exp === "string" && typeof sig === "string"
+      ? `?exp=${encodeURIComponent(exp)}&sig=${encodeURIComponent(sig)}`
+      : "";
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/recruitment";
   const logoSrc = `${basePath}/Studio Lotus Logo (TM).png`;
   const shellClass = "mx-auto w-full max-w-[1320px] px-4 sm:px-6 lg:px-7";
-  const prefill = await fetchPrefill(token);
+  const prefill = await fetchPrefill(token, linkQuery);
 
   if (!prefill) {
     return (
@@ -98,7 +113,7 @@ export default async function CafPage({ params }: { params: Promise<{ token: str
     );
   }
 
-  const screening = await fetchScreening(token);
+  const screening = await fetchScreening(token, linkQuery);
   const submitted = Boolean(prefill.basic_details_form_submitted_at || prefill.caf_submitted_at);
 
   return (

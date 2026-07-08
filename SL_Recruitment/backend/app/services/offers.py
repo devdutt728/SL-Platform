@@ -102,8 +102,35 @@ def _logo_data_uri() -> str:
     b64 = base64.b64encode(data).decode("ascii")
     return f"data:image/png;base64,{b64}"
 
+def _offer_view_signature(token: str, expires_at: int) -> str:
+    signing_key = (settings.public_link_signing_key or settings.secret_key).strip()
+    payload = f"offer-view:{token}:{int(expires_at)}"
+    digest = hmac.new(
+        signing_key.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def verify_offer_view_signature(token: str, exp: str | None, sig: str | None) -> bool:
+    if not exp or not sig:
+        return False
+    try:
+        exp_int = int(exp)
+    except ValueError:
+        return False
+    if datetime.now(timezone.utc).timestamp() > exp_int:
+        return False
+    expected = _offer_view_signature(token, exp_int)
+    return hmac.compare_digest(expected, sig)
+
+
 def _offer_public_link(token: str) -> str:
-    return build_public_link(f"/offer/{token}")
+    expires_at = int((datetime.now(timezone.utc) + timedelta(hours=settings.public_link_ttl_hours)).timestamp())
+    sig = _offer_view_signature(token, expires_at)
+    base = build_public_link(f"/offer/{token}")
+    return f"{base}?exp={expires_at}&sig={sig}"
 
 def _offer_public_pdf_link(token: str) -> str:
     return build_public_link(f"/api/offer/{token}/pdf")

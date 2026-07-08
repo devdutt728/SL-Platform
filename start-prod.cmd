@@ -3,6 +3,8 @@ set "ROOT=D:\SL Platform"
 set "LOGDIR=%ROOT%\logs"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
 if exist "%LOGDIR%\stop-live-logs.signal" del /f /q "%LOGDIR%\stop-live-logs.signal" >nul 2>nul
+set "PIDS_PATH=%LOGDIR%\pids.txt"
+if exist "%PIDS_PATH%" del /f /q "%PIDS_PATH%" >nul 2>nul
 
 rem Build on each start (set to 0 to skip builds)
 if not defined BUILD_ON_START set "BUILD_ON_START=1"
@@ -20,7 +22,7 @@ if not defined ENABLE_IT_MODULE set "ENABLE_IT_MODULE=0"
 if not defined ENABLE_PROJECT_PLANNER set "ENABLE_PROJECT_PLANNER=1"
 if not defined ENABLE_PEOPLE_MODULE set "ENABLE_PEOPLE_MODULE=1"
 
-powershell -NoProfile -Command "& { $ErrorActionPreference = 'Continue'; $ports = 3000,3001,3002,3003,3004,8001,8002,8003,8004,8005; foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { $procId = $_.OwningProcess; if ($procId) { try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {} } } } }"
+powershell -NoProfile -Command "& { $ErrorActionPreference = 'Continue'; $ports = 3000,3001,3002,3003,3004,8001,8002,8003,8004,8005,8010; foreach ($p in $ports) { Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | ForEach-Object { $procId = $_.OwningProcess; if ($procId) { try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {} } } } }"
 
 set "RUN_ID=%DATE%_%TIME%"
 set "RUN_ID=%RUN_ID: =%"
@@ -91,6 +93,7 @@ set "CURRENT_LOGS=%LOGDIR%\current-logs.cmd"
   echo set "PLANNER_FRONTEND_BUILD_ERR_LOG=%PLANNER_FRONTEND_BUILD_ERR%"
   echo set "CADDY_LOG=%CADDY_OUT%"
   echo set "CADDY_ERR_LOG=%CADDY_ERR%"
+  echo set "PIDS_PATH=%PIDS_PATH%"
 ) > "%CURRENT_LOGS%"
 
 set "IT_BACKEND_DIR=%ROOT%\SL_IT\backend"
@@ -212,7 +215,7 @@ set "RUNNER=%RUN_LOGDIR%\run-%RANDOM%-%RANDOM%.cmd"
   echo %SPAWN_CMD% 1^>^>"%SPAWN_OUT%" 2^>^>"%SPAWN_ERR%"
 ) > "%RUNNER%"
 
-start "" /b "%RUNNER%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d /s /c call ""%RUNNER%""' -WindowStyle Hidden -PassThru; Add-Content -LiteralPath '%PIDS_PATH%' -Value $p.Id"
 exit /b
 
 :wait_port

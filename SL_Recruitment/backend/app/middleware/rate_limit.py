@@ -10,7 +10,13 @@ from starlette.middleware.base import BaseHTTPMiddleware
 def _client_ip(request: Request) -> str:
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        return xff.split(",")[0].strip() or "unknown"
+        # Take the right-most entry: the client can put anything it wants at the start
+        # of this header, but the value appended by our own reverse proxy (Caddy — the
+        # only hop in front of this app) is the last one and can't be forged by the
+        # client. Trusting the left-most entry lets anyone spoof past this rate limit.
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     xrip = request.headers.get("x-real-ip")
     if xrip:
         return xrip.strip()

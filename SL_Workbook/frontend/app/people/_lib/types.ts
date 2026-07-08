@@ -152,10 +152,12 @@ export interface LicenseSoftwareSummary {
   short_name: string;
   category: string | null;
   purchased: number;
+  expired_purchased: number;
   assigned: number;
   shared_assigned: number;
   total_assigned: number;
   contracts: number;
+  expired_contracts: number;
 }
 
 export interface LicenseEmailIssue {
@@ -167,6 +169,7 @@ export interface LicenseEmailIssue {
 export interface LicenseSummaryResponse {
   totals: {
     purchased: number;
+    expired_purchased: number;
     assigned: number;
     shared_assigned: number;
     total_assigned: number;
@@ -187,6 +190,7 @@ export interface SystemInventoryItem {
   assigned_email: string | null;
   user_display: string | null;
   team: string | null;
+  group_key: string | null;
   processor: string | null;
   ram_gb: number | null;
   ram_slots_free: string | null;

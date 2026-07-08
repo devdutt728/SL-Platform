@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # sl_people database (this module's own tables)
     database_url: str
-    # shared sl_platform database (dim_person, read-only identity anchor)
+    # shared sl_platform database (dim_person identity anchor)
     platform_database_url: str
     secret_key: str = "change-me"
 

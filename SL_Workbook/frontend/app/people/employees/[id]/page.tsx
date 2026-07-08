@@ -1,12 +1,14 @@
+import { PeopleAccessRequired } from "../../_components/PeopleAccessRequired";
 import { PeopleHeader } from "../../_components/PeopleHeader";
 import { isPeopleSuperadmin } from "../../_lib/access-server";
 import { ProfileClient } from "./ProfileClient";
-import { notFound } from "next/navigation";
 
 export const metadata = { title: "Employee Profile · People" };
 
 export default async function EmployeeProfilePage({ params }: { params: Promise<{ id: string }> }) {
-  if (!(await isPeopleSuperadmin())) notFound();
+  if (!(await isPeopleSuperadmin())) {
+    return <PeopleAccessRequired title="Employee profiles need superadmin access" />;
+  }
 
   const { id } = await params;
   return (

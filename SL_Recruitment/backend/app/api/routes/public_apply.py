@@ -104,8 +104,14 @@ def _candidate_code(candidate_id: int) -> str:
 def _client_ip(request: Request) -> str | None:
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        # Take the left-most entry: original client.
-        return xff.split(",")[0].strip() or None
+        # Take the right-most entry, not the left-most: the client can put anything it
+        # wants at the start of this header (e.g. "X-Forwarded-For: 1.2.3.4"), but the
+        # value appended by our own reverse proxy (Caddy — the only hop in front of this
+        # app) is the last one, and can't be forged by the client. Trusting the
+        # left-most entry lets anyone spoof their way past the per-IP rate limit below.
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     xrip = request.headers.get("x-real-ip")
     if xrip:
         return xrip.strip() or None

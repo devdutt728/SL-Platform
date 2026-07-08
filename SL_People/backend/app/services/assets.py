@@ -97,6 +97,7 @@ def system_item(row: SystemInventory) -> SystemInventoryItem:
         assigned_email=row.assigned_email,
         user_display=row.user_display,
         team=row.team,
+        group_key=row.group_key,
         processor=row.processor,
         ram_gb=_num(row.ram_gb),
         ram_slots_free=row.ram_slots_free,
@@ -171,6 +172,7 @@ async def list_systems(
     search: Optional[str] = None,
     tier: Optional[str] = None,
     team: Optional[str] = None,
+    group_key: Optional[str] = None,
     status: Optional[str] = None,
     visibility: str = "current",
     page: int = 1,
@@ -197,6 +199,8 @@ async def list_systems(
         base = base.where(SystemInventory.capability_tier == tier)
     if team:
         base = base.where(SystemInventory.team == team)
+    if group_key:
+        base = base.where(SystemInventory.group_key == group_key)
     if status:
         base = base.where(SystemInventory.status == status)
     normalized_visibility = str(visibility or "current").strip().lower()

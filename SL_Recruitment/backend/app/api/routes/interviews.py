@@ -1127,6 +1127,7 @@ async def preview_interview_slot_email(
     candidate = await session.get(RecCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    candidate_code = candidate.candidate_code or f"SLR-{candidate.candidate_id:04d}"
     opening = None
     if candidate.opening_id is not None:
         opening = (await session.execute(select(RecOpening).where(RecOpening.opening_id == candidate.opening_id))).scalars().first()

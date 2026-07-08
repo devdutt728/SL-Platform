@@ -47,6 +47,7 @@ from app.services.offers import (
     joining_public_signed_url,
     submit_for_approval_with_principal,
     verify_offer_pdf_signature,
+    verify_offer_view_signature,
     render_offer_letter,
     _render_offer_pdf_bytes,
     send_offer,
@@ -925,8 +926,19 @@ async def create_candidate_offer(
 @public_router.get("/{token}", response_model=OfferPublicOut)
 async def get_public_offer(
     token: str,
+    request: Request,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    exp = request.query_params.get("exp")
+    sig = request.query_params.get("sig")
+    # Unlike the PDF endpoint (whose links only ever go out in candidate emails), this
+    # view page is also linked from the internal HR activity feed as a plain, unsigned
+    # `/offer/{token}` path for staff browsing their own authenticated session — so the
+    # signature is required only for requests with no valid internal session, not
+    # unconditionally in production.
+    has_internal_cookie = bool(request.cookies.get("slr_token"))
+    if not has_internal_cookie and not verify_offer_view_signature(token, exp, sig):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired link")
     offer = (
         await session.execute(select(RecCandidateOffer).where(RecCandidateOffer.public_token == token))
     ).scalars().first()
@@ -1029,6 +1041,11 @@ async def decide_public_offer(
     request: Request,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    exp = request.query_params.get("exp")
+    sig = request.query_params.get("sig")
+    has_internal_cookie = bool(request.cookies.get("slr_token"))
+    if not has_internal_cookie and not verify_offer_view_signature(token, exp, sig):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired link")
     offer = (
         await session.execute(select(RecCandidateOffer).where(RecCandidateOffer.public_token == token))
     ).scalars().first()

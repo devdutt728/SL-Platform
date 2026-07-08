@@ -5,8 +5,9 @@ type Params = { params: Promise<{ token: string }> };
 
 export async function POST(request: NextRequest, context: Params) {
   const params = await context.params;
+  const url = new URL(request.url);
   const body = await request.text();
-  const res = await fetch(backendUrl(`/offer/${encodeURIComponent(params.token)}/decision`), {
+  const res = await fetch(backendUrl(`/offer/${encodeURIComponent(params.token)}/decision${url.search}`), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body,

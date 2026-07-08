@@ -13,6 +13,7 @@ class SystemInventoryItem(BaseModel):
     assigned_email: Optional[str] = None
     user_display: Optional[str] = None
     team: Optional[str] = None
+    group_key: Optional[str] = None
     processor: Optional[str] = None
     ram_gb: Optional[float] = None
     ram_slots_free: Optional[str] = None
@@ -77,6 +78,7 @@ class SystemInventoryCreate(BaseModel):
     assigned_email: Optional[str] = None
     user_display: Optional[str] = None
     team: Optional[str] = None
+    group_key: Optional[str] = None
     processor: Optional[str] = None
     ram_gb: Optional[float] = None
     ram_slots_free: Optional[str] = None
@@ -110,6 +112,7 @@ class SystemInventoryPatch(BaseModel):
     assigned_email: Optional[str] = None
     user_display: Optional[str] = None
     team: Optional[str] = None
+    group_key: Optional[str] = None
     processor: Optional[str] = None
     ram_gb: Optional[float] = None
     ram_slots_free: Optional[str] = None

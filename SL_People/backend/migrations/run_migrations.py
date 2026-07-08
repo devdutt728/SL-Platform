@@ -58,7 +58,7 @@ async def run() -> None:
                         await conn.exec_driver_sql(stmt)
                     except DBAPIError as exc:
                         code = getattr(exc.orig, "args", [None])[0]
-                        if code == 1060:  # duplicate column
+                        if code in (1060, 1061):  # duplicate column / duplicate key name
                             continue
                         raise
         print(f"OK applied {len(files)} migration file(s)")

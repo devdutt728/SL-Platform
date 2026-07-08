@@ -6987,10 +6987,15 @@ async def get_candidate_convert_preview(
         )
     ).scalars().first()
 
+    fallback_title: str | None = None
+    if not offer and candidate.opening_id is not None:
+        opening = await session.get(RecOpening, candidate.opening_id)
+        fallback_title = opening.title if opening else None
+
     preview = await preview_candidate_person_code(
         candidate_id=candidate_id,
         employment_type=employment_type,
-        designation_title=offer.designation_title if offer else candidate.opening_title,
+        designation_title=offer.designation_title if offer else fallback_title,
         email=email or candidate.email,
     )
     return preview

@@ -7,7 +7,7 @@ import hashlib
 import io
 import logging
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status, Response
 from fastapi.responses import StreamingResponse
 import re
 
@@ -43,7 +43,7 @@ from app.services.drive import (
     upload_sprint_template_attachment,
 )
 from app.services.email import send_email
-from app.services.public_links import build_public_link
+from app.services.public_links import build_public_link, verify_public_token
 from app.services.events import log_event
 from app.services.internal_notifications import notify_sprint_reviewed, notify_sprint_submission_received, notify_stage_handoff
 from app.services.stage_transitions import apply_stage_transition
@@ -1099,8 +1099,14 @@ async def delete_sprint(
 @public_router.get("/{token}", response_model=SprintPublicOut)
 async def get_public_sprint(
     token: str,
+    request: Request,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    exp = request.query_params.get("exp")
+    sig = request.query_params.get("sig")
+    has_internal_cookie = bool(request.cookies.get("slr_token"))
+    if not has_internal_cookie and not verify_public_token("sprint", token, exp, sig):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired link")
     row = (
         await session.execute(
             select(RecCandidateSprint, RecSprintTemplate, RecCandidate, RecOpening)
@@ -1113,7 +1119,6 @@ async def get_public_sprint(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid sprint token")
     sprint, template, candidate, opening = row
-    _assert_public_sprint_active(sprint)
     _assert_public_sprint_active(sprint)
     attachments = await _load_public_attachments(session, candidate_sprint_id=sprint.candidate_sprint_id, token=token)
     return SprintPublicOut(
@@ -1141,10 +1146,16 @@ async def get_public_sprint(
 @public_router.post("/{token}", response_model=SprintPublicOut, status_code=status.HTTP_201_CREATED)
 async def submit_public_sprint(
     token: str,
+    request: Request,
     submission_url: str | None = Form(default=None),
     submission_file: UploadFile | None = None,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    exp = request.query_params.get("exp")
+    sig = request.query_params.get("sig")
+    has_internal_cookie = bool(request.cookies.get("slr_token"))
+    if not has_internal_cookie and not verify_public_token("sprint", token, exp, sig):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired link")
     row = (
         await session.execute(
             select(RecCandidateSprint, RecSprintTemplate, RecCandidate, RecOpening)
@@ -1237,8 +1248,14 @@ async def submit_public_sprint(
 async def download_public_sprint_attachment(
     token: str,
     attachment_id: int,
+    request: Request,
     session: AsyncSession = Depends(deps.get_db_session),
 ):
+    exp = request.query_params.get("exp")
+    sig = request.query_params.get("sig")
+    has_internal_cookie = bool(request.cookies.get("slr_token"))
+    if not has_internal_cookie and not verify_public_token("sprint", token, exp, sig):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired link")
     row = (
         await session.execute(
             select(RecSprintAttachment, RecCandidateSprintAttachment, RecCandidateSprint)

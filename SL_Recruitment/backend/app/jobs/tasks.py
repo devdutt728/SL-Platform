@@ -22,8 +22,9 @@ from app.services.email import send_email
 from app.services.events import log_event
 from app.services.internal_notifications import notify_stale_stage_internal
 from app.services.operation_queue import process_due_operations
+from app.services.offers import _offer_public_link
 from app.services.platform_identity import active_status_filter
-from app.services.public_links import build_public_link
+from app.services.public_links import build_public_link, sign_public_token
 from app.services.recruitment_forms import (
     BASIC_DETAILS_FORM_REMINDER_SENT,
     build_basic_details_form_link,
@@ -57,11 +58,16 @@ def _caf_expiry_note_parts() -> tuple[str, str]:
 
 
 def _sprint_link(token: str) -> str:
-    return build_public_link(f"/sprint/{token}")
+    exp, sig = sign_public_token("sprint", token)
+    base = build_public_link(f"/sprint/{token}")
+    return f"{base}?exp={exp}&sig={sig}"
 
 
 def _offer_link(token: str) -> str:
-    return build_public_link(f"/offer/{token}")
+    # Delegates to the signed builder in services.offers — this used to build an
+    # unsigned link directly, which would now be rejected by the offer view/decision
+    # endpoints' signature check for external candidates (no internal session cookie).
+    return _offer_public_link(token)
 
 
 async def _event_exists(

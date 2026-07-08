@@ -4,7 +4,24 @@ import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { pplGet } from "../_lib/client";
 import { initialsFrom } from "../_lib/format";
+import {
+  FilterBar,
+  FilterSelect,
+  ResetFiltersButton,
+  SavedViewsMenu,
+  SearchInput,
+  SegmentedControl,
+  StatBand,
+  type StatItem,
+} from "../_components/data";
 import type { GroupMemberOverview, GroupOverviewItem, GroupOverviewResponse } from "../_lib/types";
+
+const FOCUS_OPTIONS = [
+  { value: "all", label: "All groups" },
+  { value: "risk", label: "Needs attention" },
+];
+
+type GroupsFilterSnapshot = { principal: string; search: string; focus: string };
 
 type GroupInsight = {
   group: GroupOverviewItem;
@@ -25,6 +42,7 @@ export function GroupsClient() {
   const [data, setData] = useState<GroupOverviewResponse | null>(null);
   const [principal, setPrincipal] = useState("");
   const [search, setSearch] = useState("");
+  const [focus, setFocus] = useState<string>("all");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedGroup, setSelectedGroup] = useState<GroupInsight | null>(null);
@@ -54,6 +72,7 @@ export function GroupsClient() {
     return allInsights.filter((insight) => {
       const { group } = insight;
       if (principal && group.principal !== principal) return false;
+      if (focus === "risk" && insight.riskCount === 0) return false;
       if (!needle) return true;
       return [
         group.name,
@@ -66,7 +85,7 @@ export function GroupsClient() {
         .toLowerCase()
         .includes(needle);
     });
-  }, [allInsights, principal, search]);
+  }, [allInsights, principal, search, focus]);
 
   const totals = useMemo(() => {
     const source = allInsights;
@@ -88,18 +107,36 @@ export function GroupsClient() {
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [insights]);
 
+  const hasFilters = Boolean(principal || search || focus !== "all");
+
+  function resetFilters() {
+    setPrincipal("");
+    setSearch("");
+    setFocus("all");
+  }
+
+  const filterSnapshot: GroupsFilterSnapshot = { principal, search, focus };
+
+  function applyFilterSnapshot(v: GroupsFilterSnapshot) {
+    setPrincipal(v.principal ?? "");
+    setSearch(v.search ?? "");
+    setFocus(v.focus ?? "all");
+  }
+
+  const bandItems: StatItem[] = [
+    { label: "Groups", value: loading ? "--" : String(allInsights.length) },
+    { label: "People", value: loading ? "--" : String(totals.people) },
+    { label: "Systems", value: loading ? "--" : String(totals.systems) },
+    { label: "Licenses", value: loading ? "--" : String(totals.licences) },
+    { label: "Readiness", value: loading ? "--" : `${totals.readiness}%`, tone: totals.readiness >= 75 ? "good" : totals.readiness >= 55 ? "warn" : "risk" },
+    { label: "Risks", value: loading ? "--" : String(totals.risks), tone: totals.risks ? "risk" : "good" },
+  ];
+
   return (
     <div className="space-y-5">
       {error ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <ExecutiveMetric label="Groups" value={loading ? "--" : String(allInsights.length)} />
-        <ExecutiveMetric label="People" value={loading ? "--" : String(totals.people)} />
-        <ExecutiveMetric label="Systems" value={loading ? "--" : String(totals.systems)} />
-        <ExecutiveMetric label="Licenses" value={loading ? "--" : String(totals.licences)} />
-        <ExecutiveMetric label="Readiness" value={loading ? "--" : `${totals.readiness}%`} tone={totals.readiness >= 75 ? "good" : totals.readiness >= 55 ? "watch" : "risk"} />
-        <ExecutiveMetric label="Risks" value={loading ? "--" : String(totals.risks)} tone={totals.risks ? "risk" : "good"} />
-      </section>
+      <StatBand cols={6} items={bandItems} />
 
       <section className="public-panel">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -110,18 +147,13 @@ export function GroupsClient() {
               {loading ? "Loading..." : `${insights.length} visible group${insights.length === 1 ? "" : "s"} across ${byPrincipal.length} principal${byPrincipal.length === 1 ? "" : "s"}`}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <select value={principal} onChange={(e) => setPrincipal(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
-              <option value="">All principals</option>
-              {principals.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search group, lead, member"
-              className="min-w-[260px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 placeholder:text-slate-400"
-            />
-          </div>
+          <FilterBar>
+            <SegmentedControl value={focus} onChange={setFocus} options={FOCUS_OPTIONS} />
+            <FilterSelect value={principal} onChange={setPrincipal} label="All principals" options={principals} />
+            <SearchInput value={search} onChange={setSearch} placeholder="Search group, lead, member" className="min-w-[240px]" />
+            <SavedViewsMenu storageKey="ppl.groups.views" currentValues={filterSnapshot} onApply={applyFilterSnapshot} />
+            <ResetFiltersButton show={hasFilters} onReset={resetFilters} />
+          </FilterBar>
         </div>
 
         <div className="space-y-5">
@@ -426,16 +458,6 @@ function PersonRow({ person, onOpen }: { person: GroupMemberOverview; onOpen: (p
         </span>
       </div>
     </button>
-  );
-}
-
-function ExecutiveMetric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "good" | "watch" | "risk" }) {
-  const toneClass = tone === "good" ? "text-emerald-700" : tone === "watch" ? "text-amber-700" : tone === "risk" ? "text-red-700" : "text-slate-900";
-  return (
-    <div className="section-card bg-white">
-      <p className="text-xs font-semibold uppercase tracking-wide text-steel">{label}</p>
-      <p className={`mt-2 text-3xl font-semibold ${toneClass}`}>{value}</p>
-    </div>
   );
 }
 

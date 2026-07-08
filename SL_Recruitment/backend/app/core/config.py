@@ -1,6 +1,7 @@
 import os
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.paths import resolve_repo_path
@@ -78,6 +79,22 @@ class Settings(BaseSettings):
     assessment_compensation_hidden_role_ids: str = "5,6"
 
     model_config = SettingsConfigDict(env_prefix="SL_", env_file=_env_files(), extra="ignore")
+
+    @model_validator(mode="after")
+    def _require_real_signing_key(self) -> "Settings":
+        # Offer/joining/interview-slot public links are HMAC-signed with this key
+        # (app/services/offers.py, app/services/interview_slots.py), falling back to
+        # secret_key when unset. Both default to a hardcoded placeholder, so if neither
+        # is overridden, every signed link becomes forgeable by anyone who reads this
+        # file. Refuse to start rather than silently signing links with that key.
+        effective_key = (self.public_link_signing_key or self.secret_key).strip()
+        if effective_key == "change-me":
+            raise ValueError(
+                "SL_PUBLIC_LINK_SIGNING_KEY (or SL_SECRET_KEY) must be set to a real "
+                "secret — refusing to start with the default 'change-me' value, which "
+                "would make every signed offer/joining/interview-slot link forgeable."
+            )
+        return self
 
 
 settings = Settings()

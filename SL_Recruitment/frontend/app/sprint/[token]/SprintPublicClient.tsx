@@ -6,6 +6,7 @@ type Props = {
   token: string;
   initialStatus?: string | null;
   dueAt?: string | null;
+  linkQuery?: string;
 };
 
 async function readError(res: Response) {
@@ -23,7 +24,7 @@ async function readError(res: Response) {
   return raw;
 }
 
-export function SprintPublicClient({ token, initialStatus, dueAt }: Props) {
+export function SprintPublicClient({ token, initialStatus, dueAt, linkQuery = "" }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +49,7 @@ export function SprintPublicClient({ token, initialStatus, dueAt }: Props) {
     try {
       const form = new FormData();
       if (file) form.append("submission_file", file);
-      const res = await fetch(`/api/sprint/${encodeURIComponent(token)}`, { method: "POST", body: form });
+      const res = await fetch(`/api/sprint/${encodeURIComponent(token)}${linkQuery}`, { method: "POST", body: form });
       if (!res.ok) throw new Error(await readError(res));
       setSuccess(true);
       setExpired(true);

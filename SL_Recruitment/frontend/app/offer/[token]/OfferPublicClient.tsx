@@ -39,11 +39,18 @@ export function OfferPublicClient({ token }: Props) {
   const decisionIntent = decisionIntentRaw === "accept" || decisionIntentRaw === "decline" ? decisionIntentRaw : null;
   const canRespond = offer?.offer_status === "sent" || offer?.offer_status === "viewed";
 
+  const linkQuery = (() => {
+    const exp = searchParams.get("exp");
+    const sig = searchParams.get("sig");
+    if (!exp || !sig) return "";
+    return `?exp=${encodeURIComponent(exp)}&sig=${encodeURIComponent(sig)}`;
+  })();
+
   const loadOffer = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${basePath}/api/offer/${encodeURIComponent(token)}`, { cache: "no-store" });
+      const res = await fetch(`${basePath}/api/offer/${encodeURIComponent(token)}${linkQuery}`, { cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as OfferPublic;
       setOffer(data);
@@ -52,7 +59,7 @@ export function OfferPublicClient({ token }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [basePath, token]);
+  }, [basePath, token, linkQuery]);
 
   const submitDecision = async (value: "accept" | "decline") => {
     if (submitting) return;
@@ -63,7 +70,7 @@ export function OfferPublicClient({ token }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`${basePath}/api/offer/${encodeURIComponent(token)}/decision`, {
+      const res = await fetch(`${basePath}/api/offer/${encodeURIComponent(token)}/decision${linkQuery}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ decision: value, typed_name: value === "accept" ? typedName.trim() : undefined }),

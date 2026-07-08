@@ -7,10 +7,10 @@ from app.db.base import Base
 
 
 class DimPerson(Base):
-    """Read-only identity anchor in the shared sl_platform database.
+    """Identity anchor in the shared sl_platform database.
 
-    SL_People never mutates this table. The join key to all sl_people tables is
-    dim_person.person_code == employee_ext.employee_number (the SL0XXX number).
+    Most People screens read this table. The People master import can upsert it
+    so employee identity stays aligned with employee_ext.employee_number.
     """
 
     __tablename__ = "dim_person"
@@ -18,6 +18,7 @@ class DimPerson(Base):
     person_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     person_code: Mapped[str] = mapped_column(String(64), nullable=False)
     email: Mapped[str] = mapped_column(String(255), index=True)
+    personal_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     first_name: Mapped[str] = mapped_column(String(255))
     last_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
