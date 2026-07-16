@@ -36,7 +36,7 @@ SET @clauses := CONCAT_WS(', ', @clauses, @c);
 
 /* educational_qualification */
 SELECT IF(COUNT(*)=0,
-          'ADD COLUMN educational_qualification VARCHAR(255) NULL AFTER current_company',
+          'ADD COLUMN educational_qualification TEXT NULL AFTER current_company',
           NULL)
 INTO @c
 FROM information_schema.columns

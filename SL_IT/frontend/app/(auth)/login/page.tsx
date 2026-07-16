@@ -11,7 +11,7 @@ export default function LoginPage() {
             className="h-full w-full object-contain"
           />
         </div>
-        <h1 className="mt-2 text-2xl font-semibold">IT Helpdesk</h1>
+        <h1 className="mt-2 text-2xl font-semibold">Studio Lotus IMS</h1>
         <p className="mt-2 text-sm text-[var(--text-secondary)]">Sign in with your Studio Lotus Google account.</p>
 
         <div className="mt-6 flex justify-center">

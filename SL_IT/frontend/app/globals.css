@@ -289,3 +289,18 @@ button {
     padding: clamp(0.75rem, 0.9vw, 1.25rem);
   }
 }
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-label,
+  .print-label * {
+    visibility: visible;
+  }
+  .print-label {
+    position: fixed;
+    top: 0;
+    left: 0;
+  }
+}

@@ -13,8 +13,12 @@ from sqlalchemy.pool import StaticPool
 from app.models.base import Base
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 async def async_engine():
+    # Function-scoped (not session-scoped): tests that commit (e.g. bulk
+    # import) permanently write to the StaticPool's single shared
+    # connection, so a fresh in-memory DB per test avoids cross-test
+    # collisions on unique columns like category code.
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
         connect_args={"check_same_thread": False},

@@ -19,6 +19,12 @@ from app.services.user_service import active_status_filter, prevent_last_superad
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
+IMS_ROLE_CODES = {"ims_admin", "ims_manager", "ims_operator", "ims_viewer"}
+
+
+def _is_ims_role(role: DimRole | None) -> bool:
+    return bool(role and role.role_code and role.role_code.strip().lower() in IMS_ROLE_CODES)
+
 
 def _format_full_name(person: DimPerson) -> str:
     first_name = person.first_name or ""
@@ -49,6 +55,14 @@ def _primary_role_id(role_ids: list[int]) -> int | None:
     if 2 in role_ids:
         return 2
     return sorted(role_ids)[0]
+
+
+def _primary_ims_role_id(role_ids: list[int]) -> int | None:
+    priority = [9, 10, 11, 18]
+    for role_id in priority:
+        if role_id in role_ids:
+            return role_id
+    return sorted(role_ids)[0] if role_ids else None
 
 
 @router.get("/users", response_model=list[PlatformUserListItem])
@@ -87,14 +101,14 @@ async def list_users(
     role_map = await _role_map_for_people(platform_session, person_ids)
     users: list[PlatformUserListItem] = []
     for person, role in rows:
-        roles_for_person = role_map.get(person.person_id, [])
-        if not roles_for_person and person.role_id is not None:
+        roles_for_person = [r for r in role_map.get(person.person_id, []) if _is_ims_role(r)]
+        if not roles_for_person and _is_ims_role(role):
             roles_for_person = [role] if role else []
         role_ids = [r.role_id for r in roles_for_person if r and r.role_id is not None]
         role_codes = [r.role_code for r in roles_for_person if r and r.role_code]
         role_names = [r.role_name for r in roles_for_person if r and r.role_name]
-        primary_id = _primary_role_id(role_ids) or person.role_id
-        primary_role = next((r for r in roles_for_person if r.role_id == primary_id), role)
+        primary_id = _primary_ims_role_id(role_ids)
+        primary_role = next((r for r in roles_for_person if r.role_id == primary_id), None)
         users.append(
             PlatformUserListItem(
                 person_id=person.person_id,
@@ -118,7 +132,11 @@ async def list_roles(
     platform_session: AsyncSession = Depends(get_platform_session),
     user: UserContext = Depends(require_superadmin()),
 ):
-    result = await platform_session.execute(select(DimRole).order_by(DimRole.role_name.asc()))
+    result = await platform_session.execute(
+        select(DimRole)
+        .where(func.lower(DimRole.role_code).in_(IMS_ROLE_CODES))
+        .order_by(DimRole.role_name.asc())
+    )
     roles = result.scalars().all()
     return [PlatformRoleOut(role_id=role.role_id, role_code=role.role_code, role_name=role.role_name) for role in roles]
 
@@ -145,6 +163,14 @@ async def update_user(
             select(DimPersonRole.role_id).where(DimPersonRole.person_id == person.person_id)
         )
     ).scalars().all()
+    existing_set = {int(role_id) for role_id in existing_roles if role_id is not None}
+    ims_role_ids = set(
+        (
+            await platform_session.execute(
+                select(DimRole.role_id).where(func.lower(DimRole.role_code).in_(IMS_ROLE_CODES))
+            )
+        ).scalars().all()
+    )
     before = {"role_id": person.role_id, "role_ids": existing_roles, "status": person.status}
 
     desired_role_ids = payload.role_ids
@@ -154,23 +180,29 @@ async def update_user(
         desired_role_ids = sorted({int(role_id) for role_id in desired_role_ids if role_id is not None})
         if not desired_role_ids:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="missing_role_ids")
+        desired_role_ids = sorted({role_id for role_id in desired_role_ids if role_id in ims_role_ids})
+        if not desired_role_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="missing_ims_role_ids")
+
+    effective_role_ids = None
+    if desired_role_ids is not None:
+        effective_role_ids = sorted((existing_set - ims_role_ids) | set(desired_role_ids))
 
     try:
         await prevent_last_superadmin_change(
             platform_session,
             person=person,
             new_role_id=payload.role_id,
-            new_role_ids=desired_role_ids,
+            new_role_ids=effective_role_ids,
             new_status=payload.status,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     if desired_role_ids is not None:
-        existing_set = {int(role_id) for role_id in existing_roles if role_id is not None}
         desired_set = set(desired_role_ids)
         to_add = desired_set - existing_set
-        to_remove = existing_set - desired_set
+        to_remove = (existing_set & ims_role_ids) - desired_set
         if to_remove:
             await platform_session.execute(
                 delete(DimPersonRole).where(
@@ -180,7 +212,8 @@ async def update_user(
             )
         for role_id in sorted(to_add):
             platform_session.add(DimPersonRole(person_id=person.person_id, role_id=role_id))
-        person.role_id = _primary_role_id(desired_role_ids)
+        if person.role_id in ims_role_ids or person.role_id is None:
+            person.role_id = _primary_ims_role_id(desired_role_ids)
     if payload.status is not None:
         person.status = payload.status
 

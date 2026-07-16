@@ -7,6 +7,8 @@ import { API_BASE, apiFetch } from "@/lib/api";
 import type { PlatformRole, PlatformUser } from "@/lib/types";
 
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
+const IMS_ROLE_CODES = new Set(["ims_admin", "ims_manager", "ims_operator", "ims_viewer"]);
+const IMS_ROLE_IDS = new Set([9, 10, 11, 18]);
 
 function downloadText(filename: string, content: string) {
   const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
@@ -43,6 +45,22 @@ function validateCsvFile(file: File) {
   return null;
 }
 
+function roleLabel(role: PlatformRole) {
+  return role.role_name || role.role_code || `Role ${role.role_id}`;
+}
+
+function isImsRole(role: PlatformRole) {
+  const code = role.role_code?.trim().toLowerCase();
+  return (code && IMS_ROLE_CODES.has(code)) || IMS_ROLE_IDS.has(role.role_id);
+}
+
+function sameNumberSet(a: number[], b: number[]) {
+  if (a.length !== b.length) return false;
+  const left = [...a].sort((x, y) => x - y);
+  const right = [...b].sort((x, y) => x - y);
+  return left.every((value, index) => value === right[index]);
+}
+
 export function UserAdminTable() {
   const [users, setUsers] = useState<PlatformUser[]>([]);
   const [roles, setRoles] = useState<PlatformRole[]>([]);
@@ -56,8 +74,11 @@ export function UserAdminTable() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [roleFilter, setRoleFilter] = useState("ALL");
-  const [activeOnly, setActiveOnly] = useState(false);
+  const [activeOnly, setActiveOnly] = useState(true);
   const [relievedOnly, setRelievedOnly] = useState(false);
+  const [pendingRoleIds, setPendingRoleIds] = useState<Record<string, number[]>>({});
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [savingUserId, setSavingUserId] = useState<string | null>(null);
 
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -106,17 +127,50 @@ export function UserAdminTable() {
   }, [search]);
 
   const requestChange = (userId: string, updates: { roleIds?: number[]; status?: string }) => {
+    setActionError(null);
     setConfirm({ userId, ...updates });
   };
 
   const applyChange = async () => {
     if (!confirm) return;
-    await apiFetch(`/admin/users/${confirm.userId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ role_ids: confirm.roleIds, status: confirm.status }),
-    });
-    setConfirm(null);
-    loadUsers(search.trim() || undefined);
+    try {
+      await apiFetch(`/admin/users/${confirm.userId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role_ids: confirm.roleIds, status: confirm.status }),
+      });
+      setPendingRoleIds((prev) => {
+        const next = { ...prev };
+        delete next[confirm.userId];
+        return next;
+      });
+      setConfirm(null);
+      loadUsers(search.trim() || undefined);
+    } catch (e: any) {
+      setConfirm(null);
+      setActionError(e?.message || "Failed to apply change.");
+    }
+  };
+
+  const saveRoles = async (userId: string, roleIds: number[]) => {
+    if (!roleIds.length) return;
+    setSavingUserId(userId);
+    setActionError(null);
+    try {
+      await apiFetch(`/admin/users/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role_ids: roleIds }),
+      });
+      setPendingRoleIds((prev) => {
+        const next = { ...prev };
+        delete next[userId];
+        return next;
+      });
+      loadUsers(search.trim() || undefined);
+    } catch (e: any) {
+      setActionError(e?.message || "Failed to save roles.");
+    } finally {
+      setSavingUserId(null);
+    }
   };
 
   const statusOptions = useMemo(() => {
@@ -128,10 +182,10 @@ export function UserAdminTable() {
   }, [users]);
 
   const roleOptions = useMemo(() => {
-    const options = [...roles];
+    const options = roles.filter(isImsRole);
     users.forEach((user) => {
       (user.role_ids || (user.role_id ? [user.role_id] : [])).forEach((roleId) => {
-        if (roleId && !options.some((role) => role.role_id === roleId)) {
+        if (roleId && IMS_ROLE_IDS.has(roleId) && !options.some((role) => role.role_id === roleId)) {
           options.push({
             role_id: roleId,
             role_code: undefined,
@@ -271,14 +325,14 @@ export function UserAdminTable() {
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
       <section className="section-card">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-[0.6rem] font-semibold uppercase tracking-[0.4em] text-steel">
               User control center
             </p>
-            <h2 className="mt-2 text-lg font-semibold">Directory filters, bulk actions & users</h2>
+            <h2 className="mt-2 text-lg font-semibold">Directory filters and access</h2>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
             <span className="rounded-full border border-white/70 bg-white/70 px-3 py-1">
@@ -293,15 +347,15 @@ export function UserAdminTable() {
           </div>
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-3">
+        <div className="mt-5 grid gap-3 2xl:grid-cols-[minmax(260px,1fr)_160px_180px_auto_auto]">
           <input
-            className="h-9 w-full min-w-[220px] flex-1 rounded-full border border-black/10 bg-white/70 px-4 text-sm"
+            className="h-10 w-full rounded-xl border border-black/10 bg-white px-4 text-sm shadow-sm outline-none focus:border-brand/50"
             placeholder="Search name, email, role..."
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
           <select
-            className="h-9 min-w-[150px] rounded-full border border-black/10 bg-white/70 px-4 text-sm"
+            className="h-10 rounded-xl border border-black/10 bg-white px-4 text-sm shadow-sm"
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
           >
@@ -312,18 +366,18 @@ export function UserAdminTable() {
             ))}
           </select>
           <select
-            className="h-9 min-w-[150px] rounded-full border border-black/10 bg-white/70 px-4 text-sm"
+            className="h-10 rounded-xl border border-black/10 bg-white px-4 text-sm shadow-sm"
             value={roleFilter}
             onChange={(event) => setRoleFilter(event.target.value)}
           >
             <option value="ALL">All roles</option>
             {roleOptions.map((role) => (
               <option key={role.role_id} value={String(role.role_id)}>
-                {role.role_name || role.role_code || `Role ${role.role_id}`}
+                {roleLabel(role)}
               </option>
             ))}
           </select>
-          <label className="flex h-9 items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3 text-xs text-slate-600">
+          <label className="flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700">
             <input
               type="checkbox"
               checked={activeOnly}
@@ -334,7 +388,7 @@ export function UserAdminTable() {
             />
             Active only
           </label>
-          <label className="flex h-9 items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3 text-xs text-slate-600">
+          <label className="flex h-10 items-center justify-center gap-2 rounded-xl border border-black/10 bg-white px-3 text-xs text-slate-600">
             <input
               type="checkbox"
               checked={relievedOnly}
@@ -347,21 +401,28 @@ export function UserAdminTable() {
           </label>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <button
             type="button"
             onClick={exportDirectory}
-            className="h-9 rounded-full border border-black/10 bg-white/70 px-4 text-sm font-semibold"
+            className="h-9 rounded-xl border border-black/10 bg-white px-4 text-sm font-semibold shadow-sm"
           >
-            Export full directory
+            Export shown users
           </button>
+          <p className="text-xs text-steel">Showing {filteredUsers.length} of {users.length} users</p>
         </div>
 
-        <div className="mt-6 grid grid-cols-6 px-4 text-xs uppercase text-steel">
-          <div className="col-span-2">User</div>
+        {actionError ? (
+          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {actionError}
+          </div>
+        ) : null}
+
+        <div className="mt-6 hidden grid-cols-[minmax(220px,1.25fr)_minmax(320px,2fr)_150px_150px] gap-4 px-4 text-xs font-semibold uppercase tracking-wide text-steel lg:grid">
+          <div>User</div>
           <div>Roles</div>
           <div>Status</div>
-          <div className="col-span-2">Actions</div>
+          <div>Action</div>
         </div>
 
         {loading ? (
@@ -371,7 +432,11 @@ export function UserAdminTable() {
         {!loading && filteredUsers.map((user) => {
           const statusList = Array.from(new Set(["Working", "Active", "Inactive", "Relieved", user.status || ""])).filter(Boolean);
           const availableRoles = [...roleOptions];
-          const selectedRoleIds = user.role_ids && user.role_ids.length ? user.role_ids : user.role_id ? [user.role_id] : [];
+          const selectedRoleIds = (
+            user.role_ids && user.role_ids.length ? user.role_ids : user.role_id ? [user.role_id] : []
+          ).filter((roleId) => IMS_ROLE_IDS.has(roleId));
+          const draftRoleIds = pendingRoleIds[user.person_id] || selectedRoleIds;
+          const roleDirty = !sameNumberSet(draftRoleIds, selectedRoleIds);
           selectedRoleIds.forEach((roleId) => {
             if (roleId && !availableRoles.some((role) => role.role_id === roleId)) {
               availableRoles.push({
@@ -384,32 +449,46 @@ export function UserAdminTable() {
           return (
             <div
               key={user.person_id}
-              className="grid grid-cols-6 items-center gap-2 rounded-2xl border border-black/5 bg-white/80 px-4 py-3"
+              className="mt-2 grid gap-4 rounded-xl border border-black/5 bg-white px-4 py-4 shadow-sm lg:grid-cols-[minmax(220px,1.25fr)_minmax(320px,2fr)_150px_150px] lg:items-center"
             >
-              <div className="col-span-2">
+              <div>
                 <div className="font-semibold">{user.full_name || user.email}</div>
                 <div className="text-xs text-steel">{user.email || "—"}</div>
               </div>
               <div>
-                <select
-                  multiple
-                  className="h-24 w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
-                  value={selectedRoleIds.map((value) => String(value))}
-                  onChange={(event) => {
-                    const values = Array.from(event.target.selectedOptions).map((option) => Number(option.value));
-                    requestChange(user.person_id, { roleIds: values });
-                  }}
-                >
-                  {availableRoles.map((role) => (
-                    <option key={role.role_id} value={role.role_id}>
-                      {role.role_name || role.role_code || `Role ${role.role_id}`}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex max-h-24 flex-wrap gap-2 overflow-auto pr-1">
+                  {availableRoles.map((role) => {
+                    const selected = draftRoleIds.includes(role.role_id);
+                    return (
+                      <button
+                        key={role.role_id}
+                        type="button"
+                        onClick={() => {
+                          setActionError(null);
+                          setPendingRoleIds((prev) => {
+                            const current = prev[user.person_id] || selectedRoleIds;
+                            const nextRoleIds = selected
+                              ? current.filter((roleId) => roleId !== role.role_id)
+                              : [...current, role.role_id];
+                            return { ...prev, [user.person_id]: Array.from(new Set(nextRoleIds)) };
+                          });
+                        }}
+                        className={[
+                          "rounded-full border px-3 py-1 text-xs font-semibold transition",
+                          selected
+                            ? "border-brand/30 bg-brand/10 text-brand"
+                            : "border-black/10 bg-slate-50 text-slate-600 hover:border-brand/30",
+                        ].join(" ")}
+                      >
+                        {roleLabel(role)}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
               <div>
                 <select
-                  className="rounded-xl border border-black/10 bg-white px-3 py-2 text-sm"
+                  className="h-10 w-full rounded-xl border border-black/10 bg-white px-3 text-sm shadow-sm"
                   value={user.status || "Working"}
                   onChange={(event) => requestChange(user.person_id, { status: event.target.value })}
                 >
@@ -420,8 +499,19 @@ export function UserAdminTable() {
                   ))}
                 </select>
               </div>
-              <div className="col-span-2 text-xs text-steel">
-                Role changes and deactivations are audit logged.
+              <div className="flex items-center justify-end gap-2">
+                {roleDirty ? (
+                  <button
+                    type="button"
+                    disabled={draftRoleIds.length === 0 || savingUserId === user.person_id}
+                    onClick={() => void saveRoles(user.person_id, draftRoleIds)}
+                    className="h-9 rounded-xl bg-brand px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {savingUserId === user.person_id ? "Saving..." : "Save roles"}
+                  </button>
+                ) : (
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">Saved</span>
+                )}
               </div>
             </div>
           );
@@ -432,7 +522,7 @@ export function UserAdminTable() {
         )}
       </section>
 
-      <section className="section-card space-y-4">
+      <section className="section-card space-y-4 xl:sticky xl:top-4 xl:self-start">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-steel">Add user</p>
           <h3 className="mt-2 text-lg font-semibold">Create access profile</h3>
@@ -441,12 +531,12 @@ export function UserAdminTable() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            className="rounded-full border border-black/10 bg-white/70 px-4 py-2 text-xs font-semibold"
+            className="rounded-xl border border-black/10 bg-white px-4 py-2 text-xs font-semibold shadow-sm"
             onClick={downloadSampleCsv}
           >
             Download sample CSV
           </button>
-          <label className="cursor-pointer rounded-full border border-black/10 bg-white/70 px-4 py-2 text-xs font-semibold">
+          <label className="cursor-pointer rounded-xl border border-black/10 bg-white px-4 py-2 text-xs font-semibold shadow-sm">
             Choose CSV
             <input
               ref={importInputRef}
@@ -465,7 +555,7 @@ export function UserAdminTable() {
             type="button"
             disabled={importBusy || !importFile}
             onClick={() => void importUsers()}
-            className="rounded-full border border-black/10 bg-brand px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
+            className="rounded-xl border border-black/10 bg-brand px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
           >
             Import CSV
           </button>
@@ -506,7 +596,7 @@ export function UserAdminTable() {
             onChange={(event) => setNewUser((prev) => ({ ...prev, last_name: event.target.value }))}
           />
           <select
-            className="h-24 rounded-xl border border-black/10 bg-white/70 px-4 py-2 text-sm"
+            className="min-h-28 rounded-xl border border-black/10 bg-white px-4 py-2 text-sm"
             multiple
             value={newUser.role_ids}
             onChange={(event) =>
@@ -518,7 +608,7 @@ export function UserAdminTable() {
           >
             {roleOptions.map((role) => (
               <option key={role.role_id} value={role.role_id}>
-                {role.role_name || role.role_code || `Role ${role.role_id}`}
+                {roleLabel(role)}
               </option>
             ))}
           </select>

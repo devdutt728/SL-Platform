@@ -6,7 +6,7 @@ if exist "%LOGDIR%\stop-live-logs.signal" del /f /q "%LOGDIR%\stop-live-logs.sig
 set "PIDS_PATH=%LOGDIR%\pids.txt"
 if exist "%PIDS_PATH%" del /f /q "%PIDS_PATH%" >nul 2>nul
 set "SL_ENVIRONMENT=development"
-if not defined ENABLE_IT_MODULE set "ENABLE_IT_MODULE=0"
+if not defined ENABLE_IT_MODULE set "ENABLE_IT_MODULE=1"
 if not defined ENABLE_PROJECT_PLANNER set "ENABLE_PROJECT_PLANNER=0"
 if not defined ENABLE_PEOPLE_MODULE set "ENABLE_PEOPLE_MODULE=1"
 

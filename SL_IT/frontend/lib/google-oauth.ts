@@ -1,5 +1,5 @@
 import { readFileSync } from "fs";
-import { join } from "path";
+import { isAbsolute, join } from "path";
 
 type OAuthSecrets = {
   web?: {
@@ -20,7 +20,12 @@ type OAuthSecrets = {
 
 export function readGoogleOAuthSecrets() {
   const secretsPath = process.env.GOOGLE_OAUTH_SECRETS_PATH || "secrets/Oauth SL_Platform.json";
-  const absolute = join(process.cwd(), "..", secretsPath);
+  // Next's standalone server.js chdir()s into .next/standalone at runtime, so
+  // a cwd-relative path silently resolves somewhere inside .next/ instead of
+  // the real secrets/ folder next to frontend/. An absolute
+  // GOOGLE_OAUTH_SECRETS_PATH sidesteps that entirely and works the same in
+  // dev, `next start`, and the standalone build.
+  const absolute = isAbsolute(secretsPath) ? secretsPath : join(process.cwd(), "..", secretsPath);
   const raw = readFileSync(absolute, "utf-8");
   const json = JSON.parse(raw) as OAuthSecrets;
   const cfg = json.web || json.installed || {};

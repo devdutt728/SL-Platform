@@ -23,7 +23,7 @@ class RecCandidate(Base):
     source_channel: Mapped[str | None] = mapped_column(String(100), nullable=True)
     source_origin: Mapped[str] = mapped_column(String(32), nullable=False, default="ui")
     external_source_ref: Mapped[str | None] = mapped_column(String(191), nullable=True)
-    educational_qualification: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    educational_qualification: Mapped[str | None] = mapped_column(Text, nullable=True)
     years_of_experience: Mapped[float | None] = mapped_column(nullable=True)
     city: Mapped[str | None] = mapped_column(String(100), nullable=True)
     terms_consent: Mapped[bool] = mapped_column(Boolean, default=False)

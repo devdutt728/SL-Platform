@@ -28,8 +28,8 @@ function cookieOptions(isSecure: boolean) {
 
 export function proxy(request: NextRequest) {
   const moduleEnabled =
-    process.env.NEXT_PUBLIC_IT_MODULE_ENABLED === "1" ||
-    process.env.IT_MODULE_ENABLED === "1";
+    process.env.NEXT_PUBLIC_IMS_MODULE_ENABLED === "1" ||
+    process.env.IMS_MODULE_ENABLED === "1";
   if (!moduleEnabled) {
     return new NextResponse("Not Found", { status: 404 });
   }
@@ -93,7 +93,7 @@ export function proxy(request: NextRequest) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
     const url = request.nextUrl.clone();
-    url.pathname = `${basePath}/login`;
+    url.pathname = request.nextUrl.basePath ? "/login" : `${basePath}/login`;
     return NextResponse.redirect(url);
   }
 

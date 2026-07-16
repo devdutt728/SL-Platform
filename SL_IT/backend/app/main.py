@@ -13,7 +13,7 @@ from app.middleware.internal_guard import InternalGuardMiddleware
 from app.middleware.logging import RequestLoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_context import RequestContextMiddleware
-from app.routers import admin, auth, it
+from app.routers import admin, auth, ims
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("slp")
@@ -22,9 +22,9 @@ logger = logging.getLogger("slp")
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name)
 
-    if not settings.it_module_enabled:
+    if not settings.ims_module_enabled:
         @app.middleware("http")
-        async def _it_module_disabled(_request, _call_next):
+        async def _ims_module_disabled(_request, _call_next):
             return JSONResponse({"detail": "Not found"}, status_code=404)
 
         return app
@@ -33,7 +33,7 @@ def create_app() -> FastAPI:
         # Best-effort auto-create missing tables in local dev.
         @app.on_event("startup")
         async def _create_tables() -> None:
-            from app.models import it as _  # noqa: F401
+            from app.models import ims as _  # noqa: F401
 
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
@@ -65,7 +65,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth.router)
     app.include_router(admin.router)
-    app.include_router(it.router)
+    app.include_router(ims.router)
 
     return app
 

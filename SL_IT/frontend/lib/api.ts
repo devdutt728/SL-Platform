@@ -21,5 +21,9 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     throw new Error(message || "request_failed");
   }
 
-  return response.json() as Promise<T>;
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }

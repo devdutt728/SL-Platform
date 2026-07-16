@@ -42,9 +42,9 @@ def _env_files() -> list[str]:
 
 
 class Settings(BaseSettings):
-    app_name: str = "Studio Lotus Platform"
+    app_name: str = "Studio Lotus IMS"
     environment: str = "development"
-    it_module_enabled: bool = False
+    ims_module_enabled: bool = False
 
     database_url: str
     platform_database_url: str
@@ -74,12 +74,9 @@ class Settings(BaseSettings):
     )
     google_clock_skew_seconds: int = 180
 
-    enable_gmail: bool = False
-    enable_calendar: bool = False
-    gmail_sender_email: str = ""
-    gmail_sender_name: str = "SLP Helpdesk"
-    calendar_id: str = "primary"
-    calendar_timezone: str = "Asia/Kolkata"
+    # Google Drive (invoice/bill auto-filing) — configured in a later phase.
+    drive_root_folder_id: str = ""
+    drive_timezone: str = "Asia/Kolkata"
 
     public_app_origin: str = ""
 
@@ -88,9 +85,6 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("SL_SUPERADMIN_EMAIL", "SUPERADMIN_EMAIL"),
     )
-
-    reopen_window_days: int = 7
-    rate_limit_ticket_per_minute: int = 5
 
     model_config = SettingsConfigDict(env_prefix="SL_", env_file=_env_files(), extra="ignore")
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta
 from typing import Iterable, Optional
@@ -23,7 +24,18 @@ from app.services.user_service import ensure_superadmin_for_email, is_active_sta
 async def get_current_user(request: Request) -> UserContext:
     bearer = _read_bearer_token(request)
     if bearer:
-        token_info = _verify_google_id_token(bearer)
+        # Google's token verification is a blocking network call; this process
+        # runs a single event loop (--workers 1), so calling it inline would
+        # stall every other in-flight request until Google responds. Run it in
+        # a thread and bound it with a timeout so one slow/unreachable
+        # verification can't freeze the whole server.
+        try:
+            # 12s comfortably exceeds the 10s connect+read timeout set on the
+            # verifier's own HTTP client, so that timeout fires first and the
+            # background thread has already finished by the time we give up.
+            token_info = await asyncio.wait_for(asyncio.to_thread(_verify_google_id_token, bearer), timeout=12)
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Google token verification timed out")
         email = str(token_info.get("email", "")).lower()
         if not email:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token (missing email)")
@@ -33,10 +45,17 @@ async def get_current_user(request: Request) -> UserContext:
             if hosted_domain != settings.google_workspace_domain:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not in allowed workspace domain")
 
-        try:
+        async def _load_identity():
             async with PlatformSessionLocal() as platform_session:
                 await ensure_superadmin_for_email(platform_session, email)
-                identity = await resolve_identity_by_email(platform_session, email)
+                return await resolve_identity_by_email(platform_session, email), platform_session
+
+        try:
+            # Bounded so a stuck platform-DB connection (e.g. pool exhaustion)
+            # fails one request instead of hanging every request behind it.
+            identity, platform_session = await asyncio.wait_for(_load_identity(), timeout=10)
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Platform DB timed out")
         except SQLAlchemyError as exc:
             detail = "Platform DB error"
             if settings.environment != "production":
@@ -148,13 +167,20 @@ async def _enforce_single_session(platform_session, request: Request, email: str
 
     if row:
         current_id, last_activity = row[0], row[1]
+        allow_override = (request.headers.get("x-slp-session-init") or "").strip() == "1"
         if last_activity and last_activity < idle_cutoff:
+            if allow_override:
+                await platform_session.execute(
+                    text(f"UPDATE {table} SET session_id = :sid, last_activity = :now, updated_at = :now WHERE email = :email"),
+                    {"sid": session_id, "now": now, "email": email},
+                )
+                await platform_session.commit()
+                return
             await platform_session.execute(text(f"DELETE FROM {table} WHERE email = :email"), {"email": email})
             await platform_session.commit()
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
 
         if current_id != session_id:
-            allow_override = (request.headers.get("x-slp-session-init") or "").strip() == "1"
             if not allow_override:
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session replaced by another login")
             await platform_session.execute(
@@ -207,7 +233,7 @@ def _verify_google_id_token(token: str) -> dict:
     if not client_id:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Missing Google OAuth client_id")
     try:
-        req = GoogleAuthRequest(urllib3.PoolManager())
+        req = GoogleAuthRequest(urllib3.PoolManager(timeout=urllib3.Timeout(connect=5.0, read=5.0)))
         return google_id_token.verify_oauth2_token(
             token,
             req,

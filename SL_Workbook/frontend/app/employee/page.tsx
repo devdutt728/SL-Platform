@@ -32,6 +32,15 @@ const apps = [
     tags: ["Group org chart", "Encrypted PII", "Audit-ready"],
     icon: <PeopleIcon />,
   },
+  {
+    label: "IT INVENTORY",
+    title: "IMS",
+    description: "Assets, allotments, repairs, licenses, consumables, and IT spend.",
+    href: "/it",
+    accent: "from-[#B45309]/28 to-[#0F172A]/12",
+    tags: ["Scan-driven", "Audit-ready", "Cost ledger"],
+    icon: <BoxIcon />,
+  },
 ];
 
 type UserSummary = {
@@ -45,6 +54,7 @@ type UserSummary = {
   can_access_recruitment?: boolean;
   can_access_planner?: boolean;
   can_access_people?: boolean;
+  can_access_ims?: boolean;
 };
 
 function asString(value: unknown) {
@@ -57,6 +67,26 @@ function initialsFrom(name: string) {
   const parts = cleaned.split(/\s+/).filter(Boolean);
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
+
+function greetingFor(date: Date) {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-GB", { hour: "numeric", hour12: false, timeZone: "Asia/Kolkata" }).format(date),
+  );
+  if (hour < 5) return "Working late";
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  if (hour < 21) return "Good evening";
+  return "Working late";
+}
+
+function todayLabel(date: Date) {
+  return new Intl.DateTimeFormat("en-IN", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "Asia/Kolkata",
+  }).format(date);
 }
 
 function firstNameFrom(value: string) {
@@ -119,6 +149,34 @@ function hasPeopleRole(user: UserSummary | null) {
   );
 }
 
+function hasImsRole(user: UserSummary | null) {
+  if (!user) return false;
+  const values = [
+    user.platform_role_code,
+    user.platform_role_name,
+    ...(user.platform_role_names || []),
+    ...(user.roles || []),
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).trim().toLowerCase());
+
+  return values.some((value) =>
+    [
+      "superadmin",
+      "super admin",
+      "admin",
+      "ims_admin",
+      "ims admin",
+      "ims_manager",
+      "ims manager",
+      "ims_operator",
+      "ims operator",
+      "ims_viewer",
+      "ims viewer",
+    ].includes(value),
+  );
+}
+
 async function fetchCurrentUser(): Promise<UserSummary | null> {
   try {
     const res = await fetch(backendUrl("/auth/me"), {
@@ -142,6 +200,7 @@ async function fetchCurrentUser(): Promise<UserSummary | null> {
       can_access_recruitment: Boolean(data.can_access_recruitment),
       can_access_planner: Boolean(data.can_access_planner),
       can_access_people: Boolean(data.can_access_people),
+      can_access_ims: Boolean(data.can_access_ims),
     };
   } catch {
     return null;
@@ -201,6 +260,31 @@ async function probePeopleAccess(): Promise<boolean> {
   }
 }
 
+function imsBackendUrl(path: string) {
+  const base = process.env.IMS_BACKEND_URL || "http://127.0.0.1:8001";
+  return path.startsWith("/") ? `${base}${path}` : `${base}/${path}`;
+}
+
+async function probeImsAccess(): Promise<boolean> {
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get("slp_token")?.value || "";
+    const sessionId = cookieStore.get("slp_sid")?.value || "";
+    if (!token || !sessionId) return false;
+
+    const response = await fetch(imsBackendUrl("/auth/me"), {
+      cache: "no-store",
+      headers: {
+        authorization: token.startsWith("Bearer ") ? token : `Bearer ${token}`,
+        "x-slp-session": sessionId,
+      },
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export default async function EmployeeConsolePage() {
   const logoSrc = "/studio-lotus-logo.png";
   const user = await fetchCurrentUser();
@@ -213,15 +297,25 @@ export default async function EmployeeConsolePage() {
   if (user && !user.can_access_people && hasPeopleRole(user)) {
     user.can_access_people = true;
   }
+  if (user && !user.can_access_ims) {
+    user.can_access_ims = await probeImsAccess();
+  }
+  if (user && !user.can_access_ims && hasImsRole(user)) {
+    user.can_access_ims = true;
+  }
   const displayName =
     asString(user?.display_name) || asString(user?.full_name) || asString(user?.email) || "User";
   const initials = initialsFrom(displayName);
   const firstName = firstNameFrom(displayName);
   const role = roleFromUser(user);
+  const now = new Date();
+  const greeting = greetingFor(now);
+  const today = todayLabel(now);
   const visibleApps = apps.filter((app) => {
     if (app.href === "/recruitment/dashboard") return Boolean(user?.can_access_recruitment);
     if (app.title === "Project Planner") return Boolean(user?.can_access_planner);
     if (app.title === "People & Org") return Boolean(user?.can_access_people);
+    if (app.title === "IMS") return Boolean(user?.can_access_ims);
     return true;
   });
 
@@ -245,6 +339,7 @@ export default async function EmployeeConsolePage() {
               {user?.can_access_recruitment ? <a href="/recruitment/dashboard" className="employee-menu__item">Recruitment</a> : null}
               {user?.can_access_planner ? <Link href="/employee/planner" className="employee-menu__item">Project Planner</Link> : null}
               {user?.can_access_people ? <Link href="/people" className="employee-menu__item">People &amp; Org</Link> : null}
+              {user?.can_access_ims ? <a href="/it" className="employee-menu__item">IT Inventory (IMS)</a> : null}
             </div>
           </details>
           <Link href="/" className="public-button public-button--ghost">
@@ -269,59 +364,93 @@ export default async function EmployeeConsolePage() {
       </header>
 
       <div className="mx-auto w-full max-w-[1560px]">
-        <div className="max-w-5xl">
-          <h1 className="mt-10 text-4xl font-semibold text-slate-900 sm:text-5xl">
-            Coordinate every workspace from one console.
-          </h1>
-          <p className="mt-4 max-w-2xl text-base text-steel">
-            Choose a module to continue. Each app has its own sign-in and workspace, wired to the same platform identity.
-          </p>
+        <div className="motion-fade-up relative overflow-hidden rounded-[calc(var(--panel-radius)+0.4rem)] border border-[rgba(209,209,209,0.85)] bg-gradient-to-br from-white via-white to-[#f6f4f3] px-6 py-9 shadow-[0_26px_50px_-35px_rgba(93,85,82,0.24)] sm:px-9 sm:py-11">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-[radial-gradient(circle,rgba(231,64,17,0.14),transparent_70%)]"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -bottom-28 left-1/3 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(93,85,82,0.1),transparent_70%)]"
+          />
+          <div className="relative flex flex-wrap items-end justify-between gap-6">
+            <div className="max-w-2xl">
+              <p className="public-kicker">Studio Lotus · Internal console</p>
+              <h1 className="mt-3 text-3xl font-semibold leading-tight text-slate-900 sm:text-4xl">
+                {greeting}, {firstName}.
+              </h1>
+              <p className="mt-3 max-w-xl text-sm text-steel sm:text-base">
+                {visibleApps.length > 0
+                  ? `You have access to ${visibleApps.length} module${visibleApps.length === 1 ? "" : "s"} below. Each opens its own workspace, wired to the same platform identity.`
+                  : "Choose a module to continue once access is granted."}
+              </p>
+            </div>
+            <div className="flex flex-col items-start gap-2 sm:items-end">
+              <span className="public-pill">{role}</span>
+              <span className="text-xs font-medium text-steel">{today}</span>
+            </div>
+          </div>
         </div>
 
-        <div className="mt-10 grid gap-5">
-          {visibleApps.map((app) => (
-            <a key={app.title} href={app.href} className="section-card workbook-card group min-h-[184px]">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className={`workbook-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br ${app.accent}`}>
-                    {app.icon}
-                  </div>
-                  <div>
-                    <p className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-steel">{app.label}</p>
-                    <h2 className="mt-1 text-xl font-semibold text-slate-900">{app.title}</h2>
-                  </div>
+        <div className="mt-8 grid gap-5 sm:grid-cols-2">
+          {visibleApps.map((app, index) => (
+            <a key={app.title} href={app.href} className="section-card workbook-card group relative flex min-h-[212px] flex-col overflow-hidden">
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute -right-2 -top-3 select-none text-7xl font-semibold text-[rgba(93,85,82,0.06)]"
+              >
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <div className="relative flex items-center gap-3">
+                <div className={`workbook-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${app.accent}`}>
+                  {app.icon}
                 </div>
-                <span className="inline-flex items-center rounded-full border border-[#d1d1d1] bg-white px-3 py-1 text-[11px] font-semibold text-steel">
-                  Open -&gt;
-                </span>
+                <div>
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-steel">{app.label}</p>
+                  <h2 className="mt-1 text-xl font-semibold text-slate-900">{app.title}</h2>
+                </div>
               </div>
-              <p className="mt-4 text-sm text-steel">{app.description}</p>
-              <div className="mt-6 flex flex-wrap gap-2">
+              <p className="relative mt-4 text-sm text-steel">{app.description}</p>
+              <div className="relative mt-5 flex flex-wrap gap-2">
                 {app.tags.map((tag) => (
                   <span key={tag} className="workbook-chip text-xs font-semibold">
                     {tag}
                   </span>
                 ))}
               </div>
+              <div className="relative mt-auto flex items-center justify-end pt-6">
+                <span className="workbook-open inline-flex items-center gap-1.5 text-sm font-semibold text-steel">
+                  Open workspace
+                  <ArrowIcon className="h-3.5 w-3.5" />
+                </span>
+              </div>
             </a>
           ))}
           {visibleApps.length === 0 ? (
-            <div className="section-card workbook-card min-h-[184px]">
+            <div className="section-card workbook-card min-h-[184px] sm:col-span-2">
               <div className="flex h-full flex-col justify-center">
                 <p className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-steel">No App Access</p>
                 <h2 className="mt-1 text-xl font-semibold text-slate-900">No modules are enabled for your account yet.</h2>
-                <p className="mt-4 text-sm text-steel">Ask a superadmin to grant Recruitment, Project Planner, or People access in the platform directory.</p>
+                <p className="mt-4 text-sm text-steel">Ask a superadmin to grant Recruitment, Project Planner, People, or IMS access in the platform directory.</p>
               </div>
             </div>
           ) : null}
         </div>
 
-        <div className="mt-10 flex flex-wrap items-center gap-3 text-xs text-steel">
+        <div className="public-band mt-8">
           <span className="workbook-chip">Zero-trust gateways enabled</span>
-          <span>Need access? Contact your admin to enable your role in the sl_platform directory.</span>
+          <span className="text-xs text-steel">Need access? Contact your admin to enable your role in the sl_platform directory.</span>
         </div>
       </div>
     </div>
+  );
+}
+
+function ArrowIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -356,6 +485,15 @@ function GridOrbitIcon() {
       <rect x="14" y="4" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
       <rect x="4" y="14" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
       <path d="M14 17h6m-3-3v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function BoxIcon() {
+  return (
+    <svg className="h-5 w-5 text-slate-900" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 3.5 20 8v8l-8 4.5L4 16V8l8-4.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M4 8l8 4.5L20 8M12 12.5V21" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
   );
 }

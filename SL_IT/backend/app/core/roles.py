@@ -5,12 +5,20 @@ from typing import Iterable
 
 
 class Role(str, Enum):
-    SUPERADMIN = "superadmin"
+    # Platform-wide roles (shared across all Studio Lotus modules)
+    SUPERADMIN = "superadmin"   # granted via SL_ROLE_MAP_JSON {"2":["superadmin"]}
     ADMIN = "admin"
-    IT_LEAD = "it_lead"
-    IT_AGENT = "it_agent"
-    RECRUITER = "recruiter"
-    MANAGER = "manager"
+
+    # Fresh IMS (IT Inventory Management System) roles.
+    # Role codes match sl_platform.dim_role: ims_admin(9), ims_manager(10),
+    # ims_operator(11), ims_viewer(18).
+    IMS_ADMIN = "ims_admin"
+    IMS_MANAGER = "ims_manager"
+    IMS_OPERATOR = "ims_operator"
+    IMS_VIEWER = "ims_viewer"
+
+    # Regular employee self-service ("My Assets"). dim_role id 1 = 'user'.
+    USER = "user"
     EMPLOYEE = "employee"
     VIEWER = "viewer"
 

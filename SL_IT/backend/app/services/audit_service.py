@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.it import ITAuditLog
+from app.models.ims import ImsAuditLog
 from app.request_context import RequestContext
 from app.schemas.user import UserContext
 
@@ -17,8 +17,8 @@ async def write_audit_log(
     before: dict | None,
     after: dict | None,
     context: RequestContext | None,
-) -> ITAuditLog:
-    entry = ITAuditLog(
+) -> ImsAuditLog:
+    entry = ImsAuditLog(
         actor_person_id=actor.person_id_platform if actor else None,
         actor_email=actor.email if actor else None,
         action=action,

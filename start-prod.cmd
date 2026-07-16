@@ -18,7 +18,7 @@ set "HOSTNAME=127.0.0.1"
 set "SL_ENVIRONMENT=production"
 set "SPP_ENVIRONMENT=production"
 set "SPL_ENVIRONMENT=production"
-if not defined ENABLE_IT_MODULE set "ENABLE_IT_MODULE=0"
+if not defined ENABLE_IT_MODULE set "ENABLE_IT_MODULE=1"
 if not defined ENABLE_PROJECT_PLANNER set "ENABLE_PROJECT_PLANNER=1"
 if not defined ENABLE_PEOPLE_MODULE set "ENABLE_PEOPLE_MODULE=1"
 
@@ -138,6 +138,7 @@ if "%BUILD_ON_START%"=="1" (
 if "%ENABLE_IT_MODULE%"=="1" if exist "%IT_BACKEND_DIR%" (
   echo [%DATE% %TIME%] spawn it-backend>> "%TRACE_LOG%"
   call :spawn "%IT_BACKEND_DIR%" "python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1" "%IT_BACKEND_OUT%" "%IT_BACKEND_ERR%"
+  call :wait_port 8001 "IT backend"
 )
 if exist "%REC_BACKEND_DIR%" (
   echo [%DATE% %TIME%] spawn rec-backend>> "%TRACE_LOG%"
@@ -147,18 +148,24 @@ if exist "%REC_BACKEND_DIR%" (
 if "%ENABLE_IT_MODULE%"=="1" if exist "%IT_FRONTEND_DIR%" (
   echo [%DATE% %TIME%] spawn it-frontend>> "%TRACE_LOG%"
   if exist "%IT_FRONTEND_DIR%\\.next\\standalone\\server.js" (
+    rem Next standalone output does not include static assets or public/ - copy them or every /_next/static chunk 404s
+    if exist "%IT_FRONTEND_DIR%\\.next\\static" robocopy "%IT_FRONTEND_DIR%\\.next\\static" "%IT_FRONTEND_DIR%\\.next\\standalone\\.next\\static" /e /nfl /ndl /njh /njs >nul
+    if exist "%IT_FRONTEND_DIR%\\public" robocopy "%IT_FRONTEND_DIR%\\public" "%IT_FRONTEND_DIR%\\.next\\standalone\\public" /e /nfl /ndl /njh /njs >nul
     call :spawn "%IT_FRONTEND_DIR%" "node .next\\standalone\\server.js" "%IT_FRONTEND_OUT%" "%IT_FRONTEND_ERR%" "PORT=3001"
   ) else (
     call :spawn "%IT_FRONTEND_DIR%" "npm run start" "%IT_FRONTEND_OUT%" "%IT_FRONTEND_ERR%" "PORT=3001"
   )
+  call :wait_port 3001 "IT frontend"
 )
 if exist "%REC_FRONTEND_DIR%" (
   echo [%DATE% %TIME%] spawn rec-frontend>> "%TRACE_LOG%"
   call :spawn "%REC_FRONTEND_DIR%" "npm run start" "%REC_FRONTEND_OUT%" "%REC_FRONTEND_ERR%" "PORT=3002"
+  call :wait_port 3002 "recruitment frontend"
 )
 if exist "%WORKBOOK_DIR%" (
   echo [%DATE% %TIME%] spawn workbook>> "%TRACE_LOG%"
   call :spawn "%WORKBOOK_DIR%" "npm run start" "%WORKBOOK_OUT%" "%WORKBOOK_ERR%" "PORT=3003"
+  call :wait_port 3003 "workbook frontend"
 )
 if "%ENABLE_PROJECT_PLANNER%"=="1" if exist "%PLANNER_BACKEND_DIR%" (
   echo [%DATE% %TIME%] spawn planner-backend>> "%TRACE_LOG%"
@@ -177,7 +184,29 @@ if exist "%ROOT%\tools\caddy.exe" (
   echo [%DATE% %TIME%] spawn caddy>> "%TRACE_LOG%"
   "%ROOT%\tools\caddy.exe" fmt --overwrite "%ROOT%\Caddyfile" >nul 2>nul
   call :spawn "%ROOT%" "tools\\caddy.exe run --config Caddyfile --adapter caddyfile" "%CADDY_OUT%" "%CADDY_ERR%"
+  call :wait_port 3000 "Caddy"
 )
+
+echo.
+echo === Health check ===
+set "HEALTH_FAIL=0"
+if "%ENABLE_IT_MODULE%"=="1" call :check_http "IT backend"        "http://127.0.0.1:8001/ims/health"
+if "%ENABLE_IT_MODULE%"=="1" call :check_http "IT frontend"       "http://127.0.0.1:3001/it/login"
+if exist "%REC_BACKEND_DIR%" call :check_http "Recruitment backend"  "http://127.0.0.1:8002/"
+if exist "%REC_FRONTEND_DIR%" call :check_http "Recruitment frontend" "http://127.0.0.1:3002/"
+if exist "%WORKBOOK_DIR%" call :check_http "Workbook frontend"    "http://127.0.0.1:3003/"
+if "%ENABLE_PROJECT_PLANNER%"=="1" call :check_http "Planner backend"  "http://127.0.0.1:8003/"
+if "%ENABLE_PROJECT_PLANNER%"=="1" call :check_http "Planner frontend" "http://127.0.0.1:3004/"
+if "%ENABLE_PEOPLE_MODULE%"=="1" call :check_http "People backend"    "http://127.0.0.1:8004/"
+if exist "%ROOT%\tools\caddy.exe" call :check_http "Caddy (public entry)" "http://127.0.0.1:3000/"
+if "%HEALTH_FAIL%"=="1" (
+  echo.
+  echo *** One or more services failed their health check - see above and %RUN_LOGDIR% ***
+) else (
+  echo.
+  echo All services responded. Platform is up.
+)
+echo.
 
 if "%START_MONITOR%"=="1" (
   if exist "%ROOT%\monitor.cmd" (
@@ -226,4 +255,22 @@ if not defined WAIT_NAME set "WAIT_NAME=service"
 echo Waiting for %WAIT_NAME% on port %WAIT_PORT%...
 powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; $port=[int]'%WAIT_PORT%'; $deadline=(Get-Date).AddSeconds(45); while ((Get-Date) -lt $deadline) { $client=New-Object Net.Sockets.TcpClient; try { $iar=$client.BeginConnect('127.0.0.1',$port,$null,$null); if ($iar.AsyncWaitHandle.WaitOne(500)) { $client.EndConnect($iar); $client.Close(); exit 0 } } catch {} finally { try { $client.Close() } catch {} }; Start-Sleep -Milliseconds 500 }; exit 1"
 if errorlevel 1 echo Warning: %WAIT_NAME% did not become ready on port %WAIT_PORT% before continuing.
+exit /b 0
+
+rem Hits a URL and reports PASS/FAIL. Any HTTP response counts as up (some
+rem services have no dedicated /health route); only a connection failure or
+rem timeout counts as down. Retries for up to 20s since a process can be
+rem listening on its port slightly before it can actually answer requests.
+:check_http
+set "CHECK_NAME=%~1"
+set "CHECK_URL=%~2"
+powershell -NoProfile -Command ^
+  "$deadline = (Get-Date).AddSeconds(20);" ^
+  "$ok = $false;" ^
+  "while ((Get-Date) -lt $deadline) {" ^
+  "  try { Invoke-WebRequest -Uri '%CHECK_URL%' -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop | Out-Null; $ok = $true; break }" ^
+  "  catch { if ($_.Exception.Response) { $ok = $true; break }; Start-Sleep -Milliseconds 500 }" ^
+  "}" ^
+  "if ($ok) { Write-Host '  [OK]   %CHECK_NAME% (%CHECK_URL%)' -ForegroundColor Green } else { Write-Host '  [DOWN] %CHECK_NAME% (%CHECK_URL%)' -ForegroundColor Red; exit 1 }"
+if errorlevel 1 set "HEALTH_FAIL=1"
 exit /b 0
